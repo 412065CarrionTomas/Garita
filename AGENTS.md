@@ -29,7 +29,26 @@ Garita es un sistema de gestión de vigilancia compuesto por:
 
 ## 3. Estructura del monorepo
 
-> DEFINIR
+```
+garita/
+├── apps/
+│   ├── api/                 # NestJS: API REST + WebSockets, Prisma, BullMQ
+│   ├── web/                 # React + Vite: panel web (PWA) para administrador, supervisor y cliente
+│   └── mobile/              # Expo: app del vigilador (Android e iOS)
+├── packages/
+│   ├── shared/              # @garita/shared: tipos, enums y esquemas Zod compartidos
+│   ├── typescript-config/   # @garita/typescript-config: tsconfig base
+│   └── eslint-config/       # @garita/eslint-config: flat config de ESLint
+├── docs/                    # Documentación técnica
+├── .github/workflows/       # CI con GitHub Actions
+├── compose.yaml             # PostgreSQL y Redis para desarrollo local
+├── pnpm-workspace.yaml      # Workspaces y catálogo de versiones compartidas
+└── turbo.json               # Tareas de Turborepo
+```
+
+- Las apps dependen de los paquetes de `packages/`, nunca entre sí.
+- Los contratos entre la API y los clientes (roles, estados, esquemas de validación) viven en `@garita/shared`; no duplicarlos en cada app.
+- Las versiones compartidas (TypeScript, ESLint, Zod, Jest) se fijan en el `catalog` de `pnpm-workspace.yaml` y se referencian con `catalog:`.
 
 ## 4. Comandos
 
