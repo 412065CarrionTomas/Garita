@@ -1,0 +1,9 @@
+{
+  "extends": "@garita/typescript-config/nestjs.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "strictPropertyInitialization": false
+  },
+  "include": ["src", "test", "*.config.ts"]
+}
