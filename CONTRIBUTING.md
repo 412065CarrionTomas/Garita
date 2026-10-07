@@ -4,14 +4,14 @@ Reglas de trabajo con Git para el repositorio de Garita. Las convenciones de có
 
 ## Ramas (Git Flow)
 
-| Rama | Sale de | Se mergea en | Uso |
-|---|---|---|---|
-| `main` | — | — | Código en producción |
-| `develop` | `main` | — | Integración de lo próximo a publicar |
-| `feature/<descripcion>` | `develop` | `develop` | Funcionalidad nueva |
-| `fix/<descripcion>` | `develop` | `develop` | Corrección de bug no urgente |
-| `release/<version>` | `develop` | `main` y `develop` | Preparar una versión para producción |
-| `hotfix/<descripcion>` | `main` | `main` y `develop` | Corrección urgente en producción |
+| Rama                    | Sale de   | Se mergea en       | Uso                                  |
+| ----------------------- | --------- | ------------------ | ------------------------------------ |
+| `main`                  | —         | —                  | Código en producción                 |
+| `develop`               | `main`    | —                  | Integración de lo próximo a publicar |
+| `feature/<descripcion>` | `develop` | `develop`          | Funcionalidad nueva                  |
+| `fix/<descripcion>`     | `develop` | `develop`          | Corrección de bug no urgente         |
+| `release/<version>`     | `develop` | `main` y `develop` | Preparar una versión para producción |
+| `hotfix/<descripcion>`  | `main`    | `main` y `develop` | Corrección urgente en producción     |
 
 - Nunca se commitea directo en `main` ni en `develop`: todo entra por pull request.
 - Nombres en minúscula y con guiones: `feature/lectura-nfc`, `fix/sync-offline`, `release/1.2.0`.
