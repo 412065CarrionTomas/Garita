@@ -18,6 +18,7 @@
     "@garita/shared": "workspace:*",
     "expo": "~57.0.27",
     "expo-constants": "~57.0.21",
+    "expo-dev-client": "~57.0.19",
     "expo-linking": "~57.0.12",
     "expo-router": "~57.0.25",
     "expo-splash-screen": "~57.0.9",
