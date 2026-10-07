@@ -15,4 +15,7 @@ catalog:
   zod: ^4.6.5
 
 # Dependencias autorizadas a ejecutar scripts de instalación.
-allowBuilds: {}
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  unrs-resolver: true
