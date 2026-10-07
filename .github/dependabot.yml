@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      minor-y-parches:
+        update-types: [minor, patch]
+    ignore:
+      # Las versiones de Expo, React Native y React las fija el SDK: se actualizan con `expo install --fix`.
+      - dependency-name: expo
+      - dependency-name: expo-*
+      - dependency-name: react-native
+      - dependency-name: react-native-*
+      - dependency-name: '@react-native/*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
