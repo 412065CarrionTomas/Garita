@@ -1,0 +1,13 @@
+// Esquema de la base de datos de Garita.
+// Todo cambio pasa por una migración: pnpm --filter api db:migrate --name <nombre_descriptivo>
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  // La API compila a CommonJS; el cliente se genera en el mismo formato.
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
