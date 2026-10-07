@@ -7,7 +7,11 @@ const config: Config = {
   transform: {
     '^.+\\.(t|j)s$': 'ts-jest',
   },
-  collectCoverageFrom: ['**/*.(t|j)s'],
+  // El cliente generado de Prisma importa sus archivos con extensión .js.
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
+  collectCoverageFrom: ['**/*.(t|j)s', '!generated/**'],
   coverageDirectory: '../coverage',
   testEnvironment: 'node',
 };

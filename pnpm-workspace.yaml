@@ -17,5 +17,8 @@ catalog:
 # Dependencias autorizadas a ejecutar scripts de instalación.
 allowBuilds:
   '@parcel/watcher': true
+  '@prisma/engines': true
   '@swc/core': true
+  msgpackr-extract: true
+  prisma: true
   unrs-resolver: true

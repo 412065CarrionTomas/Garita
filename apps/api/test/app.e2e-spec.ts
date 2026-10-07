@@ -7,6 +7,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 
+// Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -26,6 +27,15 @@ describe('Aplicación (e2e)', () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
 
     expect(liveHealthResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it('GET /api/v1/health/ready verifica PostgreSQL y Redis', async () => {
+    const response = await request(app.getHttpServer()).get('/api/v1/health/ready').expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'ok',
+      info: { database: { status: 'up' }, redis: { status: 'up' } },
+    });
   });
 
   it('agrega las cabeceras de seguridad de helmet', async () => {
