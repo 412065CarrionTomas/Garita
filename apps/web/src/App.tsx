@@ -1,6 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { ApiStatus } from '@/features/health/api-status';
 
 export function App() {
   return (
@@ -13,6 +14,7 @@ export function App() {
         </p>
       </div>
       <Button>Ingresar</Button>
+      <ApiStatus />
     </main>
   );
 }
