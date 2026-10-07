@@ -18,10 +18,12 @@
   },
   "dependencies": {
     "@nestjs/common": "^12.1.2",
+    "@nestjs/config": "^12.0.1",
     "@nestjs/core": "^12.1.2",
     "@nestjs/platform-express": "^12.1.2",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@garita/eslint-config": "workspace:*",
