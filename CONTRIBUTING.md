@@ -31,7 +31,7 @@ git push -u origin feature/<descripcion>
 
 ## Commits
 
-Se usa [Conventional Commits](https://www.conventionalcommits.org/es/v1.0.0/) con la descripción en español.
+Se usa [Conventional Commits](https://www.conventionalcommits.org/es/v1.0.0/) con la descripción en español. El hook `commit-msg` (commitlint) valida el formato y rechaza coautores; el hook `pre-commit` aplica Prettier a los archivos modificados.
 
 ```
 <tipo>(<alcance>): <descripción en imperativo y minúscula>
