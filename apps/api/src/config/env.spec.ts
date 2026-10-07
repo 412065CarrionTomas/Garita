@@ -2,6 +2,7 @@ import { validateEnv } from './env';
 
 const REQUIRED = {
   DATABASE_URL: 'postgresql://garita:garita@localhost:5432/garita',
+  REDIS_URL: 'redis://localhost:6379',
 };
 
 describe('validateEnv', () => {
@@ -13,6 +14,7 @@ describe('validateEnv', () => {
       PORT: 3000,
       CORS_ORIGINS: ['http://localhost:5173'],
       DATABASE_URL: REQUIRED.DATABASE_URL,
+      REDIS_URL: REQUIRED.REDIS_URL,
     });
   });
 
@@ -38,7 +40,12 @@ describe('validateEnv', () => {
   });
 
   it('exige DATABASE_URL con una URL de PostgreSQL', () => {
-    expect(() => validateEnv({})).toThrow('DATABASE_URL');
-    expect(() => validateEnv({ DATABASE_URL: 'mysql://localhost/garita' })).toThrow();
+    expect(() => validateEnv({ REDIS_URL: REQUIRED.REDIS_URL })).toThrow('DATABASE_URL');
+    expect(() => validateEnv({ ...REQUIRED, DATABASE_URL: 'mysql://localhost/garita' })).toThrow();
+  });
+
+  it('exige REDIS_URL con una URL de Redis', () => {
+    expect(() => validateEnv({ DATABASE_URL: REQUIRED.DATABASE_URL })).toThrow('REDIS_URL');
+    expect(() => validateEnv({ ...REQUIRED, REDIS_URL: 'http://localhost:6379' })).toThrow();
   });
 });

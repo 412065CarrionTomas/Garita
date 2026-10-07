@@ -15,6 +15,7 @@ export const envSchema = z.object({
     )
     .pipe(z.array(z.url())),
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
+  REDIS_URL: z.url({ protocol: /^rediss?$/ }),
 });
 
 export type Env = z.infer<typeof envSchema>;
