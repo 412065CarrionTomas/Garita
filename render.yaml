@@ -1,0 +1,46 @@
+# Blueprint de Render para el ambiente de staging (ver docs/despliegue.md).
+# Despliega la API desde develop solo cuando el pipeline de CI pasa.
+services:
+  - type: web
+    name: garita-api-staging
+    runtime: node
+    plan: free
+    region: virginia
+    branch: develop
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - apps/api/**
+        - packages/**
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - turbo.json
+    # El plan free no admite preDeployCommand: las migraciones se aplican al final del build.
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm turbo run build --filter=api &&
+      pnpm --filter api db:deploy
+    startCommand: pnpm --filter api start:prod
+    healthCheckPath: /api/v1/health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: garita-redis-staging
+          property: connectionString
+
+  - type: keyvalue
+    name: garita-redis-staging
+    plan: free
+    region: virginia
+    # Sin IPs permitidas: solo accesible desde servicios de Render en la misma región.
+    ipAllowList: []
+    # BullMQ requiere que Redis nunca descarte claves.
+    maxmemoryPolicy: noeviction
