@@ -1,27 +1,37 @@
-import type { TestingModule } from '@nestjs/testing';
-import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
 
-describe('AppController (e2e)', () => {
+import { AppModule } from '../src/app.module';
+import { setupApp } from '../src/setup-app';
+
+describe('Aplicación (e2e)', () => {
   let app: INestApplication<App>;
 
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleRef.createNestApplication();
+    setupApp(app);
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer()).get('/').expect(200).expect('Hello World!');
+  afterAll(async () => {
+    await app.close();
   });
 
-  afterEach(async () => {
-    await app.close();
+  it('expone las rutas bajo el prefijo /api/v1', async () => {
+    await request(app.getHttpServer()).get('/api/v1').expect(200);
+  });
+
+  it('agrega las cabeceras de seguridad de helmet', async () => {
+    const response = await request(app.getHttpServer()).get('/api/v1');
+
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  it('responde 404 fuera del prefijo de la API', async () => {
+    await request(app.getHttpServer()).get('/').expect(404);
   });
 });
