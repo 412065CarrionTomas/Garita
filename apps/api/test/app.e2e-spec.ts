@@ -1,3 +1,4 @@
+import { liveHealthResponseSchema } from '@garita/shared';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -21,17 +22,19 @@ describe('Aplicación (e2e)', () => {
     await app.close();
   });
 
-  it('expone las rutas bajo el prefijo /api/v1', async () => {
-    await request(app.getHttpServer()).get('/api/v1').expect(200);
+  it('GET /api/v1/health/live responde con el contrato compartido', async () => {
+    const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
+
+    expect(liveHealthResponseSchema.safeParse(response.body).success).toBe(true);
   });
 
   it('agrega las cabeceras de seguridad de helmet', async () => {
-    const response = await request(app.getHttpServer()).get('/api/v1');
+    const response = await request(app.getHttpServer()).get('/api/v1/health/live');
 
     expect(response.headers['x-content-type-options']).toBe('nosniff');
   });
 
   it('responde 404 fuera del prefijo de la API', async () => {
-    await request(app.getHttpServer()).get('/').expect(404);
+    await request(app.getHttpServer()).get('/health/live').expect(404);
   });
 });
