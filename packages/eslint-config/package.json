@@ -1,0 +1,23 @@
+{
+  "name": "@garita/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Configuraciones de ESLint (flat config) compartidas por el monorepo",
+  "type": "module",
+  "exports": {
+    "./base": "./base.js",
+    "./node": "./node.js",
+    "./react": "./react.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "eslint-plugin-turbo": "^2.11.7",
+    "globals": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:"
+  }
+}
