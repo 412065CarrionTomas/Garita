@@ -1,7 +1,6 @@
 import js from '@eslint/js';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import prettier from 'eslint-config-prettier/flat';
-import turbo from 'eslint-plugin-turbo';
 import tseslint from 'typescript-eslint';
 
 /**
@@ -35,12 +34,6 @@ export const baseConfig = defineConfig(
   {
     files: ['**/*.{js,mjs,cjs}'],
     extends: [js.configs.recommended],
-  },
-  {
-    plugins: { turbo },
-    rules: {
-      'turbo/no-undeclared-env-vars': 'error',
-    },
   },
   prettier,
 );
