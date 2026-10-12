@@ -16,11 +16,14 @@ catalog:
 
 # Dependencias autorizadas a ejecutar scripts de instalación.
 allowBuilds:
+  '@firebase/util': true
   '@parcel/watcher': true
   '@prisma/engines': true
   '@swc/core': true
+  esbuild: true
   msgpackr-extract: true
   prisma: true
+  protobufjs: true
   unrs-resolver: true
 
 # Paquetes de Expo SDK 57 publicados antes de cumplir la antigüedad mínima que exige pnpm.

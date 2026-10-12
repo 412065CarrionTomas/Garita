@@ -99,5 +99,8 @@ jobs:
       - name: Aplicar migraciones
         run: pnpm --filter api db:deploy
 
+      - name: Cargar datos de prueba
+        run: pnpm --filter api db:seed
+
       - name: Tests de integración
         run: pnpm --filter api test:e2e

@@ -5,5 +5,5 @@
     "rootDir": ".",
     "strictPropertyInitialization": false
   },
-  "include": ["src", "test", "*.config.ts"]
+  "include": ["src", "test", "prisma", "*.config.ts"]
 }
