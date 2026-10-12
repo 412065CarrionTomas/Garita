@@ -9,9 +9,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
-import { ALLOWED_ROLES, PUBLIC_ROUTE } from './auth.decorators';
+import { ALLOWED_ROLES, ALLOW_PENDING_INVITATION, PUBLIC_ROUTE } from './auth.decorators';
 import { FIREBASE_IDENTITY_PROVIDER } from './auth.types';
 import type { AuthenticatedRequest, FirebaseIdentityProvider } from './auth.types';
+import { TenantContext } from './tenant-context';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -20,6 +21,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
     @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly identity: FirebaseIdentityProvider,
+    private readonly tenantContext: TenantContext,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -27,14 +29,6 @@ export class AuthGuard implements CanActivate {
     const handler = context.getHandler();
     const controller = context.getClass();
     if (this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, [handler, controller])) return true;
-    const roles: readonly string[] | undefined = this.reflector.getAllAndOverride(ALLOWED_ROLES, [
-      handler,
-      controller,
-    ]);
-    if (roles === undefined || roles.length === 0) {
-      this.deny(request, 'endpoint sin roles declarados');
-      throw new ForbiddenException();
-    }
     const auth = request.headers.authorization;
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException();
     let identity: { uid: string };
@@ -43,7 +37,7 @@ export class AuthGuard implements CanActivate {
     } catch {
       throw new UnauthorizedException();
     }
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.systemPrisma.user.findUnique({
       where: { firebaseUid: identity.uid },
       select: { id: true, companyId: true, role: true, status: true },
     });
@@ -54,10 +48,22 @@ export class AuthGuard implements CanActivate {
       role: user.role,
       status: user.status,
     };
-    const firstProfileRequest = request.method === 'GET' && request.path.endsWith('/auth/me');
+    this.tenantContext.setUser(request.user);
+    const roles: readonly string[] | undefined = this.reflector.getAllAndOverride(ALLOWED_ROLES, [
+      handler,
+      controller,
+    ]);
+    if (roles === undefined || roles.length === 0) {
+      this.deny(request, 'endpoint sin roles declarados');
+      throw new ForbiddenException();
+    }
+    const allowPendingInvitation = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_PENDING_INVITATION,
+      [handler, controller],
+    );
     if (
       user.status !== 'active' &&
-      !(user.status === 'invitation_pending' && firstProfileRequest)
+      !(user.status === 'invitation_pending' && allowPendingInvitation)
     ) {
       this.deny(request, `estado ${user.status}`);
       throw new ForbiddenException();

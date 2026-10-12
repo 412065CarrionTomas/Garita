@@ -50,17 +50,13 @@ test/                # Tests de integración (*.e2e-spec.ts)
 
 > La API se compila a CommonJS. Como NestJS 12 se distribuye como ESM, Jest se ejecuta con `--experimental-vm-modules` para poder cargarlo.
 
-# API de Garita
-
 ## Autenticación y permisos
 
-La API verifica Firebase ID tokens y carga rol, empresa y estado desde PostgreSQL. Los endpoints requieren `@Roles(...USER_ROLES)`; omitir el decorador deniega el acceso. `@Public()` habilita explícitamente rutas públicas como health. Los controladores reciben el contexto validado con `@CurrentUser()` (`userId`, `companyId`, `role`, `status`).
-
-| Estado / rol                             | Acceso                                              |
-| ---------------------------------------- | --------------------------------------------------- |
-| Sin token o token inválido               | 401                                                 |
-| `deactivated` o `invitation_pending`     | 403, excepto `/auth/me` activa al usuario pendiente |
-| `admin`, `supervisor`, `guard`, `client` | Solo endpoints que declaran explícitamente el rol   |
-| Ruta `@Public()`                         | Acceso sin autenticación                            |
-
-Para aislar datos multiempresa, cada servicio aplica `companyScope(user, filtros)` a la consulta de Prisma; el `companyId` autenticado prevalece sobre los filtros recibidos. Las búsquedas de recursos deben convertir el resultado fuera de la empresa en el mismo 404 que un ID inexistente y registrar el intento con nivel error.
+- Inyectá `PrismaService` y usá `prisma.tenantPrisma`; un contexto `AsyncLocalStorage` por request entrega al cliente el usuario autenticado.
+- La extensión de Prisma aplica el tenant a lecturas, escrituras, conteos y agregaciones; no hace falta agregar `companyId` a cada consulta.
+- `User` filtra por `companyId`; `Invitation` filtra por su `user.companyId`; `Company` es la raíz tenant y filtra por su `id` igual al `companyId` autenticado.
+- Si falta el contexto tenant, el cliente filtrado falla cerrado. Todo modelo nuevo con `companyId` debe agregarse a `TENANT_MODELS` y `COMPANY_ID_MODELS`; una prueba contrasta el registro con `schema.prisma`.
+- Buscá recursos por ID con `TenantResourceService.findOwnedOrThrow(id)`: devuelve el registro propio; si pertenece a otra empresa registra `Logger.error` y responde el mismo 404 que un ID inexistente.
+- `systemPrisma` omite el filtro y queda reservado al guard de Firebase, datos/operaciones de sistema y verificaciones internas de pertenencia; el seed crea su propio cliente de sistema.
+- Declarar roles con `@Roles('admin', ...)`; sin roles, el guard autentica y luego deniega con 403.
+- Declarar rutas públicas con `@Public()`; solo `@AllowPendingInvitation()` permite que una invitación pendiente complete `GET /auth/me`.

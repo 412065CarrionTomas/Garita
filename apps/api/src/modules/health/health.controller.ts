@@ -30,7 +30,10 @@ export class HealthController {
   @HealthCheck()
   ready() {
     return this.health.check([
-      () => this.prismaHealth.pingCheck('database', this.prisma, { timeout: CHECK_TIMEOUT_MS }),
+      () =>
+        this.prismaHealth.pingCheck('database', this.prisma.systemPrisma, {
+          timeout: CHECK_TIMEOUT_MS,
+        }),
       () => this.redisHealth.pingCheck('redis').withTimeout(CHECK_TIMEOUT_MS),
     ]);
   }

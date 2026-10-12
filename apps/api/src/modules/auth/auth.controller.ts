@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { USER_ROLES } from '@garita/shared';
-import { CurrentUser, Roles } from './auth.decorators';
+import { AllowPendingInvitation, CurrentUser, Roles } from './auth.decorators';
 import type { AuthenticatedUser } from './auth.types';
 import { AuthService } from './auth.service';
 
@@ -10,6 +10,7 @@ export class AuthController {
 
   @Get('me')
   @Roles(...USER_ROLES)
+  @AllowPendingInvitation()
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.auth.me(user.userId);
   }

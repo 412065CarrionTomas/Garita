@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { FIREBASE_IDENTITY_PROVIDER } from './auth.types';
 import { FirebaseAdminIdentityProvider } from './firebase-identity.provider';
 import { RequestIdMiddleware } from './request-id.middleware';
+import { TenantResourceService } from './tenant-resource.service';
 
 @Module({
   imports: [PrismaModule],
@@ -16,9 +17,11 @@ import { RequestIdMiddleware } from './request-id.middleware';
     AuthGuard,
     FirebaseAdminIdentityProvider,
     RequestIdMiddleware,
+    TenantResourceService,
     { provide: FIREBASE_IDENTITY_PROVIDER, useExisting: FirebaseAdminIdentityProvider },
     { provide: APP_GUARD, useExisting: AuthGuard },
   ],
+  exports: [TenantResourceService],
 })
 export class AuthModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
