@@ -11,3 +11,64 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum UserRole {
+  admin
+  supervisor
+  guard
+  client
+}
+
+enum UserStatus {
+  invitation_pending
+  active
+  deactivated
+}
+
+enum InvitationSendStatus {
+  pending
+  sent
+  failed
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+}
+
+model User {
+  id             String     @id @default(cuid())
+  companyId      String
+  firebaseUid    String     @unique
+  email          String     @unique
+  firstName      String
+  lastName       String
+  phone          String?
+  employeeNumber String?
+  role           UserRole
+  status         UserStatus @default(invitation_pending)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  company        Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invitations    Invitation[]
+
+  @@index([companyId])
+}
+
+model Invitation {
+  id                String               @id @default(cuid())
+  userId            String
+  tokenHash         String               @unique
+  expiresAt         DateTime
+  usedAt            DateTime?
+  replacedAt        DateTime?
+  sendStatus        InvitationSendStatus @default(pending)
+  providerMessageId String?
+  createdAt         DateTime             @default(now())
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
