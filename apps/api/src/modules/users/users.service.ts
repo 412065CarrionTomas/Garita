@@ -70,32 +70,31 @@ export class UsersService {
       throw new ConflictException('Ese correo ya está en uso');
     const identity = await this.firebase.createDisabledUser(input.email);
     const token = randomBytes(32).toString('base64url');
-    const invitation = await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          firebaseUid: identity.uid,
-          email: input.email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          phone: input.phone,
-          employeeNumber: input.employeeNumber,
-          role: input.role,
-          status: 'invitation_pending',
-          company: { connect: { id: companyId } },
+    const user = await this.prisma.tenantPrisma.user.create({
+      data: {
+        firebaseUid: identity.uid,
+        email: input.email,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        phone: input.phone,
+        employeeNumber: input.employeeNumber,
+        role: input.role,
+        status: 'invitation_pending',
+        companyId,
+        invitations: {
+          create: {
+            tokenHash: hash(token),
+            expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+          },
         },
-      });
-      const invite = await tx.invitation.create({
-        data: {
-          userId: user.id,
-          tokenHash: hash(token),
-          expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
-        },
-      });
-      return { user, invite };
+      },
+      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
     });
-    await this.send(invitation.invite.id, input.firstName, input.email, token);
-    this.logger.log({ event: 'personnel_created', adminId, userId: invitation.user.id });
-    return this.detail(invitation.user.id);
+    const invitation = user.invitations[0];
+    if (!invitation) throw new Error('No se pudo crear la invitación del usuario');
+    await this.send(invitation.id, input.firstName, input.email, token);
+    this.logger.log({ event: 'personnel_created', adminId, userId: user.id });
+    return this.detail(user.id);
   }
 
   async update(id: string, input: UpdateUserRequest, adminId: string) {
