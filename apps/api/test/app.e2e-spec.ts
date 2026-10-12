@@ -494,6 +494,34 @@ describe('Aplicación (e2e)', () => {
     expect(clients[0]?.sites.map(({ id }) => id)).toEqual([northAssignedSiteId]);
   });
 
+  it('lista las opciones de supervisor para el admin y los predios asignados para el usuario', async () => {
+    const supervisors = await request(app.getHttpServer())
+      .get('/api/v1/predios/supervisores-disponibles')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    expect(
+      z
+        .array(z.object({ id: z.string(), status: z.string() }))
+        .parse(supervisors.body)
+        .some(({ id }) => id === northSupervisorId),
+    ).toBe(true);
+    await request(app.getHttpServer())
+      .get('/api/v1/predios/supervisores-disponibles')
+      .set('Authorization', 'Bearer token-guard')
+      .expect(403);
+    const assignedSites = await request(app.getHttpServer())
+      .get(`/api/v1/usuarios/${northSupervisorId}/predios`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(
+      z
+        .array(z.object({ id: z.string(), hasOtherActiveSupervisor: z.boolean() }))
+        .parse(assignedSites.body),
+    ).toEqual([
+      expect.objectContaining({ id: northAssignedSiteId, hasOtherActiveSupervisor: false }),
+    ]);
+  });
+
   it('rechaza coordenadas inválidas, roles no permitidos y usuarios que no sean supervisores', async () => {
     const prisma = app.get(PrismaService).systemPrisma;
     const northClient = await prisma.client.findUniqueOrThrow({

@@ -190,6 +190,14 @@ export class SitesService {
     });
   }
 
+  async availableSupervisors() {
+    return this.prisma.tenantPrisma.user.findMany({
+      where: { role: 'supervisor', status: { in: ['active', 'invitation_pending'] } },
+      select: { id: true, firstName: true, lastName: true, status: true },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+  }
+
   async findSitesLeftWithoutActiveSupervisor(supervisorId: string) {
     const records = await this.prisma.tenantPrisma.siteSupervisor.findMany({
       where: { userId: supervisorId },

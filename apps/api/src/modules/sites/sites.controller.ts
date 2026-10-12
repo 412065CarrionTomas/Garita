@@ -70,6 +70,11 @@ export class SitesController {
     const parsed = parse(siteListQuerySchema, query);
     return this.sites.listSites(parsed.cliente, parsed.estado);
   }
+  @Get('predios/supervisores-disponibles')
+  @Roles('admin')
+  availableSupervisors() {
+    return this.sites.availableSupervisors();
+  }
   @Get('predios/:id')
   @Roles('admin', 'supervisor')
   getSite(@Param('id') id: string) {
