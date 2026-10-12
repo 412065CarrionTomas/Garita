@@ -7,11 +7,13 @@ import { env } from '@/config/env';
 
 export class ApiError extends Error {
   readonly status: number | undefined;
+  readonly body: unknown;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, body?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -58,11 +60,32 @@ export async function apiRequest<TSchema extends z.ZodType>(
           throw profileError;
       }
     }
-    throw new ApiError(`La API respondió con el estado ${response.status}`, response.status);
+    let errorBody: unknown;
+    try {
+      errorBody = await response.json();
+    } catch {
+      errorBody = undefined;
+    }
+    throw new ApiError(
+      `La API respondió con el estado ${response.status}`,
+      response.status,
+      errorBody,
+    );
   }
   const result = schema.safeParse(await response.json());
   if (!result.success) throw new ApiError('La respuesta de la API no tiene el formato esperado');
   return result.data;
+}
+
+/** Descarga un archivo autenticado sin asumir que la respuesta es JSON. */
+export async function apiDownload(path: string): Promise<Blob> {
+  const headers = new Headers({ Accept: 'application/pdf' });
+  const token = await auth.currentUser?.getIdToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${env.VITE_API_URL}${path}`, { headers });
+  if (!response.ok)
+    throw new ApiError(`La API respondió con el estado ${response.status}`, response.status);
+  return response.blob();
 }
 
 async function expireSession(message: string) {

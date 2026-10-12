@@ -7,6 +7,7 @@ import type { SyntheticEvent } from 'react';
 import { siteInputSchema } from '@garita/shared';
 import { SiteLocation } from '../mapa/site-location';
 import { z } from 'zod';
+import { CheckpointsPanel } from '../puntos/checkpoints-panel';
 
 export function SitesPage() {
   const { user } = useAuth();
@@ -157,6 +158,7 @@ export function SitesPage() {
                   {user?.role === 'supervisor' ? 'Solo lectura' : 'Administración'}
                 </span>
               )}
+              <CheckpointsPanel site={site} />
               {user?.role === 'admin' && !site.hasActiveSupervisor && (
                 <p role="status">Sin supervisor activo</p>
               )}
