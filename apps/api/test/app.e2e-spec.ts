@@ -9,11 +9,14 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   type INestApplication,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { PrismaModule } from '../src/modules/prisma/prisma.module';
+import { QrService } from '../src/modules/checkpoints/qr.service';
+import { CheckpointsModule } from '../src/modules/checkpoints/checkpoints.module';
 import { Roles } from '../src/modules/auth/auth.decorators';
 import { TenantResourceService } from '../src/modules/auth/tenant-resource.service';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
@@ -30,11 +33,18 @@ class TestOnlyUserController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantResources: TenantResourceService,
+    private readonly qr: QrService,
   ) {}
 
   @Get('unannotated')
   unannotated(): { ok: true } {
     return { ok: true };
+  }
+
+  @Get('qr/verify')
+  @Roles('admin')
+  verifyQr(@Query('payload') payload: string) {
+    return this.qr.verifyQrPayload(payload);
   }
 
   @Get('admin-only')
@@ -140,7 +150,7 @@ class TestOnlyUserController {
 }
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, CheckpointsModule],
   controllers: [TestOnlyUserController],
   providers: [TenantResourceService],
 })
@@ -286,6 +296,17 @@ describe('Aplicación (e2e)', () => {
       .parse(created.body);
     createdCheckpointIds.push(checkpoint.id);
     expect(checkpoint).toMatchObject({ toleranceRadiusMeters: 30, qrVersion: 1 });
+    const qrService = app.get(QrService);
+    const originalQr = qrService.createPayload(checkpoint.id, 1);
+    const verifyQrPath = (payload: string) =>
+      `/api/v1/test-only/users/qr/verify?payload=${encodeURIComponent(payload)}`;
+    const originalVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(originalQr))
+      .set(auth)
+      .expect(200);
+    expect(z.object({ valid: z.literal(true) }).safeParse(originalVerification.body).success).toBe(
+      true,
+    );
 
     await request(app.getHttpServer())
       .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
@@ -371,6 +392,33 @@ describe('Aplicación (e2e)', () => {
       .parse(regeneratedBody);
     expect(regeneratedPayload.checkpoint.qrVersion).toBe(2);
     expect(regeneratedPayload.qrPayload).toContain('.2.');
+    const outdatedVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(originalQr))
+      .set(auth)
+      .expect(200);
+    const outdatedBody: unknown = JSON.parse(JSON.stringify(outdatedVerification.body));
+    expect(
+      z.object({ valid: z.literal(false), reason: z.literal('outdated') }).safeParse(outdatedBody)
+        .success,
+    ).toBe(true);
+    const currentVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(regeneratedPayload.qrPayload))
+      .set(auth)
+      .expect(200);
+    expect(z.object({ valid: z.literal(true) }).safeParse(currentVerification.body).success).toBe(
+      true,
+    );
+    const alteredId = `${checkpoint.id.startsWith('a') ? 'b' : 'a'}${checkpoint.id.slice(1)}`;
+    const alteredQr = regeneratedPayload.qrPayload.replace(checkpoint.id, alteredId);
+    const alteredVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(alteredQr))
+      .set(auth)
+      .expect(200);
+    const alteredBody: unknown = JSON.parse(JSON.stringify(alteredVerification.body));
+    expect(
+      z.object({ valid: z.literal(false), reason: z.literal('signature') }).safeParse(alteredBody)
+        .success,
+    ).toBe(true);
 
     const prisma = app.get(PrismaService).systemPrisma;
     await prisma.checkpoint.createMany({
