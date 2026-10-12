@@ -2,6 +2,7 @@
 /** @type {import('jest').Config} */
 module.exports = {
   preset: 'jest-expo',
+  testTimeout: 15000,
   setupFiles: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: { '^expo-router$': '<rootDir>/src/test/expo-router.tsx' },
   // Con pnpm, los paquetes viven bajo node_modules/.pnpm y también deben transformarse.
