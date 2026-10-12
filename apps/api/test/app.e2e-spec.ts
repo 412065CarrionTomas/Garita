@@ -65,7 +65,7 @@ describe('Aplicación (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (app) await app.close();
+    await app.close();
   });
 
   it('GET /api/v1/health/live responde con el contrato compartido', async () => {
