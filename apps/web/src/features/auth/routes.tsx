@@ -8,6 +8,8 @@ import { RecoveryPage } from './recovery-page';
 import { homePathForRole } from './role-routes';
 import { PersonalPage } from '../personal/personal-page';
 import { ActivationPage } from '../activacion/activation-page';
+import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
+import { SitesPage } from '../predios/sites-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -29,10 +31,13 @@ function RoleLayout() {
     admin: [
       { path: '/resumen', title: 'Resumen' },
       { path: '/personal', title: 'Personal' },
+      { path: '/clientes', title: 'Clientes' },
+      { path: '/predios', title: 'Predios' },
     ],
     supervisor: [
       { path: '/turnos', title: 'Turnos' },
       { path: '/personal', title: 'Personal' },
+      { path: '/predios', title: 'Predios' },
     ],
     client: [{ path: '/reportes', title: 'Reportes' }],
     guard: [{ path: '/mis-turnos', title: 'Mis turnos' }],
@@ -81,7 +86,7 @@ function HomePlaceholder({ title, role }: { title: string; role: string }) {
   );
 }
 
-/** Agregá Personal, Clientes o Predios como rutas hijas protegidas con los roles correspondientes. */
+/** Las rutas de cada sección quedan protegidas por rol dentro del layout autenticado. */
 export function AppRoutes() {
   const { user } = useAuth();
   return (
@@ -129,6 +134,30 @@ export function AppRoutes() {
           element={
             <Protected roles={['client']}>
               <HomePlaceholder role="Cliente" title="Reportes de mi predio" />
+            </Protected>
+          }
+        />
+        <Route
+          path="/clientes"
+          element={
+            <Protected roles={['admin']}>
+              <ClientsPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/clientes/:id"
+          element={
+            <Protected roles={['admin']}>
+              <ClientDetailPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/predios"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <SitesPage />
             </Protected>
           }
         />
