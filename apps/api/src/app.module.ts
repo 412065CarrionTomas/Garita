@@ -8,6 +8,7 @@ import { buildQueueOptions } from './config/queue.config';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { SitesModule } from './modules/sites/sites.module';
+import { CheckpointsModule } from './modules/checkpoints/checkpoints.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SitesModule } from './modules/sites/sites.module';
     HealthModule,
     AuthModule,
     SitesModule,
+    CheckpointsModule,
   ],
 })
 export class AppModule {}
