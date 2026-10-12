@@ -36,9 +36,9 @@ export class SitesController {
 
   @Get('clientes')
   @Roles('admin', 'supervisor')
-  clients(@Query() query: unknown) {
+  clients(@Query() query: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = parse(clientListQuerySchema, query);
-    return this.sites.listClients(parsed.estado, parsed.pagina);
+    return this.sites.listClients(parsed.estado, parsed.pagina, user);
   }
   @Post('clientes')
   @Roles('admin')
