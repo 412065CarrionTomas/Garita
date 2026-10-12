@@ -1,4 +1,5 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
 import { ClientsPage } from './clients-page';
 
@@ -11,7 +12,19 @@ jest.mock('@/lib/api-client', () => {
     }
   }
   return {
-    apiGet: jest.fn(() => Promise.resolve([])),
+    apiGet: jest.fn(() =>
+      Promise.resolve([
+        {
+          id: 'client-1',
+          name: 'Cliente Norte',
+          contactName: 'Ana',
+          phone: '+541112345678',
+          email: 'ana@example.invalid',
+          taxId: null,
+          status: 'active',
+        },
+      ]),
+    ),
     apiPost: jest.fn(() => Promise.reject(new ApiError('HTTP 409', 409))),
     apiPatch: jest.fn(() => Promise.resolve({ id: 'client' })),
     ApiError,
@@ -49,5 +62,43 @@ describe('ClientsPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Ya existe un cliente con ese nombre',
     );
+  });
+
+  it('abre la edición completa y permite validar, guardar, cancelar y cerrar con Escape', async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<ClientsPage />);
+    await user.click(await screen.findByRole('button', { name: 'Editar' }));
+    expect(screen.getByRole('dialog', { name: 'Editar cliente' })).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog');
+    const email = within(dialog).getByLabelText('Correo');
+    await user.clear(email);
+    await user.type(email, 'correo-inválido');
+    expect(email).toHaveProperty('validity.typeMismatch', true);
+    await user.clear(email);
+    await user.type(email, 'ana@example.invalid');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    await user.click(await screen.findByRole('button', { name: 'Editar' }));
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('muestra la baja en cascada en una confirmación accesible', async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<ClientsPage />);
+    await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
+    expect(screen.getByRole('alertdialog', { name: 'Dar de baja al cliente' })).toHaveTextContent(
+      'dará de baja sus predios',
+    );
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
   });
 });

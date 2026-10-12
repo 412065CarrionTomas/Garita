@@ -5,6 +5,15 @@ import { useParams } from 'react-router';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
 import { env } from '@/config/env';
 import { z } from 'zod';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const response = z.looseObject({ id: z.string() });
 const ClientSitesMap = lazy(() =>
@@ -25,6 +34,17 @@ export function ClientsPage() {
     },
   });
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState<z.infer<typeof clientsResponseSchema>[number] | null>(
+    null,
+  );
+  const [editForm, setEditForm] = useState({
+    name: '',
+    contactName: '',
+    phone: '',
+    email: '',
+    taxId: '',
+  });
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   return (
     <section className="space-y-6">
       <h1 className="text-3xl font-semibold">Clientes</h1>
@@ -95,14 +115,14 @@ export function ClientsPage() {
               <button
                 className="underline"
                 onClick={() => {
-                  const name = window.prompt('Nuevo nombre', client.name);
-                  if (name)
-                    void apiPatch(
-                      `/clientes/${client.id}`,
-                      { ...client, name },
-                      clientInputSchema,
-                      response,
-                    ).then(() => queryClient.invalidateQueries({ queryKey: ['clientes'] }));
+                  setEditing(client);
+                  setEditForm({
+                    name: client.name,
+                    contactName: client.contactName,
+                    phone: client.phone,
+                    email: client.email,
+                    taxId: client.taxId ?? '',
+                  });
                 }}
               >
                 Editar
@@ -110,13 +130,7 @@ export function ClientsPage() {
               <button
                 className="ml-4 underline"
                 onClick={() => {
-                  if (window.confirm(`¿Dar de baja a ${client.name} y todos sus predios?`))
-                    void apiPost(
-                      `/clientes/${client.id}/baja`,
-                      {},
-                      z.looseObject({}),
-                      response,
-                    ).then(() => queryClient.invalidateQueries({ queryKey: ['clientes'] }));
+                  setDeleting({ id: client.id, name: client.name });
                 }}
               >
                 Dar de baja
@@ -125,6 +139,110 @@ export function ClientsPage() {
           ))}
         </ul>
       )}
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+      >
+        <DialogContent aria-describedby="client-edit-description">
+          <DialogTitle>Editar cliente</DialogTitle>
+          <DialogDescription id="client-edit-description">
+            Actualizá todos los datos del cliente.
+          </DialogDescription>
+          <form
+            className="mt-4 grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const parsed = clientInputSchema.safeParse(editForm);
+              if (!parsed.success) {
+                setError(parsed.error.issues[0]?.message ?? 'Revisá los datos');
+                return;
+              }
+              if (!editing) return;
+              void apiPatch(
+                `/clientes/${editing.id}`,
+                parsed.data,
+                clientInputSchema,
+                response,
+              ).then(() => {
+                setEditing(null);
+                setError('');
+                return queryClient.invalidateQueries({ queryKey: ['clientes'] });
+              });
+            }}
+          >
+            {(['name', 'contactName', 'phone', 'email', 'taxId'] as const).map((key) => (
+              <label key={key} className="grid gap-1">
+                {
+                  {
+                    name: 'Nombre o razón social',
+                    contactName: 'Persona de contacto',
+                    phone: 'Teléfono',
+                    email: 'Correo',
+                    taxId: 'CUIT (opcional)',
+                  }[key]
+                }
+                <input
+                  required={key !== 'taxId'}
+                  type={key === 'email' ? 'email' : 'text'}
+                  value={editForm[key]}
+                  onChange={(event) => {
+                    setEditForm({ ...editForm, [key]: event.target.value });
+                  }}
+                  className="rounded border p-2"
+                />
+              </label>
+            ))}
+            {error && <p role="alert">{error}</p>}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                className="rounded border px-4 py-2"
+                onClick={() => {
+                  setEditing(null);
+                }}
+              >
+                Cancelar
+              </button>
+              <button className="rounded bg-primary px-4 py-2 text-primary-foreground">
+                Guardar cambios
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogTitle>Dar de baja al cliente</AlertDialogTitle>
+          <AlertDialogDescription>
+            La baja de {deleting?.name} también dará de baja sus predios y quitará todas las
+            asignaciones de supervisores. Esta acción no se puede deshacer.
+          </AlertDialogDescription>
+          <div className="mt-5 flex justify-end gap-3">
+            <AlertDialogCancel className="rounded border px-4 py-2">Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="rounded bg-destructive px-4 py-2 text-white"
+              onClick={() => {
+                if (deleting)
+                  void apiPost(
+                    `/clientes/${deleting.id}/baja`,
+                    {},
+                    z.looseObject({}),
+                    response,
+                  ).then(() => queryClient.invalidateQueries({ queryKey: ['clientes'] }));
+              }}
+            >
+              Dar de baja cliente
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
