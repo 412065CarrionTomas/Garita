@@ -5,7 +5,7 @@ import type { TenantContext } from '../auth/tenant-context';
 /** Register every Prisma model that owns rows through a direct companyId field. */
 /** Models whose rows are tenant-owned directly or through a User relation. */
 /** Direct companyId fields are checked against the Prisma schema in tenant-prisma.spec.ts. */
-export const COMPANY_ID_MODELS = ['User'] as const;
+export const COMPANY_ID_MODELS = ['User', 'Client', 'Site', 'SiteSupervisor'] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
   Invitation: { relation: 'user', foreignKey: 'userId', relatedModel: 'User' },
@@ -44,6 +44,42 @@ function addTenantFilter(model: string, args: unknown, companyId: string): unkno
   const relationValue = where[config.relation];
   const relation = isRecord(relationValue) ? relationValue : {};
   return { ...args, where: { ...where, [config.relation]: { ...relation, companyId } } };
+}
+
+function addSiteAssignmentFilter(
+  model: string,
+  args: unknown,
+  user: TenantContext['user'],
+): unknown {
+  if (!isRecord(args) || user?.role !== 'supervisor') return args;
+  const where = isRecord(args.where) ? args.where : {};
+  const assignment = { supervisors: { some: { userId: user.userId } } };
+  if (model === 'Site') return { ...args, where: { ...where, ...assignment } };
+  if (model === 'SiteSupervisor') return { ...args, where: { ...where, userId: user.userId } };
+  if (model === 'Client') {
+    const siteFilter = { supervisors: { some: { userId: user.userId } } };
+    const constrainSites = (selection: unknown): unknown => {
+      if (selection === true) return { where: siteFilter };
+      if (!isRecord(selection)) return selection;
+      const nestedWhere = isRecord(selection.where) ? selection.where : {};
+      return { ...selection, where: { AND: [nestedWhere, siteFilter] } };
+    };
+    const constrainSelection = (selection: unknown): unknown => {
+      if (!isRecord(selection) || !Object.hasOwn(selection, 'sites')) return selection;
+      return { ...selection, sites: constrainSites(selection.sites) };
+    };
+    const existingSites = isRecord(where.sites) ? where.sites : {};
+    return {
+      ...args,
+      where: {
+        ...where,
+        sites: { ...existingSites, some: { AND: [existingSites.some ?? {}, siteFilter] } },
+      },
+      ...(args.include ? { include: constrainSelection(args.include) } : {}),
+      ...(args.select ? { select: constrainSelection(args.select) } : {}),
+    };
+  }
+  return args;
 }
 
 function setTenantOnData(model: string, data: unknown, companyId: string): unknown {
@@ -188,7 +224,8 @@ export function createTenantPrismaClient(systemPrisma: PrismaClient, context: Te
               args,
               user.companyId,
             );
-          return query(scopeArgs(model, operation, args, user.companyId) as typeof args);
+          const tenantArgs = scopeArgs(model, operation, args, user.companyId);
+          return query(addSiteAssignmentFilter(model, tenantArgs, user) as typeof args);
         },
       },
     },
