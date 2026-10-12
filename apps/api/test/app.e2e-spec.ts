@@ -352,6 +352,59 @@ describe('Aplicación (e2e)', () => {
     loggerError.mockRestore();
   });
 
+  it('permite al supervisor consultar personal, pero le deniega las mutaciones', async () => {
+    const auth = { Authorization: 'Bearer token-supervisor' };
+    await request(app.getHttpServer()).get('/api/v1/usuarios').set(auth).expect(200);
+    await request(app.getHttpServer()).post('/api/v1/usuarios').set(auth).send({}).expect(403);
+    await request(app.getHttpServer()).patch('/api/v1/usuarios/id').set(auth).send({}).expect(403);
+    await request(app.getHttpServer()).post('/api/v1/usuarios/id/desactivar').set(auth).expect(403);
+    await request(app.getHttpServer()).post('/api/v1/usuarios/id/reactivar').set(auth).expect(403);
+    await request(app.getHttpServer())
+      .post('/api/v1/usuarios/id/reenviar-invitacion')
+      .set(auth)
+      .expect(403);
+  });
+
+  it.each(['seed-norte-admin', 'seed-norte-client'])(
+    'oculta usuarios que no son personal en todos los endpoints de gestión (%s)',
+    async (firebaseUid) => {
+      const user = await app.get(PrismaService).systemPrisma.user.findUniqueOrThrow({
+        where: { firebaseUid },
+        select: { id: true },
+      });
+      const base = `/api/v1/usuarios/${user.id}`;
+      const auth = { Authorization: 'Bearer token-admin' };
+
+      await request(app.getHttpServer()).get(base).set(auth).expect(404);
+      await request(app.getHttpServer())
+        .patch(base)
+        .set(auth)
+        .send({ firstName: 'Nombre actualizado' })
+        .expect(404);
+      await request(app.getHttpServer()).post(`${base}/desactivar`).set(auth).expect(404);
+      await request(app.getHttpServer()).post(`${base}/reactivar`).set(auth).expect(404);
+      await request(app.getHttpServer()).post(`${base}/reenviar-invitacion`).set(auth).expect(404);
+    },
+  );
+
+  it.each(['token-guard', 'token-client'])('deniega el listado de personal a %s', async (token) => {
+    await request(app.getHttpServer())
+      .get('/api/v1/usuarios')
+      .set({ Authorization: `Bearer ${token}` })
+      .expect(403);
+  });
+
+  it('oculta en detalle personal que pertenece a otra empresa', async () => {
+    const south = await app.get(PrismaService).systemPrisma.user.findFirstOrThrow({
+      where: { companyId: 'sur-company', role: 'guard' },
+      select: { id: true },
+    });
+    await request(app.getHttpServer())
+      .get(`/api/v1/usuarios/${south.id}`)
+      .set({ Authorization: 'Bearer token-admin' })
+      .expect(404);
+  });
+
   it('oculta usuarios de otra empresa con el mismo 404 que un id inexistente', async () => {
     const prisma = app.select(TestOnlyModule).get(PrismaService);
     const foreign = await prisma.systemPrisma.user.findFirstOrThrow({

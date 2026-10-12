@@ -25,4 +25,21 @@ export class FirebaseAdminIdentityProvider implements FirebaseIdentityProvider {
     const decoded = await getAuth().verifyIdToken(token);
     return { uid: decoded.uid };
   }
+
+  async createDisabledUser(email: string): Promise<{ uid: string }> {
+    const user = await getAuth().createUser({ email, disabled: true });
+    return { uid: user.uid };
+  }
+
+  async setDisabled(uid: string, disabled: boolean): Promise<void> {
+    await getAuth().updateUser(uid, { disabled });
+  }
+
+  async revokeRefreshTokens(uid: string): Promise<void> {
+    await getAuth().revokeRefreshTokens(uid);
+  }
+
+  generatePasswordResetLink(email: string): Promise<string> {
+    return getAuth().generatePasswordResetLink(email);
+  }
 }

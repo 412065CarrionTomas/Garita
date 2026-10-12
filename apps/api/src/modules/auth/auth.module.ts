@@ -21,7 +21,7 @@ import { TenantResourceService } from './tenant-resource.service';
     { provide: FIREBASE_IDENTITY_PROVIDER, useExisting: FirebaseAdminIdentityProvider },
     { provide: APP_GUARD, useExisting: AuthGuard },
   ],
-  exports: [TenantResourceService],
+  exports: [TenantResourceService, FIREBASE_IDENTITY_PROVIDER],
 })
 export class AuthModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
