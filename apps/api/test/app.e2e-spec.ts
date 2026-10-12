@@ -198,6 +198,7 @@ describe('Aplicación (e2e)', () => {
     await prisma.invitation.deleteMany({
       where: { tokenHash: { in: ['e2e-north-invitation', 'e2e-south-invitation'] } },
     });
+    await prisma.user.deleteMany({ where: { firebaseUid: { startsWith: 'tenant-test-' } } });
     await prisma.user.updateMany({
       where: { firebaseUid: 'seed-norte-pending' },
       data: { status: 'invitation_pending' },
