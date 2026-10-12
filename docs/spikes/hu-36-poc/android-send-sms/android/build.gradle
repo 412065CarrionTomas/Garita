@@ -1,0 +1,26 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.garitasendsms'
+version = '1.0.0'
+
+android {
+  compileSdkVersion 34
+  namespace 'expo.modules.garitasendsms'
+
+  defaultConfig {
+    minSdkVersion 24
+    targetSdkVersion 34
+    versionCode 1
+    versionName "1.0.0"
+  }
+
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.23"
+}
