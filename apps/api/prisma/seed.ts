@@ -1,10 +1,12 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../src/generated/prisma/client';
 
-try {
-  process.loadEnvFile('.env');
-} catch {
-  /* CI proporciona las variables del entorno. */
+if (!process.env.DATABASE_URL) {
+  try {
+    process.loadEnvFile('.env');
+  } catch {
+    /* CI proporciona las variables del entorno. */
+  }
 }
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -39,7 +41,51 @@ async function seedCompany(name: string, prefix: string): Promise<string> {
 
 async function main(): Promise<void> {
   const north = await seedCompany('Seguridad Norte', 'norte');
-  await seedCompany('Custodia Sur', 'sur');
+  const south = await seedCompany('Custodia Sur', 'sur');
+  for (const [companyId, prefix] of [
+    [north, 'norte'],
+    [south, 'sur'],
+  ] as const) {
+    const client = await prisma.client.upsert({
+      where: { companyId_name: { companyId, name: `Cliente ${prefix}` } },
+      create: {
+        companyId,
+        name: `Cliente ${prefix}`,
+        contactName: 'Contacto Seed',
+        phone: '+541100000000',
+        email: `${prefix}-contacto@seed.garita.invalid`,
+      },
+      update: {},
+    });
+    for (const [index, name] of ['Predio A', 'Predio B'].entries()) {
+      await prisma.site.upsert({
+        where: { clientId_name: { clientId: client.id, name } },
+        create: {
+          companyId,
+          clientId: client.id,
+          name,
+          address: `Dirección ${index + 1}`,
+          latitude: -34.6 + index * 0.01,
+          longitude: -58.4 + index * 0.01,
+        },
+        update: {},
+      });
+    }
+  }
+  const northClient = await prisma.client.findUniqueOrThrow({
+    where: { companyId_name: { companyId: north, name: 'Cliente norte' } },
+  });
+  const northSite = await prisma.site.findUniqueOrThrow({
+    where: { clientId_name: { clientId: northClient.id, name: 'Predio A' } },
+  });
+  const northSupervisor = await prisma.user.findUniqueOrThrow({
+    where: { firebaseUid: 'seed-norte-supervisor' },
+  });
+  await prisma.siteSupervisor.upsert({
+    where: { siteId_userId: { siteId: northSite.id, userId: northSupervisor.id } },
+    create: { companyId: north, siteId: northSite.id, userId: northSupervisor.id },
+    update: {},
+  });
   for (const [uid, status] of [
     ['seed-norte-deactivated', 'deactivated'],
     ['seed-norte-pending', 'invitation_pending'],
