@@ -15,6 +15,10 @@ export interface AuthenticatedRequest extends Request {
 
 export interface FirebaseIdentityProvider {
   verifyIdToken(token: string): Promise<{ uid: string }>;
+  createDisabledUser(email: string): Promise<{ uid: string }>;
+  setDisabled(uid: string, disabled: boolean): Promise<void>;
+  revokeRefreshTokens(uid: string): Promise<void>;
+  generatePasswordResetLink(email: string): Promise<string>;
 }
 
 export const FIREBASE_IDENTITY_PROVIDER = Symbol('FIREBASE_IDENTITY_PROVIDER');

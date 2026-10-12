@@ -60,6 +60,10 @@ describe('AuthGuard', () => {
     const prisma = { systemPrisma } as unknown as PrismaService;
     const identity: FirebaseIdentityProvider = {
       verifyIdToken: () => Promise.resolve({ uid: 'firebase-user' }),
+      createDisabledUser: () => Promise.resolve({ uid: 'new-user' }),
+      setDisabled: () => Promise.resolve(),
+      revokeRefreshTokens: () => Promise.resolve(),
+      generatePasswordResetLink: () => Promise.resolve('https://example.invalid/reset'),
     };
     const setUser = jest.fn();
     const tenantContext = { setUser } as unknown as TenantContext;
