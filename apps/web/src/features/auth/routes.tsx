@@ -6,6 +6,8 @@ import { useAuth } from './auth-context';
 import { LoginPage } from './login-page';
 import { RecoveryPage } from './recovery-page';
 import { homePathForRole } from './role-routes';
+import { PersonalPage } from '../personal/personal-page';
+import { ActivationPage } from '../activacion/activation-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -24,8 +26,14 @@ function RoleLayout() {
   const { user, logout } = useAuth();
   if (!user) return null;
   const sections: Record<UserRole, { path: string; title: string }[]> = {
-    admin: [{ path: '/resumen', title: 'Resumen' }],
-    supervisor: [{ path: '/turnos', title: 'Turnos' }],
+    admin: [
+      { path: '/resumen', title: 'Resumen' },
+      { path: '/personal', title: 'Personal' },
+    ],
+    supervisor: [
+      { path: '/turnos', title: 'Turnos' },
+      { path: '/personal', title: 'Personal' },
+    ],
     client: [{ path: '/reportes', title: 'Reportes' }],
     guard: [{ path: '/mis-turnos', title: 'Mis turnos' }],
   };
@@ -80,14 +88,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/ingresar" element={<LoginPage />} />
       <Route path="/recuperar" element={<RecoveryPage />} />
-      <Route
-        path="/activar"
-        element={
-          <main className="p-6">
-            <h1>Activar cuenta</h1>
-          </main>
-        }
-      />
+      <Route path="/activar" element={<ActivationPage />} />
       <Route
         path="/"
         element={<Navigate to={user ? homePathForRole(user.role) : '/ingresar'} replace />}
@@ -99,6 +100,14 @@ export function AppRoutes() {
           </Protected>
         }
       >
+        <Route
+          path="/personal"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <PersonalPage />
+            </Protected>
+          }
+        />
         <Route
           path="/resumen"
           element={
