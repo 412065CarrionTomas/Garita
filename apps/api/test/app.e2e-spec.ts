@@ -154,6 +154,9 @@ describe('Aplicación (e2e)', () => {
             return Promise.resolve({ uid: 'seed-norte-deactivated' });
           if (token === 'token-pending') return Promise.resolve({ uid: 'seed-norte-pending' });
           if (token === 'token-guard') return Promise.resolve({ uid: 'seed-norte-guard' });
+          if (token === 'token-supervisor')
+            return Promise.resolve({ uid: 'seed-norte-supervisor' });
+          if (token === 'token-client') return Promise.resolve({ uid: 'seed-norte-client' });
           return Promise.reject(new Error('Token inválido'));
         },
       })
@@ -300,6 +303,32 @@ describe('Aplicación (e2e)', () => {
       ),
     ).toBe(true);
     loggerError.mockRestore();
+  });
+
+  it('permite al supervisor consultar personal, pero le deniega las mutaciones', async () => {
+    const auth = { Authorization: 'Bearer token-supervisor' };
+    await request(app.getHttpServer()).get('/api/v1/usuarios').set(auth).expect(200);
+    await request(app.getHttpServer()).post('/api/v1/usuarios').set(auth).send({}).expect(403);
+    await request(app.getHttpServer()).patch('/api/v1/usuarios/id').set(auth).send({}).expect(403);
+    await request(app.getHttpServer()).post('/api/v1/usuarios/id/desactivar').set(auth).expect(403);
+  });
+
+  it.each(['token-guard', 'token-client'])('deniega el listado de personal a %s', async (token) => {
+    await request(app.getHttpServer())
+      .get('/api/v1/usuarios')
+      .set({ Authorization: `Bearer ${token}` })
+      .expect(403);
+  });
+
+  it('oculta en detalle personal que pertenece a otra empresa', async () => {
+    const south = await app.get(PrismaService).systemPrisma.user.findFirstOrThrow({
+      where: { companyId: 'sur-company', role: 'guard' },
+      select: { id: true },
+    });
+    await request(app.getHttpServer())
+      .get(`/api/v1/usuarios/${south.id}`)
+      .set({ Authorization: 'Bearer token-admin' })
+      .expect(404);
   });
 
   it('oculta usuarios de otra empresa con el mismo 404 que un id inexistente', async () => {
