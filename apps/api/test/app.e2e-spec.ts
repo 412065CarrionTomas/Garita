@@ -97,7 +97,31 @@ class TestOnlyUserController {
   @Get(':id')
   @Roles(...USER_ROLES)
   findById(@Param('id') id: string) {
-    return this.tenantResources.findOwnedOrThrow(id);
+    return this.tenantResources.findOwnedOrThrow('User', id);
+  }
+
+  @Patch('invitations/:id')
+  @Roles(...USER_ROLES)
+  updateInvitation(@Param('id') id: string) {
+    return this.prisma.tenantPrisma.invitation.updateMany({
+      where: { id },
+      data: { sendStatus: 'sent', usedAt: new Date('2026-01-01T00:00:00.000Z') },
+    });
+  }
+
+  @Get('raw/:kind')
+  @Roles(...USER_ROLES)
+  raw(@Param('kind') kind: string) {
+    if (kind === 'query') return this.prisma.tenantPrisma.$queryRaw`SELECT 1`;
+    if (kind === 'execute') return this.prisma.tenantPrisma.$executeRaw`SELECT 1`;
+    if (kind === 'query-unsafe') return this.prisma.tenantPrisma.$queryRawUnsafe('SELECT 1');
+    return this.prisma.tenantPrisma.$executeRawUnsafe('SELECT 1');
+  }
+
+  @Get('unregistered/:id')
+  @Roles(...USER_ROLES)
+  unregistered(@Param('id') id: string) {
+    return this.tenantResources.findOwnedOrThrow('UnknownModel', id);
   }
 }
 
@@ -115,6 +139,8 @@ import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
   let app: INestApplication<App>;
+  let northInvitationId: string;
+  let southInvitationId: string;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -136,9 +162,46 @@ describe('Aplicación (e2e)', () => {
     app = moduleRef.createNestApplication();
     setupApp(app);
     await app.init();
+
+    const prisma = app.get(PrismaService).systemPrisma;
+    const pending = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-pending' },
+    });
+    await prisma.user.update({ where: { id: pending.id }, data: { status: 'invitation_pending' } });
+    const northInvitation = await prisma.invitation.upsert({
+      where: { tokenHash: 'e2e-north-invitation' },
+      create: {
+        userId: pending.id,
+        tokenHash: 'e2e-north-invitation',
+        expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+      },
+      update: { userId: pending.id },
+    });
+    northInvitationId = northInvitation.id;
+    const southUser = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-sur-admin' },
+    });
+    const southInvitation = await prisma.invitation.upsert({
+      where: { tokenHash: 'e2e-south-invitation' },
+      create: {
+        userId: southUser.id,
+        tokenHash: 'e2e-south-invitation',
+        expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+      },
+      update: { userId: southUser.id },
+    });
+    southInvitationId = southInvitation.id;
   });
 
   afterAll(async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.invitation.deleteMany({
+      where: { tokenHash: { in: ['e2e-north-invitation', 'e2e-south-invitation'] } },
+    });
+    await prisma.user.updateMany({
+      where: { firebaseUid: 'seed-norte-pending' },
+      data: { status: 'invitation_pending' },
+    });
     await app.close();
   });
 
@@ -271,6 +334,13 @@ describe('Aplicación (e2e)', () => {
     loggerError.mockRestore();
   });
 
+  it('rechaza modelos no registrados en findOwnedOrThrow', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/test-only/users/unregistered/irrelevante')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(403);
+  });
+
   it('filtra lecturas, actualizaciones y eliminaciones sin companyId manual', async () => {
     const headers = { Authorization: 'Bearer token-admin' };
     const visible = await request(app.getHttpServer())
@@ -324,4 +394,36 @@ describe('Aplicación (e2e)', () => {
       'norte-company',
     );
   });
+
+  it('actualiza campos de invitación propia y deja intacta una invitación ajena', async () => {
+    const auth = { Authorization: 'Bearer token-admin' };
+    await request(app.getHttpServer())
+      .patch(`/api/v1/test-only/users/invitations/${northInvitationId}`)
+      .set(auth)
+      .expect(200)
+      .expect({ count: 1 });
+    await request(app.getHttpServer())
+      .patch(`/api/v1/test-only/users/invitations/${southInvitationId}`)
+      .set(auth)
+      .expect(200)
+      .expect({ count: 0 });
+
+    const prisma = app.get(PrismaService).systemPrisma;
+    await expect(
+      prisma.invitation.findUniqueOrThrow({ where: { id: northInvitationId } }),
+    ).resolves.toMatchObject({ sendStatus: 'sent', usedAt: new Date('2026-01-01T00:00:00.000Z') });
+    await expect(
+      prisma.invitation.findUniqueOrThrow({ where: { id: southInvitationId } }),
+    ).resolves.toMatchObject({ sendStatus: 'pending', usedAt: null });
+  });
+
+  it.each(['query', 'execute', 'query-unsafe', 'execute-unsafe'])(
+    'deniega SQL crudo en tenantPrisma (%s)',
+    async (kind) => {
+      await request(app.getHttpServer())
+        .get(`/api/v1/test-only/users/raw/${kind}`)
+        .set('Authorization', 'Bearer token-admin')
+        .expect(403);
+    },
+  );
 });
