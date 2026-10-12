@@ -5,7 +5,13 @@ import type { TenantContext } from '../auth/tenant-context';
 /** Register every Prisma model that owns rows through a direct companyId field. */
 /** Models whose rows are tenant-owned directly or through a User relation. */
 /** Direct companyId fields are checked against the Prisma schema in tenant-prisma.spec.ts. */
-export const COMPANY_ID_MODELS = ['User', 'Client', 'Site', 'SiteSupervisor'] as const;
+export const COMPANY_ID_MODELS = [
+  'User',
+  'Client',
+  'Site',
+  'SiteSupervisor',
+  'Checkpoint',
+] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
   Invitation: { relation: 'user', foreignKey: 'userId', relatedModel: 'User' },
@@ -56,6 +62,7 @@ function addSiteAssignmentFilter(
   const assignment = { supervisors: { some: { userId: user.userId } } };
   if (model === 'Site') return { ...args, where: { ...where, ...assignment } };
   if (model === 'SiteSupervisor') return { ...args, where: { ...where, userId: user.userId } };
+  if (model === 'Checkpoint') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'Client') {
     const siteFilter = { supervisors: { some: { userId: user.userId } } };
     const constrainSites = (selection: unknown): unknown => {

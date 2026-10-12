@@ -30,6 +30,13 @@ describe('registro del aislamiento tenant', () => {
     });
   });
 
+  it('registra puntos y limita las lecturas del supervisor a predios asignados', () => {
+    expect(COMPANY_ID_MODELS).toContain('Checkpoint');
+    expect(scopeArgs('Checkpoint', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
+      where: { status: 'active', companyId: 'norte' },
+    });
+  });
+
   it('falla cerrado ante operaciones tenant no soportadas', () => {
     expect(() => scopeArgs('User', 'futureOperation', {}, 'norte-company')).toThrow(
       'Operación futureOperation no soportada',
