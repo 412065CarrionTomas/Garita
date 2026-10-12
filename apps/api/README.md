@@ -56,8 +56,9 @@ test/                # Tests de integración (*.e2e-spec.ts)
 - La extensión de Prisma aplica el tenant a lecturas, escrituras, conteos y agregaciones; no hace falta agregar `companyId` a cada consulta.
 - Prisma 7 permite filtros adicionales junto a la clave única; `findUnique` conserva la clave y agrega la restricción tenant en el mismo `where`.
 - `User` filtra por `companyId`; `Invitation` filtra por su `user.companyId`; `Company` es la raíz tenant y filtra por su `id` igual al `companyId` autenticado.
-- Si falta el contexto tenant, el cliente filtrado falla cerrado. Todo modelo nuevo con `companyId` debe agregarse a `TENANT_MODELS` y `COMPANY_ID_MODELS`; una prueba contrasta el registro con `schema.prisma`.
-- Buscá recursos por ID con `TenantResourceService.findOwnedOrThrow(id)`: devuelve el registro propio; si pertenece a otra empresa registra `Logger.error` y responde el mismo 404 que un ID inexistente.
+- Modelo directo nuevo: agregalo a `COMPANY_ID_MODELS`; `TENANT_MODELS` se deriva de esa lista y el test compara los campos con `schema.prisma`.
+- Modelo indirecto nuevo: agregá una entrada en `INDIRECT_TENANT_MODELS` con la relación que conduce a `companyId`.
+- Buscá recursos por ID con `TenantResourceService.findOwnedOrThrow('User', id)` (modelo, id): devuelve el registro propio; si pertenece a otra empresa registra `Logger.error` y responde el mismo 404 que un ID inexistente.
 - `systemPrisma` omite el filtro y queda reservado al guard de Firebase, datos/operaciones de sistema y verificaciones internas de pertenencia; el seed crea su propio cliente de sistema.
 - Declarar roles con `@Roles('admin', ...)`; sin roles, el guard autentica y luego deniega con 403.
 - Declarar rutas públicas con `@Public()`; solo `@AllowPendingInvitation()` permite que una invitación pendiente complete `GET /auth/me`.
