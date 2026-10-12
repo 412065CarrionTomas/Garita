@@ -28,9 +28,13 @@ pnpm dlx eas-cli@latest build --profile development --platform android
 
 ## Variables de entorno
 
-| Variable              | Descripción                               |
-| --------------------- | ----------------------------------------- |
-| `EXPO_PUBLIC_API_URL` | URL base de la API, con prefijo y versión |
+| Variable                           | Descripción                                               |
+| ---------------------------------- | --------------------------------------------------------- |
+| `EXPO_PUBLIC_API_URL`              | URL base de la API, con prefijo y versión                 |
+| `EXPO_PUBLIC_FIREBASE_API_KEY`     | Clave pública de configuración de Firebase Authentication |
+| `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN` | Dominio de autenticación de Firebase                      |
+| `EXPO_PUBLIC_FIREBASE_PROJECT_ID`  | Proyecto de Firebase                                      |
+| `EXPO_PUBLIC_FIREBASE_APP_ID`      | Aplicación Firebase                                       |
 
 Las variables `EXPO_PUBLIC_*` se incrustan en la app y son públicas. Para los builds de EAS se cargan con `eas env:create` en el entorno correspondiente.
 
