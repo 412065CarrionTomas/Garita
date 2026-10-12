@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { sitesResponseSchema } from '@garita/shared';
-import { apiGet, apiPost, apiPut } from '@/lib/api-client';
+import { apiGet, apiPost, apiPut, apiPatch } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
@@ -33,7 +33,7 @@ export function SitesPage() {
     queryKey: ['supervisores'],
     queryFn: () =>
       apiGet(
-        '/usuarios?rol=supervisor',
+        '/predios/supervisores-disponibles',
         z.array(z.looseObject({ id: z.string(), firstName: z.string(), lastName: z.string() })),
       ),
     enabled: user?.role === 'admin',
@@ -161,34 +161,80 @@ export function SitesPage() {
                 <p role="status">Sin supervisor activo</p>
               )}
               {user?.role === 'admin' && site.status === 'active' && (
-                <label className="mt-2 block">
-                  Supervisores asignados
-                  <select
-                    multiple
-                    aria-label={`Supervisores de ${site.name}`}
-                    value={supervisorIds[site.id] ?? assignments.data?.[site.id] ?? []}
-                    disabled={assignments.isPending}
-                    onChange={(event) => {
-                      const selected = [...event.currentTarget.selectedOptions].map(
-                        (option) => option.value,
-                      );
-                      setSupervisorIds({ ...supervisorIds, [site.id]: selected });
-                      void apiPut(
-                        `/predios/${site.id}/supervisores`,
-                        { supervisorIds: selected },
-                        z.object({ supervisorIds: z.array(z.string()) }),
-                        z.array(z.unknown()),
-                      );
+                <div className="mt-2 space-y-2">
+                  <label className="block">
+                    Supervisores asignados
+                    <select
+                      multiple
+                      aria-label={`Supervisores de ${site.name}`}
+                      value={supervisorIds[site.id] ?? assignments.data?.[site.id] ?? []}
+                      disabled={assignments.isPending}
+                      onChange={(event) => {
+                        const selected = [...event.currentTarget.selectedOptions].map(
+                          (option) => option.value,
+                        );
+                        setSupervisorIds({ ...supervisorIds, [site.id]: selected });
+                        void apiPut(
+                          `/predios/${site.id}/supervisores`,
+                          { supervisorIds: selected },
+                          z.object({ supervisorIds: z.array(z.string()) }),
+                          z.array(z.unknown()),
+                        ).then(() => sites.refetch());
+                      }}
+                      className="block min-h-24 w-full rounded border p-2"
+                    >
+                      {supervisors.data?.map((supervisor) => (
+                        <option key={supervisor.id} value={supervisor.id}>
+                          {supervisor.firstName} {supervisor.lastName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="underline"
+                    onClick={() => {
+                      const name = window.prompt('Nombre del predio', site.name);
+                      const address = window.prompt('Dirección', site.address);
+                      if (name === null || address === null) return;
+                      const input = siteInputSchema.safeParse({
+                        clientId: site.clientId,
+                        name,
+                        address,
+                        latitude: Number(site.latitude),
+                        longitude: Number(site.longitude),
+                        accessInstructions:
+                          typeof site.accessInstructions === 'string'
+                            ? site.accessInstructions
+                            : undefined,
+                        observations:
+                          typeof site.observations === 'string' ? site.observations : undefined,
+                      });
+                      if (!input.success) return;
+                      void apiPatch(
+                        `/predios/${site.id}`,
+                        input.data,
+                        siteInputSchema,
+                        response,
+                      ).then(() => sites.refetch());
                     }}
-                    className="block min-h-24 w-full rounded border p-2"
                   >
-                    {supervisors.data?.map((supervisor) => (
-                      <option key={supervisor.id} value={supervisor.id}>
-                        {supervisor.firstName} {supervisor.lastName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    Editar predio
+                  </button>
+                  <button
+                    className="ml-4 underline"
+                    onClick={() => {
+                      if (!window.confirm(`¿Dar de baja el predio ${site.name}?`)) return;
+                      void apiPost(
+                        `/predios/${site.id}/baja`,
+                        {},
+                        z.looseObject({}),
+                        response,
+                      ).then(() => sites.refetch());
+                    }}
+                  >
+                    Dar de baja
+                  </button>
+                </div>
               )}
             </li>
           ))}

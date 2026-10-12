@@ -38,7 +38,7 @@ describe('ClientsPage', () => {
     for (const [label, value] of [
       ['Nombre o razón social', 'Cliente'],
       ['Persona de contacto', 'Ana'],
-      ['Teléfono', '123'],
+      ['Teléfono', '12345678'],
       ['Correo', 'ana@example.invalid'],
     ] as const) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
