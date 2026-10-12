@@ -22,6 +22,9 @@ export function Navigate() {
 export function useNavigate() {
   return jest.fn();
 }
+export function useSearchParams(): [URLSearchParams] {
+  return [new URLSearchParams(window.location.search)];
+}
 export function Outlet() {
   return null;
 }

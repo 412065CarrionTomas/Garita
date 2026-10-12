@@ -1,13 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
-import { sitesResponseSchema } from '@garita/shared';
+import { siteInputSchema, sitesResponseSchema } from '@garita/shared';
 import { apiGet, apiPost, apiPut, apiPatch } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
-import { siteInputSchema } from '@garita/shared';
 import { SiteLocation } from '../mapa/site-location';
 import { z } from 'zod';
 import { CheckpointsPanel } from '../puntos/checkpoints-panel';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export function SitesPage() {
   const { user } = useAuth();
@@ -30,6 +38,17 @@ export function SitesPage() {
     observations: '',
   });
   const [supervisorIds, setSupervisorIds] = useState<Record<string, string[]>>({});
+  const [editing, setEditing] = useState<z.infer<typeof sitesResponseSchema>[number] | null>(null);
+  const [editForm, setEditForm] = useState({
+    clientId: '',
+    name: '',
+    address: '',
+    latitude: 0,
+    longitude: 0,
+    accessInstructions: '',
+    observations: '',
+  });
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const supervisors = useQuery({
     queryKey: ['supervisores'],
     queryFn: () =>
@@ -38,23 +57,6 @@ export function SitesPage() {
         z.array(z.looseObject({ id: z.string(), firstName: z.string(), lastName: z.string() })),
       ),
     enabled: user?.role === 'admin',
-  });
-  const assignments = useQuery({
-    queryKey: ['asignaciones-supervisores', sites.data?.map((site) => site.id)],
-    enabled: user?.role === 'admin' && sites.data !== undefined,
-    queryFn: async () => {
-      const currentSites = sites.data ?? [];
-      const entries = await Promise.all(
-        currentSites.map(async (site) => {
-          const assigned = await apiGet(
-            `/predios/${site.id}/supervisores`,
-            z.array(z.looseObject({ user: z.looseObject({ id: z.string() }) })),
-          );
-          return [site.id, assigned.map(({ user: assignedUser }) => assignedUser.id)] as const;
-        }),
-      );
-      return Object.fromEntries(entries);
-    },
   });
   const response = z.looseObject({ id: z.string() });
   const save = async (event: SyntheticEvent<HTMLFormElement>) => {
@@ -169,8 +171,9 @@ export function SitesPage() {
                     <select
                       multiple
                       aria-label={`Supervisores de ${site.name}`}
-                      value={supervisorIds[site.id] ?? assignments.data?.[site.id] ?? []}
-                      disabled={assignments.isPending}
+                      value={
+                        supervisorIds[site.id] ?? site.supervisors?.map(({ user }) => user.id) ?? []
+                      }
                       onChange={(event) => {
                         const selected = [...event.currentTarget.selectedOptions].map(
                           (option) => option.value,
@@ -195,29 +198,16 @@ export function SitesPage() {
                   <button
                     className="underline"
                     onClick={() => {
-                      const name = window.prompt('Nombre del predio', site.name);
-                      const address = window.prompt('Dirección', site.address);
-                      if (name === null || address === null) return;
-                      const input = siteInputSchema.safeParse({
+                      setEditing(site);
+                      setEditForm({
                         clientId: site.clientId,
-                        name,
-                        address,
+                        name: site.name,
+                        address: site.address,
                         latitude: Number(site.latitude),
                         longitude: Number(site.longitude),
-                        accessInstructions:
-                          typeof site.accessInstructions === 'string'
-                            ? site.accessInstructions
-                            : undefined,
-                        observations:
-                          typeof site.observations === 'string' ? site.observations : undefined,
+                        accessInstructions: site.accessInstructions ?? '',
+                        observations: site.observations ?? '',
                       });
-                      if (!input.success) return;
-                      void apiPatch(
-                        `/predios/${site.id}`,
-                        input.data,
-                        siteInputSchema,
-                        response,
-                      ).then(() => sites.refetch());
                     }}
                   >
                     Editar predio
@@ -225,13 +215,7 @@ export function SitesPage() {
                   <button
                     className="ml-4 underline"
                     onClick={() => {
-                      if (!window.confirm(`¿Dar de baja el predio ${site.name}?`)) return;
-                      void apiPost(
-                        `/predios/${site.id}/baja`,
-                        {},
-                        z.looseObject({}),
-                        response,
-                      ).then(() => sites.refetch());
+                      setDeleting({ id: site.id, name: site.name });
                     }}
                   >
                     Dar de baja
@@ -242,6 +226,128 @@ export function SitesPage() {
           ))}
         </ul>
       )}
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+      >
+        <DialogContent aria-describedby="site-edit-description">
+          <DialogTitle>Editar predio</DialogTitle>
+          <DialogDescription id="site-edit-description">
+            Actualizá los datos, la ubicación y las indicaciones del predio.
+          </DialogDescription>
+          <form
+            className="mt-4 grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const parsed = siteInputSchema.safeParse(editForm);
+              if (!parsed.success || !editing) return;
+              void apiPatch(`/predios/${editing.id}`, parsed.data, siteInputSchema, response).then(
+                () => {
+                  setEditing(null);
+                  return sites.refetch();
+                },
+              );
+            }}
+          >
+            <label>
+              Nombre
+              <input
+                required
+                value={editForm.name}
+                onChange={(event) => {
+                  setEditForm({ ...editForm, name: event.target.value });
+                }}
+                className="block w-full rounded border p-2"
+              />
+            </label>
+            <label>
+              Dirección
+              <input
+                required
+                value={editForm.address}
+                onChange={(event) => {
+                  setEditForm({ ...editForm, address: event.target.value });
+                }}
+                className="block w-full rounded border p-2"
+              />
+            </label>
+            <SiteLocation
+              latitude={editForm.latitude}
+              longitude={editForm.longitude}
+              onChange={(latitude, longitude) => {
+                setEditForm({ ...editForm, latitude, longitude });
+              }}
+            />
+            <label>
+              Instrucciones de acceso
+              <textarea
+                value={editForm.accessInstructions}
+                onChange={(event) => {
+                  setEditForm({ ...editForm, accessInstructions: event.target.value });
+                }}
+                className="block w-full rounded border p-2"
+              />
+            </label>
+            <label>
+              Observaciones
+              <textarea
+                value={editForm.observations}
+                onChange={(event) => {
+                  setEditForm({ ...editForm, observations: event.target.value });
+                }}
+                className="block w-full rounded border p-2"
+              />
+            </label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                className="rounded border px-4 py-2"
+                onClick={() => {
+                  setEditing(null);
+                }}
+              >
+                Cancelar
+              </button>
+              <button className="rounded bg-primary px-4 py-2 text-primary-foreground">
+                Guardar cambios
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogTitle>Dar de baja el predio</AlertDialogTitle>
+          <AlertDialogDescription>
+            Se dará de baja {deleting?.name} y se quitarán las asignaciones de supervisores. Esta
+            acción no se puede deshacer.
+          </AlertDialogDescription>
+          <div className="mt-5 flex justify-end gap-3">
+            <AlertDialogCancel className="rounded border px-4 py-2">Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="rounded bg-destructive px-4 py-2 text-white"
+              onClick={() => {
+                if (deleting)
+                  void apiPost(
+                    `/predios/${deleting.id}/baja`,
+                    {},
+                    z.looseObject({}),
+                    response,
+                  ).then(() => sites.refetch());
+              }}
+            >
+              Dar de baja predio
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

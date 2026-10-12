@@ -6,6 +6,8 @@ import { useAuth } from './auth-context';
 import { LoginPage } from './login-page';
 import { RecoveryPage } from './recovery-page';
 import { homePathForRole } from './role-routes';
+import { PersonalPage } from '../personal/personal-page';
+import { ActivationPage } from '../activacion/activation-page';
 import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
 import { SitesPage } from '../predios/sites-page';
 
@@ -28,11 +30,13 @@ function RoleLayout() {
   const sections: Record<UserRole, { path: string; title: string }[]> = {
     admin: [
       { path: '/resumen', title: 'Resumen' },
+      { path: '/personal', title: 'Personal' },
       { path: '/clientes', title: 'Clientes' },
       { path: '/predios', title: 'Predios' },
     ],
     supervisor: [
       { path: '/turnos', title: 'Turnos' },
+      { path: '/personal', title: 'Personal' },
       { path: '/predios', title: 'Predios' },
     ],
     client: [{ path: '/reportes', title: 'Reportes' }],
@@ -82,21 +86,14 @@ function HomePlaceholder({ title, role }: { title: string; role: string }) {
   );
 }
 
-/** Agregá Personal, Clientes o Predios como rutas hijas protegidas con los roles correspondientes. */
+/** Las rutas de cada sección quedan protegidas por rol dentro del layout autenticado. */
 export function AppRoutes() {
   const { user } = useAuth();
   return (
     <Routes>
       <Route path="/ingresar" element={<LoginPage />} />
       <Route path="/recuperar" element={<RecoveryPage />} />
-      <Route
-        path="/activar"
-        element={
-          <main className="p-6">
-            <h1>Activar cuenta</h1>
-          </main>
-        }
-      />
+      <Route path="/activar" element={<ActivationPage />} />
       <Route
         path="/"
         element={<Navigate to={user ? homePathForRole(user.role) : '/ingresar'} replace />}
@@ -108,6 +105,14 @@ export function AppRoutes() {
           </Protected>
         }
       >
+        <Route
+          path="/personal"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <PersonalPage />
+            </Protected>
+          }
+        />
         <Route
           path="/resumen"
           element={

@@ -34,7 +34,11 @@ export const siteListQuerySchema = z.object({
     recordStatusSchema.optional(),
   ),
 });
-export const supervisorAssignmentSchema = z.object({ supervisorIds: z.array(z.string().min(1)) });
+export const supervisorAssignmentSchema = z.object({
+  supervisorIds: z
+    .array(z.string().min(1))
+    .refine((ids) => new Set(ids).size === ids.length, 'No se permiten supervisores duplicados'),
+});
 export const clientsResponseSchema = z.array(
   z.looseObject({
     id: z.string(),
@@ -54,6 +58,10 @@ export const siteResponseSchema = z.looseObject({
   latitude: z.union([z.number(), z.string()]),
   longitude: z.union([z.number(), z.string()]),
   status: recordStatusSchema,
+  accessInstructions: z.string().nullable().optional(),
+  observations: z.string().nullable().optional(),
+  supervisors: z.array(z.looseObject({ user: z.looseObject({ id: z.string() }) })).optional(),
+  _count: z.looseObject({ sites: z.number() }).optional(),
 });
 export const sitesResponseSchema = z.array(siteResponseSchema);
 export const clientResponseSchema = z.looseObject({

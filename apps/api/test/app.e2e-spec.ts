@@ -576,6 +576,59 @@ describe('Aplicación (e2e)', () => {
     loggerError.mockRestore();
   });
 
+  it('permite al supervisor consultar personal, pero le deniega las mutaciones', async () => {
+    const auth = { Authorization: 'Bearer token-supervisor' };
+    await request(app.getHttpServer()).get('/api/v1/usuarios').set(auth).expect(200);
+    await request(app.getHttpServer()).post('/api/v1/usuarios').set(auth).send({}).expect(403);
+    await request(app.getHttpServer()).patch('/api/v1/usuarios/id').set(auth).send({}).expect(403);
+    await request(app.getHttpServer()).post('/api/v1/usuarios/id/desactivar').set(auth).expect(403);
+    await request(app.getHttpServer()).post('/api/v1/usuarios/id/reactivar').set(auth).expect(403);
+    await request(app.getHttpServer())
+      .post('/api/v1/usuarios/id/reenviar-invitacion')
+      .set(auth)
+      .expect(403);
+  });
+
+  it.each(['seed-norte-admin', 'seed-norte-client'])(
+    'oculta usuarios que no son personal en todos los endpoints de gestión (%s)',
+    async (firebaseUid) => {
+      const user = await app.get(PrismaService).systemPrisma.user.findUniqueOrThrow({
+        where: { firebaseUid },
+        select: { id: true },
+      });
+      const base = `/api/v1/usuarios/${user.id}`;
+      const auth = { Authorization: 'Bearer token-admin' };
+
+      await request(app.getHttpServer()).get(base).set(auth).expect(404);
+      await request(app.getHttpServer())
+        .patch(base)
+        .set(auth)
+        .send({ firstName: 'Nombre actualizado' })
+        .expect(404);
+      await request(app.getHttpServer()).post(`${base}/desactivar`).set(auth).expect(404);
+      await request(app.getHttpServer()).post(`${base}/reactivar`).set(auth).expect(404);
+      await request(app.getHttpServer()).post(`${base}/reenviar-invitacion`).set(auth).expect(404);
+    },
+  );
+
+  it.each(['token-guard', 'token-client'])('deniega el listado de personal a %s', async (token) => {
+    await request(app.getHttpServer())
+      .get('/api/v1/usuarios')
+      .set({ Authorization: `Bearer ${token}` })
+      .expect(403);
+  });
+
+  it('oculta en detalle personal que pertenece a otra empresa', async () => {
+    const south = await app.get(PrismaService).systemPrisma.user.findFirstOrThrow({
+      where: { companyId: 'sur-company', role: 'guard' },
+      select: { id: true },
+    });
+    await request(app.getHttpServer())
+      .get(`/api/v1/usuarios/${south.id}`)
+      .set({ Authorization: 'Bearer token-admin' })
+      .expect(404);
+  });
+
   it('oculta usuarios de otra empresa con el mismo 404 que un id inexistente', async () => {
     const prisma = app.select(TestOnlyModule).get(PrismaService);
     const foreign = await prisma.systemPrisma.user.findFirstOrThrow({
@@ -704,6 +757,38 @@ describe('Aplicación (e2e)', () => {
       .set('Authorization', 'Bearer token-admin')
       .send({ supervisorIds: [northSupervisorId] })
       .expect(200);
+  });
+
+  it('no expone el total de predios no asignados en el conteo del cliente al supervisor', async () => {
+    const list = await request(app.getHttpServer())
+      .get('/api/v1/clientes')
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const clients = z
+      .array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) }))
+      .parse(list.body);
+    const northClient = await app.get(PrismaService).systemPrisma.client.findUniqueOrThrow({
+      where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
+    });
+    const client = clients.find(({ id }) => id === northClient.id);
+    expect(client?._count.sites).toBe(1);
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/clientes/${northClient.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const detailBody = z
+      .object({ _count: z.object({ sites: z.number() }), sites: z.array(z.unknown()) })
+      .parse(detail.body);
+    expect(detailBody._count.sites).toBe(1);
+    expect(detailBody.sites).toHaveLength(1);
+  });
+
+  it('rechaza IDs de supervisores duplicados con 400 sin producir error de base de datos', async () => {
+    await request(app.getHttpServer())
+      .put(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({ supervisorIds: [northSupervisorId, northSupervisorId] })
+      .expect(400);
   });
 
   it('filtra también los predios anidados cuando un servicio consulta clientes', async () => {
