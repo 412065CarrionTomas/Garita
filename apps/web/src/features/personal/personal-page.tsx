@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createUserRequestSchema,
@@ -11,22 +11,94 @@ import {
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 
-const pageSchema = usersPageSchema;
+type Person = ReturnType<typeof personnelUserSchema.parse>;
+
 export function PersonalPage() {
   const { user } = useAuth();
   const [role, setRole] = useState('');
   const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Person | null>(null);
+  const [deactivating, setDeactivating] = useState<Person | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
+  const editDialog = useRef<HTMLDialogElement>(null);
+  const deactivateDialog = useRef<HTMLDialogElement>(null);
   const queryClient = useQueryClient();
-  const params = new URLSearchParams({ pagina: '1' });
+  const params = new URLSearchParams({ pagina: String(page) });
   if (role) params.set('rol', role);
   if (status) params.set('estado', status);
   const result = useQuery({
-    queryKey: ['personal', role, status],
-    queryFn: () => apiGet(`/usuarios?${params.toString()}`, pageSchema),
+    queryKey: ['personal', role, status, page],
+    queryFn: () => apiGet(`/usuarios?${params.toString()}`, usersPageSchema),
   });
+  useEffect(() => {
+    const dialog = editDialog.current;
+    if (editing && dialog && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    }
+    if (!editing && dialog?.open) {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    }
+  }, [editing]);
+  useEffect(() => {
+    const dialog = deactivateDialog.current;
+    if (deactivating && dialog && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    }
+    if (!deactivating && dialog?.open) {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    }
+  }, [deactivating]);
+  const refresh = async () => queryClient.invalidateQueries({ queryKey: ['personal'] });
+  const runAction = async (path: string, failure: string) => {
+    try {
+      await apiPost(path, {}, emptyRequestSchema, emptyResponseSchema);
+      setFormError('');
+      await refresh();
+    } catch {
+      setFormError(failure);
+    }
+  };
+  const saveEdit = async (event: React.SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editing) return;
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const parsed = updateUserRequestSchema.safeParse(values);
+    if (!parsed.success) {
+      setErrors(
+        Object.fromEntries(
+          parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message]),
+        ),
+      );
+      return;
+    }
+    try {
+      await apiPatch(
+        `/usuarios/${editing.id}`,
+        parsed.data,
+        updateUserRequestSchema,
+        personnelUserSchema,
+      );
+      setEditing(null);
+      setErrors({});
+      setFormError('');
+      await refresh();
+    } catch {
+      setFormError('No se pudo editar el registro.');
+    }
+  };
+  const renderErrors = () =>
+    Object.entries(errors).map(([field, message]) => (
+      <span id={`${field}-error`} className="text-sm text-red-700" key={field}>
+        {message}
+      </span>
+    ));
   return (
     <section className="space-y-4">
       <h1 className="text-3xl font-semibold">Personal</h1>
@@ -40,6 +112,7 @@ export function PersonalPage() {
             value={role}
             onChange={(event) => {
               setRole(event.target.value);
+              setPage(1);
             }}
           >
             <option value="">Todos</option>
@@ -55,6 +128,7 @@ export function PersonalPage() {
             value={status}
             onChange={(event) => {
               setStatus(event.target.value);
+              setPage(1);
             }}
           >
             <option value="">Todos</option>
@@ -69,6 +143,7 @@ export function PersonalPage() {
           type="button"
           onClick={() => {
             setCreating(!creating);
+            setFormError('');
           }}
           className="rounded-md border px-3 py-2"
         >
@@ -77,11 +152,13 @@ export function PersonalPage() {
       )}
       {creating && (
         <form
+          aria-label="Agregar personal"
           className="grid gap-3 rounded border p-4 sm:grid-cols-2"
           onSubmit={(event) => {
             event.preventDefault();
-            const values = Object.fromEntries(new FormData(event.currentTarget));
-            const parsed = createUserRequestSchema.safeParse(values);
+            const parsed = createUserRequestSchema.safeParse(
+              Object.fromEntries(new FormData(event.currentTarget)),
+            );
             if (!parsed.success) {
               setErrors(
                 Object.fromEntries(
@@ -94,7 +171,7 @@ export function PersonalPage() {
             setFormError('');
             void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
               .then(async () => {
-                await queryClient.invalidateQueries({ queryKey: ['personal'] });
+                await refresh();
                 setCreating(false);
               })
               .catch((error: unknown) => {
@@ -149,135 +226,209 @@ export function PersonalPage() {
       ) : result.isError ? (
         <p role="alert">No se pudo cargar el personal.</p>
       ) : (
-        <ul className="divide-y">
-          {result.data.items.map((person) => (
-            <li key={person.id} className="py-3">
-              <strong>
-                {person.firstName} {person.lastName}
-              </strong>{' '}
-              · {person.role === 'guard' ? 'Vigilador' : 'Supervisor'} ·{' '}
-              {person.status === 'invitation_pending'
-                ? person.invitationStatus === 'failed'
-                  ? 'Envío fallido'
-                  : 'Invitación pendiente'
-                : person.status === 'active'
-                  ? 'Activo'
-                  : 'Desactivado'}
-              <p>{person.email}</p>
-              {user?.role === 'admin' && (
-                <div className="mt-2 flex gap-3">
-                  <button
-                    type="button"
-                    className="underline"
-                    onClick={() => {
-                      const values = {
-                        firstName: person.firstName,
-                        lastName: person.lastName,
-                        phone: person.phone ?? '',
-                        employeeNumber: person.employeeNumber ?? '',
-                      };
-                      const firstName = window.prompt('Nombre', values.firstName);
-                      if (firstName === null) return;
-                      const lastName = window.prompt('Apellido', values.lastName);
-                      if (lastName === null) return;
-                      const phone = window.prompt('Teléfono celular', values.phone);
-                      if (phone === null) return;
-                      const employeeNumber = window.prompt('Legajo', values.employeeNumber);
-                      if (employeeNumber === null) return;
-                      const input = { firstName, lastName, phone, employeeNumber };
-                      const parsed = updateUserRequestSchema.safeParse(input);
-                      if (!parsed.success) {
-                        setFormError('Revisá el nombre, apellido, teléfono y legajo.');
-                        return;
-                      }
-                      void apiPatch(
-                        `/usuarios/${person.id}`,
-                        parsed.data,
-                        updateUserRequestSchema,
-                        personnelUserSchema,
-                      )
-                        .then(async () => {
-                          await queryClient.invalidateQueries({ queryKey: ['personal'] });
-                        })
-                        .catch(() => {
-                          setFormError('No se pudo editar el registro.');
-                        });
-                    }}
-                  >
-                    Editar
-                  </button>
-                  {person.status === 'deactivated' ? (
+        <>
+          <ul className="divide-y">
+            {result.data.items.map((person) => (
+              <li key={person.id} className="py-3">
+                <strong>
+                  {person.firstName} {person.lastName}
+                </strong>{' '}
+                · {person.role === 'guard' ? 'Vigilador' : 'Supervisor'} ·{' '}
+                {person.status === 'invitation_pending'
+                  ? person.invitationStatus === 'failed'
+                    ? 'Envío fallido'
+                    : 'Invitación pendiente'
+                  : person.status === 'active'
+                    ? 'Activo'
+                    : 'Desactivado'}
+                <p>{person.email}</p>
+                {user?.role === 'admin' && (
+                  <div className="mt-2 flex gap-3">
                     <button
                       type="button"
                       className="underline"
                       onClick={() => {
-                        void apiPost(
-                          `/usuarios/${person.id}/reactivar`,
-                          {},
-                          emptyRequestSchema,
-                          emptyResponseSchema,
-                        )
-                          .then(async () => {
-                            await queryClient.invalidateQueries({ queryKey: ['personal'] });
-                          })
-                          .catch(() => {
-                            setFormError('No se pudo reactivar el usuario.');
-                          });
+                        setEditing(person);
+                        setErrors({});
+                        setFormError('');
                       }}
                     >
-                      Reactivar
+                      Editar
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => {
-                        if (window.confirm(`¿Desactivar a ${person.firstName} ${person.lastName}?`))
-                          void apiPost(
-                            `/usuarios/${person.id}/desactivar`,
-                            {},
-                            emptyRequestSchema,
-                            emptyResponseSchema,
+                    {person.status === 'deactivated' ? (
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() =>
+                          void runAction(
+                            `/usuarios/${person.id}/reactivar`,
+                            'No se pudo reactivar el usuario.',
                           )
-                            .then(async () => {
-                              await queryClient.invalidateQueries({ queryKey: ['personal'] });
-                            })
-                            .catch(() => {
-                              setFormError('No se pudo desactivar el usuario.');
-                            });
-                      }}
-                    >
-                      Desactivar
-                    </button>
-                  )}
-                  {person.status === 'invitation_pending' && (
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => {
-                        void apiPost(
-                          `/usuarios/${person.id}/reenviar-invitacion`,
-                          {},
-                          emptyRequestSchema,
-                          personnelUserSchema,
-                        )
-                          .then(async () => {
-                            await queryClient.invalidateQueries({ queryKey: ['personal'] });
-                          })
-                          .catch(() => {
-                            setFormError('No se pudo reenviar la invitación.');
-                          });
-                      }}
-                    >
-                      Reenviar invitación
-                    </button>
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+                        }
+                      >
+                        Reactivar
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => {
+                          setDeactivating(person);
+                          setFormError('');
+                        }}
+                      >
+                        Desactivar
+                      </button>
+                    )}
+                    {person.status === 'invitation_pending' && (
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() =>
+                          void runAction(
+                            `/usuarios/${person.id}/reenviar-invitacion`,
+                            'No se pudo reenviar la invitación.',
+                          )
+                        }
+                      >
+                        Reenviar invitación
+                      </button>
+                    )}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          <nav aria-label="Paginación" className="flex items-center gap-3">
+            <button
+              type="button"
+              className="rounded border px-3 py-2"
+              disabled={page <= 1}
+              onClick={() => {
+                setPage((value) => value - 1);
+              }}
+            >
+              Anterior
+            </button>
+            <span>
+              Página {result.data.pagina} de {Math.max(1, result.data.paginas)}
+            </span>
+            <button
+              type="button"
+              className="rounded border px-3 py-2"
+              disabled={page >= result.data.paginas}
+              onClick={() => {
+                setPage((value) => value + 1);
+              }}
+            >
+              Siguiente
+            </button>
+          </nav>
+        </>
       )}
+      {formError && !creating && !editing && <p role="alert">{formError}</p>}
+      {editing && (
+        <dialog
+          ref={editDialog}
+          aria-labelledby="edit-title"
+          aria-describedby="edit-description"
+          onCancel={(event) => {
+            event.preventDefault();
+            setEditing(null);
+          }}
+          className="fixed inset-0 m-auto w-[min(36rem,calc(100%-2rem))] rounded-lg border p-6 shadow-xl backdrop:bg-black/50"
+        >
+          <form aria-label="Editar personal" onSubmit={(event) => void saveEdit(event)}>
+            <h2 id="edit-title" className="text-xl font-semibold">
+              Editar personal
+            </h2>
+            <p id="edit-description">Actualizá nombre, apellido, teléfono o legajo.</p>
+            {(['firstName', 'lastName', 'phone', 'employeeNumber'] as const).map((field) => (
+              <label key={field} className="mt-3 grid gap-1">
+                {
+                  {
+                    firstName: 'Nombre',
+                    lastName: 'Apellido',
+                    phone: 'Teléfono celular',
+                    employeeNumber: 'Legajo',
+                  }[field]
+                }
+                <input
+                  name={field}
+                  defaultValue={editing[field] ?? ''}
+                  aria-invalid={Boolean(errors[field])}
+                  aria-describedby={errors[field] ? `${field}-error` : undefined}
+                  className="rounded border p-2"
+                />
+                {errors[field] && (
+                  <span id={`${field}-error`} className="text-sm text-red-700">
+                    {errors[field]}
+                  </span>
+                )}
+              </label>
+            ))}
+            {formError && <p role="alert">{formError}</p>}
+            <div className="mt-4 flex gap-3">
+              <button className="rounded border px-3 py-2">Guardar cambios</button>
+              <button
+                type="button"
+                className="rounded border px-3 py-2"
+                onClick={() => {
+                  setEditing(null);
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+        </dialog>
+      )}
+      {deactivating && (
+        <dialog
+          ref={deactivateDialog}
+          aria-labelledby="deactivate-title"
+          aria-describedby="deactivate-description"
+          onCancel={(event) => {
+            event.preventDefault();
+            setDeactivating(null);
+          }}
+          className="fixed inset-0 m-auto w-[min(32rem,calc(100%-2rem))] rounded-lg border p-6 shadow-xl backdrop:bg-black/50"
+        >
+          <h2 id="deactivate-title" className="text-xl font-semibold">
+            Desactivar usuario
+          </h2>
+          <p id="deactivate-description">
+            ¿Querés desactivar a {deactivating.firstName} {deactivating.lastName}? Ya no podrá
+            acceder a Garita.
+          </p>
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              className="rounded border px-3 py-2"
+              onClick={() => {
+                const person = deactivating;
+                setDeactivating(null);
+                void runAction(
+                  `/usuarios/${person.id}/desactivar`,
+                  'No se pudo desactivar el usuario.',
+                );
+              }}
+            >
+              Confirmar desactivación
+            </button>
+            <button
+              type="button"
+              className="rounded border px-3 py-2"
+              onClick={() => {
+                setDeactivating(null);
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </dialog>
+      )}
+      {renderErrors()}
     </section>
   );
 }
