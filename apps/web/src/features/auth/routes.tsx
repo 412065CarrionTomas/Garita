@@ -6,6 +6,8 @@ import { useAuth } from './auth-context';
 import { LoginPage } from './login-page';
 import { RecoveryPage } from './recovery-page';
 import { homePathForRole } from './role-routes';
+import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
+import { SitesPage } from '../predios/sites-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -24,8 +26,15 @@ function RoleLayout() {
   const { user, logout } = useAuth();
   if (!user) return null;
   const sections: Record<UserRole, { path: string; title: string }[]> = {
-    admin: [{ path: '/resumen', title: 'Resumen' }],
-    supervisor: [{ path: '/turnos', title: 'Turnos' }],
+    admin: [
+      { path: '/resumen', title: 'Resumen' },
+      { path: '/clientes', title: 'Clientes' },
+      { path: '/predios', title: 'Predios' },
+    ],
+    supervisor: [
+      { path: '/turnos', title: 'Turnos' },
+      { path: '/predios', title: 'Predios' },
+    ],
     client: [{ path: '/reportes', title: 'Reportes' }],
     guard: [{ path: '/mis-turnos', title: 'Mis turnos' }],
   };
@@ -120,6 +129,30 @@ export function AppRoutes() {
           element={
             <Protected roles={['client']}>
               <HomePlaceholder role="Cliente" title="Reportes de mi predio" />
+            </Protected>
+          }
+        />
+        <Route
+          path="/clientes"
+          element={
+            <Protected roles={['admin']}>
+              <ClientsPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/clientes/:id"
+          element={
+            <Protected roles={['admin']}>
+              <ClientDetailPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/predios"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <SitesPage />
             </Protected>
           }
         />

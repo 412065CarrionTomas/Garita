@@ -5,4 +5,5 @@ export const env = {
   VITE_FIREBASE_AUTH_DOMAIN: 'garita.test',
   VITE_FIREBASE_PROJECT_ID: 'garita-test',
   VITE_FIREBASE_APP_ID: 'test-app',
+  VITE_GOOGLE_MAPS_API_KEY: '',
 };
