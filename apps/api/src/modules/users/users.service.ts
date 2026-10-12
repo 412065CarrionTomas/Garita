@@ -16,6 +16,7 @@ import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env';
 import { ResendInvitationMailer } from './email.service';
+import { purgeExpiredRedeemAttempts } from './redeem-attempts';
 
 @Injectable()
 export class UsersService {
@@ -56,7 +57,7 @@ export class UsersService {
   }
 
   async detail(id: string) {
-    await this.resources.findOwnedOrThrow('User', id);
+    await this.getUser(id);
     const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({
       where: { id },
       include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
@@ -98,7 +99,7 @@ export class UsersService {
   }
 
   async update(id: string, input: UpdateUserRequest, adminId: string) {
-    await this.resources.findOwnedOrThrow('User', id);
+    await this.getUser(id);
     const result = await this.prisma.tenantPrisma.user.update({ where: { id }, data: input });
     this.logger.log({ event: 'personnel_updated', adminId, userId: result.id });
     return this.detail(id);
@@ -141,6 +142,7 @@ export class UsersService {
   }
 
   async redeem(token: string, ip: string) {
+    purgeExpiredRedeemAttempts(redeemAttempts);
     const key = `${ip}:${Math.floor(Date.now() / 60000)}`;
     const attempts = (redeemAttempts.get(key) ?? 0) + 1;
     redeemAttempts.set(key, attempts);
@@ -209,7 +211,10 @@ export class UsersService {
 
   private async getUser(id: string) {
     await this.resources.findOwnedOrThrow('User', id);
-    return this.prisma.tenantPrisma.user.findUniqueOrThrow({ where: { id } });
+    const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({ where: { id } });
+    if (user.role !== 'supervisor' && user.role !== 'guard')
+      throw new NotFoundException('Recurso no encontrado');
+    return user;
   }
 
   private present(user: {

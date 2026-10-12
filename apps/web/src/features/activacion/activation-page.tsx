@@ -10,6 +10,7 @@ export function ActivationPage() {
       ? 'Validando invitación…'
       : 'Falta el enlace de invitación. Pedile a tu administrador que te envíe uno nuevo.',
   );
+  const [passwordSetupUrl, setPasswordSetupUrl] = useState<string | null>(null);
   useEffect(() => {
     const token = params.get('token');
     if (!token) return;
@@ -35,10 +36,10 @@ export function ActivationPage() {
         const data = invitationRedeemResponseSchema.parse(await response.json());
         setMessage(
           data.role === 'guard'
-            ? 'Invitación válida. Para continuar, ingresá desde la app móvil.'
-            : 'Invitación válida. Te estamos llevando a definir tu contraseña…',
+            ? 'Una vez definida tu contraseña, ingresá desde la app móvil de Garita.'
+            : 'Invitación válida. Definí tu contraseña para ingresar.',
         );
-        if (data.role === 'supervisor') window.location.assign(data.passwordSetupUrl);
+        setPasswordSetupUrl(data.passwordSetupUrl);
       })
       .catch(() => {
         setMessage('No se pudo validar la invitación. Pedile ayuda a tu administrador.');
@@ -50,6 +51,11 @@ export function ActivationPage() {
       <p role="status" className="mt-4">
         {message}
       </p>
+      {passwordSetupUrl && (
+        <a className="mt-4 inline-block underline" href={passwordSetupUrl}>
+          Definir contraseña
+        </a>
+      )}
     </main>
   );
 }
