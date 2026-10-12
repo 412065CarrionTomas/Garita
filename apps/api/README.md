@@ -52,6 +52,10 @@ test/                # Tests de integración (*.e2e-spec.ts)
 
 ## Autenticación y permisos
 
+### Limitación conocida: límite de canje de invitaciones
+
+El endpoint de canje limita a 10 intentos por IP y minuto con un contador en memoria por proceso. El contador no se comparte entre réplicas ni sobrevive a reinicios; antes de escalar la API a varias réplicas, mover este límite a Redis para aplicar una cuota distribuida.
+
 - Inyectá `PrismaService` y usá `prisma.tenantPrisma`; un contexto `AsyncLocalStorage` por request entrega al cliente el usuario autenticado.
 - La extensión de Prisma aplica el tenant a lecturas, escrituras, conteos y agregaciones; no hace falta agregar `companyId` a cada consulta.
 - Prisma 7 permite filtros adicionales junto a la clave única; `findUnique` conserva la clave y agrega la restricción tenant en el mismo `where`.

@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  HttpException,
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import type { CreateUserRequest, UpdateUserRequest } from '@garita/shared';
@@ -145,10 +146,13 @@ export class UsersService {
     const attempts = (redeemAttempts.get(key) ?? 0) + 1;
     redeemAttempts.set(key, attempts);
     if (attempts > 10)
-      throw new GoneException({
-        message: 'Demasiados intentos. Probá más tarde.',
-        reason: 'rate_limited',
-      });
+      throw new HttpException(
+        {
+          message: 'Demasiados intentos. Probá más tarde.',
+          reason: 'rate_limited',
+        },
+        429,
+      );
     const invitation = await this.prisma.systemPrisma.invitation.findUnique({
       where: { tokenHash: hash(token) },
       include: { user: true },
