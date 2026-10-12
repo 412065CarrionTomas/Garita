@@ -61,6 +61,20 @@ class TestOnlyUserController {
     return this.prisma.tenantPrisma.company.findMany({ select: { id: true } });
   }
 
+  @Get('transaction')
+  @Roles(...USER_ROLES)
+  transaction() {
+    return this.prisma.tenantPrisma.$transaction((tx) =>
+      tx.user.findMany({ select: { id: true, companyId: true } }),
+    );
+  }
+
+  @Get('clients-with-sites')
+  @Roles(...USER_ROLES)
+  clientsWithSites() {
+    return this.prisma.tenantPrisma.client.findMany({ include: { sites: true } });
+  }
+
   @Post('create-spoofed')
   @Roles(...USER_ROLES)
   createSpoofed() {
@@ -141,6 +155,11 @@ describe('Aplicación (e2e)', () => {
   let app: INestApplication<App>;
   let northInvitationId: string;
   let southInvitationId: string;
+  let northAssignedSiteId: string;
+  let northUnassignedSiteId: string;
+  let southSiteId: string;
+  let northSupervisorId: string;
+  let northGuardId: string;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -154,6 +173,10 @@ describe('Aplicación (e2e)', () => {
             return Promise.resolve({ uid: 'seed-norte-deactivated' });
           if (token === 'token-pending') return Promise.resolve({ uid: 'seed-norte-pending' });
           if (token === 'token-guard') return Promise.resolve({ uid: 'seed-norte-guard' });
+          if (token === 'token-supervisor')
+            return Promise.resolve({ uid: 'seed-norte-supervisor' });
+          if (token === 'token-client') return Promise.resolve({ uid: 'seed-norte-client' });
+          if (token === 'token-south-admin') return Promise.resolve({ uid: 'seed-sur-admin' });
           return Promise.reject(new Error('Token inválido'));
         },
       })
@@ -164,6 +187,33 @@ describe('Aplicación (e2e)', () => {
     await app.init();
 
     const prisma = app.get(PrismaService).systemPrisma;
+    const northClient = await prisma.client.findUniqueOrThrow({
+      where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
+    });
+    const southClient = await prisma.client.findUniqueOrThrow({
+      where: { companyId_name: { companyId: 'sur-company', name: 'Cliente sur' } },
+    });
+    northAssignedSiteId = (
+      await prisma.site.findUniqueOrThrow({
+        where: { clientId_name: { clientId: northClient.id, name: 'Predio A' } },
+      })
+    ).id;
+    northUnassignedSiteId = (
+      await prisma.site.findUniqueOrThrow({
+        where: { clientId_name: { clientId: northClient.id, name: 'Predio B' } },
+      })
+    ).id;
+    southSiteId = (
+      await prisma.site.findUniqueOrThrow({
+        where: { clientId_name: { clientId: southClient.id, name: 'Predio A' } },
+      })
+    ).id;
+    northSupervisorId = (
+      await prisma.user.findUniqueOrThrow({ where: { firebaseUid: 'seed-norte-supervisor' } })
+    ).id;
+    northGuardId = (
+      await prisma.user.findUniqueOrThrow({ where: { firebaseUid: 'seed-norte-guard' } })
+    ).id;
     const pending = await prisma.user.findUniqueOrThrow({
       where: { firebaseUid: 'seed-norte-pending' },
     });
@@ -384,6 +434,311 @@ describe('Aplicación (e2e)', () => {
     expect(z.array(z.object({ id: z.string() })).parse(response.body)).toEqual([
       { id: 'norte-company' },
     ]);
+  });
+
+  it('aplica el filtro de empresa dentro de tenantPrisma.$transaction', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/test-only/users/transaction')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    const users = z.array(z.object({ id: z.string(), companyId: z.string() })).parse(response.body);
+    expect(users.length).toBeGreaterThan(0);
+    expect(users.every(({ companyId }) => companyId === 'norte-company')).toBe(true);
+  });
+
+  it('filtra los predios asignados en cada solicitud del supervisor y revoca el acceso inmediatamente', async () => {
+    const headers = { Authorization: 'Bearer token-supervisor' };
+    const visible = await request(app.getHttpServer())
+      .get('/api/v1/predios')
+      .set(headers)
+      .expect(200);
+    expect(
+      z
+        .array(z.object({ id: z.string() }))
+        .parse(visible.body)
+        .map(({ id }) => id),
+    ).toContain(northAssignedSiteId);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northUnassignedSiteId}`)
+      .set(headers)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${southSiteId}`)
+      .set(headers)
+      .expect(404);
+    await request(app.getHttpServer())
+      .put(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({ supervisorIds: [] })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}`)
+      .set(headers)
+      .expect(404);
+    await request(app.getHttpServer())
+      .put(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({ supervisorIds: [northSupervisorId] })
+      .expect(200);
+  });
+
+  it('filtra también los predios anidados cuando un servicio consulta clientes', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/test-only/users/clients-with-sites')
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const clients = z
+      .array(z.object({ sites: z.array(z.object({ id: z.string() })) }))
+      .parse(response.body);
+    expect(clients).toHaveLength(1);
+    expect(clients[0]?.sites.map(({ id }) => id)).toEqual([northAssignedSiteId]);
+  });
+
+  it('lista las opciones de supervisor para el admin y los predios asignados para el usuario', async () => {
+    const supervisors = await request(app.getHttpServer())
+      .get('/api/v1/predios/supervisores-disponibles')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    expect(
+      z
+        .array(z.object({ id: z.string(), status: z.string() }))
+        .parse(supervisors.body)
+        .some(({ id }) => id === northSupervisorId),
+    ).toBe(true);
+    await request(app.getHttpServer())
+      .get('/api/v1/predios/supervisores-disponibles')
+      .set('Authorization', 'Bearer token-guard')
+      .expect(403);
+    const assignedSites = await request(app.getHttpServer())
+      .get(`/api/v1/usuarios/${northSupervisorId}/predios`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(
+      z
+        .array(z.object({ id: z.string(), hasOtherActiveSupervisor: z.boolean() }))
+        .parse(assignedSites.body),
+    ).toEqual([
+      expect.objectContaining({ id: northAssignedSiteId, hasOtherActiveSupervisor: false }),
+    ]);
+  });
+
+  it('rechaza coordenadas inválidas, roles no permitidos y usuarios que no sean supervisores', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const northClient = await prisma.client.findUniqueOrThrow({
+      where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/predios')
+      .set('Authorization', 'Bearer token-admin')
+      .send({
+        clientId: northClient.id,
+        name: 'Fuera de rango',
+        address: 'Calle 1',
+        latitude: 91,
+        longitude: 0,
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/v1/clientes')
+      .set('Authorization', 'Bearer token-guard')
+      .send({ name: 'No', contactName: 'No', phone: '123', email: 'n@example.invalid' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/api/v1/clientes')
+      .set('Authorization', 'Bearer token-client')
+      .send({ name: 'No', contactName: 'No', phone: '123', email: 'n@example.invalid' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .put(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({ supervisorIds: [northGuardId] })
+      .expect(404);
+  });
+
+  it('no permite al admin de otra empresa consultar un cliente ajeno', async () => {
+    const southClient = await app.get(PrismaService).systemPrisma.client.findUniqueOrThrow({
+      where: { companyId_name: { companyId: 'sur-company', name: 'Cliente sur' } },
+    });
+    await request(app.getHttpServer())
+      .get(`/api/v1/clientes/${southClient.id}`)
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}`)
+      .set('Authorization', 'Bearer token-south-admin')
+      .expect(404);
+  });
+
+  it.each(['supervisor', 'guard', 'client'] as const)(
+    'deniega al rol %s todas las operaciones de escritura de clientes y predios',
+    async (role) => {
+      const token = `token-${role}`;
+      const auth = { Authorization: `Bearer ${token}` };
+      const prisma = app.get(PrismaService).systemPrisma;
+      const client = await prisma.client.findUniqueOrThrow({
+        where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
+      });
+      const body = {
+        name: 'Sin permiso',
+        contactName: 'Nadie',
+        phone: '12345678',
+        email: 'n@example.invalid',
+      };
+      await request(app.getHttpServer()).post('/api/v1/clientes').set(auth).send(body).expect(403);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/clientes/${client.id}`)
+        .set(auth)
+        .send(body)
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(`/api/v1/clientes/${client.id}/baja`)
+        .set(auth)
+        .expect(403);
+      const site = {
+        clientId: client.id,
+        name: 'Sin permiso',
+        address: 'Calle 1',
+        latitude: -34,
+        longitude: -58,
+      };
+      await request(app.getHttpServer()).post('/api/v1/predios').set(auth).send(site).expect(403);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/predios/${northAssignedSiteId}`)
+        .set(auth)
+        .send(site)
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(`/api/v1/predios/${northAssignedSiteId}/baja`)
+        .set(auth)
+        .expect(403);
+      await request(app.getHttpServer())
+        .get(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+        .set(auth)
+        .expect(403);
+      await request(app.getHttpServer())
+        .put(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+        .set(auth)
+        .send({ supervisorIds: [] })
+        .expect(403);
+    },
+  );
+
+  it.each(['guard', 'client'] as const)(
+    'deniega lecturas de clientes y predios al rol %s',
+    async (role) => {
+      const auth = { Authorization: `Bearer token-${role}` };
+      const prisma = app.get(PrismaService).systemPrisma;
+      const client = await prisma.client.findUniqueOrThrow({
+        where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
+      });
+      await request(app.getHttpServer()).get('/api/v1/clientes').set(auth).expect(403);
+      await request(app.getHttpServer()).get(`/api/v1/clientes/${client.id}`).set(auth).expect(403);
+      await request(app.getHttpServer()).get('/api/v1/predios').set(auth).expect(403);
+      await request(app.getHttpServer())
+        .get(`/api/v1/predios/${northAssignedSiteId}`)
+        .set(auth)
+        .expect(403);
+      await request(app.getHttpServer())
+        .get(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+        .set(auth)
+        .expect(403);
+      await request(app.getHttpServer())
+        .get(`/api/v1/usuarios/${northSupervisorId}/predios`)
+        .set(auth)
+        .expect(403);
+    },
+  );
+
+  it('marca un predio sin supervisores activos cuando la asignación sigue a un usuario desactivado', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.user.update({ where: { id: northSupervisorId }, data: { status: 'deactivated' } });
+    try {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/predios')
+        .set('Authorization', 'Bearer token-admin')
+        .expect(200);
+      const sites = z
+        .array(z.object({ id: z.string(), hasActiveSupervisor: z.boolean() }))
+        .parse(response.body);
+      expect(sites.find(({ id }) => id === northAssignedSiteId)?.hasActiveSupervisor).toBe(false);
+      await expect(
+        prisma.siteSupervisor.count({
+          where: { siteId: northAssignedSiteId, userId: northSupervisorId },
+        }),
+      ).resolves.toBe(1);
+    } finally {
+      await prisma.user.update({ where: { id: northSupervisorId }, data: { status: 'active' } });
+    }
+  });
+
+  it('crea clientes con unicidad por empresa y da de baja en cascada los predios y sus asignaciones', async () => {
+    const name = `Cliente e2e ${randomUUID()}`;
+    const body = {
+      name,
+      contactName: 'Contacto E2E',
+      phone: '+541112345678',
+      email: 'e2e@example.invalid',
+    };
+    const createdClient = await request(app.getHttpServer())
+      .post('/api/v1/clientes')
+      .set('Authorization', 'Bearer token-admin')
+      .send(body)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/v1/clientes')
+      .set('Authorization', 'Bearer token-admin')
+      .send(body)
+      .expect(409);
+    await request(app.getHttpServer())
+      .post('/api/v1/clientes')
+      .set('Authorization', 'Bearer token-south-admin')
+      .send(body)
+      .expect(201);
+    const clientId = z.object({ id: z.string() }).parse(createdClient.body).id;
+    const siteBody = {
+      clientId,
+      name: 'Sede E2E',
+      address: 'Calle 1',
+      latitude: -34.6,
+      longitude: -58.4,
+    };
+    const createdSite = await request(app.getHttpServer())
+      .post('/api/v1/predios')
+      .set('Authorization', 'Bearer token-admin')
+      .send(siteBody)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/v1/predios')
+      .set('Authorization', 'Bearer token-admin')
+      .send(siteBody)
+      .expect(409);
+    const siteId = z.object({ id: z.string() }).parse(createdSite.body).id;
+    await request(app.getHttpServer())
+      .put(`/api/v1/predios/${siteId}/supervisores`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({ supervisorIds: [northSupervisorId] })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/v1/clientes/${clientId}/baja`)
+      .set('Authorization', 'Bearer token-admin')
+      .expect(201);
+    const prisma = app.get(PrismaService).systemPrisma;
+    await expect(prisma.site.findUniqueOrThrow({ where: { id: siteId } })).resolves.toMatchObject({
+      status: 'inactive',
+    });
+    await expect(prisma.siteSupervisor.count({ where: { siteId } })).resolves.toBe(0);
+    await request(app.getHttpServer())
+      .get('/api/v1/predios?estado=active')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200)
+      .then(({ body: rows }) => {
+        expect(
+          z
+            .array(z.object({ id: z.string() }))
+            .parse(rows)
+            .map(({ id }) => id),
+        ).not.toContain(siteId);
+      });
   });
 
   it('asigna la empresa del contexto al crear aunque data incluya otra empresa', async () => {
