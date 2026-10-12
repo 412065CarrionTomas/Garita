@@ -54,6 +54,7 @@ test/                # Tests de integración (*.e2e-spec.ts)
 
 - Inyectá `PrismaService` y usá `prisma.tenantPrisma`; un contexto `AsyncLocalStorage` por request entrega al cliente el usuario autenticado.
 - La extensión de Prisma aplica el tenant a lecturas, escrituras, conteos y agregaciones; no hace falta agregar `companyId` a cada consulta.
+- Prisma 7 permite filtros adicionales junto a la clave única; `findUnique` conserva la clave y agrega la restricción tenant en el mismo `where`.
 - `User` filtra por `companyId`; `Invitation` filtra por su `user.companyId`; `Company` es la raíz tenant y filtra por su `id` igual al `companyId` autenticado.
 - Si falta el contexto tenant, el cliente filtrado falla cerrado. Todo modelo nuevo con `companyId` debe agregarse a `TENANT_MODELS` y `COMPANY_ID_MODELS`; una prueba contrasta el registro con `schema.prisma`.
 - Buscá recursos por ID con `TenantResourceService.findOwnedOrThrow(id)`: devuelve el registro propio; si pertenece a otra empresa registra `Logger.error` y responde el mismo 404 que un ID inexistente.
