@@ -12,13 +12,22 @@ export class SitesService {
     private readonly resources: TenantResourceService,
   ) {}
 
-  async listClients(status?: 'active' | 'inactive', page = 1) {
+  async listClients(status?: 'active' | 'inactive', page = 1, user?: AuthenticatedUser) {
     return this.prisma.tenantPrisma.client.findMany({
       where: status ? { status } : undefined,
       orderBy: { name: 'asc' },
       skip: (page - 1) * 50,
       take: 50,
-      include: { _count: { select: { sites: true } } },
+      include: {
+        _count: {
+          select: {
+            sites:
+              user?.role === 'supervisor'
+                ? { where: { supervisors: { some: { userId: user.userId } } } }
+                : true,
+          },
+        },
+      },
     });
   }
 
@@ -68,7 +77,9 @@ export class SitesService {
       },
     });
     if (!client) throw new NotFoundException('Recurso no encontrado');
-    return client;
+    return user.role === 'supervisor'
+      ? { ...client, _count: { sites: client.sites.length } }
+      : client;
   }
 
   async listSites(clientId?: string, status?: 'active' | 'inactive') {
@@ -153,6 +164,7 @@ export class SitesService {
   }
 
   async replaceSupervisors(siteId: string, userIds: string[]) {
+    const uniqueUserIds = [...new Set(userIds)];
     await this.resources.findOwnedOrThrow('Site', siteId);
     const site = await this.prisma.tenantPrisma.site.findFirst({
       where: { id: siteId, status: 'active' },
@@ -160,23 +172,23 @@ export class SitesService {
     if (!site) throw new NotFoundException('Recurso no encontrado');
     const users = await this.prisma.tenantPrisma.user.findMany({
       where: {
-        id: { in: userIds },
+        id: { in: uniqueUserIds },
         role: 'supervisor',
         status: { in: ['active', 'invitation_pending'] },
       },
       select: { id: true },
     });
-    if (users.length !== new Set(userIds).size)
+    if (users.length !== uniqueUserIds.length)
       throw new NotFoundException('Supervisor no encontrado');
     return this.prisma.tenantPrisma.$transaction(async (tx) => {
       await tx.siteSupervisor.deleteMany({ where: { siteId } });
-      if (userIds.length)
+      if (uniqueUserIds.length)
         await tx.siteSupervisor.createMany({
-          data: userIds.map((userId) => ({ companyId: site.companyId, siteId, userId })),
+          data: uniqueUserIds.map((userId) => ({ companyId: site.companyId, siteId, userId })),
         });
       this.logger.log({
         siteId,
-        supervisorIds: userIds,
+        supervisorIds: uniqueUserIds,
         reason: 'asignación de supervisores reemplazada',
       });
       return tx.siteSupervisor.findMany({ where: { siteId }, include: { user: true } });

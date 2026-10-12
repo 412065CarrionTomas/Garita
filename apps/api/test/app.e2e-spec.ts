@@ -482,6 +482,38 @@ describe('Aplicación (e2e)', () => {
       .expect(200);
   });
 
+  it('no expone el total de predios no asignados en el conteo del cliente al supervisor', async () => {
+    const list = await request(app.getHttpServer())
+      .get('/api/v1/clientes')
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const clients = z
+      .array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) }))
+      .parse(list.body);
+    const northClient = await app.get(PrismaService).systemPrisma.client.findUniqueOrThrow({
+      where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
+    });
+    const client = clients.find(({ id }) => id === northClient.id);
+    expect(client?._count.sites).toBe(1);
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/clientes/${northClient.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const detailBody = z
+      .object({ _count: z.object({ sites: z.number() }), sites: z.array(z.unknown()) })
+      .parse(detail.body);
+    expect(detailBody._count.sites).toBe(1);
+    expect(detailBody.sites).toHaveLength(1);
+  });
+
+  it('rechaza IDs de supervisores duplicados con 400 sin producir error de base de datos', async () => {
+    await request(app.getHttpServer())
+      .put(`/api/v1/predios/${northAssignedSiteId}/supervisores`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({ supervisorIds: [northSupervisorId, northSupervisorId] })
+      .expect(400);
+  });
+
   it('filtra también los predios anidados cuando un servicio consulta clientes', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/test-only/users/clients-with-sites')
