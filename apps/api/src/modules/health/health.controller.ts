@@ -4,6 +4,7 @@ import { HealthCheck, HealthCheckService, PrismaHealthIndicator } from '@nestjs/
 
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisHealthIndicator } from './redis.health';
+import { Public } from '../auth/auth.decorators';
 
 const CHECK_TIMEOUT_MS = 2_000;
 
@@ -18,12 +19,14 @@ export class HealthController {
 
   /** Indica que el proceso está vivo. No consulta dependencias externas. */
   @Get('live')
+  @Public()
   live(): LiveHealthResponse {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
   /** Indica si la API puede atender pedidos: PostgreSQL y Redis deben responder. */
   @Get('ready')
+  @Public()
   @HealthCheck()
   ready() {
     return this.health.check([

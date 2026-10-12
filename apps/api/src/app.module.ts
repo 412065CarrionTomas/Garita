@@ -6,6 +6,7 @@ import type { Env } from './config/env';
 import { validateEnv } from './config/env';
 import { buildQueueOptions } from './config/queue.config';
 import { HealthModule } from './modules/health/health.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { HealthModule } from './modules/health/health.module';
         buildQueueOptions(config.get('REDIS_URL', { infer: true })),
     }),
     HealthModule,
+    AuthModule,
   ],
 })
 export class AppModule {}

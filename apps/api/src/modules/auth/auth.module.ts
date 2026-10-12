@@ -1,0 +1,27 @@
+import { MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { PrismaModule } from '../prisma/prisma.module';
+import { AuthController } from './auth.controller';
+import { AuthGuard } from './auth.guard';
+import { AuthService } from './auth.service';
+import { FIREBASE_IDENTITY_PROVIDER } from './auth.types';
+import { FirebaseAdminIdentityProvider } from './firebase-identity.provider';
+import { RequestIdMiddleware } from './request-id.middleware';
+
+@Module({
+  imports: [PrismaModule],
+  controllers: [AuthController],
+  providers: [
+    AuthService,
+    AuthGuard,
+    FirebaseAdminIdentityProvider,
+    RequestIdMiddleware,
+    { provide: FIREBASE_IDENTITY_PROVIDER, useExisting: FirebaseAdminIdentityProvider },
+    { provide: APP_GUARD, useExisting: AuthGuard },
+  ],
+})
+export class AuthModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

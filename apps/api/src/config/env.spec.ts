@@ -3,6 +3,9 @@ import { validateEnv } from './env';
 const REQUIRED = {
   DATABASE_URL: 'postgresql://garita:garita@localhost:5432/garita',
   REDIS_URL: 'redis://localhost:6379',
+  FIREBASE_PROJECT_ID: 'garita-test',
+  FIREBASE_CLIENT_EMAIL: 'firebase-test@example.invalid',
+  FIREBASE_PRIVATE_KEY: 'fake-test-key',
 };
 
 describe('validateEnv', () => {
@@ -15,6 +18,9 @@ describe('validateEnv', () => {
       CORS_ORIGINS: ['http://localhost:5173'],
       DATABASE_URL: REQUIRED.DATABASE_URL,
       REDIS_URL: REQUIRED.REDIS_URL,
+      FIREBASE_PROJECT_ID: REQUIRED.FIREBASE_PROJECT_ID,
+      FIREBASE_CLIENT_EMAIL: REQUIRED.FIREBASE_CLIENT_EMAIL,
+      FIREBASE_PRIVATE_KEY: REQUIRED.FIREBASE_PRIVATE_KEY,
     });
   });
 
