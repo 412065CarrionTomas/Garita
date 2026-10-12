@@ -58,7 +58,7 @@ async function main(): Promise<void> {
       update: {},
     });
     for (const [index, name] of ['Predio A', 'Predio B'].entries()) {
-      await prisma.site.upsert({
+      const site = await prisma.site.upsert({
         where: { clientId_name: { clientId: client.id, name } },
         create: {
           companyId,
@@ -70,6 +70,26 @@ async function main(): Promise<void> {
         },
         update: {},
       });
+      if (prefix === 'norte') {
+        for (const [checkpointIndex, checkpointName] of [
+          'Portón principal',
+          'Depósito central',
+          'Acceso perimetral',
+        ].entries()) {
+          await prisma.checkpoint.upsert({
+            where: { siteId_name: { siteId: site.id, name: checkpointName } },
+            create: {
+              companyId,
+              siteId: site.id,
+              name: checkpointName,
+              latitude: -34.6 + index * 0.01 + checkpointIndex * 0.0001,
+              longitude: -58.4 + index * 0.01 + checkpointIndex * 0.0001,
+              isIndoor: checkpointIndex === 1,
+            },
+            update: {},
+          });
+        }
+      }
     }
   }
   const northClient = await prisma.client.findUniqueOrThrow({

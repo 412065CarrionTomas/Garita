@@ -6,6 +6,7 @@ import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { SiteLocation } from '../mapa/site-location';
 import { z } from 'zod';
+import { CheckpointsPanel } from '../puntos/checkpoints-panel';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -159,6 +160,7 @@ export function SitesPage() {
                   {user?.role === 'supervisor' ? 'Solo lectura' : 'Administración'}
                 </span>
               )}
+              <CheckpointsPanel site={site} />
               {user?.role === 'admin' && !site.hasActiveSupervisor && (
                 <p role="status">Sin supervisor activo</p>
               )}

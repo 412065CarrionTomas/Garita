@@ -9,11 +9,14 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   type INestApplication,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { PrismaModule } from '../src/modules/prisma/prisma.module';
+import { QrService } from '../src/modules/checkpoints/qr.service';
+import { CheckpointsModule } from '../src/modules/checkpoints/checkpoints.module';
 import { Roles } from '../src/modules/auth/auth.decorators';
 import { TenantResourceService } from '../src/modules/auth/tenant-resource.service';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
@@ -30,11 +33,18 @@ class TestOnlyUserController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantResources: TenantResourceService,
+    private readonly qr: QrService,
   ) {}
 
   @Get('unannotated')
   unannotated(): { ok: true } {
     return { ok: true };
+  }
+
+  @Get('qr/verify')
+  @Roles('admin')
+  verifyQr(@Query('payload') payload: string) {
+    return this.qr.verifyQrPayload(payload);
   }
 
   @Get('admin-only')
@@ -140,7 +150,7 @@ class TestOnlyUserController {
 }
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, CheckpointsModule],
   controllers: [TestOnlyUserController],
   providers: [TenantResourceService],
 })
@@ -149,6 +159,7 @@ class TestOnlyModule {}
 import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
+import { CHECKPOINT_USAGE_PORT } from '../src/modules/checkpoints/checkpoints-usage.port';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
@@ -160,6 +171,8 @@ describe('Aplicación (e2e)', () => {
   let southSiteId: string;
   let northSupervisorId: string;
   let northGuardId: string;
+  let activeRounds: { id: string; name: string }[] = [];
+  const createdCheckpointIds: string[] = [];
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -180,6 +193,8 @@ describe('Aplicación (e2e)', () => {
           return Promise.reject(new Error('Token inválido'));
         },
       })
+      .overrideProvider(CHECKPOINT_USAGE_PORT)
+      .useValue({ findActiveRoundsUsing: () => Promise.resolve(activeRounds) })
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -245,6 +260,10 @@ describe('Aplicación (e2e)', () => {
 
   afterAll(async () => {
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.checkpoint.deleteMany({ where: { id: { in: createdCheckpointIds } } });
+    await prisma.checkpoint.deleteMany({
+      where: { name: { startsWith: 'Punto PDF E2E ' } },
+    });
     await prisma.invitation.deleteMany({
       where: { tokenHash: { in: ['e2e-north-invitation', 'e2e-south-invitation'] } },
     });
@@ -255,6 +274,211 @@ describe('Aplicación (e2e)', () => {
     });
     await app.close();
   });
+
+  it('administra puntos, valida ubicaciones, firma QRs y genera stickers PDF', async () => {
+    const auth = { Authorization: 'Bearer token-admin' };
+    const otherSiteAuth = { Authorization: 'Bearer token-south-admin' };
+    const name = `Punto e2e ${randomUUID()}`;
+    const body = {
+      name,
+      latitude: -34.6,
+      longitude: -58.4,
+      stickerLocation: 'portón trasero',
+      isIndoor: true,
+    };
+    const created = await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(auth)
+      .send(body)
+      .expect(201);
+    const checkpoint = z
+      .object({ id: z.string(), toleranceRadiusMeters: z.number(), qrVersion: z.number() })
+      .parse(created.body);
+    createdCheckpointIds.push(checkpoint.id);
+    expect(checkpoint).toMatchObject({ toleranceRadiusMeters: 30, qrVersion: 1 });
+    const qrService = app.get(QrService);
+    const originalQr = qrService.createPayload(checkpoint.id, 1);
+    const verifyQrPath = (payload: string) =>
+      `/api/v1/test-only/users/qr/verify?payload=${encodeURIComponent(payload)}`;
+    const originalVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(originalQr))
+      .set(auth)
+      .expect(200);
+    expect(z.object({ valid: z.literal(true) }).safeParse(originalVerification.body).success).toBe(
+      true,
+    );
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(auth)
+      .send({ ...body, toleranceRadiusMeters: 5 })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(auth)
+      .send({ ...body, toleranceRadiusMeters: 250 })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(auth)
+      .send(body)
+      .expect(409);
+    const secondSiteName = name;
+    const secondSitePoint = await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northUnassignedSiteId}/puntos`)
+      .set(auth)
+      .send({ ...body, name: secondSiteName, confirmFarLocation: true })
+      .expect(201);
+    createdCheckpointIds.push(z.object({ id: z.string() }).parse(secondSitePoint.body).id);
+
+    const far = { ...body, name: `Lejano ${randomUUID()}`, latitude: 0, longitude: 0 };
+    const rejected = await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(auth)
+      .send(far)
+      .expect(409);
+    const rejectedBody: unknown = JSON.parse(JSON.stringify(rejected.body));
+    expect(z.object({ code: z.string() }).parse(rejectedBody).code).toBe(
+      'CHECKPOINT_LOCATION_REQUIRES_CONFIRMATION',
+    );
+    const confirmed = await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(auth)
+      .send({ ...far, confirmFarLocation: true })
+      .expect(201);
+    createdCheckpointIds.push(z.object({ id: z.string() }).parse(confirmed.body).id);
+
+    // El test altera temporalmente el fixture seed para verificar el predio dado de baja.
+    const systemPrisma = app.get(PrismaService).systemPrisma;
+    await systemPrisma.site.update({
+      where: { id: northAssignedSiteId },
+      data: { status: 'inactive' },
+    });
+    try {
+      await request(app.getHttpServer())
+        .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+        .set(auth)
+        .send({ ...body, name: `Predio dado de baja ${randomUUID()}` })
+        .expect(404);
+    } finally {
+      await systemPrisma.site.update({
+        where: { id: northAssignedSiteId },
+        data: { status: 'active' },
+      });
+    }
+
+    activeRounds = [{ id: 'round-1', name: 'Perimetral' }];
+    await request(app.getHttpServer())
+      .post(`/api/v1/puntos/${checkpoint.id}/baja`)
+      .set(auth)
+      .expect(409)
+      .expect(({ body: result }) => {
+        const parsedResult: unknown = JSON.parse(JSON.stringify(result));
+        expect(
+          z
+            .object({ rounds: z.array(z.object({ id: z.string(), name: z.string() })) })
+            .parse(parsedResult).rounds,
+        ).toContainEqual({ id: 'round-1', name: 'Perimetral' });
+      });
+    activeRounds = [];
+
+    const regenerated = await request(app.getHttpServer())
+      .post(`/api/v1/puntos/${checkpoint.id}/regenerar-qr`)
+      .set(auth)
+      .expect(201);
+    const regeneratedBody: unknown = JSON.parse(JSON.stringify(regenerated.body));
+    const regeneratedPayload = z
+      .object({ checkpoint: z.object({ qrVersion: z.number() }), qrPayload: z.string() })
+      .parse(regeneratedBody);
+    expect(regeneratedPayload.checkpoint.qrVersion).toBe(2);
+    expect(regeneratedPayload.qrPayload).toContain('.2.');
+    const outdatedVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(originalQr))
+      .set(auth)
+      .expect(200);
+    const outdatedBody: unknown = JSON.parse(JSON.stringify(outdatedVerification.body));
+    expect(
+      z.object({ valid: z.literal(false), reason: z.literal('outdated') }).safeParse(outdatedBody)
+        .success,
+    ).toBe(true);
+    const currentVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(regeneratedPayload.qrPayload))
+      .set(auth)
+      .expect(200);
+    expect(z.object({ valid: z.literal(true) }).safeParse(currentVerification.body).success).toBe(
+      true,
+    );
+    const alteredId = `${checkpoint.id.startsWith('a') ? 'b' : 'a'}${checkpoint.id.slice(1)}`;
+    const alteredQr = regeneratedPayload.qrPayload.replace(checkpoint.id, alteredId);
+    const alteredVerification = await request(app.getHttpServer())
+      .get(verifyQrPath(alteredQr))
+      .set(auth)
+      .expect(200);
+    const alteredBody: unknown = JSON.parse(JSON.stringify(alteredVerification.body));
+    expect(
+      z.object({ valid: z.literal(false), reason: z.literal('signature') }).safeParse(alteredBody)
+        .success,
+    ).toBe(true);
+
+    const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.checkpoint.createMany({
+      data: Array.from({ length: 50 }, (_, index) => ({
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Punto PDF E2E ${index}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      })),
+    });
+
+    const pdfStarted = Date.now();
+    const pdf = await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/stickers`)
+      .set(auth)
+      .expect(200)
+      .expect('Content-Type', /application\/pdf/);
+    const pdfBody: unknown = pdf.body;
+    expect(Buffer.isBuffer(pdfBody) ? pdfBody.byteLength : 0).toBeGreaterThan(1000);
+    expect(Date.now() - pdfStarted).toBeLessThan(5000);
+
+    const supervisor = { Authorization: 'Bearer token-supervisor' };
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(supervisor)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northUnassignedSiteId}/puntos`)
+      .set(supervisor)
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(supervisor)
+      .send(body)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set({ Authorization: 'Bearer token-client' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/puntos`)
+      .set(otherSiteAuth)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/stickers`)
+      .set({ Authorization: 'Bearer token-guard' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/api/v1/puntos/${checkpoint.id}/baja`)
+      .set(auth)
+      .expect(201);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/stickers?puntos=${checkpoint.id}`)
+      .set(auth)
+      .expect(404);
+  }, 30000);
 
   it('GET /api/v1/health/live responde con el contrato compartido', async () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);

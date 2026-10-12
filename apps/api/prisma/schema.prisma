@@ -100,6 +100,7 @@ model Site {
   company            Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   client             Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
   supervisors        SiteSupervisor[]
+  checkpoints        Checkpoint[]
 
   @@unique([clientId, name])
   @@index([companyId, status])
@@ -118,6 +119,27 @@ model SiteSupervisor {
   @@unique([siteId, userId])
   @@index([companyId])
   @@index([userId])
+}
+
+model Checkpoint {
+  id                    String       @id @default(cuid())
+  companyId             String
+  siteId                String
+  name                  String
+  latitude              Decimal      @db.Decimal(9, 6)
+  longitude             Decimal      @db.Decimal(10, 6)
+  toleranceRadiusMeters Int          @default(30)
+  stickerLocation       String?
+  isIndoor              Boolean      @default(false)
+  qrVersion             Int          @default(1)
+  status                RecordStatus @default(active)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  site                  Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@unique([siteId, name])
+  @@index([companyId, status])
+  @@index([siteId, status])
 }
 
 model Invitation {

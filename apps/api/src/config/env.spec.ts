@@ -6,6 +6,7 @@ const REQUIRED = {
   FIREBASE_PROJECT_ID: 'garita-test',
   FIREBASE_CLIENT_EMAIL: 'firebase-test@example.invalid',
   FIREBASE_PRIVATE_KEY: 'fake-test-key',
+  QR_SIGNING_SECRET: 'garita-production-like-signing-key-value',
 };
 
 describe('validateEnv', () => {
@@ -22,6 +23,7 @@ describe('validateEnv', () => {
       FIREBASE_PROJECT_ID: REQUIRED.FIREBASE_PROJECT_ID,
       FIREBASE_CLIENT_EMAIL: REQUIRED.FIREBASE_CLIENT_EMAIL,
       FIREBASE_PRIVATE_KEY: REQUIRED.FIREBASE_PRIVATE_KEY,
+      QR_SIGNING_SECRET: REQUIRED.QR_SIGNING_SECRET,
     });
   });
 
@@ -54,5 +56,13 @@ describe('validateEnv', () => {
   it('exige REDIS_URL con una URL de Redis', () => {
     expect(() => validateEnv({ DATABASE_URL: REQUIRED.DATABASE_URL })).toThrow('REDIS_URL');
     expect(() => validateEnv({ ...REQUIRED, REDIS_URL: 'http://localhost:6379' })).toThrow();
+  });
+
+  it('permite omitir la clave solo en test y exige al menos 32 caracteres en otros entornos', () => {
+    const testEnv = validateEnv({ ...REQUIRED, NODE_ENV: 'test', QR_SIGNING_SECRET: undefined });
+    expect(testEnv.QR_SIGNING_SECRET).toBe('garita-test-qr-signing-secret-fixed-value');
+    expect(() => validateEnv({ ...REQUIRED, QR_SIGNING_SECRET: 'short' })).toThrow();
+    const { QR_SIGNING_SECRET: _secret, ...withoutSecret } = REQUIRED;
+    expect(() => validateEnv(withoutSecret)).toThrow('QR_SIGNING_SECRET');
   });
 });

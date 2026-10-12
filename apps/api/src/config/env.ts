@@ -23,6 +23,7 @@ export const envSchema = z
     FIREBASE_PROJECT_ID: z.string().min(1).optional(),
     FIREBASE_CLIENT_EMAIL: z.email().optional(),
     FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
+    QR_SIGNING_SECRET: z.string().min(32).optional(),
   })
   .superRefine((env, context) => {
     if (env.NODE_ENV !== 'test') {
@@ -30,6 +31,7 @@ export const envSchema = z
         'FIREBASE_PROJECT_ID',
         'FIREBASE_CLIENT_EMAIL',
         'FIREBASE_PRIVATE_KEY',
+        'QR_SIGNING_SECRET',
       ] as const) {
         if (!env[key])
           context.addIssue({
@@ -39,7 +41,11 @@ export const envSchema = z
           });
       }
     }
-  });
+  })
+  .transform((env) => ({
+    ...env,
+    QR_SIGNING_SECRET: env.QR_SIGNING_SECRET ?? 'garita-test-qr-signing-secret-fixed-value',
+  }));
 
 export type Env = z.infer<typeof envSchema>;
 
