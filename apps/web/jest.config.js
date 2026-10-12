@@ -15,6 +15,7 @@ export default {
     ],
   },
   moduleNameMapper: {
+    '^react-router$': '<rootDir>/src/test/react-router.tsx',
     // import.meta.env solo existe en Vite: en los tests se usa una configuración fija.
     '^@/config/env$': '<rootDir>/src/test/env.ts',
     '^@/(.*)$': '<rootDir>/src/$1',
