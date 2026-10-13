@@ -11,6 +11,8 @@ import { UsersModule } from './modules/users/users.module';
 import { SitesModule } from './modules/sites/sites.module';
 import { CheckpointsModule } from './modules/checkpoints/checkpoints.module';
 import { RoundsModule } from './modules/rounds/rounds.module';
+import { ClockModule } from './common/clock';
+import { ShiftsModule } from './modules/shifts/shifts.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { RoundsModule } from './modules/rounds/rounds.module';
     SitesModule,
     CheckpointsModule,
     RoundsModule,
+    ClockModule,
+    ShiftsModule,
   ],
 })
 export class AppModule {}

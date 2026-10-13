@@ -159,6 +159,7 @@ class TestOnlyModule {}
 import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
+import { CLOCK } from '../src/common/clock';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
@@ -172,6 +173,7 @@ describe('Aplicación (e2e)', () => {
   let northGuardId: string;
   const createdRoundNames: string[] = [];
   const createdCheckpointIds: string[] = [];
+  const createdShiftIds: string[] = [];
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -192,6 +194,8 @@ describe('Aplicación (e2e)', () => {
           return Promise.reject(new Error('Token inválido'));
         },
       })
+      .overrideProvider(CLOCK)
+      .useValue({ now: () => new Date('2026-10-13T12:00:00.000Z') })
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -257,6 +261,7 @@ describe('Aplicación (e2e)', () => {
 
   afterAll(async () => {
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.shift.deleteMany({ where: { id: { in: createdShiftIds } } });
     const rounds = await prisma.round.findMany({
       where: { name: { in: createdRoundNames } },
       select: { id: true },
@@ -1030,6 +1035,178 @@ describe('Aplicación (e2e)', () => {
       .get(`/api/v1/predios/${northAssignedSiteId}`)
       .set('Authorization', 'Bearer token-south-admin')
       .expect(404);
+  });
+
+  it('impide solapamientos de asignaciones vigentes en PostgreSQL y libera el rango al cancelar', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const startsAt = new Date('2035-01-01T01:00:00.000Z');
+    const endsAt = new Date('2035-01-01T09:00:00.000Z');
+    const first = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt,
+        endsAt,
+        serviceDate: new Date('2035-01-01T00:00:00.000Z'),
+        createdById: admin.id,
+      },
+    });
+    const second = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date(startsAt.getTime() + 60 * 60 * 1000),
+        endsAt: new Date(endsAt.getTime() + 60 * 60 * 1000),
+        serviceDate: new Date('2035-01-01T00:00:00.000Z'),
+        createdById: admin.id,
+      },
+    });
+    try {
+      const assignment = {
+        guardId: northGuardId,
+        startsAt,
+        endsAt,
+        assignedById: admin.id,
+      };
+      await prisma.shiftAssignment.create({ data: { shiftId: first.id, ...assignment } });
+      await expect(
+        prisma.shiftAssignment.create({ data: { shiftId: second.id, ...assignment } }),
+      ).rejects.toThrow();
+      await expect(
+        prisma.shiftAssignment.create({
+          data: { shiftId: second.id, ...assignment, guardId: null },
+        }),
+      ).resolves.toMatchObject({ guardId: null });
+      await prisma.shiftAssignment.updateMany({
+        where: { shiftId: first.id },
+        data: { active: false },
+      });
+      await expect(
+        prisma.shiftAssignment.create({ data: { shiftId: second.id, ...assignment } }),
+      ).resolves.toMatchObject({ guardId: northGuardId });
+    } finally {
+      await prisma.shift.deleteMany({ where: { id: { in: [first.id, second.id] } } });
+    }
+  });
+
+  it('crea, edita y cancela turnos con ventanas esperadas y valida inicio, duración y cobertura', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const round = await prisma.round.findUniqueOrThrow({
+      where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
+    });
+    const requestShift = {
+      siteId: northAssignedSiteId,
+      guardId: northGuardId,
+      startsAt: '2026-10-14T23:00:00.000Z',
+      endsAt: '2026-10-15T11:00:00.000Z',
+      roundIds: [round.id],
+    };
+    const auth = { Authorization: 'Bearer token-admin' };
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/turnos')
+      .set(auth)
+      .send(requestShift)
+      .expect(201);
+    const createdBody = z
+      .object({
+        id: z.string(),
+        status: z.string(),
+        windows: z.array(z.object({ shiftId: z.string().nullable() })),
+      })
+      .parse(created.body);
+    createdShiftIds.push(createdBody.id);
+    expect(createdBody.status).toBe('scheduled');
+    expect(createdBody.windows.filter((window) => window.shiftId === createdBody.id)).toHaveLength(
+      4,
+    );
+
+    const conflict = await request(app.getHttpServer())
+      .post('/api/v1/turnos')
+      .set(auth)
+      .send(requestShift)
+      .expect(409);
+    expect(
+      z
+        .object({ code: z.literal('SHIFT_OVERLAP'), shift: z.object({ id: z.string() }) })
+        .parse(conflict.body).shift.id,
+    ).toBe(createdBody.id);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/turnos')
+      .set(auth)
+      .send({
+        ...requestShift,
+        startsAt: '2026-10-14T11:00:00.000Z',
+        endsAt: '2026-10-14T19:00:00.000Z',
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/v1/turnos')
+      .set(auth)
+      .send({ ...requestShift, startsAt: '2026-10-13T11:00:00.000Z' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/v1/turnos')
+      .set(auth)
+      .send({ ...requestShift, endsAt: '2026-10-14T23:30:00.000Z' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/v1/turnos')
+      .set(auth)
+      .send({ ...requestShift, endsAt: '2026-10-16T00:00:00.000Z' })
+      .expect(400);
+
+    const pending = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-pending' },
+    });
+    await prisma.user.update({ where: { id: pending.id }, data: { status: 'invitation_pending' } });
+    const pendingShift = await request(app.getHttpServer())
+      .post('/api/v1/turnos')
+      .set(auth)
+      .send({
+        ...requestShift,
+        guardId: pending.id,
+        startsAt: '2026-10-16T23:00:00.000Z',
+        endsAt: '2026-10-17T11:00:00.000Z',
+      })
+      .expect(201);
+    const pendingId = z.object({ id: z.string() }).parse(pendingShift.body).id;
+    createdShiftIds.push(pendingId);
+    expect(
+      z.object({ invitationPending: z.boolean() }).parse(pendingShift.body).invitationPending,
+    ).toBe(true);
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/turnos/${createdBody.id}`)
+      .set(auth)
+      .send({ ...requestShift, endsAt: '2026-10-15T12:00:00.000Z' })
+      .expect(200);
+    const mine = await request(app.getHttpServer())
+      .get('/api/v1/mis-turnos')
+      .set({ Authorization: 'Bearer token-guard' })
+      .expect(200);
+    expect(
+      z
+        .array(z.object({ id: z.string() }))
+        .parse(mine.body)
+        .map(({ id }) => id),
+    ).toContain(createdBody.id);
+    await request(app.getHttpServer())
+      .post(`/api/v1/turnos/${createdBody.id}/cancelar`)
+      .set(auth)
+      .expect(201);
+    await request(app.getHttpServer())
+      .patch(`/api/v1/turnos/${createdBody.id}`)
+      .set(auth)
+      .send(requestShift)
+      .expect(409);
+    await request(app.getHttpServer())
+      .post(`/api/v1/turnos/${createdBody.id}/cancelar`)
+      .set(auth)
+      .expect(409);
   });
 
   it.each(['supervisor', 'guard', 'client'] as const)(
