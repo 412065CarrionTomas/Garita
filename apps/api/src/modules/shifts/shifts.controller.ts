@@ -8,7 +8,14 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConflictResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { shiftInputSchema } from '@garita/shared';
 import { z } from 'zod';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
@@ -32,6 +39,11 @@ export class ShiftsController {
   @Get('turnos')
   @Roles('admin', 'supervisor')
   @ApiOperation({ summary: 'Lista turnos de la empresa con filtros opcionales' })
+  @ApiQuery({ name: 'predio', required: false, type: String })
+  @ApiQuery({ name: 'vigilador', required: false, type: String })
+  @ApiQuery({ name: 'desde', required: false, type: String, format: 'date-time' })
+  @ApiQuery({ name: 'hasta', required: false, type: String, format: 'date-time' })
+  @ApiQuery({ name: 'sinVigilador', required: false, enum: ['true', 'false'] })
   list(@Query() query: unknown) {
     const parsed = listQuerySchema.safeParse(query);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
@@ -48,6 +60,22 @@ export class ShiftsController {
   @Post('turnos')
   @Roles('admin', 'supervisor')
   @ApiOperation({ summary: 'Crea un turno y su primera asignación' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['siteId', 'guardId', 'startsAt', 'endsAt', 'roundIds'],
+      properties: {
+        siteId: { type: 'string' },
+        guardId: { type: 'string', nullable: true },
+        startsAt: { type: 'string', format: 'date-time' },
+        endsAt: { type: 'string', format: 'date-time' },
+        roundIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'El vigilador ya tiene un turno superpuesto; incluye el turno en conflicto',
+  })
   create(@Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = shiftInputSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
@@ -57,6 +85,22 @@ export class ShiftsController {
   @Patch('turnos/:id')
   @Roles('admin', 'supervisor')
   @ApiOperation({ summary: 'Edita un turno antes de su inicio' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['siteId', 'guardId', 'startsAt', 'endsAt', 'roundIds'],
+      properties: {
+        siteId: { type: 'string' },
+        guardId: { type: 'string', nullable: true },
+        startsAt: { type: 'string', format: 'date-time' },
+        endsAt: { type: 'string', format: 'date-time' },
+        roundIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'Turno superpuesto o inicio ya pasado (SHIFT_OVERLAP / SHIFT_STARTED)',
+  })
   update(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = shiftInputSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
@@ -66,6 +110,9 @@ export class ShiftsController {
   @Post('turnos/:id/cancelar')
   @Roles('admin', 'supervisor')
   @ApiOperation({ summary: 'Cancela un turno antes de su inicio' })
+  @ApiConflictResponse({
+    description: 'El turno ya comenzó; solo se puede reasignar (SHIFT_STARTED)',
+  })
   cancel(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.shifts.cancel(id, user);
   }

@@ -160,6 +160,7 @@ import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { CLOCK } from '../src/common/clock';
+import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-error';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
@@ -533,7 +534,23 @@ describe('Aplicación (e2e)', () => {
         '/api/v1/configuracion/predios',
         '/api/v1/predios/{id}/puntos',
         '/api/v1/puntos/{id}/etiqueta-nfc',
+        '/api/v1/turnos',
+        '/api/v1/turnos/{id}',
+        '/api/v1/turnos/{id}/cancelar',
+        '/api/v1/mis-turnos',
+        '/api/v1/usuarios/{id}/turnos-futuros',
+        '/api/v1/usuarios/{id}/desactivar',
+        '/api/v1/predios/{id}/impacto-baja',
+        '/api/v1/predios/{id}/baja',
+        '/api/v1/clientes/{id}/impacto-baja',
+        '/api/v1/clientes/{id}/baja',
       ]),
+    );
+    expect(z.record(z.string(), z.unknown()).parse(swaggerPaths['/api/v1/turnos'])).toHaveProperty(
+      'get',
+    );
+    expect(z.record(z.string(), z.unknown()).parse(swaggerPaths['/api/v1/turnos'])).toHaveProperty(
+      'post',
     );
     const auth = { Authorization: 'Bearer token-admin' };
     const points = await app.get(PrismaService).systemPrisma.checkpoint.findMany({
@@ -901,10 +918,16 @@ describe('Aplicación (e2e)', () => {
       .expect(200);
     expect(
       z
-        .array(z.object({ id: z.string() }))
+        .array(z.object({ id: z.string(), company: z.object({ timezone: z.string() }) }))
         .parse(visible.body)
         .map(({ id }) => id),
     ).toContain(northAssignedSiteId);
+    expect(
+      z
+        .array(z.object({ id: z.string(), company: z.object({ timezone: z.string() }) }))
+        .parse(visible.body)
+        .find(({ id }) => id === northAssignedSiteId)?.company.timezone,
+    ).toBe('America/Argentina/Buenos_Aires');
     await request(app.getHttpServer())
       .get(`/api/v1/predios/${northUnassignedSiteId}`)
       .set(headers)
@@ -1083,9 +1106,13 @@ describe('Aplicación (e2e)', () => {
         assignedById: admin.id,
       };
       await prisma.shiftAssignment.create({ data: { shiftId: first.id, ...assignment } });
-      await expect(
-        prisma.shiftAssignment.create({ data: { shiftId: second.id, ...assignment } }),
-      ).rejects.toThrow();
+      const overlapError: unknown = await prisma.shiftAssignment
+        .create({ data: { shiftId: second.id, ...assignment } })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(isShiftOverlapViolation(overlapError)).toBe(true);
       await expect(
         prisma.shiftAssignment.create({
           data: { shiftId: second.id, ...assignment, guardId: null },

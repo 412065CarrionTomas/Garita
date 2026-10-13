@@ -1,12 +1,21 @@
 import {
   computeRoundWindows,
   defaultGraceMinutes,
+  localDateTimeToUtc,
   previewWindows,
   validateWindowConfig,
   windowsForShift,
 } from './windows';
 
 describe('round windows', () => {
+  it('converts local shift selector dates and times to UTC', () => {
+    expect(
+      localDateTimeToUtc('2026-10-13', 22 * 60, 'America/Argentina/Buenos_Aires').toISOString(),
+    ).toBe('2026-10-14T01:00:00.000Z');
+    expect(
+      localDateTimeToUtc('2026-10-14', 1 * 60, 'America/Argentina/Buenos_Aires').toISOString(),
+    ).toBe('2026-10-14T04:00:00.000Z');
+  });
   it('calculates overnight and clipped windows', () => {
     expect(
       previewWindows({ windowStartLocal: '22:00', windowEndLocal: '06:00', frequencyMinutes: 120 }),

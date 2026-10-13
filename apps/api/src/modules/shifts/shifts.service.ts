@@ -7,7 +7,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '../../generated/prisma/client';
 import {
   assignWindowsToShifts,
   computeRoundWindows,
@@ -19,6 +18,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
+import { isShiftOverlapViolation } from './shift-overlap-error';
 
 interface ShiftListQuery {
   predio?: string;
@@ -410,11 +410,7 @@ export class ShiftsService {
     startsAt: string,
     endsAt: string,
   ): Promise<never> {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2004' &&
-      guardId
-    ) {
+    if (guardId && isShiftOverlapViolation(error)) {
       const conflict = await this.findConflict(guardId, startsAt, endsAt);
       throw new ConflictException({
         code: 'SHIFT_OVERLAP',
