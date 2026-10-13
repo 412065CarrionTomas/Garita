@@ -556,18 +556,6 @@ describe('record imputation (ID-140 / HU-11)', () => {
         'Ya registraste Portón trasero a la 1:10. Podés volver a registrarlo desde las 2:10',
       );
     });
-
-    it('soporta llamada con parámetros de string individuales', () => {
-      const msg = formatTooSoonMessage(
-        'Portón trasero',
-        '2026-10-14T03:10:00.000Z',
-        '2026-10-14T04:10:00.000Z',
-        timezone,
-      );
-      expect(msg).toBe(
-        'Ya registraste Portón trasero a las 0:10. Podés volver a registrarlo desde la 1:10',
-      );
-    });
   });
 
   describe('windowCompletion', () => {

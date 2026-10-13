@@ -235,23 +235,11 @@ export function windowCompletion(
  */
 export function formatTooSoonMessage(
   checkpointName: string,
-  tooSoonOrLastRecorded: { lastRecordedAtUtc: string; retryAfterUtc: string } | string,
-  retryAfterOrTimezone: string,
-  maybeTimezone?: string,
+  tooSoon: { lastRecordedAtUtc: string; retryAfterUtc: string },
+  /** IANA zone of the company; required so the guard never sees the phone's or UTC time. */
+  timezone: string,
 ): string {
-  let lastRecordedAtUtc: string;
-  let retryAfterUtc: string;
-  let timezone: string;
-
-  if (typeof tooSoonOrLastRecorded === 'object') {
-    lastRecordedAtUtc = tooSoonOrLastRecorded.lastRecordedAtUtc;
-    retryAfterUtc = tooSoonOrLastRecorded.retryAfterUtc;
-    timezone = retryAfterOrTimezone;
-  } else {
-    lastRecordedAtUtc = tooSoonOrLastRecorded;
-    retryAfterUtc = retryAfterOrTimezone;
-    timezone = maybeTimezone ?? 'UTC';
-  }
+  const { lastRecordedAtUtc, retryAfterUtc } = tooSoon;
 
   const lastParts = getTimeParts(lastRecordedAtUtc, timezone);
   const retryParts = getTimeParts(retryAfterUtc, timezone);
