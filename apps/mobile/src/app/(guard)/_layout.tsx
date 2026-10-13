@@ -8,29 +8,48 @@ export default function GuardLayout() {
   const pathname = usePathname();
   const [permissionState, setPermissionState] = useState<FieldPermissionState | null>(null);
   const [savedShiftId, setSavedShiftId] = useState<string | null>(null);
+  const [localCheckPath, setLocalCheckPath] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
-    void checkFieldPermissions().then(async (state) => {
-      if (mounted) setPermissionState(state);
-      if (state === 'ok') {
-        try {
-          const saved = await (await createDefaultFieldRepository()).getShiftData();
-          if (mounted && saved) setSavedShiftId(saved.shift.id);
-        } catch {
-          // A local database read failure should not prevent access to the shift list.
-        }
-      }
-    });
+    void checkFieldPermissions()
+      .then((state) => {
+        if (mounted) setPermissionState(state);
+      })
+      .catch(() => {
+        if (mounted) setPermissionState('location_denied');
+      });
     return () => {
       mounted = false;
     };
   }, []);
+  useEffect(() => {
+    if (permissionState !== 'ok') return;
+    let mounted = true;
+    void createDefaultFieldRepository()
+      .then((repository) => repository.getShiftData())
+      .then((saved) => {
+        if (mounted) {
+          setSavedShiftId(saved?.shift.id ?? null);
+          setLocalCheckPath(pathname);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setSavedShiftId(null);
+          setLocalCheckPath(pathname);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [pathname, permissionState]);
   if (loading) return null;
   if (!user) return <Redirect href="/(auth)/login" />;
   if (user.role !== 'guard') return <Redirect href="/(configuration)" />;
   if (permissionState === null) return null;
   if (permissionState !== 'ok') return <Redirect href="/permisos" />;
-  if (savedShiftId && !pathname.endsWith(`/turno/${savedShiftId}`))
+  if (savedShiftId && localCheckPath === pathname && !pathname.endsWith(`/turno/${savedShiftId}`)) {
     return <Redirect href={`/turno/${savedShiftId}`} />;
+  }
   return <Stack screenOptions={{ headerShown: false }} />;
 }

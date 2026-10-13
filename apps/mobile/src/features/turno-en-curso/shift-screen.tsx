@@ -108,6 +108,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
       if (result.status === 'closed') {
         setData(null);
         setMessage('Turno cerrado.');
+        router.replace('/(guard)');
       } else if (result.status === 'closed_pending') {
         setPendingClose(true);
         setMessage('Turno cerrado, pendiente de envío. Sincronizá cuando tengas conexión.');
