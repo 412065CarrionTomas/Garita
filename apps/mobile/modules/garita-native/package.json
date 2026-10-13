@@ -1,0 +1,6 @@
+{
+  "name": "@garita/garita-native",
+  "version": "1.0.0",
+  "description": "Módulo nativo de campo de Garita",
+  "main": "src/index.ts"
+}

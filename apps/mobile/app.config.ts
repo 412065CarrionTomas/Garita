@@ -13,6 +13,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     bundleIdentifier: 'com.garita.app',
     supportsTablet: false,
+    infoPlist: {
+      NSLocationWhenInUseUsageDescription:
+        'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',
+      NSCameraUsageDescription:
+        'Garita usa la cámara para leer los códigos QR de los puntos de control.',
+    },
   },
   android: {
     package: 'com.garita.app',
@@ -33,6 +39,28 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     './plugins/withNfcFeature',
     'expo-audio',
+    'expo-sqlite',
+    ['./modules/garita-native/app.plugin.js', {}],
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',
+        locationAlwaysAndWhenInUsePermission: false,
+        locationAlwaysPermission: false,
+        motionUsagePermission: false,
+        isIosBackgroundLocationEnabled: false,
+        isAndroidBackgroundLocationEnabled: false,
+        isAndroidForegroundServiceEnabled: false,
+      },
+    ],
+    [
+      'expo-camera',
+      {
+        cameraPermission: 'Garita usa la cámara para leer los códigos QR de los puntos de control.',
+        recordAudioAndroid: false,
+      },
+    ],
     [
       'expo-splash-screen',
       {
