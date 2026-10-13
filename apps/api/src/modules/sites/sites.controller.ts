@@ -72,8 +72,16 @@ export class SitesController {
     schema: { type: 'object', properties: { confirm: { type: 'boolean', default: false } } },
   })
   @ApiConflictResponse({ description: 'Requiere confirmación; incluye el resumen del impacto' })
-  deactivateClient(@Param('id') id: string, @Body() raw: unknown) {
-    return this.sites.deactivateClient(id, parse(deactivationSchema, raw ?? {}).confirm);
+  deactivateClient(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @CurrentUser() admin: AuthenticatedUser,
+  ) {
+    return this.sites.deactivateClient(
+      id,
+      parse(deactivationSchema, raw ?? {}).confirm,
+      admin.userId,
+    );
   }
   @Get('clientes/:id/impacto-baja')
   @Roles('admin')
@@ -121,8 +129,16 @@ export class SitesController {
     schema: { type: 'object', properties: { confirm: { type: 'boolean', default: false } } },
   })
   @ApiConflictResponse({ description: 'Requiere confirmación; incluye el resumen del impacto' })
-  deactivateSite(@Param('id') id: string, @Body() raw: unknown) {
-    return this.sites.deactivateSite(id, parse(deactivationSchema, raw ?? {}).confirm);
+  deactivateSite(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @CurrentUser() admin: AuthenticatedUser,
+  ) {
+    return this.sites.deactivateSite(
+      id,
+      parse(deactivationSchema, raw ?? {}).confirm,
+      admin.userId,
+    );
   }
   @Get('predios/:id/impacto-baja')
   @Roles('admin')

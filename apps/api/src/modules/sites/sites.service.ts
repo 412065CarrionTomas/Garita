@@ -78,7 +78,7 @@ export class SitesService {
     return this.deactivationImpact(sites.map((site) => site.id));
   }
 
-  async deactivateClient(id: string, confirm: boolean) {
+  async deactivateClient(id: string, confirm: boolean, adminId: string) {
     const impact = await this.impactClientDeactivation(id);
     this.requireConfirmation(impact, confirm);
     const siteIds = (
@@ -88,7 +88,7 @@ export class SitesService {
       })
     ).map((site) => site.id);
     return this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds);
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
       await this.weeklySchedules.terminateForSites(tx, siteIds);
       await this.inProgress.closeForSites(tx, siteIds);
       await tx.siteSupervisor.deleteMany({ where: { site: { clientId: id } } });
@@ -173,11 +173,11 @@ export class SitesService {
     return this.deactivationImpact([id]);
   }
 
-  async deactivateSite(id: string, confirm: boolean) {
+  async deactivateSite(id: string, confirm: boolean, adminId: string) {
     const impact = await this.impactSiteDeactivation(id);
     this.requireConfirmation(impact, confirm);
     return this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id]);
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
       await this.weeklySchedules.terminateForSites(tx, [id]);
       await this.inProgress.closeForSites(tx, [id]);
       await tx.siteSupervisor.deleteMany({ where: { siteId: id } });
@@ -227,6 +227,7 @@ export class SitesService {
   private async cancelShifts(
     transaction: Prisma.TransactionClient,
     siteIds: string[],
+    adminId: string,
   ): Promise<void> {
     if (!siteIds.length) return;
     const shifts = await transaction.shift.findMany({
@@ -248,6 +249,7 @@ export class SitesService {
       data: {
         status: 'cancelled',
         cancelledAt: this.clock.now(),
+        cancelledById: adminId,
         cancellationReason: 'Baja del predio',
       },
     });
