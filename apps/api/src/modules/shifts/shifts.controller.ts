@@ -38,6 +38,13 @@ export class ShiftsController {
     return this.shifts.list(parsed.data);
   }
 
+  @Get('turnos/:id')
+  @Roles('admin', 'supervisor', 'guard')
+  @ApiOperation({ summary: 'Consulta el detalle de un turno propio o visible por rol' })
+  get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.shifts.get(id, user);
+  }
+
   @Post('turnos')
   @Roles('admin', 'supervisor')
   @ApiOperation({ summary: 'Crea un turno y su primera asignación' })

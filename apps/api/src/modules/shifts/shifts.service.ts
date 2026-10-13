@@ -1,6 +1,7 @@
 import {
   ConflictException,
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -60,6 +61,31 @@ export class ShiftsService {
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
+  }
+
+  async get(id: string, user: AuthenticatedUser) {
+    await this.resources.findOwnedOrThrow('Shift', id);
+    const shift = await this.prisma.tenantPrisma.shift.findFirst({
+      where: {
+        id,
+        ...(user.role === 'guard'
+          ? { assignments: { some: { guardId: user.userId, isCurrent: true } } }
+          : {}),
+      },
+      include: this.shiftInclude(),
+    });
+    if (!shift) {
+      if (user.role === 'guard') throw new ForbiddenException('No podés consultar turnos ajenos');
+      throw new NotFoundException('Turno no encontrado');
+    }
+    if (
+      user.role === 'supervisor' &&
+      !(await this.prisma.tenantPrisma.siteSupervisor.findFirst({
+        where: { siteId: shift.siteId, userId: user.userId },
+      }))
+    )
+      throw new NotFoundException('Turno no encontrado');
+    return shift;
   }
 
   async create(input: ShiftInput, user: AuthenticatedUser) {
