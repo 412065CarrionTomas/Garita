@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { shiftOfflineDataSchema } from './shift-offline-data';
+import { shiftOfflineDataSchema, type ShiftOfflineData } from './shift-offline-data';
 
 /**
  * HU-10 contract between the API (start, close and state of a shift) and the guard app.
@@ -134,4 +134,38 @@ export function isWithinStartMargin(
 export function lateStartMinutes(assignmentStartUtc: string, startedAtUtc: string): number | null {
   const minutes = Math.floor((Date.parse(startedAtUtc) - Date.parse(assignmentStartUtc)) / 60_000);
   return minutes > 0 ? minutes : null;
+}
+
+/** Current window of each round and its pending checkpoints, computed the same way by the API and the offline app. */
+export function currentRoundProgress(
+  data: Pick<ShiftOfflineData, 'rounds' | 'windows'>,
+  nowUtc: string,
+  /** Checkpoint ids already recorded per round window, keyed by `${roundId}:${windowIndex}` (HU-11 fills it). */
+  recorded: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
+): ShiftStateResponse['rounds'] {
+  const now = Date.parse(nowUtc);
+  return data.rounds.map((round) => {
+    const window =
+      data.windows.find(
+        (candidate) =>
+          candidate.roundId === round.roundId &&
+          Date.parse(candidate.startUtc) <= now &&
+          now < Date.parse(candidate.endUtc),
+      ) ?? null;
+    const done = window
+      ? (recorded.get(`${round.roundId}:${window.index}`) ?? new Set<string>())
+      : new Set<string>();
+    return {
+      roundId: round.roundId,
+      currentWindow: window
+        ? {
+            index: window.index,
+            startUtc: window.startUtc,
+            endUtc: window.endUtc,
+            label: window.label,
+          }
+        : null,
+      pendingCheckpointIds: window ? round.checkpointIds.filter((id) => !done.has(id)) : [],
+    };
+  });
 }

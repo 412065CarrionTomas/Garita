@@ -1,5 +1,6 @@
 import {
   closeShiftRequestSchema,
+  currentRoundProgress,
   isEarlyClose,
   isWithinStartMargin,
   lateStartMinutes,
@@ -52,5 +53,52 @@ describe('shift execution contract', () => {
   it('flags a close before the scheduled end as early', () => {
     expect(isEarlyClose('2026-10-14T09:00:00.000Z', '2026-10-14T07:30:00.000Z')).toBe(true);
     expect(isEarlyClose('2026-10-14T09:00:00.000Z', '2026-10-14T09:00:00.000Z')).toBe(false);
+  });
+});
+
+describe('currentRoundProgress', () => {
+  const data = {
+    rounds: [
+      {
+        roundId: 'r1',
+        roundVersionId: 'v1',
+        name: 'Perimetral',
+        frequencyMinutes: 120,
+        windowStartLocal: '22:00',
+        windowEndLocal: '06:00',
+        graceMinutes: 15,
+        checkpointIds: ['a', 'b', 'c'],
+      },
+    ],
+    windows: [
+      {
+        roundId: 'r1',
+        index: 0,
+        startUtc: '2026-10-14T01:00:00.000Z',
+        endUtc: '2026-10-14T03:00:00.000Z',
+        label: '22:00–00:00',
+      },
+      {
+        roundId: 'r1',
+        index: 1,
+        startUtc: '2026-10-14T03:00:00.000Z',
+        endUtc: '2026-10-14T05:00:00.000Z',
+        label: '00:00–02:00',
+      },
+    ],
+  };
+
+  it('returns the current window with its checkpoints in order', () => {
+    const [progress] = currentRoundProgress(data, '2026-10-14T03:30:00.000Z');
+    expect(progress?.currentWindow?.label).toBe('00:00–02:00');
+    expect(progress?.pendingCheckpointIds).toEqual(['a', 'b', 'c']);
+  });
+
+  it('excludes recorded checkpoints and returns no window outside the franja', () => {
+    const recorded = new Map([['r1:0', new Set(['b'])]]);
+    expect(
+      currentRoundProgress(data, '2026-10-14T01:10:00.000Z', recorded)[0]?.pendingCheckpointIds,
+    ).toEqual(['a', 'c']);
+    expect(currentRoundProgress(data, '2026-10-14T10:00:00.000Z')[0]?.currentWindow).toBeNull();
   });
 });
