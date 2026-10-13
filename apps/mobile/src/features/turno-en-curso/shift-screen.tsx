@@ -218,7 +218,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
                 onPress={() => void close()}
                 style={[styles.button, styles.closeButton]}
               >
-                <Text style={styles.buttonText}>Cerrar turno</Text>
+                <Text style={[styles.buttonText, styles.closeButtonText]}>Cerrar turno</Text>
               </Pressable>
             </>
           )}
@@ -256,7 +256,8 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   closeButton: { backgroundColor: '#dc2626' },
-  buttonText: { color: '#fff', fontSize: 19, fontWeight: '700' },
+  buttonText: { color: '#171717', fontSize: 19, fontWeight: '700' },
+  closeButtonText: { color: '#fff' },
   disabled: { opacity: 0.45 },
   input: {
     minHeight: 64,
