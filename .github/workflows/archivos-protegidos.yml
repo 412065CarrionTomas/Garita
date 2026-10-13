@@ -1,0 +1,68 @@
+name: Archivos protegidos
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  archivos-protegidos:
+    name: Cambios en archivos protegidos
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verificar archivos protegidos
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.base_ref }}
+          AUTOR: ${{ github.event.pull_request.user.login }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          # Lista de archivos protegidos. Debe mantenerse alineada con .github/CODEOWNERS.
+          PROTEGIDOS='^(\.github/|\.husky/|(.*/)?package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$|compose\.yaml$|(.*/)?tsconfig[^/]*\.json$|(.*/)?eslint\.config\.[^/]+$|\.prettierrc[^/]*$|\.prettierignore$|\.editorconfig$|\.gitignore$|\.gitattributes$|\.npmrc$|(.*/)?commitlint\.config\.[^/]+$)'
+
+          git fetch --no-tags origin "$BASE_REF"
+          CAMBIADOS=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          MODIFICADOS=$(printf '%s\n' "$CAMBIADOS" | grep -E "$PROTEGIDOS" || true)
+
+          if [ -z "$MODIFICADOS" ]; then
+            echo "✅ No hay cambios en archivos protegidos."
+            exit 0
+          fi
+
+          echo "Archivos protegidos modificados:"
+          echo "$MODIFICADOS"
+
+          # Los dueños se leen de CODEOWNERS en la rama base, no del PR,
+          # para que un PR no pueda agregarse a sí mismo como dueño.
+          DUENOS=$(git show "origin/$BASE_REF:.github/CODEOWNERS" 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -oE '@[A-Za-z0-9_-]+' | tr -d '@')
+
+          AUTORIZADO=false
+          for usuario in "$AUTOR" "$ACTOR"; do
+            if printf '%s\n' "$DUENOS" | grep -qixF "$usuario"; then
+              AUTORIZADO=true
+            fi
+          done
+
+          # Los administradores del repositorio también pueden modificar archivos protegidos.
+          if [ "$AUTORIZADO" = false ]; then
+            ROL=$(gh api "repos/$REPO/collaborators/$AUTOR/permission" --jq .permission 2>/dev/null || echo none)
+            if [ "$ROL" = admin ]; then
+              AUTORIZADO=true
+            fi
+          fi
+
+          if [ "$AUTORIZADO" = false ]; then
+            echo "::error::@$AUTOR no es dueño ni administrador del repositorio y el PR modifica archivos protegidos."
+            echo "::error::La revisión la deben aprobar los dueños definidos en .github/CODEOWNERS."
+            exit 1
+          fi
+
+          echo "✅ Cambio autorizado para @$AUTOR."
