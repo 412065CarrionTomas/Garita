@@ -3,6 +3,8 @@ import { MyShiftsScreen } from './my-shifts-screen';
 import { apiGet } from '@/lib/api-client';
 
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+const mockPush = jest.fn();
+jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 
 const fetchShifts = jest.mocked(apiGet);
 
@@ -31,6 +33,10 @@ describe('<MyShiftsScreen />', () => {
     await act(async () => resolveRequests[0]?.());
     expect(await screen.findByText('Predio A')).toBeOnTheScreen();
     expect(screen.getByText(/Perimetral/)).toBeOnTheScreen();
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Ver turno en Predio A' }));
+    });
+    expect(mockPush).toHaveBeenCalledWith('/turno/shift-1');
     await act(async () => {
       fireEvent.press(screen.getByRole('button', { name: 'Actualizar turnos' }));
       await waitFor(() => expect(resolveRequests).toHaveLength(2));

@@ -4,7 +4,7 @@ export interface WeeklyScheduleTerminationPort {
 }
 
 export interface InProgressShiftClosurePort {
-  closeForSites(transaction: unknown, siteIds: string[]): Promise<void>;
+  closeForSites(transaction: unknown, siteIds: string[], adminId: string): Promise<void>;
 }
 
 export const WEEKLY_SCHEDULE_TERMINATION_PORT = Symbol('WEEKLY_SCHEDULE_TERMINATION_PORT');
@@ -23,7 +23,7 @@ export class NoopWeeklyScheduleTermination implements WeeklyScheduleTerminationP
 
 /** HU-10 replaces this placeholder with closure of shifts already in progress. */
 export class NoopInProgressShiftClosure implements InProgressShiftClosurePort {
-  closeForSites(_transaction: unknown, _siteIds: string[]): Promise<void> {
+  closeForSites(_transaction: unknown, _siteIds: string[], _adminId: string): Promise<void> {
     return Promise.resolve();
   }
 }

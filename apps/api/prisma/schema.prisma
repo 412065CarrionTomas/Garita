@@ -247,6 +247,34 @@ enum ShiftStatus {
   scheduled
   unassigned
   cancelled
+  in_progress
+  closed
+  auto_closed
+}
+
+enum ShiftEventType {
+  start
+  close
+  auto_close
+  admin_close
+}
+
+enum ShiftEventLocationStatus {
+  ok
+  unverifiable
+  disabled
+}
+
+enum ShiftEventSimulation {
+  simulated
+  not_simulated
+  unavailable
+}
+
+enum ShiftClosedBy {
+  guard
+  admin
+  system
 }
 
 model Shift {
@@ -261,6 +289,14 @@ model Shift {
   cancelledAt        DateTime?         @db.Timestamptz(3)
   cancelledById      String?
   cancellationReason String?
+  startedAt          DateTime?         @db.Timestamptz(3)
+  lateStartMinutes   Int?
+  closedAt           DateTime?         @db.Timestamptz(3)
+  closedEarly        Boolean           @default(false)
+  closeReason        String?
+  closedBy           ShiftClosedBy?
+  closedByUserId     String?
+  autoClosedAt       DateTime?         @db.Timestamptz(3)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   company            Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -268,10 +304,38 @@ model Shift {
   createdBy          User              @relation("ShiftCreator", fields: [createdById], references: [id], onDelete: Restrict)
   assignments        ShiftAssignment[]
   rounds             ShiftRound[]
+  events             ShiftEvent[]
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
   @@index([status, startsAt])
+}
+
+model ShiftEvent {
+  id                  String                    @id @default(cuid())
+  companyId           String
+  shiftId             String
+  assignmentId        String
+  type                ShiftEventType
+  deviceEventId       String?                   @unique @db.Uuid
+  occurredAt          DateTime                  @db.Timestamptz(3)
+  occurredAtDevice    DateTime?                 @db.Timestamptz(3)
+  receivedAt          DateTime                  @default(now()) @db.Timestamptz(3)
+  locationStatus      ShiftEventLocationStatus?
+  latitude            Decimal?                  @db.Decimal(9, 6)
+  longitude           Decimal?                  @db.Decimal(10, 6)
+  accuracyMeters      Decimal?                  @db.Decimal(10, 2)
+  simulation          ShiftEventSimulation?
+  reason              String?
+  actorUserId         String?
+  lateStartMinutes    Int?
+  countsForCompliance Boolean                   @default(true)
+  response            Json?
+  shift               Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment          ShiftAssignment           @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, shiftId, occurredAt])
+  @@index([assignmentId, type])
 }
 
 model ShiftAssignment {
@@ -287,6 +351,7 @@ model ShiftAssignment {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   shift        Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  events       ShiftEvent[]
   guard        User?    @relation(fields: [guardId], references: [id], onDelete: Restrict)
 
   @@index([shiftId, isCurrent])

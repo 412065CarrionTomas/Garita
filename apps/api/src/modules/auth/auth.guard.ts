@@ -9,7 +9,12 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
-import { ALLOWED_ROLES, ALLOW_PENDING_INVITATION, PUBLIC_ROUTE } from './auth.decorators';
+import {
+  ALLOWED_ROLES,
+  ALLOW_DEACTIVATED_FIELD_EVENT,
+  ALLOW_PENDING_INVITATION,
+  PUBLIC_ROUTE,
+} from './auth.decorators';
 import { FIREBASE_IDENTITY_PROVIDER } from './auth.types';
 import type { AuthenticatedRequest, FirebaseIdentityProvider } from './auth.types';
 import { TenantContext } from './tenant-context';
@@ -61,9 +66,14 @@ export class AuthGuard implements CanActivate {
       ALLOW_PENDING_INVITATION,
       [handler, controller],
     );
+    const allowDeactivatedFieldEvent = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_DEACTIVATED_FIELD_EVENT,
+      [handler, controller],
+    );
     if (
       user.status !== 'active' &&
-      !(user.status === 'invitation_pending' && allowPendingInvitation)
+      !(user.status === 'invitation_pending' && allowPendingInvitation) &&
+      !(user.status === 'deactivated' && allowDeactivatedFieldEvent && user.role === 'guard')
     ) {
       this.deny(request, `estado ${user.status}`);
       throw new ForbiddenException();

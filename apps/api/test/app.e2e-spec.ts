@@ -1,4 +1,9 @@
-import { authMeResponseSchema, liveHealthResponseSchema, USER_ROLES } from '@garita/shared';
+import {
+  authMeResponseSchema,
+  liveHealthResponseSchema,
+  startShiftResponseSchema,
+  USER_ROLES,
+} from '@garita/shared';
 import {
   Controller,
   Delete,
@@ -20,6 +25,7 @@ import { CheckpointsModule } from '../src/modules/checkpoints/checkpoints.module
 import { Roles } from '../src/modules/auth/auth.decorators';
 import { TenantResourceService } from '../src/modules/auth/tenant-resource.service';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
+import { ShiftExecutionService } from '../src/modules/shift-execution/shift-execution.service';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { z } from 'zod';
@@ -175,6 +181,8 @@ describe('Aplicación (e2e)', () => {
   const createdRoundNames: string[] = [];
   const createdCheckpointIds: string[] = [];
   const createdShiftIds: string[] = [];
+  const createdSiteIds: string[] = [];
+  let testNow = new Date('2026-10-13T12:00:00.000Z');
   const createdNfcCheckpointIds: string[] = [];
 
   beforeAll(async () => {
@@ -202,7 +210,7 @@ describe('Aplicación (e2e)', () => {
         generatePasswordResetLink: jest.fn((email: string) => Promise.resolve(email)),
       })
       .overrideProvider(CLOCK)
-      .useValue({ now: () => new Date('2026-10-13T12:00:00.000Z') })
+      .useValue({ now: () => testNow })
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -271,6 +279,7 @@ describe('Aplicación (e2e)', () => {
   afterAll(async () => {
     const prisma = app.get(PrismaService).systemPrisma;
     await prisma.shift.deleteMany({ where: { id: { in: createdShiftIds } } });
+    await prisma.site.deleteMany({ where: { id: { in: createdSiteIds } } });
     const rounds = await prisma.round.findMany({
       where: { name: { in: createdRoundNames } },
       select: { id: true },
@@ -1861,6 +1870,451 @@ describe('Aplicación (e2e)', () => {
     await prisma.user.update({ where: { id: sourceGuard.id }, data: { status: 'deactivated' } });
   });
 
+  it('valida el margen, la reasignación, la invitación pendiente y otro turno en curso', async () => {
+    const client = request(app.getHttpServer());
+    const prisma = app.get(PrismaService).systemPrisma;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const pendingGuard = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-pending' },
+    });
+    const makeShift = async (
+      guardId: string,
+      startsAt: string,
+      endsAt: string,
+      status: 'scheduled' | 'cancelled' | 'in_progress' = 'scheduled',
+    ) => {
+      const shift = await prisma.shift.create({
+        data: {
+          companyId: 'norte-company',
+          siteId: northAssignedSiteId,
+          startsAt: new Date(startsAt),
+          endsAt: new Date(endsAt),
+          serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+          createdById: actor.id,
+          status,
+          ...(status === 'in_progress' ? { startedAt: new Date(startsAt) } : {}),
+          assignments: {
+            create: {
+              guardId,
+              startsAt: new Date(startsAt),
+              endsAt: new Date(endsAt),
+              assignedById: actor.id,
+            },
+          },
+        },
+      });
+      createdShiftIds.push(shift.id);
+      return shift;
+    };
+    const location = {
+      status: 'ok',
+      latitude: -34.6,
+      longitude: -58.4,
+      accuracyMeters: 5,
+      simulation: 'not_simulated',
+      takenAt: '2026-10-13T12:00:00.000Z',
+    };
+    const outOfMargin = await makeShift(
+      northGuardId,
+      '2026-10-13T17:00:00.000Z',
+      '2026-10-13T18:00:00.000Z',
+    );
+    const outside = await client
+      .post(`/api/v1/turnos/${outOfMargin.id}/iniciar`)
+      .set('Authorization', 'Bearer token-guard')
+      .send({ eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location })
+      .expect(422);
+    expect(z.object({ code: z.literal('OUTSIDE_START_MARGIN') }).parse(outside.body).code).toBe(
+      'OUTSIDE_START_MARGIN',
+    );
+
+    const cancelled = await makeShift(
+      northGuardId,
+      '2026-10-13T16:00:00.000Z',
+      '2026-10-13T17:00:00.000Z',
+      'cancelled',
+    );
+    const notStartable = await client
+      .post(`/api/v1/turnos/${cancelled.id}/iniciar`)
+      .set('Authorization', 'Bearer token-guard')
+      .send({ eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location })
+      .expect(409);
+    expect(z.object({ code: z.literal('SHIFT_NOT_STARTABLE') }).parse(notStartable.body).code).toBe(
+      'SHIFT_NOT_STARTABLE',
+    );
+
+    const pendingShift = await makeShift(
+      pendingGuard.id,
+      '2026-10-13T14:00:00.000Z',
+      '2026-10-13T15:00:00.000Z',
+    );
+    const pending = await client
+      .post(`/api/v1/turnos/${pendingShift.id}/iniciar`)
+      .set('Authorization', 'Bearer token-pending')
+      .send({ eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location })
+      .expect(403);
+    expect(z.object({ code: z.literal('INVITATION_PENDING') }).parse(pending.body).code).toBe(
+      'INVITATION_PENDING',
+    );
+
+    const reassigned = await makeShift(
+      pendingGuard.id,
+      '2026-10-13T15:00:00.000Z',
+      '2026-10-13T16:00:00.000Z',
+    );
+    await prisma.shiftAssignment.updateMany({
+      where: { shiftId: reassigned.id },
+      data: { isCurrent: false, active: false },
+    });
+    await prisma.shiftAssignment.create({
+      data: {
+        shiftId: reassigned.id,
+        guardId: northGuardId,
+        startsAt: reassigned.startsAt,
+        endsAt: reassigned.endsAt,
+        assignedById: actor.id,
+      },
+    });
+    const oldGuard = await client
+      .post(`/api/v1/turnos/${reassigned.id}/iniciar`)
+      .set('Authorization', 'Bearer token-pending')
+      .send({ eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location })
+      .expect(409);
+    expect(z.object({ code: z.literal('SHIFT_REASSIGNED') }).parse(oldGuard.body).code).toBe(
+      'SHIFT_REASSIGNED',
+    );
+
+    const inProgress = await makeShift(
+      northGuardId,
+      '2026-10-13T11:00:00.000Z',
+      '2026-10-13T12:00:00.000Z',
+      'in_progress',
+    );
+    const candidate = await makeShift(
+      northGuardId,
+      '2026-10-13T12:00:00.000Z',
+      '2026-10-13T13:00:00.000Z',
+    );
+    const another = await client
+      .post(`/api/v1/turnos/${candidate.id}/iniciar`)
+      .set('Authorization', 'Bearer token-guard')
+      .send({ eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location })
+      .expect(409);
+    expect(
+      z.object({ code: z.literal('ANOTHER_SHIFT_IN_PROGRESS') }).parse(another.body).code,
+    ).toBe('ANOTHER_SHIFT_IN_PROGRESS');
+    await prisma.shiftAssignment.updateMany({
+      where: {
+        shiftId: { in: [outOfMargin.id, cancelled.id, reassigned.id, inProgress.id, candidate.id] },
+      },
+      data: { isCurrent: false, active: false },
+    });
+  });
+
+  it('inicia y cierra turnos, conserva la respuesta y evita duplicar el evento del dispositivo', async () => {
+    const client = request(app.getHttpServer());
+    const prisma = app.get(PrismaService).systemPrisma;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const round = await prisma.round.findFirstOrThrow({
+      where: { siteId: northAssignedSiteId, status: 'active' },
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-13T12:00:00.000Z'),
+        endsAt: new Date('2026-10-13T13:00:00.000Z'),
+        serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+        createdById: actor.id,
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2026-10-13T12:00:00.000Z'),
+            endsAt: new Date('2026-10-13T13:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+        rounds: { create: { roundId: round.id } },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const auth = { Authorization: 'Bearer token-guard' };
+    const startBody = {
+      eventId: randomUUID(),
+      occurredAtDevice: '2026-10-13T11:59:00.000Z',
+      location: {
+        status: 'ok',
+        latitude: -34.6,
+        longitude: -58.4,
+        accuracyMeters: 8,
+        simulation: 'not_simulated',
+        takenAt: '2026-10-13T11:59:00.000Z',
+      },
+    };
+    const started = await client
+      .post(`/api/v1/turnos/${shift.id}/iniciar`)
+      .set(auth)
+      .send(startBody)
+      .expect(201);
+    const parsed = startShiftResponseSchema.parse(started.body);
+    expect(parsed.status).toBe('in_progress');
+    const replay = await client
+      .post(`/api/v1/turnos/${shift.id}/iniciar`)
+      .set(auth)
+      .send(startBody)
+      .expect(201);
+    expect(replay.body).toEqual(started.body);
+    await expect(
+      prisma.shiftEvent.count({ where: { shiftId: shift.id, deviceEventId: startBody.eventId } }),
+    ).resolves.toBe(1);
+    const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+      where: { shiftId: shift.id },
+    });
+    await expect(
+      prisma.shiftEvent.create({
+        data: {
+          companyId: 'norte-company',
+          shiftId: shift.id,
+          assignmentId: assignment.id,
+          type: 'start',
+          deviceEventId: startBody.eventId,
+          occurredAt: new Date('2026-10-13T12:00:00.000Z'),
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+    const closeBody = {
+      eventId: randomUUID(),
+      occurredAtDevice: '2026-10-13T12:00:00.000Z',
+      location: startBody.location,
+    };
+    await client.post(`/api/v1/turnos/${shift.id}/cerrar`).set(auth).send(closeBody).expect(400);
+    const closed = await client
+      .post(`/api/v1/turnos/${shift.id}/cerrar`)
+      .set(auth)
+      .send({ ...closeBody, reason: 'Relevo anticipado' })
+      .expect(201);
+    expect(closed.body).toMatchObject({ status: 'closed', closedEarly: true });
+  });
+
+  it('cierra por administración al desactivar forzadamente y conserva el cierre automático al recibir el real', async () => {
+    const client = request(app.getHttpServer());
+    const prisma = app.get(PrismaService).systemPrisma;
+    const execution = app.get(ShiftExecutionService);
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-13T09:00:00.000Z'),
+        endsAt: new Date('2026-10-13T10:00:00.000Z'),
+        serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+        startedAt: new Date('2026-10-13T09:00:00.000Z'),
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2026-10-13T09:00:00.000Z'),
+            endsAt: new Date('2026-10-13T10:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+      },
+      include: { assignments: true },
+    });
+    createdShiftIds.push(shift.id);
+    await client
+      .post(`/api/v1/usuarios/${northGuardId}/desactivar`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({})
+      .expect(409);
+    testNow = new Date('2026-10-13T11:55:00.000Z');
+    const futureShiftCount = await prisma.shift.count({
+      where: {
+        status: 'scheduled',
+        startsAt: { gt: testNow },
+        assignments: { some: { guardId: northGuardId, isCurrent: true, active: true } },
+      },
+    });
+    const forced = await client
+      .post(`/api/v1/usuarios/${northGuardId}/desactivar`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({
+        forceDeactivate: true,
+        reason: 'Celular robado',
+        ...(futureShiftCount
+          ? { leaveUnassigned: true, confirmUnassignedCount: futureShiftCount }
+          : {}),
+      })
+      .expect(201);
+    testNow = new Date('2026-10-13T12:00:00.000Z');
+    expect(z.object({ ok: z.literal(true) }).parse(forced.body).ok).toBe(true);
+    await expect(
+      prisma.shift.findUniqueOrThrow({ where: { id: shift.id } }),
+    ).resolves.toMatchObject({
+      status: 'closed',
+      closedBy: 'admin',
+      closeReason: 'Celular robado',
+    });
+    await expect(
+      prisma.shiftEvent.findFirstOrThrow({ where: { shiftId: shift.id } }),
+    ).resolves.toMatchObject({ type: 'admin_close', actorUserId: actor.id });
+    await client
+      .post(`/api/v1/turnos/${shift.id}/cerrar`)
+      .set('Authorization', 'Bearer token-guard')
+      .send({
+        eventId: randomUUID(),
+        occurredAtDevice: '2026-10-13T11:59:00.000Z',
+        location: {
+          status: 'ok',
+          latitude: -34.6,
+          longitude: -58.4,
+          accuracyMeters: 5,
+          simulation: 'not_simulated',
+          takenAt: '2026-10-13T11:59:00.000Z',
+        },
+      })
+      .expect(201);
+    await expect(
+      prisma.shiftEvent.findFirstOrThrow({ where: { shiftId: shift.id, type: 'close' } }),
+    ).resolves.toMatchObject({ countsForCompliance: false });
+    await prisma.user.update({ where: { id: northGuardId }, data: { status: 'active' } });
+
+    const automatic = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-13T10:00:00.000Z'),
+        endsAt: new Date('2026-10-13T11:00:00.000Z'),
+        serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+        startedAt: new Date('2026-10-13T10:00:00.000Z'),
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2026-10-13T10:00:00.000Z'),
+            endsAt: new Date('2026-10-13T11:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(automatic.id);
+    testNow = new Date('2026-10-13T13:00:00.000Z');
+    await expect(execution.autoClose(automatic.id)).resolves.toBe(true);
+    const lateClose = await client
+      .post(`/api/v1/turnos/${automatic.id}/cerrar`)
+      .set('Authorization', 'Bearer token-guard')
+      .send({
+        eventId: randomUUID(),
+        occurredAtDevice: '2026-10-13T12:59:00.000Z',
+        location: {
+          status: 'ok',
+          latitude: -34.6,
+          longitude: -58.4,
+          accuracyMeters: 5,
+          simulation: 'not_simulated',
+          takenAt: '2026-10-13T12:59:00.000Z',
+        },
+      })
+      .expect(201);
+    testNow = new Date('2026-10-13T12:00:00.000Z');
+    expect(z.object({ status: z.literal('closed') }).parse(lateClose.body).status).toBe('closed');
+    await expect(
+      prisma.shift.findUniqueOrThrow({ where: { id: automatic.id } }),
+    ).resolves.toMatchObject({
+      status: 'closed',
+      autoClosedAt: new Date('2026-10-13T13:00:00.000Z'),
+      closedAt: new Date('2026-10-13T12:59:00.000Z'),
+    });
+    await expect(
+      prisma.shiftEvent.count({ where: { shiftId: automatic.id, type: 'auto_close' } }),
+    ).resolves.toBe(1);
+  });
+
+  it('cierra turnos en curso al dar de baja un predio y los cuenta en el impacto', async () => {
+    const client = request(app.getHttpServer());
+    const prisma = app.get(PrismaService).systemPrisma;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const pendingGuard = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-pending' },
+    });
+    const site = await prisma.site.create({
+      data: {
+        companyId: 'norte-company',
+        clientId: (
+          await prisma.client.findUniqueOrThrow({
+            where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
+          })
+        ).id,
+        name: `HU10-${randomUUID()}`,
+        address: 'Domicilio de prueba',
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdSiteIds.push(site.id);
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: site.id,
+        startsAt: new Date('2026-10-13T11:00:00.000Z'),
+        endsAt: new Date('2026-10-13T13:00:00.000Z'),
+        serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+        startedAt: new Date('2026-10-13T11:00:00.000Z'),
+        assignments: {
+          create: {
+            guardId: pendingGuard.id,
+            startsAt: new Date('2026-10-13T11:00:00.000Z'),
+            endsAt: new Date('2026-10-13T13:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    await client.get(`/api/v1/turnos/${shift.id}/datos`).expect(401);
+    await client
+      .get(`/api/v1/turnos/${shift.id}/datos`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(404);
+    await client
+      .get(`/api/v1/turnos/${shift.id}/estado`)
+      .set('Authorization', 'Bearer token-client')
+      .expect(403);
+    const auth = { Authorization: 'Bearer token-admin' };
+    const impact = await client
+      .get(`/api/v1/predios/${site.id}/impacto-baja`)
+      .set(auth)
+      .expect(200);
+    expect(
+      z.object({ inProgressShiftsToClose: z.number() }).parse(impact.body).inProgressShiftsToClose,
+    ).toBe(1);
+    await client
+      .post(`/api/v1/predios/${site.id}/baja`)
+      .set(auth)
+      .send({ confirm: true })
+      .expect(201);
+    await expect(
+      prisma.shift.findUniqueOrThrow({ where: { id: shift.id } }),
+    ).resolves.toMatchObject({
+      status: 'closed',
+      closedBy: 'admin',
+      closeReason: 'baja del predio',
+    });
+  });
+
   it('protege endpoints de turnos, impacto y desactivación por rol y tenant', async () => {
     const client = request(app.getHttpServer());
     const prisma = app.get(PrismaService).systemPrisma;
@@ -1914,6 +2368,23 @@ describe('Aplicación (e2e)', () => {
     const other = await makeShift(
       (await prisma.user.findUniqueOrThrow({ where: { firebaseUid: 'seed-norte-pending' } })).id,
     );
+    await client.post(`/api/v1/turnos/${owned.id}/iniciar`).send({}).expect(401);
+    await client
+      .post(`/api/v1/turnos/${other.id}/iniciar`)
+      .set('Authorization', 'Bearer token-guard')
+      .send({
+        eventId: randomUUID(),
+        occurredAtDevice: '2026-10-13T12:00:00.000Z',
+        location: {
+          status: 'ok',
+          latitude: -34.6,
+          longitude: -58.4,
+          accuracyMeters: 5,
+          simulation: 'not_simulated',
+          takenAt: '2026-10-13T12:00:00.000Z',
+        },
+      })
+      .expect(403);
     await client
       .get(`/api/v1/turnos/${owned.id}`)
       .set('Authorization', 'Bearer token-guard')

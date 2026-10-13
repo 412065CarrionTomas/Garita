@@ -15,6 +15,7 @@ export const COMPANY_ID_MODELS = [
   'Round',
   'RoundVersionCheckpoint',
   'Shift',
+  'ShiftEvent',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
@@ -81,6 +82,8 @@ export function addSiteAssignmentFilter(
   if (model === 'ShiftAssignment')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'ShiftRound')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'ShiftEvent')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'Client') {
     const siteFilter = { supervisors: { some: { userId: user.userId } } };

@@ -10,6 +10,7 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
   version = 0;
   shift: unknown | null = null;
   events: PendingFieldEvent[] = [];
+  sent = new Set<string>();
   tables: string[] = [];
   async getVersion() {
     return this.version;
@@ -30,10 +31,13 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
     return this.shift;
   }
   async insertEvent(event: PendingFieldEvent) {
-    this.events.push(event);
+    if (!this.events.some(({ id }) => id === event.id)) this.events.push(event);
+  }
+  async markEventSent(id: string) {
+    this.sent.add(id);
   }
   async readEvents() {
-    return this.events;
+    return this.events.filter(({ id }) => !this.sent.has(id));
   }
 }
 const shift = {
@@ -56,14 +60,14 @@ describe('field database', () => {
   it('migrates an empty database and upgrades the previous version', async () => {
     const fresh = new MemoryDatabase();
     await migrateDatabase(fresh);
-    expect(fresh.version).toBe(1);
-    expect(fresh.tables).toHaveLength(6);
+    expect(fresh.version).toBe(2);
+    expect(fresh.tables).toHaveLength(7);
     const prior = new MemoryDatabase();
     prior.version = 0;
     await migrateDatabase(prior);
-    expect(prior.version).toBe(1);
+    expect(prior.version).toBe(2);
     await migrateDatabase(prior);
-    expect(prior.tables).toHaveLength(6);
+    expect(prior.tables).toHaveLength(7);
   });
   it('saves, reopens, replaces, clears, and validates pending events', async () => {
     const disk = new MemoryDatabase();
@@ -83,6 +87,8 @@ describe('field database', () => {
     };
     await reopenedApp.addPendingEvent(event);
     await expect(reopenedApp.listPendingEvents()).resolves.toEqual([event]);
+    await reopenedApp.markPendingEventSent(event.id);
+    await expect(reopenedApp.listPendingEvents()).resolves.toEqual([]);
     await expect(reopenedApp.addPendingEvent({ ...event, id: 'bad' })).rejects.toThrow();
     await reopenedApp.clearShiftData();
     await expect(reopenedApp.getShiftData()).resolves.toBeNull();
