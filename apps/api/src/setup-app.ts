@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import type { Env } from './config/env';
 
@@ -17,4 +18,9 @@ export function setupApp(app: INestApplication): void {
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.enableShutdownHooks();
+  const document = SwaggerModule.createDocument(
+    app,
+    new DocumentBuilder().setTitle('Garita API').setVersion('1').addBearerAuth().build(),
+  );
+  SwaggerModule.setup('docs', app, document, { useGlobalPrefix: true });
 }

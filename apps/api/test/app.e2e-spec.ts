@@ -159,7 +159,6 @@ class TestOnlyModule {}
 import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
-import { CHECKPOINT_USAGE_PORT } from '../src/modules/checkpoints/checkpoints-usage.port';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
@@ -171,7 +170,7 @@ describe('Aplicación (e2e)', () => {
   let southSiteId: string;
   let northSupervisorId: string;
   let northGuardId: string;
-  let activeRounds: { id: string; name: string }[] = [];
+  const createdRoundNames: string[] = [];
   const createdCheckpointIds: string[] = [];
 
   beforeAll(async () => {
@@ -193,8 +192,6 @@ describe('Aplicación (e2e)', () => {
           return Promise.reject(new Error('Token inválido'));
         },
       })
-      .overrideProvider(CHECKPOINT_USAGE_PORT)
-      .useValue({ findActiveRoundsUsing: () => Promise.resolve(activeRounds) })
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -260,6 +257,27 @@ describe('Aplicación (e2e)', () => {
 
   afterAll(async () => {
     const prisma = app.get(PrismaService).systemPrisma;
+    const rounds = await prisma.round.findMany({
+      where: { name: { in: createdRoundNames } },
+      select: { id: true },
+    });
+    const roundIds = rounds.map(({ id }) => id);
+    if (roundIds.length) {
+      const versions = await prisma.roundVersion.findMany({
+        where: { roundId: { in: roundIds } },
+        select: { id: true },
+      });
+      const versionIds = versions.map(({ id }) => id);
+      await prisma.roundVersionCheckpoint.deleteMany({
+        where: { roundVersionId: { in: versionIds } },
+      });
+      await prisma.round.updateMany({
+        where: { id: { in: roundIds } },
+        data: { currentVersionId: null },
+      });
+      await prisma.roundVersion.deleteMany({ where: { id: { in: versionIds } } });
+      await prisma.round.deleteMany({ where: { id: { in: roundIds } } });
+    }
     await prisma.checkpoint.deleteMany({ where: { id: { in: createdCheckpointIds } } });
     await prisma.checkpoint.deleteMany({
       where: { name: { startsWith: 'Punto PDF E2E ' } },
@@ -367,20 +385,21 @@ describe('Aplicación (e2e)', () => {
       });
     }
 
-    activeRounds = [{ id: 'round-1', name: 'Perimetral' }];
+    const seededCheckpoint = await systemPrisma.checkpoint.findFirstOrThrow({
+      where: { siteId: northAssignedSiteId, status: 'active' },
+      orderBy: { name: 'asc' },
+    });
     await request(app.getHttpServer())
-      .post(`/api/v1/puntos/${checkpoint.id}/baja`)
+      .post(`/api/v1/puntos/${seededCheckpoint.id}/baja`)
       .set(auth)
       .expect(409)
       .expect(({ body: result }) => {
         const parsedResult: unknown = JSON.parse(JSON.stringify(result));
-        expect(
-          z
-            .object({ rounds: z.array(z.object({ id: z.string(), name: z.string() })) })
-            .parse(parsedResult).rounds,
-        ).toContainEqual({ id: 'round-1', name: 'Perimetral' });
+        const rounds = z
+          .object({ rounds: z.array(z.object({ id: z.string(), name: z.string() })) })
+          .parse(parsedResult).rounds;
+        expect(rounds.map(({ name }) => name)).toContain('Perimetral');
       });
-    activeRounds = [];
 
     const regenerated = await request(app.getHttpServer())
       .post(`/api/v1/puntos/${checkpoint.id}/regenerar-qr`)
@@ -484,6 +503,141 @@ describe('Aplicación (e2e)', () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
 
     expect(liveHealthResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it('crea rondas, conserva las versiones anteriores y valida los permisos', async () => {
+    const swagger = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
+    const swaggerDocument: unknown = swagger.body as unknown;
+    const swaggerPaths = z
+      .object({ paths: z.record(z.string(), z.unknown()) })
+      .parse(swaggerDocument).paths;
+    expect(Object.keys(swaggerPaths)).toEqual(
+      expect.arrayContaining([
+        '/api/v1/predios/{id}/rondas',
+        '/api/v1/rondas/{id}',
+        '/api/v1/rondas/{id}/baja',
+        '/api/v1/rondas/previsualizar-ventanas',
+      ]),
+    );
+    const auth = { Authorization: 'Bearer token-admin' };
+    const points = await app.get(PrismaService).systemPrisma.checkpoint.findMany({
+      where: { siteId: northAssignedSiteId, status: 'active' },
+      take: 2,
+      orderBy: { name: 'asc' },
+    });
+    const name = `Ronda e2e ${randomUUID()}`;
+    createdRoundNames.push(name);
+    const payload = {
+      name,
+      checkpointIds: points.map(({ id }) => id),
+      frequencyMinutes: 30,
+      windowStartLocal: '22:00',
+      windowEndLocal: '06:00',
+      graceMinutes: 15,
+    };
+    for (const frequencyMinutes of [10, 1500]) {
+      await request(app.getHttpServer())
+        .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+        .set(auth)
+        .send({ ...payload, name: `${name} frecuencia ${frequencyMinutes}`, frequencyMinutes })
+        .expect(400);
+    }
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send({ ...payload, name: `${name} gracia`, graceMinutes: 20 })
+      .expect(400);
+    const otherSitePoint = await app.get(PrismaService).systemPrisma.checkpoint.findFirstOrThrow({
+      where: { siteId: northUnassignedSiteId, status: 'active' },
+      select: { id: true },
+    });
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send({ ...payload, name: `${name} otro predio`, checkpointIds: [otherSitePoint.id] })
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send({ ...payload, checkpointIds: [] })
+      .expect(400);
+    const created = await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send(payload)
+      .expect(201);
+    const id = z.object({ id: z.string() }).parse(created.body).id;
+    const preview = await request(app.getHttpServer())
+      .post('/api/v1/rondas/previsualizar-ventanas')
+      .set(auth)
+      .send({
+        frequencyMinutes: 120,
+        windowStartLocal: '22:00',
+        windowEndLocal: '06:00',
+        graceMinutes: 15,
+      })
+      .expect(200);
+    const previewResponse: unknown = preview.body as unknown;
+    const previewWindows = z
+      .object({ windows: z.array(z.string()) })
+      .parse(previewResponse).windows;
+    expect(previewWindows).toHaveLength(4);
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send(payload)
+      .expect(409);
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send({
+        ...payload,
+        name: `${name} duplicados`,
+        checkpointIds: [points[0]?.id, points[0]?.id],
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/api/v1/rondas/${id}`)
+      .set(auth)
+      .send({ ...payload, checkpointIds: [points[1]?.id] })
+      .expect(200);
+    const listed = await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .expect(200);
+    const round = z
+      .array(z.unknown())
+      .parse(listed.body)
+      .find((item) => (item as { id?: string }).id === id);
+    const versions = await app.get(PrismaService).systemPrisma.roundVersion.findMany({
+      where: { roundId: id },
+      include: { checkpoints: true },
+      orderBy: { versionNumber: 'asc' },
+    });
+    expect(versions).toHaveLength(2);
+    expect(versions[0]?.checkpoints).toHaveLength(2);
+    expect(versions[1]?.checkpoints).toHaveLength(1);
+    expect(round).toBeDefined();
+    await request(app.getHttpServer()).post(`/api/v1/rondas/${id}/baja`).set(auth).expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northUnassignedSiteId}/rondas`)
+      .set({ Authorization: 'Bearer token-supervisor' })
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${southSiteId}/rondas`)
+      .set(auth)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set({ Authorization: 'Bearer token-client' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set({ Authorization: 'Bearer token-guard' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .expect(401);
   });
 
   it('GET /api/v1/health/ready verifica PostgreSQL y Redis', async () => {

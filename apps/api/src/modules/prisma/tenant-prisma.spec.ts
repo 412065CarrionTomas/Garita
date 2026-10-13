@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import type { PrismaClient } from '../../generated/prisma/client';
 import {
   COMPANY_ID_MODELS,
+  addSiteAssignmentFilter,
   createTenantPrismaClient,
   INDIRECT_TENANT_MODELS,
   scopeArgs,
@@ -37,6 +38,25 @@ describe('registro del aislamiento tenant', () => {
     expect(scopeArgs('Checkpoint', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
       where: { status: 'active', companyId: 'norte' },
     });
+  });
+
+  it('registra rondas y filtra sus lecturas por predios asignados', () => {
+    expect(COMPANY_ID_MODELS).toContain('Round');
+    expect(
+      addSiteAssignmentFilter(
+        'Round',
+        { where: { status: 'active' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { status: 'active' },
+          { site: { supervisors: { some: { userId: 'supervisor-1' } } } },
+        ],
+      },
+    });
+    expect(INDIRECT_TENANT_MODELS).toHaveProperty('RoundVersion');
   });
 
   it('falla cerrado ante operaciones tenant no soportadas', () => {
