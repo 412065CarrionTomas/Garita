@@ -39,12 +39,34 @@ export class CheckpointsService {
     @Inject(CHECKPOINT_USAGE_PORT) private readonly usage: CheckpointUsagePort,
   ) {}
 
-  async list(siteId: string) {
+  async list(siteId: string, includeNfcTag = false, user?: AuthenticatedUser) {
     await this.resources.findOwnedOrThrow('Site', siteId);
-    return this.prisma.tenantPrisma.checkpoint.findMany({
+    if (!includeNfcTag)
+      return this.prisma.tenantPrisma.checkpoint.findMany({
+        where: { siteId, status: 'active' },
+        orderBy: { name: 'asc' },
+      });
+    const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
       where: { siteId, status: 'active' },
       orderBy: { name: 'asc' },
+      include: {
+        nfcTags: {
+          where: { status: 'active' },
+          take: 1,
+          select: { status: true, associatedAt: true, uid: true },
+        },
+      },
     });
+    return checkpoints.map(({ nfcTags, ...checkpoint }) => ({
+      ...checkpoint,
+      etiquetaNfc: nfcTags[0]
+        ? {
+            status: nfcTags[0].status,
+            associatedAt: nfcTags[0].associatedAt,
+            ...(user?.role === 'admin' ? { uid: nfcTags[0].uid } : {}),
+          }
+        : null,
+    }));
   }
 
   async create(siteId: string, input: CheckpointInput, user: AuthenticatedUser) {

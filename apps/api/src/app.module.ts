@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { SitesModule } from './modules/sites/sites.module';
 import { CheckpointsModule } from './modules/checkpoints/checkpoints.module';
+import { NfcTagsModule } from './modules/nfc-tags/nfc-tags.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CheckpointsModule } from './modules/checkpoints/checkpoints.module';
     UsersModule,
     SitesModule,
     CheckpointsModule,
+    NfcTagsModule,
   ],
 })
 export class AppModule {}
