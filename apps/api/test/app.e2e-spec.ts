@@ -577,7 +577,11 @@ describe('Aplicación (e2e)', () => {
         graceMinutes: 15,
       })
       .expect(201);
-    expect(z.array(z.string()).parse(preview.body.windows)).toHaveLength(4);
+    const previewResponse: unknown = preview.body as unknown;
+    const previewWindows = z
+      .object({ windows: z.array(z.string()) })
+      .parse(previewResponse).windows;
+    expect(previewWindows).toHaveLength(4);
     await request(app.getHttpServer())
       .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
       .set(auth)
