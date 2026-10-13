@@ -1,6 +1,7 @@
 ## Tarea de Jira
 
-SCRUM-
+HU<id>-<name>
+ID-<subtask-name>
 
 ## Qué cambia
 
