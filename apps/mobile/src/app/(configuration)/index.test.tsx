@@ -1,5 +1,5 @@
 import { Alert } from 'react-native';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { render, userEvent, waitFor } from '@testing-library/react-native';
 import type { AuthMeResponse } from '@garita/shared';
 import { useAuth } from '@/features/auth/auth-context';
 import { ApiError, apiDelete, apiGet, apiRequest } from '@/lib/api-client';
@@ -93,14 +93,16 @@ it('informa cuando el celular no tiene NFC y no ofrece asociar', async () => {
 
 it('informa que NFC está apagado y permite abrir ajustes', async () => {
   availabilityMock.mockResolvedValue('disabled');
+  const user = userEvent.setup();
   const view = await mount();
-  fireEvent.press(await view.findByLabelText('Abrir ajustes de NFC'));
+  await user.press(await view.findByLabelText('Abrir ajustes de NFC'));
   expect(openNfcSettings).toHaveBeenCalled();
 });
 
 it('confirma una asociación exitosa con el mensaje visible', async () => {
+  const user = userEvent.setup();
   const view = await mount();
-  fireEvent.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
   expect(await view.findByText('Etiqueta asociada a Portón trasero')).toBeTruthy();
   expect(putMock).toHaveBeenCalledWith('PUT', '/puntos/point-a/etiqueta-nfc', expect.anything(), {
     uid: '04A1B2C3',
@@ -115,8 +117,9 @@ it('pide confirmación y reintenta el movimiento ante un 409', async () => {
   const alert = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
     buttons?.find((button) => button.text === 'Mover etiqueta')?.onPress?.();
   });
+  const user = userEvent.setup();
   const view = await mount();
-  fireEvent.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
   await waitFor(() => expect(putMock).toHaveBeenCalledTimes(2));
   expect(alert).toHaveBeenCalledWith(
     'La etiqueta está asociada a Punto anterior. ¿Moverla a Portón trasero?',
@@ -134,8 +137,9 @@ it('pide confirmación y reintenta el movimiento ante un 409', async () => {
 
 it('muestra Etiqueta no disponible ante un 422', async () => {
   putMock.mockRejectedValue(new ApiError('unavailable', 422));
+  const user = userEvent.setup();
   const view = await mount();
-  fireEvent.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
   expect(await view.findByText('Etiqueta no disponible')).toBeTruthy();
 });
 
@@ -144,8 +148,9 @@ it('avisa si está sin conexión y no inicia la lectura NFC', async () => {
     isConnected: false,
     isInternetReachable: false,
   } as Network.NetworkState);
+  const user = userEvent.setup();
   const view = await mount();
-  fireEvent.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
   expect(await view.findByText('Se necesita conexión para asociar una etiqueta.')).toBeTruthy();
   expect(readMock).not.toHaveBeenCalled();
 });
