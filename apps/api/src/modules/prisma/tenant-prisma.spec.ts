@@ -40,6 +40,32 @@ describe('registro del aislamiento tenant', () => {
     });
   });
 
+  it('registra etiquetas NFC y las limita por el predio de su punto', () => {
+    expect(COMPANY_ID_MODELS).toContain('NfcTag');
+    expect(scopeArgs('NfcTag', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
+      where: { status: 'active', companyId: 'norte' },
+    });
+    expect(
+      addSiteAssignmentFilter(
+        'NfcTag',
+        { where: { status: 'active' } },
+        {
+          userId: 'supervisor-1',
+          companyId: 'norte',
+          role: 'supervisor',
+          status: 'active',
+        },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { status: 'active' },
+          { checkpoint: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+  });
+
   it('registra rondas y filtra sus lecturas por predios asignados', () => {
     expect(COMPANY_ID_MODELS).toContain('Round');
     expect(

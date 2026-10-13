@@ -172,6 +172,7 @@ describe('Aplicación (e2e)', () => {
   let northGuardId: string;
   const createdRoundNames: string[] = [];
   const createdCheckpointIds: string[] = [];
+  const createdNfcCheckpointIds: string[] = [];
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -199,6 +200,8 @@ describe('Aplicación (e2e)', () => {
     await app.init();
 
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.nfcTag.deleteMany({ where: { checkpointId: { in: createdNfcCheckpointIds } } });
+    await prisma.checkpoint.deleteMany({ where: { id: { in: createdNfcCheckpointIds } } });
     const northClient = await prisma.client.findUniqueOrThrow({
       where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
     });
@@ -517,6 +520,9 @@ describe('Aplicación (e2e)', () => {
         '/api/v1/rondas/{id}',
         '/api/v1/rondas/{id}/baja',
         '/api/v1/rondas/previsualizar-ventanas',
+        '/api/v1/configuracion/predios',
+        '/api/v1/predios/{id}/puntos',
+        '/api/v1/puntos/{id}/etiqueta-nfc',
       ]),
     );
     const auth = { Authorization: 'Bearer token-admin' };
@@ -1245,4 +1251,159 @@ describe('Aplicación (e2e)', () => {
         .expect(403);
     },
   );
+
+  it('asocia, reemplaza, mueve, rechaza otra empresa y quita etiquetas NFC', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const makePoint = async (siteId: string, label: string) => {
+      const row = await prisma.checkpoint.create({
+        data: {
+          companyId: siteId === southSiteId ? 'sur-company' : 'norte-company',
+          siteId,
+          name: `NFC ${label} ${randomUUID()}`,
+          latitude: -34.6,
+          longitude: -58.4,
+        },
+      });
+      createdNfcCheckpointIds.push(row.id);
+      return row;
+    };
+    const pointA = await makePoint(northAssignedSiteId, 'A');
+    const pointB = await makePoint(northAssignedSiteId, 'B');
+    const southPoint = await makePoint(southSiteId, 'Sur');
+    const base = request(app.getHttpServer());
+    const put = (pointId: string, uid: string, confirmMove?: boolean) =>
+      base
+        .put(`/api/v1/puntos/${pointId}/etiqueta-nfc`)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ uid, ...(confirmMove === undefined ? {} : { confirmMove }) });
+    const freeUid = `04${randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`;
+    await put(pointA.id, freeUid.toLowerCase())
+      .expect(200)
+      .expect(({ body }) => {
+        expect(z.object({ status: z.string() }).parse(body).status).toBe('active');
+      });
+    await put(pointA.id, `04:${freeUid.slice(2, 4)}-${freeUid.slice(4)}`).expect(200);
+    const replacementUid = `05${randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`;
+    await put(pointA.id, replacementUid).expect(200);
+    expect(
+      await prisma.nfcTag.findFirstOrThrow({ where: { checkpointId: pointA.id, uid: freeUid } }),
+    ).toMatchObject({ status: 'replaced', endedById: admin.id });
+    await put(pointB.id, replacementUid).expect(409);
+    await put(pointB.id, replacementUid, true).expect(200);
+    expect(
+      await prisma.nfcTag.findFirstOrThrow({
+        where: { checkpointId: pointA.id, uid: replacementUid },
+      }),
+    ).toMatchObject({ status: 'replaced' });
+    const foreignUid = `06${randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`;
+    await base
+      .put(`/api/v1/puntos/${southPoint.id}/etiqueta-nfc`)
+      .set('Authorization', 'Bearer token-south-admin')
+      .send({ uid: foreignUid })
+      .expect(200);
+    await put(pointA.id, foreignUid)
+      .expect(422)
+      .expect(({ body }) => {
+        expect(z.object({ message: z.string() }).parse(body).message).toBe(
+          'Etiqueta no disponible',
+        );
+        expect(JSON.stringify(body)).not.toContain('sur-company');
+      });
+    await base
+      .delete(`/api/v1/puntos/${pointB.id}/etiqueta-nfc`)
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    const nowReusable = await prisma.nfcTag.findFirstOrThrow({
+      where: { checkpointId: pointB.id, uid: replacementUid },
+    });
+    expect(nowReusable.status).toBe('removed');
+  });
+
+  it('expone los predios de configuración y aplica permisos del modo NFC', async () => {
+    const client = request(app.getHttpServer());
+    await client.get('/api/v1/configuracion/predios').expect(401);
+    await client
+      .get('/api/v1/configuracion/predios')
+      .set('Authorization', 'Bearer token-guard')
+      .expect(403);
+    await client
+      .get('/api/v1/configuracion/predios')
+      .set('Authorization', 'Bearer token-client')
+      .expect(403);
+    await client
+      .get('/api/v1/configuracion/predios')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: northAssignedSiteId }),
+            expect.objectContaining({ id: northUnassignedSiteId }),
+          ]),
+        );
+      });
+    await client
+      .get('/api/v1/configuracion/predios')
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(
+          z
+            .array(z.object({ id: z.string() }))
+            .parse(body)
+            .map(({ id }) => id),
+        ).toEqual([northAssignedSiteId]);
+      });
+    const pointOutsideAssignment = await app
+      .get(PrismaService)
+      .systemPrisma.checkpoint.findFirstOrThrow({ where: { siteId: northUnassignedSiteId } });
+    await client
+      .put(`/api/v1/puntos/${pointOutsideAssignment.id}/etiqueta-nfc`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ uid: 'A1B2C3D4' })
+      .expect(404);
+  });
+
+  it('la base limita las etiquetas activas por punto y por UID global', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const makePoint = async (name: string) => {
+      const row = await prisma.checkpoint.create({
+        data: {
+          companyId: 'norte-company',
+          siteId: northAssignedSiteId,
+          name: `NFC índice ${name} ${randomUUID()}`,
+          latitude: -34.6,
+          longitude: -58.4,
+        },
+      });
+      createdNfcCheckpointIds.push(row.id);
+      return row;
+    };
+    const first = await makePoint('primero');
+    const second = await makePoint('segundo');
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const uid = `07${randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`;
+    const active = (checkpointId: string, tagUid: string) =>
+      prisma.nfcTag.create({
+        data: {
+          companyId: 'norte-company',
+          checkpointId,
+          uid: tagUid,
+          associatedById: admin.id,
+        },
+      });
+    const original = await active(first.id, uid);
+    await expect(active(first.id, `${uid.slice(0, 6)}AB`)).rejects.toMatchObject({ code: 'P2002' });
+    await expect(active(second.id, uid)).rejects.toMatchObject({ code: 'P2002' });
+    await prisma.nfcTag.update({
+      where: { id: original.id },
+      data: { status: 'replaced', endedAt: new Date(), endedById: admin.id },
+    });
+    await expect(active(second.id, uid)).resolves.toMatchObject({ uid, status: 'active' });
+  });
 });

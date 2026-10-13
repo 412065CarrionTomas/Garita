@@ -4,14 +4,16 @@ import { env } from '@/config/env';
 
 export class ApiError extends Error {
   readonly status: number | undefined;
-  constructor(message: string, status?: number) {
+  readonly payload: unknown;
+  constructor(message: string, status?: number, payload?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.payload = payload;
   }
 }
 
-type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'PUT';
+type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 export async function apiRequest<TSchema extends z.ZodType>(
   method: ApiMethod,
   path: string,
@@ -30,8 +32,14 @@ export async function apiRequest<TSchema extends z.ZodType>(
     headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (!response.ok)
-    throw new ApiError(`La API respondió con el estado ${response.status}`, response.status);
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => undefined);
+    const detail =
+      typeof payload === 'object' && payload !== null && 'message' in payload
+        ? String(payload.message)
+        : `La API respondió con el estado ${response.status}`;
+    throw new ApiError(detail, response.status, payload);
+  }
   const result = schema.safeParse(await response.json());
   if (!result.success) throw new ApiError('La respuesta de la API no tiene el formato esperado');
   return result.data;
@@ -42,4 +50,8 @@ export function apiGet<TSchema extends z.ZodType>(
   init?: RequestInit,
 ) {
   return apiRequest('GET', path, schema, undefined, init);
+}
+
+export function apiDelete<TSchema extends z.ZodType>(path: string, schema: TSchema) {
+  return apiRequest('DELETE', path, schema);
 }

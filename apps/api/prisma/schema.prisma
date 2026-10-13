@@ -36,6 +36,12 @@ enum RecordStatus {
   inactive
 }
 
+enum NfcTagStatus {
+  active
+  replaced
+  removed
+}
+
 model Company {
   id        String   @id @default(cuid())
   name      String
@@ -139,11 +145,30 @@ model Checkpoint {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
   site                  Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  nfcTags               NfcTag[]
   roundVersions         RoundVersionCheckpoint[]
 
   @@unique([siteId, name])
   @@index([companyId, status])
   @@index([siteId, status])
+}
+
+model NfcTag {
+  id             String       @id @default(cuid())
+  companyId      String
+  checkpointId   String
+  uid            String
+  status         NfcTagStatus @default(active)
+  associatedById String
+  associatedAt   DateTime     @default(now())
+  endedAt        DateTime?
+  endedById      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  checkpoint     Checkpoint   @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, checkpointId, status])
+  @@index([uid, status])
 }
 
 model Round {
