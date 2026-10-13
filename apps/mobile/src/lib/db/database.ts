@@ -11,6 +11,7 @@ export interface FieldDatabase {
   replaceShift(data: ShiftOfflineData | null): Promise<void>;
   readShift(): Promise<unknown | null>;
   insertEvent(event: PendingFieldEvent): Promise<void>;
+  markEventSent(id: string): Promise<void>;
   readEvents(): Promise<unknown[]>;
 }
 
@@ -44,6 +45,12 @@ export async function migrateDatabase(database: MigrationDatabase): Promise<void
         'CREATE TABLE IF NOT EXISTS pending_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, payload TEXT NOT NULL, occurred_at_device TEXT NOT NULL, created_at TEXT NOT NULL)',
       );
       await database.setVersion(1);
+    });
+  }
+  if (version < 2) {
+    await database.transaction(async () => {
+      await database.exec('ALTER TABLE pending_events ADD COLUMN sent INTEGER NOT NULL DEFAULT 0');
+      await database.setVersion(2);
     });
   }
 }
@@ -132,6 +139,9 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
       event.createdAt,
     );
   }
+  async markEventSent(id: string): Promise<void> {
+    await this.db.runAsync('UPDATE pending_events SET sent = 1 WHERE id = ?', id);
+  }
   async readEvents(): Promise<unknown[]> {
     return (
       await this.db.getAllAsync<{
@@ -140,7 +150,9 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
         payload: string;
         occurred_at_device: string;
         created_at: string;
-      }>('SELECT * FROM pending_events ORDER BY created_at')
+      }>(
+        'SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 ORDER BY created_at',
+      )
     ).map((row) => ({
       id: row.id,
       type: row.type,
@@ -181,6 +193,9 @@ export function createFieldRepository(database: FieldDatabase) {
     },
     async listPendingEvents(): Promise<PendingFieldEvent[]> {
       return (await database.readEvents()).map((event) => pendingFieldEventSchema.parse(event));
+    },
+    async markPendingEventSent(id: string): Promise<void> {
+      await database.markEventSent(id);
     },
   };
 }

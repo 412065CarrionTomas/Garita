@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { MyShiftsScreen } from './my-shifts-screen';
 import { apiGet } from '@/lib/api-client';
 
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+const mockPush = jest.fn();
+jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 
 const fetchShifts = jest.mocked(apiGet);
 
@@ -21,7 +23,13 @@ describe('<MyShiftsScreen />', () => {
     await render(<MyShiftsScreen />);
     expect(await screen.findByText('Predio A')).toBeOnTheScreen();
     expect(screen.getByText(/Perimetral/)).toBeOnTheScreen();
-    fireEvent.press(screen.getByRole('button', { name: 'Actualizar turnos' }));
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Ver turno en Predio A' }));
+    });
+    expect(mockPush).toHaveBeenCalledWith('/turno/shift-1');
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Actualizar turnos' }));
+    });
     await waitFor(() => expect(fetchShifts).toHaveBeenCalledTimes(2));
   });
 
