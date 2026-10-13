@@ -11,6 +11,7 @@ export const COMPANY_ID_MODELS = [
   'Site',
   'SiteSupervisor',
   'Checkpoint',
+  'NfcTag',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
@@ -52,7 +53,7 @@ function addTenantFilter(model: string, args: unknown, companyId: string): unkno
   return { ...args, where: { ...where, [config.relation]: { ...relation, companyId } } };
 }
 
-function addSiteAssignmentFilter(
+export function addSiteAssignmentFilter(
   model: string,
   args: unknown,
   user: TenantContext['user'],
@@ -63,6 +64,8 @@ function addSiteAssignmentFilter(
   if (model === 'Site') return { ...args, where: { ...where, ...assignment } };
   if (model === 'SiteSupervisor') return { ...args, where: { ...where, userId: user.userId } };
   if (model === 'Checkpoint') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'NfcTag')
+    return { ...args, where: { AND: [where, { checkpoint: { site: assignment } }] } };
   if (model === 'Client') {
     const siteFilter = { supervisors: { some: { userId: user.userId } } };
     const constrainSites = (selection: unknown): unknown => {

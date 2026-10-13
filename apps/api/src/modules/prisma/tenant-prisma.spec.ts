@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import type { PrismaClient } from '../../generated/prisma/client';
 import {
   COMPANY_ID_MODELS,
+  addSiteAssignmentFilter,
   createTenantPrismaClient,
   INDIRECT_TENANT_MODELS,
   scopeArgs,
@@ -36,6 +37,32 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('Checkpoint');
     expect(scopeArgs('Checkpoint', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
       where: { status: 'active', companyId: 'norte' },
+    });
+  });
+
+  it('registra etiquetas NFC y las limita por el predio de su punto', () => {
+    expect(COMPANY_ID_MODELS).toContain('NfcTag');
+    expect(scopeArgs('NfcTag', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
+      where: { status: 'active', companyId: 'norte' },
+    });
+    expect(
+      addSiteAssignmentFilter(
+        'NfcTag',
+        { where: { status: 'active' } },
+        {
+          userId: 'supervisor-1',
+          companyId: 'norte',
+          role: 'supervisor',
+          status: 'active',
+        },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { status: 'active' },
+          { checkpoint: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
     });
   });
 
