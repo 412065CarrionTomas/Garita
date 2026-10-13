@@ -90,7 +90,7 @@ export class SitesService {
     return this.prisma.tenantPrisma.$transaction(async (tx) => {
       await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
       await this.weeklySchedules.terminateForSites(tx, siteIds);
-      await this.inProgress.closeForSites(tx, siteIds);
+      await this.inProgress.closeForSites(tx, siteIds, adminId);
       await tx.siteSupervisor.deleteMany({ where: { site: { clientId: id } } });
       await tx.site.updateMany({ where: { clientId: id }, data: { status: 'inactive' } });
       return tx.client.update({ where: { id }, data: { status: 'inactive' } });
@@ -187,7 +187,7 @@ export class SitesService {
     return this.prisma.tenantPrisma.$transaction(async (tx) => {
       await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
       await this.weeklySchedules.terminateForSites(tx, [id]);
-      await this.inProgress.closeForSites(tx, [id]);
+      await this.inProgress.closeForSites(tx, [id], adminId);
       await tx.siteSupervisor.deleteMany({ where: { siteId: id } });
       return tx.site.update({ where: { id }, data: { status: 'inactive' } });
     });
@@ -212,7 +212,7 @@ export class SitesService {
         ? this.prisma.tenantPrisma.shift.count({
             where: {
               siteId: { in: siteIds },
-              status: { in: ['scheduled', 'unassigned'] },
+              status: 'in_progress',
               startsAt: { lte: now },
               endsAt: { gt: now },
             },

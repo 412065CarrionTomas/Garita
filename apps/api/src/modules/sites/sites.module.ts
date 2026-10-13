@@ -5,20 +5,21 @@ import { SitesController } from './sites.controller';
 import { SitesService } from './sites.service';
 import {
   IN_PROGRESS_SHIFT_CLOSURE_PORT,
-  NoopInProgressShiftClosure,
   NoopWeeklyScheduleTermination,
   WEEKLY_SCHEDULE_TERMINATION_PORT,
 } from './deactivation-ports';
 import { ClockModule } from '../../common/clock';
+import { ShiftExecutionModule } from '../shift-execution/shift-execution.module';
+import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 
 @Module({
-  imports: [PrismaModule, ClockModule],
+  imports: [PrismaModule, ClockModule, ShiftExecutionModule],
   controllers: [SitesController],
   providers: [
     TenantResourceService,
     SitesService,
     { provide: WEEKLY_SCHEDULE_TERMINATION_PORT, useClass: NoopWeeklyScheduleTermination },
-    { provide: IN_PROGRESS_SHIFT_CLOSURE_PORT, useClass: NoopInProgressShiftClosure },
+    { provide: IN_PROGRESS_SHIFT_CLOSURE_PORT, useExisting: ShiftExecutionService },
   ],
   exports: [SitesService],
 })

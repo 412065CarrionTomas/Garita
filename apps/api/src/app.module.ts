@@ -14,6 +14,7 @@ import { NfcTagsModule } from './modules/nfc-tags/nfc-tags.module';
 import { RoundsModule } from './modules/rounds/rounds.module';
 import { ClockModule } from './common/clock';
 import { ShiftsModule } from './modules/shifts/shifts.module';
+import { ShiftExecutionModule } from './modules/shift-execution/shift-execution.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ShiftsModule } from './modules/shifts/shifts.module';
     RoundsModule,
     ClockModule,
     ShiftsModule,
+    ShiftExecutionModule,
   ],
 })
 export class AppModule {}
