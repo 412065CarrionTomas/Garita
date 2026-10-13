@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { SitesModule } from './modules/sites/sites.module';
 import { CheckpointsModule } from './modules/checkpoints/checkpoints.module';
+import { NfcTagsModule } from './modules/nfc-tags/nfc-tags.module';
 import { RoundsModule } from './modules/rounds/rounds.module';
 import { ClockModule } from './common/clock';
 import { ShiftsModule } from './modules/shifts/shifts.module';
@@ -31,6 +32,7 @@ import { ShiftsModule } from './modules/shifts/shifts.module';
     UsersModule,
     SitesModule,
     CheckpointsModule,
+    NfcTagsModule,
     RoundsModule,
     ClockModule,
     ShiftsModule,

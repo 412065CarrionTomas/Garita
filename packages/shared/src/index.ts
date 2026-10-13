@@ -4,6 +4,7 @@ export * from './auth';
 export * from './users';
 export * from './sites';
 export * from './checkpoints';
+export * from './nfc-tags';
 export * from './rounds/windows';
 export * from './rounds/schemas';
 export * from './shifts/windows';
