@@ -19,4 +19,8 @@ jest.mock('firebase/auth', () => ({
 }));
 
 // Enable React 19's act() checks in the test environment.
-global.IS_REACT_ACT_ENVIRONMENT = true;
+Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', {
+  value: true,
+  writable: true,
+  configurable: true,
+});
