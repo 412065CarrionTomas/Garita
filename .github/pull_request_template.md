@@ -1,43 +1,21 @@
-## Description
+## Tarea de Jira
 
-[Provide a brief description of the changes introduced by this PR]
+SCRUM-
 
-## Context / Motivation
+## Qué cambia
 
-[Why is this change needed? What problem does it solve?]
+<!-- Resumen de los cambios y por qué se hacen. -->
 
-## Type of Change
+## Cómo se probó
 
-- [ ] Fix (bug fix)
-- [ ] Feature (new user-facing functionality)
-- [ ] Refactor / Chore (code improvements, cleanup, or maintenance)
-- [ ] Docs (documentation update)
-- [ ] Breaking change (fix or feature that breaks backwards compatibility)
-
-## Scope
-
-- Angular Frontend
-
-## How to Test
-
-1. [Step 1]
-2. [Step 2]
-3. [Step 3]
-
-## Screenshots / Evidence
-
-[If applicable, attach screenshots or video recordings]
-
-## Risks & Mitigation
-
-[Are there any risks associated with deploying this change? How are they mitigated?]
+<!-- Tests agregados, pasos manuales, capturas si aplica. -->
 
 ## Checklist
 
-- [ ] Lint OK (`npm run lint` and `npm run stylelint` pass)
-- [ ] Build OK (`npm run build` completes with zero errors)
-- [ ] Tests OK (`npm run test` passes 100%)
-- [ ] Documentation updated
-- [ ] No hardcoded secrets, tokens, or backend URLs
-- [ ] Accessibility reviewed and verified
-- [ ] Commit messages strictly adhere to Conventional Commits
+- [ ] El pipeline de CI pasa (formato, lint, typecheck, test y build)
+- [ ] La documentación afectada está actualizada
+- [ ] Si hay variables de entorno nuevas, están en el `.env.example` correspondiente
+- [ ] Si hay cambios de esquema, tienen su migración de Prisma
+- [ ] Si hay cambios en archivos protegidos, la revisión la aprueba el dueño del repositorio
+- [ ] No se incluyen secretos, `.env` ni archivos generados
+- [ ] Los commits siguen Conventional Commits con descripción en español, sin coautores
