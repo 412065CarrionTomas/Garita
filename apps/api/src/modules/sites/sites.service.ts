@@ -123,7 +123,11 @@ export class SitesService {
       where: { ...(clientId ? { clientId } : {}), ...(status ? { status } : {}) },
       take: 200,
       orderBy: { name: 'asc' },
-      include: { client: true, supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } },
+      include: {
+        client: true,
+        company: { select: { timezone: true } },
+        supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } },
+      },
     });
     return sites.map((site) => ({
       ...site,
@@ -135,7 +139,11 @@ export class SitesService {
     await this.resources.findOwnedOrThrow('Site', id);
     const site = await this.prisma.tenantPrisma.site.findFirst({
       where: { id },
-      include: { client: true, supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } },
+      include: {
+        client: true,
+        company: { select: { timezone: true } },
+        supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } },
+      },
     });
     if (!site) throw new NotFoundException('Recurso no encontrado');
     return {
