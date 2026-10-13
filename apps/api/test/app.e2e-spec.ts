@@ -1669,6 +1669,12 @@ describe('Aplicación (e2e)', () => {
         where: { shiftId: { in: [overdue.id, future.id] }, active: true },
       }),
     ).resolves.toBe(0);
+    await expect(
+      prisma.shift.findUniqueOrThrow({ where: { id: future.id } }),
+    ).resolves.toMatchObject({
+      cancelledById: actor.id,
+      cancellationReason: 'Baja del predio',
+    });
     await prisma.site.update({ where: { id: northAssignedSiteId }, data: { status: 'active' } });
 
     const clientRow = await prisma.client.findUniqueOrThrow({
