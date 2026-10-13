@@ -26,3 +26,10 @@ CREATE INDEX "NfcTag_uid_status_idx" ON "NfcTag"("uid", "status");
 
 -- AddForeignKey
 ALTER TABLE "NfcTag" ADD CONSTRAINT "NfcTag_checkpointId_fkey" FOREIGN KEY ("checkpointId") REFERENCES "Checkpoint"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- Índices parciales: una etiqueta activa por punto y un punto activo por UID.
+CREATE UNIQUE INDEX "NfcTag_one_active_per_checkpoint"
+ON "NfcTag" ("checkpointId") WHERE "status" = 'active';
+
+CREATE UNIQUE INDEX "NfcTag_one_active_per_uid"
+ON "NfcTag" ("uid") WHERE "status" = 'active';
