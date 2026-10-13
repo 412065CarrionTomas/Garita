@@ -520,6 +520,9 @@ describe('Aplicación (e2e)', () => {
         '/api/v1/rondas/{id}',
         '/api/v1/rondas/{id}/baja',
         '/api/v1/rondas/previsualizar-ventanas',
+        '/api/v1/configuracion/predios',
+        '/api/v1/predios/{id}/puntos',
+        '/api/v1/puntos/{id}/etiqueta-nfc',
       ]),
     );
     const auth = { Authorization: 'Bearer token-admin' };

@@ -11,6 +11,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   checkpointInputSchema,
   checkpointListQuerySchema,
@@ -21,11 +22,22 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { CheckpointsService } from './checkpoints.service';
 
 @Controller()
+@ApiTags('puntos')
+@ApiBearerAuth()
 export class CheckpointsController {
   constructor(private readonly checkpoints: CheckpointsService) {}
 
   @Get('predios/:id/puntos')
   @Roles('admin', 'supervisor')
+  @ApiQuery({ name: 'incluirEtiqueta', required: false, enum: ['true', 'false'] })
+  @ApiResponse({
+    status: 200,
+    description: 'Puntos del predio y, si se solicita, su etiqueta activa.',
+  })
+  @ApiResponse({ status: 400, description: 'Parámetro incluirEtiqueta inválido.' })
+  @ApiResponse({ status: 401, description: 'Falta autenticación.' })
+  @ApiResponse({ status: 403, description: 'El usuario no puede ver este predio.' })
+  @ApiResponse({ status: 404, description: 'Predio inexistente.' })
   list(
     @Param('id') siteId: string,
     @Query() query: unknown,
