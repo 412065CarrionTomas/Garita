@@ -237,19 +237,32 @@ export function createTenantPrismaClient(systemPrisma: PrismaClient, context: Te
       },
     },
   });
-  return new Proxy(extended, {
+  return blockRawSql(extended);
+}
+
+const RAW_SQL_METHODS = ['$queryRaw', '$executeRaw', '$queryRawUnsafe', '$executeRawUnsafe'];
+
+/** Bloquea SQL crudo también dentro de las transacciones interactivas. */
+function blockRawSql<T extends object>(client: T): T {
+  return new Proxy(client, {
     get(target, property, receiver) {
-      if (
-        property === '$queryRaw' ||
-        property === '$executeRaw' ||
-        property === '$queryRawUnsafe' ||
-        property === '$executeRawUnsafe'
-      ) {
+      if (typeof property === 'string' && RAW_SQL_METHODS.includes(property)) {
         return () => {
           throw new ForbiddenException('SQL crudo solo está disponible mediante systemPrisma');
         };
       }
-      return Reflect.get(target, property, receiver) as unknown;
+      const value = Reflect.get(target, property, receiver) as unknown;
+      if (property === '$transaction' && typeof value === 'function') {
+        return (arg: unknown, ...rest: unknown[]) =>
+          (value as (...args: unknown[]) => unknown).call(
+            target,
+            typeof arg === 'function'
+              ? (tx: object) => (arg as (tx: object) => unknown)(blockRawSql(tx))
+              : arg,
+            ...rest,
+          );
+      }
+      return value;
     },
   });
 }

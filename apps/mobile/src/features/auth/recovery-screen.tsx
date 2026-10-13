@@ -19,10 +19,12 @@ export function RecoveryScreen() {
     setError('');
     try {
       await recover(result.data);
-    } catch {
-      /* La respuesta evita revelar si el correo existe. */
+      setSent(true);
+    } catch (caught) {
+      // Solo se oculta "usuario inexistente" para no revelar si el correo existe.
+      if ((caught as { code?: string }).code === 'auth/user-not-found') setSent(true);
+      else setError('No pudimos enviar el enlace. Revisá tu conexión e intentá de nuevo.');
     }
-    setSent(true);
   }
   return (
     <SafeAreaView style={styles.safe}>

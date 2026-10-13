@@ -21,10 +21,12 @@ export function RecoveryPage() {
     setBusy(true);
     try {
       await recover(result.data);
-    } catch {
-      /* No revelar si el correo existe. */
+      setSent(true);
+    } catch (caught) {
+      // Solo se oculta "usuario inexistente" para no revelar si el correo existe.
+      if ((caught as { code?: string }).code === 'auth/user-not-found') setSent(true);
+      else setError('No pudimos enviar el enlace. Revisá tu conexión e intentá de nuevo.');
     }
-    setSent(true);
     setBusy(false);
   }
   return (

@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { PrismaClient } from '../../generated/prisma/client';
 import {
   COMPANY_ID_MODELS,
+  createTenantPrismaClient,
   INDIRECT_TENANT_MODELS,
   scopeArgs,
   TENANT_MODELS,
@@ -41,5 +43,29 @@ describe('registro del aislamiento tenant', () => {
     expect(() => scopeArgs('User', 'futureOperation', {}, 'norte-company')).toThrow(
       'Operación futureOperation no soportada',
     );
+  });
+});
+
+describe('bloqueo de SQL crudo', () => {
+  it('también aplica dentro de una transacción interactiva', () => {
+    const tx = { $queryRawUnsafe: jest.fn(), $executeRaw: jest.fn() };
+    const extended = {
+      $transaction: (callback: (client: typeof tx) => unknown) => callback(tx),
+      $queryRaw: jest.fn(),
+    };
+    const system = { $extends: () => extended } as unknown as PrismaClient;
+    const client = createTenantPrismaClient(system, { user: undefined } as never) as unknown as {
+      $queryRaw: () => void;
+      $transaction: (callback: (client: typeof tx) => unknown) => unknown;
+    };
+    expect(() => {
+      client.$queryRaw();
+    }).toThrow('SQL crudo');
+    expect(() =>
+      client.$transaction((inner) => {
+        inner.$queryRawUnsafe();
+      }),
+    ).toThrow('SQL crudo');
+    expect(tx.$queryRawUnsafe).not.toHaveBeenCalled();
   });
 });

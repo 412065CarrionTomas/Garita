@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
+/** Datos mínimos de un supervisor visibles en las respuestas de predios. */
+const SUPERVISOR_FIELDS = { id: true, firstName: true, lastName: true, status: true } as const;
+
 @Injectable()
 export class SitesService {
   private readonly logger = new Logger(SitesService.name);
@@ -87,7 +90,7 @@ export class SitesService {
       where: { ...(clientId ? { clientId } : {}), ...(status ? { status } : {}) },
       take: 200,
       orderBy: { name: 'asc' },
-      include: { client: true, supervisors: { include: { user: true } } },
+      include: { client: true, supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } },
     });
     return sites.map((site) => ({
       ...site,
@@ -99,7 +102,7 @@ export class SitesService {
     await this.resources.findOwnedOrThrow('Site', id);
     const site = await this.prisma.tenantPrisma.site.findFirst({
       where: { id },
-      include: { client: true, supervisors: { include: { user: true } } },
+      include: { client: true, supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } },
     });
     if (!site) throw new NotFoundException('Recurso no encontrado');
     return {
@@ -159,7 +162,7 @@ export class SitesService {
     await this.resources.findOwnedOrThrow('Site', siteId);
     return this.prisma.tenantPrisma.siteSupervisor.findMany({
       where: { siteId },
-      include: { user: true },
+      include: { user: { select: SUPERVISOR_FIELDS } },
     });
   }
 
@@ -198,7 +201,7 @@ export class SitesService {
   async activeSupervisors(siteId: string) {
     return this.prisma.tenantPrisma.siteSupervisor.findMany({
       where: { siteId, user: { status: 'active' } },
-      include: { user: true },
+      include: { user: { select: SUPERVISOR_FIELDS } },
     });
   }
 
@@ -213,7 +216,9 @@ export class SitesService {
   async findSitesLeftWithoutActiveSupervisor(supervisorId: string) {
     const records = await this.prisma.tenantPrisma.siteSupervisor.findMany({
       where: { userId: supervisorId },
-      include: { site: { include: { supervisors: { include: { user: true } } } } },
+      include: {
+        site: { include: { supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } } },
+      },
     });
     return records
       .filter(({ site }) => !site.supervisors.some(({ user }) => user.status === 'active'))
@@ -224,7 +229,7 @@ export class SitesService {
     await this.resources.findOwnedOrThrow('User', userId);
     const sites = await this.prisma.tenantPrisma.site.findMany({
       where: { supervisors: { some: { userId } } },
-      include: { supervisors: { include: { user: true } } },
+      include: { supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } },
     });
     return sites.map((site) => ({
       ...site,

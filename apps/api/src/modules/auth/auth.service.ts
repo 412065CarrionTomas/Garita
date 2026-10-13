@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { AllowedChannel, AuthMeResponse, UserRole } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from './tenant-resource.service';
@@ -26,6 +26,13 @@ export class AuthService {
       where: { id: userId },
       include: { company: { select: { id: true, name: true } } },
     });
+    if (user.status === 'invitation_pending') {
+      const validInvitation = await this.prisma.tenantPrisma.invitation.findFirst({
+        where: { userId: user.id, usedAt: null, replacedAt: null },
+        select: { id: true },
+      });
+      if (!validInvitation) throw new ForbiddenException('La invitación ya no está vigente');
+    }
     const status = user.status === 'invitation_pending' ? 'active' : user.status;
     if (status !== user.status) {
       await this.prisma.tenantPrisma.user.update({ where: { id: user.id }, data: { status } });

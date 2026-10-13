@@ -69,28 +69,47 @@ export class UsersService {
     // Email uniqueness spans companies, so this is a justified system-level lookup.
     if (await this.prisma.systemPrisma.user.findUnique({ where: { email: input.email } }))
       throw new ConflictException('Ese correo ya está en uso');
-    const identity = await this.firebase.createDisabledUser(input.email);
+    let identity: { uid: string };
+    try {
+      identity = await this.firebase.createDisabledUser(input.email);
+    } catch (error) {
+      if ((error as { code?: string }).code === 'auth/email-already-exists')
+        throw new ConflictException('Ese correo ya está en uso');
+      throw error;
+    }
     const token = randomBytes(32).toString('base64url');
-    const user = await this.prisma.tenantPrisma.user.create({
-      data: {
-        firebaseUid: identity.uid,
-        email: input.email,
-        firstName: input.firstName,
-        lastName: input.lastName,
-        phone: input.phone,
-        employeeNumber: input.employeeNumber,
-        role: input.role,
-        status: 'invitation_pending',
-        companyId,
-        invitations: {
-          create: {
-            tokenHash: hash(token),
-            expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+    const user = await this.prisma.tenantPrisma.user
+      .create({
+        data: {
+          firebaseUid: identity.uid,
+          email: input.email,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          phone: input.phone,
+          employeeNumber: input.employeeNumber,
+          role: input.role,
+          status: 'invitation_pending',
+          companyId,
+          invitations: {
+            create: {
+              tokenHash: hash(token),
+              expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+            },
           },
         },
-      },
-      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
-    });
+        include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      })
+      .catch(async (error: unknown) => {
+        // Compensación: evita dejar un usuario huérfano en Firebase si falla la BD.
+        await this.firebase.deleteUser(identity.uid).catch((cleanupError: unknown) => {
+          this.logger.error({
+            event: 'personnel_firebase_cleanup_failed',
+            firebaseUid: identity.uid,
+            error: cleanupError instanceof Error ? cleanupError.message : 'unknown',
+          });
+        });
+        throw error;
+      });
     const invitation = user.invitations[0];
     if (!invitation) throw new Error('No se pudo crear la invitación del usuario');
     await this.send(invitation.id, input.firstName, input.email, token);
@@ -110,6 +129,10 @@ export class UsersService {
     await this.firebase.setDisabled(user.firebaseUid, true);
     await this.firebase.revokeRefreshTokens(user.firebaseUid);
     await this.prisma.tenantPrisma.user.update({ where: { id }, data: { status: 'deactivated' } });
+    await this.prisma.tenantPrisma.invitation.updateMany({
+      where: { userId: id, usedAt: null, replacedAt: null },
+      data: { replacedAt: new Date() },
+    });
     this.logger.log({ event: 'personnel_deactivated', adminId, userId: id });
     return { ok: true as const };
   }
@@ -124,6 +147,10 @@ export class UsersService {
 
   async resend(id: string, adminId: string) {
     const user = await this.getUser(id);
+    if (user.status === 'deactivated')
+      throw new ConflictException(
+        'El usuario está desactivado. Reactivalo antes de reenviar la invitación',
+      );
     await this.prisma.tenantPrisma.invitation.updateMany({
       where: { userId: id, usedAt: null, replacedAt: null },
       data: { replacedAt: new Date() },
@@ -172,6 +199,8 @@ export class UsersService {
         message: 'Esta invitación venció. Pedile a tu administrador que te envíe una nueva',
         reason: 'expired',
       });
+    if (invitation.user.status === 'deactivated')
+      throw new GoneException({ message: 'Invitación inválida', reason: 'invalid' });
     await this.firebase.setDisabled(invitation.user.firebaseUid, false);
     return {
       passwordSetupUrl: await this.firebase.generatePasswordResetLink(invitation.user.email),

@@ -61,6 +61,7 @@ describe('AuthGuard', () => {
     const identity: FirebaseIdentityProvider = {
       verifyIdToken: () => Promise.resolve({ uid: 'firebase-user' }),
       createDisabledUser: () => Promise.resolve({ uid: 'new-user' }),
+      deleteUser: () => Promise.resolve(),
       setDisabled: () => Promise.resolve(),
       revokeRefreshTokens: () => Promise.resolve(),
       generatePasswordResetLink: () => Promise.resolve('https://example.invalid/reset'),

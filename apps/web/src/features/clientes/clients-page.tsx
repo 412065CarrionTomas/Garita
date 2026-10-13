@@ -4,6 +4,7 @@ import { lazy, Suspense, useState } from 'react';
 import { useParams } from 'react-router';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
 import { env } from '@/config/env';
+import { errorMessage } from '@/lib/error-message';
 import { z } from 'zod';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import {
@@ -34,6 +35,8 @@ export function ClientsPage() {
     },
   });
   const [error, setError] = useState('');
+  const [editError, setEditError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [editing, setEditing] = useState<z.infer<typeof clientsResponseSchema>[number] | null>(
     null,
   );
@@ -95,6 +98,7 @@ export function ClientsPage() {
             : create.error.message}
         </p>
       )}
+      {actionError && <p role="alert">{actionError}</p>}
       <h2 className="text-xl font-semibold">Listado</h2>
       {clients.isPending ? (
         <p role="status">Cargando clientes…</p>
@@ -115,6 +119,7 @@ export function ClientsPage() {
               <button
                 className="underline"
                 onClick={() => {
+                  setEditError('');
                   setEditing(client);
                   setEditForm({
                     name: client.name,
@@ -142,7 +147,10 @@ export function ClientsPage() {
       <Dialog
         open={editing !== null}
         onOpenChange={(open) => {
-          if (!open) setEditing(null);
+          if (!open) {
+            setEditing(null);
+            setEditError('');
+          }
         }}
       >
         <DialogContent aria-describedby="client-edit-description">
@@ -156,20 +164,19 @@ export function ClientsPage() {
               event.preventDefault();
               const parsed = clientInputSchema.safeParse(editForm);
               if (!parsed.success) {
-                setError(parsed.error.issues[0]?.message ?? 'Revisá los datos');
+                setEditError(parsed.error.issues[0]?.message ?? 'Revisá los datos');
                 return;
               }
               if (!editing) return;
-              void apiPatch(
-                `/clientes/${editing.id}`,
-                parsed.data,
-                clientInputSchema,
-                response,
-              ).then(() => {
-                setEditing(null);
-                setError('');
-                return queryClient.invalidateQueries({ queryKey: ['clientes'] });
-              });
+              void apiPatch(`/clientes/${editing.id}`, parsed.data, clientInputSchema, response)
+                .then(() => {
+                  setEditing(null);
+                  setEditError('');
+                  return queryClient.invalidateQueries({ queryKey: ['clientes'] });
+                })
+                .catch((caught: unknown) => {
+                  setEditError(errorMessage(caught, 'Ya existe un cliente con ese nombre'));
+                });
             }}
           >
             {(['name', 'contactName', 'phone', 'email', 'taxId'] as const).map((key) => (
@@ -194,7 +201,7 @@ export function ClientsPage() {
                 />
               </label>
             ))}
-            {error && <p role="alert">{error}</p>}
+            {editError && <p role="alert">{editError}</p>}
             <div className="flex gap-3">
               <button
                 type="button"
@@ -229,13 +236,14 @@ export function ClientsPage() {
             <AlertDialogAction
               className="rounded bg-destructive px-4 py-2 text-white"
               onClick={() => {
-                if (deleting)
-                  void apiPost(
-                    `/clientes/${deleting.id}/baja`,
-                    {},
-                    z.looseObject({}),
-                    response,
-                  ).then(() => queryClient.invalidateQueries({ queryKey: ['clientes'] }));
+                if (deleting) {
+                  setActionError('');
+                  void apiPost(`/clientes/${deleting.id}/baja`, {}, z.looseObject({}), response)
+                    .then(() => queryClient.invalidateQueries({ queryKey: ['clientes'] }))
+                    .catch((caught: unknown) => {
+                      setActionError(errorMessage(caught));
+                    });
+                }
               }}
             >
               Dar de baja cliente
