@@ -21,12 +21,16 @@ Instalá el APK/enlace entregado por EAS y abrí Garita. Iniciá sesión como ad
 
 Si el teléfono no admite NFC, la app lo indica y no muestra la acción. Si NFC está apagado, activalo desde **Abrir ajustes de NFC**. La asociación requiere internet; conectate antes de empezar.
 
+La app lee etiquetas NFC-A (NfcA) y NFC-V / ISO 15693 (NfcV), incluidas etiquetas industriales de UID de 8 bytes como ICODE SLIX. Para instalar una etiqueta sobre metal, usá una etiqueta anti-metal.
+
 ## Asociar o reemplazar en iPhone
 
 1. Abrí **Modo de configuración** y elegí el predio y punto.
 2. Tocá **Asociar etiqueta** o **Reemplazar etiqueta**.
 3. Cuando aparezca la ventana de lectura de iOS, acercá la etiqueta al iPhone y mantenelo junto a ella hasta que Garita confirme con vibración, sonido y el mensaje **Etiqueta asociada a {punto}**.
 4. Si aparece el diálogo de movimiento, verificá el otro punto antes de confirmar.
+
+La lectura de iOS usa la sesión de etiquetas del sistema y lee el UID de fábrica, incluso si la etiqueta está virgen y todavía no tiene contenido NDEF. Se admiten etiquetas MIFARE y NFC-V / ISO 15693.
 
 ## Quitar una etiqueta
 
@@ -35,7 +39,9 @@ En el punto correspondiente, tocá **Quitar etiqueta**. El registro queda en el 
 ## Verificación manual antes de habilitar dispositivos
 
 - [ ] Android: asociación libre con mensaje, vibración y sonido en menos de 3 segundos.
-- [ ] iPhone: la ventana del sistema lee el identificador y completa la asociación en menos de 3 segundos.
+- [ ] Android: una etiqueta ISO 15693 / NFC-V de 8 bytes se lee y queda asociada.
+- [ ] iPhone: una etiqueta virgen, sin formato NDEF, se lee desde la ventana del sistema y queda asociada en menos de 3 segundos.
+- [ ] iPhone: una etiqueta ISO 15693 / NFC-V se lee y queda asociada.
 - [ ] Reemplazar una etiqueta ya asociada deja vigente solamente la nueva.
 - [ ] Mover una etiqueta de otro punto requiere confirmación.
 - [ ] Una etiqueta de otra empresa muestra **Etiqueta no disponible**.

@@ -1,6 +1,6 @@
 # API de etiquetas NFC
 
-Todas las rutas usan el prefijo `/api/v1` y requieren autenticación. Solo `admin` y `supervisor` pueden acceder; el supervisor queda limitado a sus predios asignados. Los UID se normalizan como hexadecimal mayúsculo sin separadores y deben representar 4, 7 o 10 bytes.
+La especificación OpenAPI vigente está en `/api/docs` al ejecutar la API. Este archivo resume las reglas de negocio; Swagger documenta las operaciones, autenticación y respuestas HTTP. Todas las rutas usan el prefijo `/api/v1` y requieren autenticación. Solo `admin` y `supervisor` pueden acceder; el supervisor queda limitado a sus predios asignados. Los UID se normalizan como hexadecimal mayúsculo sin separadores y deben representar de 4 a 10 bytes (8 a 20 caracteres hexadecimales, longitud par).
 
 ## `GET /configuracion/predios`
 
