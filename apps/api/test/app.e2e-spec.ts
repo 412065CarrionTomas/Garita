@@ -160,6 +160,7 @@ import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { CLOCK } from '../src/common/clock';
+import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-error';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
@@ -1105,9 +1106,13 @@ describe('Aplicación (e2e)', () => {
         assignedById: admin.id,
       };
       await prisma.shiftAssignment.create({ data: { shiftId: first.id, ...assignment } });
-      await expect(
-        prisma.shiftAssignment.create({ data: { shiftId: second.id, ...assignment } }),
-      ).rejects.toThrow();
+      const overlapError: unknown = await prisma.shiftAssignment
+        .create({ data: { shiftId: second.id, ...assignment } })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(isShiftOverlapViolation(overlapError)).toBe(true);
       await expect(
         prisma.shiftAssignment.create({
           data: { shiftId: second.id, ...assignment, guardId: null },
