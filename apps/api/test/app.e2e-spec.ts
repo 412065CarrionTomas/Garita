@@ -576,7 +576,7 @@ describe('Aplicación (e2e)', () => {
         windowEndLocal: '06:00',
         graceMinutes: 15,
       })
-      .expect(201);
+      .expect(200);
     const previewResponse: unknown = preview.body as unknown;
     const previewWindows = z
       .object({ windows: z.array(z.string()) })
@@ -618,7 +618,7 @@ describe('Aplicación (e2e)', () => {
     expect(versions[0]?.checkpoints).toHaveLength(2);
     expect(versions[1]?.checkpoints).toHaveLength(1);
     expect(round).toBeDefined();
-    await request(app.getHttpServer()).post(`/api/v1/rondas/${id}/baja`).set(auth).expect(201);
+    await request(app.getHttpServer()).post(`/api/v1/rondas/${id}/baja`).set(auth).expect(200);
     await request(app.getHttpServer())
       .get(`/api/v1/predios/${northUnassignedSiteId}/rondas`)
       .set({ Authorization: 'Bearer token-supervisor' })

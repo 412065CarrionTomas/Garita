@@ -1,4 +1,14 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { previewRoundSchema, roundInputSchema } from '@garita/shared';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
@@ -43,6 +53,7 @@ export class RoundsController {
     return this.rounds.update(id, parsed.data, user);
   }
   @Post('rondas/:id/baja')
+  @HttpCode(HttpStatus.OK)
   @Roles('admin', 'supervisor')
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403 })
@@ -51,8 +62,9 @@ export class RoundsController {
     return this.rounds.deactivate(id, user);
   }
   @Post('rondas/previsualizar-ventanas')
+  @HttpCode(HttpStatus.OK)
   @Roles('admin', 'supervisor')
-  @ApiResponse({ status: 201 })
+  @ApiResponse({ status: 200 })
   @ApiResponse({ status: 400 })
   @ApiResponse({ status: 403 })
   preview(@Body() body: unknown) {
