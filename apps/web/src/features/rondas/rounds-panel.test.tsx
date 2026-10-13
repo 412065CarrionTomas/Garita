@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
 import { apiGet } from '@/lib/api-client';
@@ -59,5 +59,31 @@ describe('RoundsPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Bajar Portón' }));
     const ordered = screen.getByRole('list', { name: 'Orden de puntos' });
     expect(ordered.firstElementChild).toHaveTextContent('Depósito');
+  });
+
+  it('muestra los errores de frecuencia y gracia junto a sus campos', async () => {
+    setup();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
+    await user.click(await screen.findByLabelText('Portón'));
+    fireEvent.change(screen.getByLabelText('Frecuencia (minutos)'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText(/Gracia/), { target: { value: '10' } });
+    const form = screen.getByRole('button', { name: 'Guardar ronda' }).closest('form');
+    if (!form) throw new Error('No se encontró el formulario de ronda.');
+    form.noValidate = true;
+    await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+
+    const frequencyInput = screen.getByLabelText('Frecuencia (minutos)');
+    const graceInput = screen.getByLabelText(/Gracia/);
+    await waitFor(() => {
+      expect(frequencyInput).toHaveAttribute('aria-invalid', 'true');
+    });
+    expect(frequencyInput).toHaveAttribute('aria-describedby', 'round-frequency-error');
+    expect(graceInput).toHaveAttribute('aria-invalid', 'true');
+    expect(graceInput).toHaveAttribute('aria-describedby', 'round-grace-error');
+    expect(
+      screen.getAllByText('La frecuencia debe estar entre 15 minutos y 24 horas.'),
+    ).toHaveLength(2);
+    expect(screen.getAllByText(/La gracia puede ser, como máximo, 5 minutos/)).toHaveLength(2);
   });
 });

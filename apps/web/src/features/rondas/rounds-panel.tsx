@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { defaultGraceMinutes, previewWindows } from '@garita/shared';
+import { defaultGraceMinutes, previewWindows, roundInputSchema } from '@garita/shared';
 import { useState } from 'react';
 import { z } from 'zod';
 import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
@@ -27,14 +27,6 @@ const roundsSchema = z.array(
       .nullable(),
   }),
 );
-const inputSchema = z.object({
-  name: z.string().trim().min(1),
-  checkpointIds: z.array(z.string()).min(1),
-  frequencyMinutes: z.number().int().min(15).max(1440),
-  windowStartLocal: z.string(),
-  windowEndLocal: z.string(),
-  graceMinutes: z.number().int().min(0).max(60),
-});
 const idSchema = z.looseObject({ id: z.string() });
 
 export function RoundsPanel({ site }: { site: { id: string; status: 'active' | 'inactive' } }) {
@@ -57,13 +49,14 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
   const [editingId, setEditingId] = useState<string>();
   const [confirmId, setConfirmId] = useState<string>();
   const [message, setMessage] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const labels = previewWindows({
     windowStartLocal: start,
     windowEndLocal: end,
     frequencyMinutes: frequency,
   });
   const save = async () => {
-    const parsed = inputSchema.safeParse({
+    const parsed = roundInputSchema.safeParse({
       name,
       checkpointIds: selected,
       frequencyMinutes: frequency,
@@ -71,18 +64,21 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
       windowEndLocal: end,
       graceMinutes: grace,
     });
-    const maxGrace = Math.min(60, frequency / 2);
-    if (!parsed.success || grace > maxGrace) {
-      setMessage(
-        grace > maxGrace
-          ? `La gracia puede ser, como máximo, ${maxGrace} minutos: la mitad de la frecuencia.`
-          : 'Completá todos los datos y seleccioná al menos un punto.',
-      );
+    if (!parsed.success) {
+      const nextErrors = parsed.error.issues.reduce<Record<string, string[]>>((errors, issue) => {
+        const field = String(issue.path[0] ?? 'form');
+        errors[field] = [...(errors[field] ?? []), issue.message];
+        return errors;
+      }, {});
+      setFieldErrors(nextErrors);
+      setMessage('');
       return;
     }
+    setFieldErrors({});
     try {
-      if (editingId) await apiPatch(`/rondas/${editingId}`, parsed.data, inputSchema, idSchema);
-      else await apiPost(`/predios/${site.id}/rondas`, parsed.data, inputSchema, idSchema);
+      if (editingId)
+        await apiPatch(`/rondas/${editingId}`, parsed.data, roundInputSchema, idSchema);
+      else await apiPost(`/predios/${site.id}/rondas`, parsed.data, roundInputSchema, idSchema);
       setMessage(
         editingId
           ? 'Ronda actualizada. Los cambios aplican a los turnos futuros.'
@@ -171,15 +167,19 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
       {canWrite && site.status === 'active' && (
         <form
           className="grid gap-3"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
           <h4>{editingId ? 'Editar ronda' : 'Nueva ronda'}</h4>
-          <label>
+          <label htmlFor="round-name">
             Nombre
             <input
+              id="round-name"
+              aria-invalid={Boolean(fieldErrors.name)}
+              aria-describedby={fieldErrors.name ? 'round-name-error' : undefined}
               className="ml-2 rounded border p-1"
               value={name}
               onChange={(event) => {
@@ -188,9 +188,17 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
               required
             />
           </label>
-          <label>
+          {fieldErrors.name?.map((error) => (
+            <p id="round-name-error" key={error}>
+              {error}
+            </p>
+          ))}
+          <label htmlFor="round-frequency">
             Frecuencia (minutos)
             <input
+              id="round-frequency"
+              aria-invalid={Boolean(fieldErrors.frequencyMinutes)}
+              aria-describedby={fieldErrors.frequencyMinutes ? 'round-frequency-error' : undefined}
               className="ml-2 rounded border p-1"
               type="number"
               min="15"
@@ -203,9 +211,17 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
               }}
             />
           </label>
-          <label>
+          {fieldErrors.frequencyMinutes?.map((error) => (
+            <p id="round-frequency-error" key={error}>
+              {error}
+            </p>
+          ))}
+          <label htmlFor="round-start">
             Inicio de franja
             <input
+              id="round-start"
+              aria-invalid={Boolean(fieldErrors.windowStartLocal)}
+              aria-describedby={fieldErrors.windowStartLocal ? 'round-start-error' : undefined}
               className="ml-2 rounded border p-1"
               type="time"
               value={start}
@@ -214,9 +230,17 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
               }}
             />
           </label>
-          <label>
+          {fieldErrors.windowStartLocal?.map((error) => (
+            <p id="round-start-error" key={error}>
+              {error}
+            </p>
+          ))}
+          <label htmlFor="round-end">
             Fin de franja
             <input
+              id="round-end"
+              aria-invalid={Boolean(fieldErrors.windowEndLocal)}
+              aria-describedby={fieldErrors.windowEndLocal ? 'round-end-error' : undefined}
               className="ml-2 rounded border p-1"
               type="time"
               value={end}
@@ -225,11 +249,19 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
               }}
             />
           </label>
+          {fieldErrors.windowEndLocal?.map((error) => (
+            <p id="round-end-error" key={error}>
+              {error}
+            </p>
+          ))}
           {start === end && <p>Todo el día (24 h)</p>}
-          <label>
+          <label htmlFor="round-grace">
             Gracia (minutos; predeterminada {defaultGraceMinutes(frequency)}, máximo{' '}
             {Math.min(60, frequency / 2)})
             <input
+              id="round-grace"
+              aria-invalid={Boolean(fieldErrors.graceMinutes)}
+              aria-describedby={fieldErrors.graceMinutes ? 'round-grace-error' : undefined}
               className="ml-2 rounded border p-1"
               type="number"
               min="0"
@@ -240,8 +272,18 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
               }}
             />
           </label>
+          {fieldErrors.graceMinutes?.map((error) => (
+            <p id="round-grace-error" key={error}>
+              {error}
+            </p>
+          ))}
           <fieldset>
             <legend>Puntos en orden de recorrido</legend>
+            {fieldErrors.checkpointIds?.map((error) => (
+              <p id="round-checkpoints-error" key={error}>
+                {error}
+              </p>
+            ))}
             {points.data?.map((point) => (
               <label key={point.id} className="block">
                 <input
@@ -349,7 +391,18 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
               ))}
             </ol>
           </div>
-          {message && <p role="alert">{message}</p>}
+          {(Object.keys(fieldErrors).length > 1 || Boolean(fieldErrors.form ?? message)) && (
+            <div role="alert" aria-label="Errores del formulario">
+              {message && <p>{message}</p>}
+              {Object.keys(fieldErrors).length > 1 &&
+                Object.values(fieldErrors)
+                  .flat()
+                  .map((error) => <p key={error}>{error}</p>)}
+              {fieldErrors.form?.map((error) => (
+                <p key={error}>{error}</p>
+              ))}
+            </div>
+          )}
           <button className="rounded bg-primary px-3 py-2 text-primary-foreground">
             Guardar ronda
           </button>
