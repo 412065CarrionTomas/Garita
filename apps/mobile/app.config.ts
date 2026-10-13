@@ -26,7 +26,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-router',
     [
       'react-native-nfc-manager',
-      { nfcPermission: 'Garita usa NFC para asociar etiquetas a los puntos de control.' },
+      {
+        nfcPermission: 'Garita usa NFC para asociar etiquetas a los puntos de control.',
+        includeNdefEntitlement: false,
+      },
     ],
     './plugins/withNfcFeature',
     'expo-audio',

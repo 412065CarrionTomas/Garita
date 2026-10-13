@@ -10,14 +10,20 @@ export async function nfcAvailability(): Promise<'unsupported' | 'disabled' | 'r
 }
 
 export async function readFactoryUid(): Promise<string> {
-  const technology = Platform.OS === 'android' ? NfcTech.NfcA : NfcTech.Ndef;
-  await NfcManager.requestTechnology(
-    technology,
-    Platform.OS === 'ios' ? { alertMessage: 'Acercá la etiqueta NFC al iPhone.' } : undefined,
-  );
-  const tag = await NfcManager.getTag();
-  if (!tag?.id) throw new Error('No se pudo leer el identificador de la etiqueta');
-  return tag.id;
+  const technologies =
+    Platform.OS === 'android'
+      ? [NfcTech.NfcA, NfcTech.NfcV]
+      : [NfcTech.MifareIOS, NfcTech.Iso15693IOS];
+  try {
+    await NfcManager.requestTechnology(technologies, {
+      ...(Platform.OS === 'ios' ? { alertMessage: 'Acercá la etiqueta NFC al iPhone.' } : {}),
+    });
+    const tag = await NfcManager.getTag();
+    if (!tag?.id) throw new Error('No se pudo leer el identificador de la etiqueta');
+    return tag.id;
+  } finally {
+    await cancelNfcRead();
+  }
 }
 
 export async function cancelNfcRead(): Promise<void> {
