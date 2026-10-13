@@ -89,6 +89,7 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('Shift');
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('ShiftAssignment');
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('ShiftRound');
+    expect(COMPANY_ID_MODELS).toContain('ShiftEvent');
     const user = {
       userId: 'supervisor-1',
       companyId: 'norte',
@@ -112,6 +113,14 @@ describe('registro del aislamiento tenant', () => {
               site: { supervisors: { some: { userId: 'supervisor-1' } } },
             },
           },
+        ],
+      },
+    });
+    expect(addSiteAssignmentFilter('ShiftEvent', { where: { type: 'start' } }, user)).toEqual({
+      where: {
+        AND: [
+          { type: 'start' },
+          { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
         ],
       },
     });

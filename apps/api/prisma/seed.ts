@@ -129,13 +129,15 @@ async function main(): Promise<void> {
       },
       update: {},
     });
-    for (const [position, checkpointId] of checkpointIds.entries()) {
-      await prisma.roundVersionCheckpoint.upsert({
-        where: { roundVersionId_checkpointId: { roundVersionId: version.id, checkpointId } },
-        create: { companyId: north, roundVersionId: version.id, checkpointId, position },
-        update: { position },
-      });
-    }
+    await prisma.roundVersionCheckpoint.deleteMany({ where: { roundVersionId: version.id } });
+    await prisma.roundVersionCheckpoint.createMany({
+      data: checkpointIds.map((checkpointId, position) => ({
+        companyId: north,
+        roundVersionId: version.id,
+        checkpointId,
+        position,
+      })),
+    });
     await prisma.round.update({ where: { id: round.id }, data: { currentVersionId: version.id } });
   };
   await seedRound(
@@ -211,6 +213,62 @@ async function main(): Promise<void> {
         rounds: { create: { roundId: perimetral.id } },
       },
     });
+  }
+  const executionSeeds = [
+    {
+      status: 'in_progress' as const,
+      startsAt: new Date('2030-10-17T00:00:00.000Z'),
+      endsAt: new Date('2030-10-17T08:00:00.000Z'),
+    },
+    {
+      status: 'auto_closed' as const,
+      startsAt: new Date('2030-10-18T00:00:00.000Z'),
+      endsAt: new Date('2030-10-18T08:00:00.000Z'),
+    },
+  ];
+  for (const value of executionSeeds) {
+    const existing = await prisma.shift.findFirst({
+      where: { siteId: northSite.id, startsAt: value.startsAt },
+    });
+    if (existing) continue;
+    const now = new Date('2030-10-18T10:00:00.000Z');
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: north,
+        siteId: northSite.id,
+        startsAt: value.startsAt,
+        endsAt: value.endsAt,
+        serviceDate: new Date(`${value.startsAt.toISOString().slice(0, 10)}T00:00:00.000Z`),
+        createdById: northSupervisor.id,
+        status: value.status,
+        ...(value.status === 'in_progress'
+          ? { startedAt: value.startsAt }
+          : { startedAt: value.startsAt, closedAt: now, autoClosedAt: now, closedBy: 'system' }),
+        assignments: {
+          create: {
+            guardId: activeGuard.id,
+            startsAt: value.startsAt,
+            endsAt: value.endsAt,
+            assignedById: northSupervisor.id,
+          },
+        },
+        rounds: { create: { roundId: perimetral.id } },
+      },
+      include: { assignments: true },
+    });
+    const assignment = shift.assignments[0];
+    if (assignment && value.status === 'auto_closed') {
+      await prisma.shiftEvent.create({
+        data: {
+          companyId: north,
+          shiftId: shift.id,
+          assignmentId: assignment.id,
+          type: 'auto_close',
+          occurredAt: now,
+          receivedAt: now,
+        },
+      });
+    }
   }
 }
 
