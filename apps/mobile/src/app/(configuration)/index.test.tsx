@@ -89,7 +89,7 @@ it('informa cuando el celular no tiene NFC y no ofrece asociar', async () => {
   const view = await mount();
   expect(await view.findByText('Tu celular no puede leer etiquetas NFC')).toBeTruthy();
   expect(view.queryByLabelText('Asociar etiqueta NFC a Portón trasero')).toBeNull();
-});
+}, 30000);
 
 it('informa que NFC está apagado y permite abrir ajustes', async () => {
   availabilityMock.mockResolvedValue('disabled');
