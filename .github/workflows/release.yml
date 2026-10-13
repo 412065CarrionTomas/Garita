@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Tag, release y backport
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RAMA: ${{ github.event.pull_request.head.ref }}
+      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Obtener versión desde la rama
+        run: |
+          VERSION="${RAMA#release/}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::La versión '$VERSION' no es SemVer (MAYOR.MENOR.PARCHE)."
+            exit 1
+          fi
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+
+      - name: Crear tag y GitHub Release
+        run: |
+          gh release create "$TAG" \
+            --target "$MERGE_SHA" \
+            --title "Release $TAG" \
+            --generate-notes
+
+      - name: Crear rama y PR de backport a develop
+        run: |
+          BACKPORT="backport/$TAG"
+          git push origin "$MERGE_SHA:refs/heads/$BACKPORT"
+          gh pr create \
+            --base develop \
+            --head "$BACKPORT" \
+            --title "chore(repo): backport de la release $TAG a develop" \
+            --body "Backport automático de la release $TAG para traer los cambios a develop."

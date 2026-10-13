@@ -1,0 +1,21 @@
+# Archivos protegidos: CI, dependencias y configuración de herramientas.
+# Los cambios en estos archivos los revisa y aprueba el dueño del repositorio.
+# La misma lista está en .github/workflows/archivos-protegidos.yml.
+
+/.github/                       @412065CarrionTomas
+/.husky/                        @412065CarrionTomas
+**/package.json                 @412065CarrionTomas
+/pnpm-lock.yaml                 @412065CarrionTomas
+/pnpm-workspace.yaml            @412065CarrionTomas
+/turbo.json                     @412065CarrionTomas
+/.nvmrc                         @412065CarrionTomas
+/compose.yaml                   @412065CarrionTomas
+**/tsconfig*.json               @412065CarrionTomas
+**/eslint.config.*              @412065CarrionTomas
+/.prettierrc*                   @412065CarrionTomas
+/.prettierignore                @412065CarrionTomas
+/.editorconfig                  @412065CarrionTomas
+/.gitignore                     @412065CarrionTomas
+/.gitattributes                 @412065CarrionTomas
+/.npmrc                         @412065CarrionTomas
+**/commitlint.config.*          @412065CarrionTomas
