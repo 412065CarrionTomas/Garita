@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { siteInputSchema, sitesResponseSchema } from '@garita/shared';
 import { apiGet, apiPost, apiPut, apiPatch } from '@/lib/api-client';
+import { errorMessage } from '@/lib/error-message';
 import { useAuth } from '../auth/auth-context';
 import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
@@ -59,12 +60,23 @@ export function SitesPage() {
     enabled: user?.role === 'admin',
   });
   const response = z.looseObject({ id: z.string() });
+  const [createError, setCreateError] = useState('');
+  const [editError, setEditError] = useState('');
+  const [actionError, setActionError] = useState('');
   const save = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsed = siteInputSchema.safeParse(form);
-    if (!parsed.success) return;
-    await apiPost('/predios', parsed.data, siteInputSchema, response);
-    await sites.refetch();
+    if (!parsed.success) {
+      setCreateError(parsed.error.issues[0]?.message ?? 'Revisá los datos');
+      return;
+    }
+    try {
+      await apiPost('/predios', parsed.data, siteInputSchema, response);
+      setCreateError('');
+      await sites.refetch();
+    } catch (caught) {
+      setCreateError(errorMessage(caught, 'Ya existe un predio con ese nombre en el cliente'));
+    }
   };
   return (
     <section className="space-y-4">
@@ -82,6 +94,9 @@ export function SitesPage() {
               }}
               className="block rounded border p-2"
             >
+              <option value="" disabled>
+                Seleccioná un cliente
+              </option>
               {clients.data?.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.name}
@@ -138,11 +153,13 @@ export function SitesPage() {
               className="block rounded border p-2"
             />
           </label>
+          {createError && <p role="alert">{createError}</p>}
           <button className="rounded bg-primary px-4 py-2 text-primary-foreground">
             Guardar predio
           </button>
         </form>
       )}
+      {actionError && <p role="alert">{actionError}</p>}
       {sites.isPending ? (
         <p role="status">Cargando predios…</p>
       ) : sites.isError ? (
@@ -178,13 +195,20 @@ export function SitesPage() {
                         const selected = [...event.currentTarget.selectedOptions].map(
                           (option) => option.value,
                         );
-                        setSupervisorIds({ ...supervisorIds, [site.id]: selected });
+                        setActionError('');
                         void apiPut(
                           `/predios/${site.id}/supervisores`,
                           { supervisorIds: selected },
                           z.object({ supervisorIds: z.array(z.string()) }),
                           z.array(z.unknown()),
-                        ).then(() => sites.refetch());
+                        )
+                          .then(() => {
+                            setSupervisorIds({ ...supervisorIds, [site.id]: selected });
+                            return sites.refetch();
+                          })
+                          .catch((caught: unknown) => {
+                            setActionError(errorMessage(caught));
+                          });
                       }}
                       className="block min-h-24 w-full rounded border p-2"
                     >
@@ -198,6 +222,7 @@ export function SitesPage() {
                   <button
                     className="underline"
                     onClick={() => {
+                      setEditError('');
                       setEditing(site);
                       setEditForm({
                         clientId: site.clientId,
@@ -229,7 +254,10 @@ export function SitesPage() {
       <Dialog
         open={editing !== null}
         onOpenChange={(open) => {
-          if (!open) setEditing(null);
+          if (!open) {
+            setEditing(null);
+            setEditError('');
+          }
         }}
       >
         <DialogContent aria-describedby="site-edit-description">
@@ -242,13 +270,22 @@ export function SitesPage() {
             onSubmit={(event) => {
               event.preventDefault();
               const parsed = siteInputSchema.safeParse(editForm);
-              if (!parsed.success || !editing) return;
-              void apiPatch(`/predios/${editing.id}`, parsed.data, siteInputSchema, response).then(
-                () => {
+              if (!parsed.success) {
+                setEditError(parsed.error.issues[0]?.message ?? 'Revisá los datos');
+                return;
+              }
+              if (!editing) return;
+              void apiPatch(`/predios/${editing.id}`, parsed.data, siteInputSchema, response)
+                .then(() => {
                   setEditing(null);
+                  setEditError('');
                   return sites.refetch();
-                },
-              );
+                })
+                .catch((caught: unknown) => {
+                  setEditError(
+                    errorMessage(caught, 'Ya existe un predio con ese nombre en el cliente'),
+                  );
+                });
             }}
           >
             <label>
@@ -300,6 +337,7 @@ export function SitesPage() {
                 className="block w-full rounded border p-2"
               />
             </label>
+            {editError && <p role="alert">{editError}</p>}
             <div className="flex gap-3">
               <button
                 type="button"
@@ -334,13 +372,14 @@ export function SitesPage() {
             <AlertDialogAction
               className="rounded bg-destructive px-4 py-2 text-white"
               onClick={() => {
-                if (deleting)
-                  void apiPost(
-                    `/predios/${deleting.id}/baja`,
-                    {},
-                    z.looseObject({}),
-                    response,
-                  ).then(() => sites.refetch());
+                if (deleting) {
+                  setActionError('');
+                  void apiPost(`/predios/${deleting.id}/baja`, {}, z.looseObject({}), response)
+                    .then(() => sites.refetch())
+                    .catch((caught: unknown) => {
+                      setActionError(errorMessage(caught));
+                    });
+                }
               }}
             >
               Dar de baja predio

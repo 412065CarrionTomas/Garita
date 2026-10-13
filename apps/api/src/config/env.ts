@@ -44,7 +44,9 @@ export const envSchema = z
   })
   .transform((env) => ({
     ...env,
-    QR_SIGNING_SECRET: env.QR_SIGNING_SECRET ?? 'garita-test-qr-signing-secret-fixed-value',
+    QR_SIGNING_SECRET:
+      env.QR_SIGNING_SECRET ??
+      (env.NODE_ENV === 'test' ? 'garita-test-qr-signing-secret-fixed-value' : undefined),
   }));
 
 export type Env = z.infer<typeof envSchema>;

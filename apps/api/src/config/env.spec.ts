@@ -65,4 +65,12 @@ describe('validateEnv', () => {
     const { QR_SIGNING_SECRET: _secret, ...withoutSecret } = REQUIRED;
     expect(() => validateEnv(withoutSecret)).toThrow('QR_SIGNING_SECRET');
   });
+
+  it('solo usa el secreto QR de prueba cuando NODE_ENV es test', () => {
+    const { QR_SIGNING_SECRET: _omit, ...withoutSecret } = REQUIRED;
+    expect(validateEnv({ ...withoutSecret, NODE_ENV: 'test' }).QR_SIGNING_SECRET).toBeTruthy();
+    expect(() => validateEnv({ ...withoutSecret, NODE_ENV: 'production' })).toThrow(
+      'QR_SIGNING_SECRET',
+    );
+  });
 });

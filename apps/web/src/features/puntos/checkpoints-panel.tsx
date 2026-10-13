@@ -98,7 +98,13 @@ export function CheckpointsPanel({ site }: SiteProps) {
 
   const download = async (checkpointId?: string) => {
     const query = checkpointId ? `?puntos=${encodeURIComponent(checkpointId)}` : '';
-    const blob = await apiDownload(`/predios/${site.id}/stickers${query}`);
+    let blob: Blob;
+    try {
+      blob = await apiDownload(`/predios/${site.id}/stickers${query}`);
+    } catch {
+      setMessage('No se pudo descargar el sticker. Intentá de nuevo.');
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -283,9 +289,13 @@ export function CheckpointsPanel({ site }: SiteProps) {
                             {},
                             emptyInput,
                             z.looseObject({ checkpoint: idResponse, qrPayload: z.string() }),
-                          ).then(() => {
-                            setMessage('QR regenerado. Imprimí un sticker nuevo.');
-                          });
+                          )
+                            .then(() => {
+                              setMessage('QR regenerado. Imprimí un sticker nuevo.');
+                            })
+                            .catch(() => {
+                              setMessage('No se pudo regenerar el QR. Intentá de nuevo.');
+                            });
                       }}
                     >
                       Regenerar QR
@@ -306,7 +316,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
                               );
                               return;
                             }
-                            throw error;
+                            setMessage('No se pudo dar de baja el punto. Intentá de nuevo.');
                           }
                         });
                       }}

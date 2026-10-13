@@ -31,6 +31,10 @@ export class FirebaseAdminIdentityProvider implements FirebaseIdentityProvider {
     return { uid: user.uid };
   }
 
+  async deleteUser(uid: string): Promise<void> {
+    await getAuth().deleteUser(uid);
+  }
+
   async setDisabled(uid: string, disabled: boolean): Promise<void> {
     await getAuth().updateUser(uid, { disabled });
   }

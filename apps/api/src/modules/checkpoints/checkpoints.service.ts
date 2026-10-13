@@ -181,7 +181,7 @@ export class CheckpointsService {
         .translate(qrX, y)
         .scale(qrSize / Number(viewBox[1]))
         .path(darkPath)
-        .stroke('black')
+        .fill('black')
         .restore();
       document.fontSize(10).text(checkpoint.name, x, y + qrSize + 8, {
         width: columnWidth,

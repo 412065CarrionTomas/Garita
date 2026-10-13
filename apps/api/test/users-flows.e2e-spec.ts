@@ -25,6 +25,7 @@ describe('Flujos de gestión de personal (e2e)', () => {
     createDisabledUser: jest.fn((email: string) =>
       Promise.resolve({ uid: `${uidPrefix}${email}` }),
     ),
+    deleteUser: jest.fn(() => Promise.resolve()),
     setDisabled: jest.fn(() => Promise.resolve()),
     revokeRefreshTokens: jest.fn(() => Promise.resolve()),
     generatePasswordResetLink: jest.fn((email: string) =>
