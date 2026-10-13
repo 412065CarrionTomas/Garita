@@ -3,9 +3,15 @@
 HU<id>-<name>
 ID-<subtask-name>
 
-## Qué cambia
+## Resumen
 
 <!-- Resumen de los cambios y por qué se hacen. -->
+
+## Criterios de aceptación
+
+| CRITERIO                                                             | VERIFICADO                                   |
+| -------------------------------------------------------------------- | -------------------------------------------- |
+| <!-- Criterio, con su referencia (por ejemplo, HU-12 criterio 1) --> | <!-- Cómo se verificó, en pocas palabras --> |
 
 ## Cómo se probó
 
