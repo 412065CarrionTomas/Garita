@@ -36,6 +36,24 @@ const deactivateSchema = z.union([
     })
     .strict(),
   z.object({}).strict(),
+  z
+    .object({ forceDeactivate: z.literal(true), reason: z.string().trim().min(3).max(500) })
+    .strict(),
+  z
+    .object({
+      forceDeactivate: z.literal(true),
+      reason: z.string().trim().min(3).max(500),
+      leaveUnassigned: z.literal(true),
+      confirmUnassignedCount: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      forceDeactivate: z.literal(true),
+      reason: z.string().trim().min(3).max(500),
+      deriveToUserId: z.string().min(1),
+    })
+    .strict(),
 ]);
 
 @ApiTags('Usuarios')
@@ -85,6 +103,14 @@ export class UsersController {
           properties: {
             leaveUnassigned: { type: 'boolean', enum: [true] },
             confirmUnassignedCount: { type: 'integer', minimum: 0 },
+          },
+        },
+        {
+          type: 'object',
+          required: ['forceDeactivate', 'reason'],
+          properties: {
+            forceDeactivate: { type: 'boolean', enum: [true] },
+            reason: { type: 'string', minLength: 3, maxLength: 500 },
           },
         },
       ],

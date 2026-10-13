@@ -20,6 +20,7 @@ import { purgeExpiredRedeemAttempts } from './redeem-attempts';
 import { CLOCK, type Clock } from '../../common/clock';
 import { WEEKLY_SCHEDULE_DERIVATION_PORT } from './weekly-schedule-derivation.port';
 import type { WeeklyScheduleDerivationPort } from './weekly-schedule-derivation.port';
+import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 
 @Injectable()
 export class UsersService {
@@ -33,6 +34,7 @@ export class UsersService {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(WEEKLY_SCHEDULE_DERIVATION_PORT)
     private readonly weeklySchedules: WeeklyScheduleDerivationPort,
+    private readonly shiftExecution: ShiftExecutionService,
   ) {}
 
   async list(query: {
@@ -137,9 +139,17 @@ export class UsersService {
       deriveToUserId?: string;
       leaveUnassigned?: true;
       confirmUnassignedCount?: number;
+      forceDeactivate?: true;
+      reason?: string;
     } = {},
   ) {
     const user = await this.getUser(id);
+    const inProgressShift = await this.shiftExecution.findInProgressForGuard(id);
+    if (inProgressShift && (!choice.forceDeactivate || !choice.reason))
+      throw new ConflictException({
+        code: 'GUARD_HAS_SHIFT_IN_PROGRESS',
+        shiftId: inProgressShift,
+      });
     const futureShifts = await this.prisma.tenantPrisma.shift.findMany({
       where: {
         status: 'scheduled',
@@ -250,6 +260,8 @@ export class UsersService {
         });
       });
     }
+    if (inProgressShift && choice.forceDeactivate && choice.reason)
+      await this.shiftExecution.closeForGuard(id, adminId, choice.reason);
     await this.firebase.setDisabled(user.firebaseUid, true);
     await this.firebase.revokeRefreshTokens(user.firebaseUid);
     this.logger.log({
