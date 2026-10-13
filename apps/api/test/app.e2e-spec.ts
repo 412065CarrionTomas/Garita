@@ -535,6 +535,27 @@ describe('Aplicación (e2e)', () => {
       windowEndLocal: '06:00',
       graceMinutes: 15,
     };
+    for (const frequencyMinutes of [10, 1500]) {
+      await request(app.getHttpServer())
+        .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+        .set(auth)
+        .send({ ...payload, name: `${name} frecuencia ${frequencyMinutes}`, frequencyMinutes })
+        .expect(400);
+    }
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send({ ...payload, name: `${name} gracia`, graceMinutes: 20 })
+      .expect(400);
+    const otherSitePoint = await app.get(PrismaService).systemPrisma.checkpoint.findFirstOrThrow({
+      where: { siteId: northUnassignedSiteId, status: 'active' },
+      select: { id: true },
+    });
+    await request(app.getHttpServer())
+      .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set(auth)
+      .send({ ...payload, name: `${name} otro predio`, checkpointIds: [otherSitePoint.id] })
+      .expect(404);
     await request(app.getHttpServer())
       .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
       .set(auth)
@@ -546,6 +567,17 @@ describe('Aplicación (e2e)', () => {
       .send(payload)
       .expect(201);
     const id = z.object({ id: z.string() }).parse(created.body).id;
+    const preview = await request(app.getHttpServer())
+      .post('/api/v1/rondas/previsualizar-ventanas')
+      .set(auth)
+      .send({
+        frequencyMinutes: 120,
+        windowStartLocal: '22:00',
+        windowEndLocal: '06:00',
+        graceMinutes: 15,
+      })
+      .expect(201);
+    expect(z.array(z.string()).parse(preview.body.windows)).toHaveLength(4);
     await request(app.getHttpServer())
       .post(`/api/v1/predios/${northAssignedSiteId}/rondas`)
       .set(auth)
@@ -588,9 +620,20 @@ describe('Aplicación (e2e)', () => {
       .set({ Authorization: 'Bearer token-supervisor' })
       .expect(404);
     await request(app.getHttpServer())
+      .get(`/api/v1/predios/${southSiteId}/rondas`)
+      .set(auth)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .set({ Authorization: 'Bearer token-client' })
+      .expect(403);
+    await request(app.getHttpServer())
       .get(`/api/v1/predios/${northAssignedSiteId}/rondas`)
       .set({ Authorization: 'Bearer token-guard' })
       .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/v1/predios/${northAssignedSiteId}/rondas`)
+      .expect(401);
   });
 
   it('GET /api/v1/health/ready verifica PostgreSQL y Redis', async () => {
