@@ -7,3 +7,5 @@ export * from './checkpoints';
 export * from './nfc-tags';
 export * from './rounds/windows';
 export * from './rounds/schemas';
+export * from './field/shift-offline-data';
+export * from './field/native-module';
