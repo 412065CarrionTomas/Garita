@@ -17,3 +17,6 @@ jest.mock('firebase/auth', () => ({
   signInWithEmailAndPassword: jest.fn(),
   signOut: jest.fn(),
 }));
+
+// Enable React 19's act() checks in the test environment.
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
