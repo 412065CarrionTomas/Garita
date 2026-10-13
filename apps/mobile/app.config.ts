@@ -4,6 +4,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Garita',
   slug: 'garita',
+  owner: 'garita.com',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
@@ -35,5 +36,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   experiments: {
     typedRoutes: true,
     reactCompiler: true,
+  },
+  extra: {
+    ...config.extra,
+    eas: {
+      projectId: '9fa675ec-1e76-4328-a7f2-9c3821cd25d8',
+    },
   },
 });
