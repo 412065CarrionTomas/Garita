@@ -3,7 +3,12 @@ import { z } from 'zod';
 /** Normalizes the factory UID returned by NFC readers to uppercase hex without separators. */
 export function normalizeNfcUid(value: string): string {
   const compact = value.replace(/[\s:-]/g, '').toUpperCase();
-  if (!/^[0-9A-F]+$/.test(compact) || ![8, 14, 20].includes(compact.length))
+  if (
+    !/^[0-9A-F]+$/.test(compact) ||
+    compact.length < 8 ||
+    compact.length > 20 ||
+    compact.length % 2 !== 0
+  )
     throw new Error('El identificador NFC no es válido');
   return compact;
 }
