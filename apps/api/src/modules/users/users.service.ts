@@ -1,6 +1,7 @@
 import {
   ConflictException,
   GoneException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,11 +13,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { FIREBASE_IDENTITY_PROVIDER } from '../auth/auth.types';
 import type { FirebaseIdentityProvider } from '../auth/auth.types';
-import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env';
 import { ResendInvitationMailer } from './email.service';
 import { purgeExpiredRedeemAttempts } from './redeem-attempts';
+import { CLOCK, type Clock } from '../../common/clock';
+import { WEEKLY_SCHEDULE_DERIVATION_PORT } from './weekly-schedule-derivation.port';
+import type { WeeklyScheduleDerivationPort } from './weekly-schedule-derivation.port';
 
 @Injectable()
 export class UsersService {
@@ -27,6 +30,9 @@ export class UsersService {
     @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly firebase: FirebaseIdentityProvider,
     private readonly mailer: ResendInvitationMailer,
     private readonly config: ConfigService<Env, true>,
+    @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(WEEKLY_SCHEDULE_DERIVATION_PORT)
+    private readonly weeklySchedules: WeeklyScheduleDerivationPort,
   ) {}
 
   async list(query: {
@@ -124,17 +130,136 @@ export class UsersService {
     return this.detail(id);
   }
 
-  async deactivate(id: string, adminId: string) {
+  async deactivate(
+    id: string,
+    adminId: string,
+    choice: {
+      deriveToUserId?: string;
+      leaveUnassigned?: true;
+      confirmUnassignedCount?: number;
+    } = {},
+  ) {
     const user = await this.getUser(id);
+    const futureShifts = await this.prisma.tenantPrisma.shift.findMany({
+      where: {
+        status: 'scheduled',
+        startsAt: { gt: this.clock.now() },
+        assignments: { some: { guardId: id, isCurrent: true, active: true } },
+      },
+      include: { assignments: { where: { guardId: id, isCurrent: true } } },
+      orderBy: { startsAt: 'asc' },
+    });
+    if (choice.deriveToUserId && choice.leaveUnassigned)
+      throw new ConflictException('Elegí derivar o dejar sin vigilador, no ambas opciones');
+    if (futureShifts.length && !choice.deriveToUserId && !choice.leaveUnassigned)
+      throw new ConflictException({ code: 'SHIFT_DECISION_REQUIRED', shifts: futureShifts });
+
+    let derivedCount = 0;
+    let unassignedCount = 0;
+    let notDerived: typeof futureShifts = [];
+    if (choice.deriveToUserId) {
+      if (user.role !== 'guard') throw new NotFoundException('Vigilador no encontrado');
+      const target = await this.prisma.tenantPrisma.user.findFirst({
+        where: {
+          id: choice.deriveToUserId,
+          role: 'guard',
+          status: { in: ['active', 'invitation_pending'] },
+        },
+      });
+      if (!target) throw new NotFoundException('Vigilador destino no encontrado');
+      const candidateAssignments = await this.prisma.tenantPrisma.shiftAssignment.findMany({
+        where: {
+          guardId: target.id,
+          active: true,
+          isCurrent: true,
+          endsAt: { gt: this.clock.now() },
+        },
+        select: { startsAt: true, endsAt: true },
+      });
+      notDerived = futureShifts.filter((shift) => {
+        const source = shift.assignments[0];
+        return (
+          !source ||
+          candidateAssignments.some(
+            (assignment) =>
+              assignment.startsAt < source.endsAt && assignment.endsAt > source.startsAt,
+          )
+        );
+      });
+      const notDerivedIds = new Set(notDerived.map(({ id: shiftId }) => shiftId));
+      derivedCount = futureShifts.length - notDerived.length;
+      await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        for (const shift of futureShifts) {
+          if (notDerivedIds.has(shift.id)) continue;
+          const assignment = shift.assignments[0];
+          if (!assignment) continue;
+          await tx.shiftAssignment.updateMany({
+            where: { shiftId: shift.id, isCurrent: true, active: true },
+            data: { isCurrent: false, active: false },
+          });
+          await tx.shiftAssignment.create({
+            data: {
+              shiftId: shift.id,
+              guardId: target.id,
+              startsAt: assignment.startsAt,
+              endsAt: assignment.endsAt,
+              assignedById: adminId,
+            },
+          });
+        }
+        await this.weeklySchedules.deriveForGuard(tx, id, target.id);
+        await tx.user.update({ where: { id }, data: { status: 'deactivated' } });
+        await tx.invitation.updateMany({
+          where: { userId: id, usedAt: null, replacedAt: null },
+          data: { replacedAt: this.clock.now() },
+        });
+      });
+    } else {
+      if (choice.leaveUnassigned && choice.confirmUnassignedCount !== futureShifts.length)
+        throw new ConflictException({
+          code: 'UNASSIGNED_COUNT_MISMATCH',
+          unassignedCount: futureShifts.length,
+        });
+      unassignedCount = choice.leaveUnassigned ? futureShifts.length : 0;
+      await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        if (choice.leaveUnassigned) {
+          for (const shift of futureShifts) {
+            const assignment = shift.assignments[0];
+            if (!assignment) continue;
+            await tx.shiftAssignment.updateMany({
+              where: { shiftId: shift.id, isCurrent: true, active: true },
+              data: { isCurrent: false, active: false },
+            });
+            await tx.shiftAssignment.create({
+              data: {
+                shiftId: shift.id,
+                guardId: null,
+                startsAt: assignment.startsAt,
+                endsAt: assignment.endsAt,
+                assignedById: adminId,
+              },
+            });
+            await tx.shift.update({ where: { id: shift.id }, data: { status: 'unassigned' } });
+          }
+        }
+        await this.weeklySchedules.deriveForGuard(tx, id, null);
+        await tx.user.update({ where: { id }, data: { status: 'deactivated' } });
+        await tx.invitation.updateMany({
+          where: { userId: id, usedAt: null, replacedAt: null },
+          data: { replacedAt: this.clock.now() },
+        });
+      });
+    }
     await this.firebase.setDisabled(user.firebaseUid, true);
     await this.firebase.revokeRefreshTokens(user.firebaseUid);
-    await this.prisma.tenantPrisma.user.update({ where: { id }, data: { status: 'deactivated' } });
-    await this.prisma.tenantPrisma.invitation.updateMany({
-      where: { userId: id, usedAt: null, replacedAt: null },
-      data: { replacedAt: new Date() },
+    this.logger.log({
+      event: 'personnel_deactivated',
+      adminId,
+      userId: id,
+      derivedCount,
+      unassignedCount,
     });
-    this.logger.log({ event: 'personnel_deactivated', adminId, userId: id });
-    return { ok: true as const };
+    return { ok: true as const, derivedCount, unassignedCount, notDerived };
   }
 
   async reactivate(id: string, adminId: string) {

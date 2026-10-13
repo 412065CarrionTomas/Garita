@@ -52,6 +52,7 @@ model Company {
   clients   Client[]
   sites     Site[]
   rounds    Round[]
+  shifts    Shift[]
 }
 
 model User {
@@ -70,6 +71,8 @@ model User {
   company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   invitations     Invitation[]
   siteAssignments SiteSupervisor[]
+  createdShifts Shift[] @relation("ShiftCreator")
+  shiftAssignments ShiftAssignment[]
 
   @@index([companyId])
 }
@@ -110,6 +113,7 @@ model Site {
   supervisors        SiteSupervisor[]
   checkpoints        Checkpoint[]
   rounds             Round[]
+  shifts             Shift[]
 
   @@unique([clientId, name])
   @@index([companyId, status])
@@ -184,6 +188,7 @@ model Round {
   site            Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
   versions        RoundVersion[]
   currentVersion  RoundVersion? @relation("CurrentRoundVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  shifts          ShiftRound[]
 
   @@unique([siteId, name])
   @@index([companyId, status])
@@ -203,6 +208,7 @@ model RoundVersion {
   round            Round                     @relation(fields: [roundId], references: [id], onDelete: Restrict)
   currentFor       Round?                    @relation("CurrentRoundVersion")
   checkpoints      RoundVersionCheckpoint[]
+  shifts           ShiftRound[]
 
   @@unique([roundId, versionNumber])
   @@index([roundId, createdAt])
@@ -235,4 +241,66 @@ model Invitation {
   user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+enum ShiftStatus {
+  scheduled
+  unassigned
+  cancelled
+}
+
+model Shift {
+  id                 String            @id @default(cuid())
+  companyId          String
+  siteId             String
+  startsAt           DateTime          @db.Timestamptz(3)
+  endsAt             DateTime          @db.Timestamptz(3)
+  serviceDate        DateTime          @db.Date
+  status             ShiftStatus       @default(scheduled)
+  createdById        String
+  cancelledAt        DateTime?         @db.Timestamptz(3)
+  cancelledById      String?
+  cancellationReason String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  company            Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site               Site              @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  createdBy          User              @relation("ShiftCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments        ShiftAssignment[]
+  rounds             ShiftRound[]
+
+  @@index([companyId, startsAt])
+  @@index([siteId, serviceDate])
+  @@index([status, startsAt])
+}
+
+model ShiftAssignment {
+  id           String   @id @default(cuid())
+  shiftId      String
+  guardId      String?
+  startsAt     DateTime @db.Timestamptz(3)
+  endsAt       DateTime @db.Timestamptz(3)
+  isCurrent    Boolean  @default(true)
+  active       Boolean  @default(true)
+  result       String?
+  assignedById String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  shift        Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  guard        User?    @relation(fields: [guardId], references: [id], onDelete: Restrict)
+
+  @@index([shiftId, isCurrent])
+  @@index([guardId, startsAt, endsAt])
+}
+
+model ShiftRound {
+  shiftId        String
+  roundId        String
+  roundVersionId String?
+  shift          Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  round          Round        @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  roundVersion   RoundVersion? @relation(fields: [roundVersionId], references: [id], onDelete: Restrict)
+
+  @@id([shiftId, roundId])
+  @@index([roundId])
 }

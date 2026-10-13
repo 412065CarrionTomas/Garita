@@ -51,6 +51,22 @@ export function SitesPage() {
     observations: '',
   });
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const impact = useQuery({
+    queryKey: ['predio-impacto-baja', deleting?.id],
+    enabled: deleting !== null,
+    queryFn: () =>
+      apiGet(
+        `/predios/${deleting?.id ?? ''}/impacto-baja`,
+        z.looseObject({
+          shiftsToCancel: z.number(),
+          weeklySchedulesToEnd: z.number(),
+          inProgressShiftsToClose: z.number(),
+          shifts: z.array(
+            z.looseObject({ id: z.string(), startsAt: z.string(), endsAt: z.string() }),
+          ),
+        }),
+      ),
+  });
   const supervisors = useQuery({
     queryKey: ['supervisores'],
     queryFn: () =>
@@ -370,17 +386,47 @@ export function SitesPage() {
         <AlertDialogContent>
           <AlertDialogTitle>Dar de baja el predio</AlertDialogTitle>
           <AlertDialogDescription>
-            Se dará de baja {deleting?.name} y se quitarán las asignaciones de supervisores. Esta
-            acción no se puede deshacer.
+            Se dará de baja {deleting?.name} y se quitarán las asignaciones de supervisores.
           </AlertDialogDescription>
+          {impact.isPending ? (
+            <p role="status">Consultando el impacto de la baja…</p>
+          ) : impact.isError ? (
+            <p role="alert">
+              No se pudo consultar el impacto. Cerrá el diálogo e intentá nuevamente.
+            </p>
+          ) : (
+            <div className="my-4 space-y-2" aria-live="polite">
+              <p>
+                Se cancelarán {impact.data.shiftsToCancel} turnos, terminarán{' '}
+                {impact.data.weeklySchedulesToEnd} programaciones semanales y se cerrarán{' '}
+                {impact.data.inProgressShiftsToClose} turnos en curso.
+              </p>
+              {impact.data.shifts.length > 0 && (
+                <ul aria-label="Turnos que se cancelarán">
+                  {impact.data.shifts.map((shift) => (
+                    <li key={shift.id}>
+                      {new Date(shift.startsAt).toLocaleString('es-AR')}–
+                      {new Date(shift.endsAt).toLocaleString('es-AR')}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="mt-5 flex justify-end gap-3">
             <AlertDialogCancel className="rounded border px-4 py-2">Cancelar</AlertDialogCancel>
             <AlertDialogAction
+              disabled={!impact.isSuccess}
               className="rounded bg-destructive px-4 py-2 text-white"
               onClick={() => {
                 if (deleting) {
                   setActionError('');
-                  void apiPost(`/predios/${deleting.id}/baja`, {}, z.looseObject({}), response)
+                  void apiPost(
+                    `/predios/${deleting.id}/baja`,
+                    { confirm: true },
+                    z.object({ confirm: z.boolean() }),
+                    response,
+                  )
                     .then(() => sites.refetch())
                     .catch((caught: unknown) => {
                       setActionError(errorMessage(caught));
@@ -388,7 +434,7 @@ export function SitesPage() {
                 }
               }}
             >
-              Dar de baja predio
+              Confirmar baja
             </AlertDialogAction>
           </div>
         </AlertDialogContent>

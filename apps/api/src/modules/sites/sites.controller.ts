@@ -11,6 +11,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConflictResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import { z } from 'zod';
+import {
   clientInputSchema,
   clientListQuerySchema,
   siteInputSchema,
@@ -30,6 +38,10 @@ function parse<T>(
   return result.data;
 }
 
+const deactivationSchema = z.object({ confirm: z.boolean().optional().default(false) });
+
+@ApiTags('Predios y clientes')
+@ApiBearerAuth()
 @Controller()
 export class SitesController {
   constructor(private readonly sites: SitesService) {}
@@ -55,8 +67,27 @@ export class SitesController {
   }
   @Post('clientes/:id/baja')
   @Roles('admin')
-  deactivateClient(@Param('id') id: string) {
-    return this.sites.deactivateClient(id);
+  @ApiOperation({ summary: 'Da de baja un cliente y cancela sus turnos' })
+  @ApiBody({
+    schema: { type: 'object', properties: { confirm: { type: 'boolean', default: false } } },
+  })
+  @ApiConflictResponse({ description: 'Requiere confirmación; incluye el resumen del impacto' })
+  deactivateClient(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @CurrentUser() admin: AuthenticatedUser,
+  ) {
+    return this.sites.deactivateClient(
+      id,
+      parse(deactivationSchema, raw ?? {}).confirm,
+      admin.userId,
+    );
+  }
+  @Get('clientes/:id/impacto-baja')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Muestra los turnos y programaciones afectados por la baja' })
+  impactClientDeactivation(@Param('id') id: string) {
+    return this.sites.impactClientDeactivation(id);
   }
   @Get('clientes/:id')
   @Roles('admin', 'supervisor')
@@ -93,8 +124,27 @@ export class SitesController {
   }
   @Post('predios/:id/baja')
   @Roles('admin')
-  deactivateSite(@Param('id') id: string) {
-    return this.sites.deactivateSite(id);
+  @ApiOperation({ summary: 'Da de baja un predio y cancela sus turnos' })
+  @ApiBody({
+    schema: { type: 'object', properties: { confirm: { type: 'boolean', default: false } } },
+  })
+  @ApiConflictResponse({ description: 'Requiere confirmación; incluye el resumen del impacto' })
+  deactivateSite(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @CurrentUser() admin: AuthenticatedUser,
+  ) {
+    return this.sites.deactivateSite(
+      id,
+      parse(deactivationSchema, raw ?? {}).confirm,
+      admin.userId,
+    );
+  }
+  @Get('predios/:id/impacto-baja')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Muestra los turnos y programaciones afectados por la baja' })
+  impactSiteDeactivation(@Param('id') id: string) {
+    return this.sites.impactSiteDeactivation(id);
   }
   @Get('predios/:id/supervisores')
   @Roles('admin')

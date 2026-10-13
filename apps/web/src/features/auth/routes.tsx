@@ -10,6 +10,7 @@ import { PersonalPage } from '../personal/personal-page';
 import { ActivationPage } from '../activacion/activation-page';
 import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
 import { SitesPage } from '../predios/sites-page';
+import { ShiftsPanel } from '../turnos/shifts-panel';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -30,6 +31,7 @@ function RoleLayout() {
   const sections: Record<UserRole, { path: string; title: string }[]> = {
     admin: [
       { path: '/resumen', title: 'Resumen' },
+      { path: '/turnos', title: 'Turnos' },
       { path: '/personal', title: 'Personal' },
       { path: '/clientes', title: 'Clientes' },
       { path: '/predios', title: 'Predios' },
@@ -124,8 +126,8 @@ export function AppRoutes() {
         <Route
           path="/turnos"
           element={
-            <Protected roles={['supervisor']}>
-              <HomePlaceholder role="Supervisor" title="Estado de los turnos" />
+            <Protected roles={['admin', 'supervisor']}>
+              <ShiftsPanel />
             </Protected>
           }
         />

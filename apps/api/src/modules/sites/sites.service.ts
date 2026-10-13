@@ -1,8 +1,17 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { CLOCK, type Clock } from '../../common/clock';
+import {
+  IN_PROGRESS_SHIFT_CLOSURE_PORT,
+  WEEKLY_SCHEDULE_TERMINATION_PORT,
+} from './deactivation-ports';
+import type {
+  InProgressShiftClosurePort,
+  WeeklyScheduleTerminationPort,
+} from './deactivation-ports';
 
 /** Datos mínimos de un supervisor visibles en las respuestas de predios. */
 const SUPERVISOR_FIELDS = { id: true, firstName: true, lastName: true, status: true } as const;
@@ -13,6 +22,11 @@ export class SitesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
+    @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(WEEKLY_SCHEDULE_TERMINATION_PORT)
+    private readonly weeklySchedules: WeeklyScheduleTerminationPort,
+    @Inject(IN_PROGRESS_SHIFT_CLOSURE_PORT)
+    private readonly inProgress: InProgressShiftClosurePort,
   ) {}
 
   async listClients(status?: 'active' | 'inactive', page = 1, user?: AuthenticatedUser) {
@@ -55,9 +69,28 @@ export class SitesService {
     }
   }
 
-  async deactivateClient(id: string) {
+  async impactClientDeactivation(id: string) {
     await this.resources.findOwnedOrThrow('Client', id);
+    const sites = await this.prisma.tenantPrisma.site.findMany({
+      where: { clientId: id },
+      select: { id: true },
+    });
+    return this.deactivationImpact(sites.map((site) => site.id));
+  }
+
+  async deactivateClient(id: string, confirm: boolean, adminId: string) {
+    const impact = await this.impactClientDeactivation(id);
+    this.requireConfirmation(impact, confirm);
+    const siteIds = (
+      await this.prisma.tenantPrisma.site.findMany({
+        where: { clientId: id },
+        select: { id: true },
+      })
+    ).map((site) => site.id);
     return this.prisma.tenantPrisma.$transaction(async (tx) => {
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
+      await this.weeklySchedules.terminateForSites(tx, siteIds);
+      await this.inProgress.closeForSites(tx, siteIds);
       await tx.siteSupervisor.deleteMany({ where: { site: { clientId: id } } });
       await tx.site.updateMany({ where: { clientId: id }, data: { status: 'inactive' } });
       return tx.client.update({ where: { id }, data: { status: 'inactive' } });
@@ -90,7 +123,11 @@ export class SitesService {
       where: { ...(clientId ? { clientId } : {}), ...(status ? { status } : {}) },
       take: 200,
       orderBy: { name: 'asc' },
-      include: { client: true, supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } },
+      include: {
+        client: true,
+        company: { select: { timezone: true } },
+        supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } },
+      },
     });
     return sites.map((site) => ({
       ...site,
@@ -102,7 +139,11 @@ export class SitesService {
     await this.resources.findOwnedOrThrow('Site', id);
     const site = await this.prisma.tenantPrisma.site.findFirst({
       where: { id },
-      include: { client: true, supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } } },
+      include: {
+        client: true,
+        company: { select: { timezone: true } },
+        supervisors: { include: { user: { select: SUPERVISOR_FIELDS } } },
+      },
     });
     if (!site) throw new NotFoundException('Recurso no encontrado');
     return {
@@ -135,11 +176,90 @@ export class SitesService {
     }
   }
 
-  async deactivateSite(id: string) {
+  async impactSiteDeactivation(id: string) {
     await this.resources.findOwnedOrThrow('Site', id);
+    return this.deactivationImpact([id]);
+  }
+
+  async deactivateSite(id: string, confirm: boolean, adminId: string) {
+    const impact = await this.impactSiteDeactivation(id);
+    this.requireConfirmation(impact, confirm);
     return this.prisma.tenantPrisma.$transaction(async (tx) => {
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
+      await this.weeklySchedules.terminateForSites(tx, [id]);
+      await this.inProgress.closeForSites(tx, [id]);
       await tx.siteSupervisor.deleteMany({ where: { siteId: id } });
       return tx.site.update({ where: { id }, data: { status: 'inactive' } });
+    });
+  }
+
+  private async deactivationImpact(siteIds: string[]) {
+    const now = this.clock.now();
+    const shifts = siteIds.length
+      ? await this.prisma.tenantPrisma.shift.findMany({
+          where: {
+            siteId: { in: siteIds },
+            status: { in: ['scheduled', 'unassigned'] },
+            OR: [{ startsAt: { gt: now } }, { endsAt: { lte: now } }],
+          },
+          select: { id: true, siteId: true, startsAt: true, endsAt: true, status: true },
+          orderBy: { startsAt: 'asc' },
+        })
+      : [];
+    const [weeklySchedulesToEnd, inProgressShiftsToClose] = await Promise.all([
+      this.weeklySchedules.countForSite(siteIds),
+      siteIds.length
+        ? this.prisma.tenantPrisma.shift.count({
+            where: {
+              siteId: { in: siteIds },
+              status: { in: ['scheduled', 'unassigned'] },
+              startsAt: { lte: now },
+              endsAt: { gt: now },
+            },
+          })
+        : Promise.resolve(0),
+    ]);
+    return { shiftsToCancel: shifts.length, weeklySchedulesToEnd, inProgressShiftsToClose, shifts };
+  }
+
+  private requireConfirmation(
+    impact: Awaited<ReturnType<SitesService['deactivationImpact']>>,
+    confirm: boolean,
+  ) {
+    const affected =
+      impact.shiftsToCancel + impact.weeklySchedulesToEnd + impact.inProgressShiftsToClose;
+    if (affected > 0 && !confirm)
+      throw new ConflictException({ code: 'DEACTIVATION_CONFIRMATION_REQUIRED', ...impact });
+  }
+
+  private async cancelShifts(
+    transaction: Prisma.TransactionClient,
+    siteIds: string[],
+    adminId: string,
+  ): Promise<void> {
+    if (!siteIds.length) return;
+    const shifts = await transaction.shift.findMany({
+      where: {
+        siteId: { in: siteIds },
+        status: { in: ['scheduled', 'unassigned'] },
+        OR: [{ startsAt: { gt: this.clock.now() } }, { endsAt: { lte: this.clock.now() } }],
+      },
+      select: { id: true },
+    });
+    const shiftIds = shifts.map(({ id }) => id);
+    if (!shiftIds.length) return;
+    await transaction.shiftAssignment.updateMany({
+      where: { shiftId: { in: shiftIds }, active: true },
+      data: { active: false },
+    });
+    await transaction.shift.updateMany({
+      where: { id: { in: shiftIds } },
+      data: {
+        status: 'cancelled',
+        cancelledAt: this.clock.now(),
+        cancelledById: adminId,
+        cancellationReason: 'Baja del predio',
+      },
     });
   }
 

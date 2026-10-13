@@ -8,6 +8,13 @@ import { SitesPage } from './sites-page';
 jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn((path: string) => {
+    if (path.endsWith('/impacto-baja'))
+      return Promise.resolve({
+        shiftsToCancel: 3,
+        weeklySchedulesToEnd: 2,
+        inProgressShiftsToClose: 1,
+        shifts: [],
+      });
     if (path === '/predios')
       return [
         {
@@ -128,10 +135,28 @@ describe('SitesPage', () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
-    expect(screen.getByRole('alertdialog', { name: 'Dar de baja el predio' })).toHaveTextContent(
-      'quitarán las asignaciones',
-    );
+    const dialog = screen.getByRole('alertdialog', { name: 'Dar de baja el predio' });
+    expect(dialog).toHaveTextContent('Se cancelarán 3 turnos');
+    expect(dialog).toHaveTextContent('terminarán 2 programaciones semanales');
+    expect(dialog).toHaveTextContent('se cerrarán 1 turnos en curso');
     await user.click(screen.getByRole('button', { name: 'Cancelar' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('envía la confirmación después de mostrar el impacto de la baja', async () => {
+    jest.mocked(useAuth).mockReturnValue(profile('admin'));
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
+    expect(await screen.findByText(/Se cancelarán 3 turnos/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirmar baja' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/predios/site-1/baja',
+        { confirm: true },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
   });
 });
