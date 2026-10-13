@@ -39,11 +39,13 @@ enum RecordStatus {
 model Company {
   id        String   @id @default(cuid())
   name      String
+  timezone  String   @default("America/Argentina/Buenos_Aires")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   users     User[]
   clients   Client[]
   sites     Site[]
+  rounds    Round[]
 }
 
 model User {
@@ -101,6 +103,7 @@ model Site {
   client             Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
   supervisors        SiteSupervisor[]
   checkpoints        Checkpoint[]
+  rounds             Round[]
 
   @@unique([clientId, name])
   @@index([companyId, status])
@@ -136,10 +139,62 @@ model Checkpoint {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
   site                  Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  roundVersions         RoundVersionCheckpoint[]
 
   @@unique([siteId, name])
   @@index([companyId, status])
   @@index([siteId, status])
+}
+
+model Round {
+  id              String       @id @default(cuid())
+  companyId       String
+  siteId          String
+  name            String
+  status          RecordStatus @default(active)
+  currentVersionId String?     @unique
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  company         Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site            Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  versions        RoundVersion[]
+  currentVersion  RoundVersion? @relation("CurrentRoundVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  @@unique([siteId, name])
+  @@index([companyId, status])
+  @@index([siteId, status])
+}
+
+model RoundVersion {
+  id               String                    @id @default(cuid())
+  roundId          String
+  versionNumber    Int
+  frequencyMinutes Int
+  windowStartLocal String
+  windowEndLocal   String
+  graceMinutes     Int
+  createdById      String
+  createdAt        DateTime                  @default(now())
+  round            Round                     @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  currentFor       Round?                    @relation("CurrentRoundVersion")
+  checkpoints      RoundVersionCheckpoint[]
+
+  @@unique([roundId, versionNumber])
+  @@index([roundId, createdAt])
+}
+
+model RoundVersionCheckpoint {
+  id             String       @id @default(cuid())
+  companyId      String
+  roundVersionId String
+  checkpointId   String
+  position       Int
+  roundVersion   RoundVersion @relation(fields: [roundVersionId], references: [id], onDelete: Restrict)
+  checkpoint     Checkpoint   @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+
+  @@unique([roundVersionId, checkpointId])
+  @@unique([roundVersionId, position])
+  @@index([checkpointId])
 }
 
 model Invitation {
