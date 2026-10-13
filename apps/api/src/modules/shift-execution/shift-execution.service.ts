@@ -161,7 +161,7 @@ export class ShiftExecutionService {
       where: { deviceEventId: input.eventId },
       data: { response: response as Prisma.InputJsonValue },
     });
-    await this.scheduleAutoClose(id, shift.siteId, shift.endsAt);
+    await this.scheduleAutoCloseSafely(id, shift.siteId, shift.endsAt);
     this.logger.log({
       event: 'shift.started',
       shiftId: id,
@@ -663,6 +663,25 @@ export class ShiftExecutionService {
     });
     return result;
   }
+  /**
+   * The shift is already in progress in the database when this runs. If Redis is unreachable, the
+   * periodic sweep (every 60 s) still auto-closes the shift, so a scheduling failure is logged and
+   * never turns the guard's start into a 500.
+   */
+  async scheduleAutoCloseSafely(id: string, siteId: string, endsAt: Date): Promise<boolean> {
+    try {
+      await this.scheduleAutoClose(id, siteId, endsAt);
+      return true;
+    } catch (error) {
+      this.logger.warn({
+        event: 'shift.auto_close_schedule_failed',
+        shiftId: id,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      return false;
+    }
+  }
+
   private async scheduleAutoClose(id: string, siteId: string, endsAt: Date) {
     const defaultTime = endsAt.getTime() + SHIFT_AUTO_CLOSE_AFTER_MINUTES * 60_000;
     const siteDeadline = await this.syncDeadline.deadlineForSite(siteId, endsAt);

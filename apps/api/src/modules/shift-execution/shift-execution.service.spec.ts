@@ -53,3 +53,36 @@ describe('ShiftExecutionService.autoClose', () => {
     expect(tx.shift.updateMany).not.toHaveBeenCalled();
   });
 });
+
+describe('ShiftExecutionService auto-close scheduling', () => {
+  function build(add: jest.Mock) {
+    const prisma = { systemPrisma: {}, tenantPrisma: {} } as unknown as PrismaService;
+    const queue = { add } as unknown as Queue;
+    const syncDeadline: SyncDeadlinePort = { deadlineForSite: () => Promise.resolve(null) };
+    return new ShiftExecutionService(
+      prisma,
+      { now: () => now },
+      queue,
+      syncDeadline,
+      new NoopShiftExecutionEffects(),
+    );
+  }
+  const endsAt = new Date('2026-10-13T09:00:00.000Z');
+
+  it('schedules the auto-close job two hours after the scheduled end', async () => {
+    const add = jest.fn().mockResolvedValue({});
+    const service = build(add);
+    await expect(service.scheduleAutoCloseSafely('shift-1', 'site-1', endsAt)).resolves.toBe(true);
+    expect(add).toHaveBeenCalledWith(
+      expect.any(String),
+      { shiftId: 'shift-1' },
+      { jobId: 'shift-auto-close-shift-1', delay: 3 * 60 * 60_000 },
+    );
+  });
+
+  it('does not fail the start when Redis is unreachable', async () => {
+    const add = jest.fn().mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:6379'));
+    const service = build(add);
+    await expect(service.scheduleAutoCloseSafely('shift-1', 'site-1', endsAt)).resolves.toBe(false);
+  });
+});
