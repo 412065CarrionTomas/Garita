@@ -69,7 +69,7 @@ function minutes(value: string): number {
   return hours * 60 + mins;
 }
 
-function localDateTimeToUtc(date: string, minuteOfDay: number, timezone: string): Date {
+export function localDateTimeToUtc(date: string, minuteOfDay: number, timezone: string): Date {
   const dayOffset = Math.floor(minuteOfDay / 1440);
   const minute = ((minuteOfDay % 1440) + 1440) % 1440;
   const year = Number(date.slice(0, 4));

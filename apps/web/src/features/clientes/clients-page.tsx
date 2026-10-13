@@ -48,6 +48,22 @@ export function ClientsPage() {
     taxId: '',
   });
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const impact = useQuery({
+    queryKey: ['cliente-impacto-baja', deleting?.id],
+    enabled: deleting !== null,
+    queryFn: () =>
+      apiGet(
+        `/clientes/${deleting?.id ?? ''}/impacto-baja`,
+        z.looseObject({
+          shiftsToCancel: z.number(),
+          weeklySchedulesToEnd: z.number(),
+          inProgressShiftsToClose: z.number(),
+          shifts: z.array(
+            z.looseObject({ id: z.string(), startsAt: z.string(), endsAt: z.string() }),
+          ),
+        }),
+      ),
+  });
   return (
     <section className="space-y-6">
       <h1 className="text-3xl font-semibold">Clientes</h1>
@@ -229,16 +245,47 @@ export function ClientsPage() {
           <AlertDialogTitle>Dar de baja al cliente</AlertDialogTitle>
           <AlertDialogDescription>
             La baja de {deleting?.name} también dará de baja sus predios y quitará todas las
-            asignaciones de supervisores. Esta acción no se puede deshacer.
+            asignaciones de supervisores.
           </AlertDialogDescription>
+          {impact.isPending ? (
+            <p role="status">Consultando el impacto de la baja…</p>
+          ) : impact.isError ? (
+            <p role="alert">
+              No se pudo consultar el impacto. Cerrá el diálogo e intentá nuevamente.
+            </p>
+          ) : (
+            <div className="my-4 space-y-2" aria-live="polite">
+              <p>
+                Se cancelarán {impact.data.shiftsToCancel} turnos, terminarán{' '}
+                {impact.data.weeklySchedulesToEnd} programaciones semanales y se cerrarán{' '}
+                {impact.data.inProgressShiftsToClose} turnos en curso.
+              </p>
+              {impact.data.shifts.length > 0 && (
+                <ul aria-label="Turnos que se cancelarán">
+                  {impact.data.shifts.map((shift) => (
+                    <li key={shift.id}>
+                      {new Date(shift.startsAt).toLocaleString('es-AR')}–
+                      {new Date(shift.endsAt).toLocaleString('es-AR')}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="mt-5 flex justify-end gap-3">
             <AlertDialogCancel className="rounded border px-4 py-2">Cancelar</AlertDialogCancel>
             <AlertDialogAction
+              disabled={!impact.isSuccess}
               className="rounded bg-destructive px-4 py-2 text-white"
               onClick={() => {
                 if (deleting) {
                   setActionError('');
-                  void apiPost(`/clientes/${deleting.id}/baja`, {}, z.looseObject({}), response)
+                  void apiPost(
+                    `/clientes/${deleting.id}/baja`,
+                    { confirm: true },
+                    z.object({ confirm: z.boolean() }),
+                    response,
+                  )
                     .then(() => queryClient.invalidateQueries({ queryKey: ['clientes'] }))
                     .catch((caught: unknown) => {
                       setActionError(errorMessage(caught));
@@ -246,7 +293,7 @@ export function ClientsPage() {
                 }
               }}
             >
-              Dar de baja cliente
+              Confirmar baja
             </AlertDialogAction>
           </div>
         </AlertDialogContent>

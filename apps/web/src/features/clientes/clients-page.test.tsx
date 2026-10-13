@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
+import { apiPost } from '@/lib/api-client';
 import { ClientsPage } from './clients-page';
 
 jest.mock('@/lib/api-client', () => {
@@ -12,18 +13,25 @@ jest.mock('@/lib/api-client', () => {
     }
   }
   return {
-    apiGet: jest.fn(() =>
-      Promise.resolve([
-        {
-          id: 'client-1',
-          name: 'Cliente Norte',
-          contactName: 'Ana',
-          phone: '+541112345678',
-          email: 'ana@example.invalid',
-          taxId: null,
-          status: 'active',
-        },
-      ]),
+    apiGet: jest.fn((path: string) =>
+      path.endsWith('/impacto-baja')
+        ? Promise.resolve({
+            shiftsToCancel: 4,
+            weeklySchedulesToEnd: 1,
+            inProgressShiftsToClose: 2,
+            shifts: [],
+          })
+        : Promise.resolve([
+            {
+              id: 'client-1',
+              name: 'Cliente Norte',
+              contactName: 'Ana',
+              phone: '+541112345678',
+              email: 'ana@example.invalid',
+              taxId: null,
+              status: 'active',
+            },
+          ]),
     ),
     apiPost: jest.fn(() => Promise.reject(new ApiError('HTTP 409', 409))),
     apiPatch: jest.fn(() => Promise.resolve({ id: 'client' })),
@@ -93,9 +101,19 @@ describe('ClientsPage', () => {
     const user = userEvent.setup();
     renderWithQueryClient(<ClientsPage />);
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
-    expect(screen.getByRole('alertdialog', { name: 'Dar de baja al cliente' })).toHaveTextContent(
-      'dará de baja sus predios',
-    );
+    const dialog = screen.getByRole('alertdialog', { name: 'Dar de baja al cliente' });
+    expect(dialog).toHaveTextContent('Se cancelarán 4 turnos');
+    expect(dialog).toHaveTextContent('terminarán 1 programaciones semanales');
+    expect(dialog).toHaveTextContent('se cerrarán 2 turnos en curso');
+    await user.click(screen.getByRole('button', { name: 'Confirmar baja' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/clientes/client-1/baja',
+        { confirm: true },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();

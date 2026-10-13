@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 import {
   createUserRequestSchema,
   emptyRequestSchema,
@@ -21,11 +22,35 @@ export function PersonalPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Person | null>(null);
   const [deactivating, setDeactivating] = useState<Person | null>(null);
+  const [deriveToUserId, setDeriveToUserId] = useState('');
+  const [leaveUnassigned, setLeaveUnassigned] = useState(false);
+  const [notDerived, setNotDerived] = useState<{ id: string; name: string }[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
   const editDialog = useRef<HTMLDialogElement>(null);
   const deactivateDialog = useRef<HTMLDialogElement>(null);
   const queryClient = useQueryClient();
+  const futureShifts = useQuery({
+    queryKey: ['personal', deactivating?.id, 'turnos-futuros'],
+    enabled: deactivating?.role === 'guard',
+    queryFn: () =>
+      apiGet(
+        `/usuarios/${deactivating?.id ?? ''}/turnos-futuros`,
+        z.array(
+          z.looseObject({
+            id: z.string(),
+            startsAt: z.string(),
+            endsAt: z.string(),
+            site: z.looseObject({ name: z.string() }),
+          }),
+        ),
+      ),
+  });
+  const guardOptions = useQuery({
+    queryKey: ['personal', 'vigiladores', 'derivacion'],
+    enabled: deactivating?.role === 'guard',
+    queryFn: () => apiGet('/usuarios?rol=guard&pagina=1', usersPageSchema),
+  });
   const params = new URLSearchParams({ pagina: String(page) });
   if (role) params.set('rol', role);
   if (status) params.set('estado', status);
@@ -274,6 +299,9 @@ export function PersonalPage() {
                         className="underline"
                         onClick={() => {
                           setDeactivating(person);
+                          setDeriveToUserId('');
+                          setLeaveUnassigned(false);
+                          setNotDerived([]);
                           setFormError('');
                         }}
                       >
@@ -401,21 +429,176 @@ export function PersonalPage() {
             ¿Querés desactivar a {deactivating.firstName} {deactivating.lastName}? Ya no podrá
             acceder a Garita.
           </p>
+          {deactivating.role === 'guard' &&
+            (futureShifts.isPending ? (
+              <p role="status">Consultando turnos futuros…</p>
+            ) : futureShifts.isError ? (
+              <p role="alert">No se pudieron consultar los turnos futuros.</p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {futureShifts.data.length > 0 ? (
+                  <>
+                    <p>Tiene {futureShifts.data.length} turnos futuros:</p>
+                    <ul className="max-h-40 list-disc overflow-auto pl-5">
+                      {futureShifts.data.map((shift) => (
+                        <li key={shift.id}>
+                          {shift.site.name} · {new Date(shift.startsAt).toLocaleString('es-AR')}–
+                          {new Date(shift.endsAt).toLocaleString('es-AR')}
+                        </li>
+                      ))}
+                    </ul>
+                    <label className="grid gap-1">
+                      Derivar turnos a
+                      <select
+                        className="rounded border p-2"
+                        value={deriveToUserId}
+                        onChange={(event) => {
+                          setDeriveToUserId(event.target.value);
+                          setLeaveUnassigned(false);
+                        }}
+                      >
+                        <option value="">Seleccioná un vigilador destino</option>
+                        {guardOptions.data?.items
+                          .filter(
+                            (candidate) =>
+                              candidate.id !== deactivating.id &&
+                              (candidate.status === 'active' ||
+                                candidate.status === 'invitation_pending'),
+                          )
+                          .map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {candidate.firstName} {candidate.lastName}
+                              {candidate.status === 'invitation_pending'
+                                ? ' · invitación pendiente'
+                                : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={leaveUnassigned}
+                        onChange={(event) => {
+                          setLeaveUnassigned(event.target.checked);
+                          setDeriveToUserId('');
+                        }}
+                      />
+                      <span>Dejar los turnos sin vigilador</span>
+                    </label>
+                    {leaveUnassigned && (
+                      <p role="alert">
+                        Se desactivará a {deactivating.firstName} y {futureShifts.data.length}{' '}
+                        turnos quedarán sin vigilador. Si nadie los cubre, sus rondas contarán como
+                        no realizadas. Confirmá esta cantidad en una segunda instancia.
+                      </p>
+                    )}
+                    {notDerived.length > 0 && (
+                      <div role="status">
+                        <p>{notDerived.length} turnos no se pudieron derivar por superposición:</p>
+                        <ul className="list-disc pl-5">
+                          {notDerived.map((shift) => (
+                            <li key={shift.id}>{shift.name}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p>No tiene turnos futuros.</p>
+                )}
+              </div>
+            ))}
           <div className="mt-4 flex gap-3">
             <button
               type="button"
+              disabled={
+                deactivating.role === 'guard' &&
+                (futureShifts.isPending || futureShifts.isError || futureShifts.data.length > 0)
+              }
               className="rounded border px-3 py-2"
               onClick={() => {
                 const person = deactivating;
-                setDeactivating(null);
-                void runAction(
+                void apiPost(
                   `/usuarios/${person.id}/desactivar`,
-                  'No se pudo desactivar el usuario.',
-                );
+                  {},
+                  emptyRequestSchema,
+                  emptyResponseSchema,
+                )
+                  .then(async () => {
+                    setDeactivating(null);
+                    await refresh();
+                  })
+                  .catch(() => {
+                    setFormError('No se pudo desactivar el usuario.');
+                  });
               }}
             >
               Confirmar desactivación
             </button>
+            {deactivating.role === 'guard' && deriveToUserId && (
+              <button
+                type="button"
+                className="rounded border px-3 py-2"
+                onClick={() => {
+                  void apiPost(
+                    `/usuarios/${deactivating.id}/desactivar`,
+                    { deriveToUserId },
+                    z.object({ deriveToUserId: z.string() }),
+                    z.looseObject({
+                      notDerived: z.array(
+                        z.looseObject({
+                          id: z.string(),
+                          site: z.looseObject({ name: z.string() }),
+                        }),
+                      ),
+                    }),
+                  )
+                    .then(async (result) => {
+                      setNotDerived(
+                        result.notDerived.map(({ id, site }) => ({ id, name: site.name })),
+                      );
+                      await refresh();
+                      if (result.notDerived.length === 0) setDeactivating(null);
+                    })
+                    .catch(() => {
+                      setFormError(
+                        'No se pudieron derivar los turnos. Revisá las superposiciones.',
+                      );
+                    });
+                }}
+              >
+                Derivar y desactivar
+              </button>
+            )}
+            {deactivating.role === 'guard' && leaveUnassigned && futureShifts.data && (
+              <button
+                type="button"
+                className="rounded border px-3 py-2"
+                onClick={() => {
+                  void apiPost(
+                    `/usuarios/${deactivating.id}/desactivar`,
+                    { leaveUnassigned: true, confirmUnassignedCount: futureShifts.data.length },
+                    z.object({
+                      leaveUnassigned: z.literal(true),
+                      confirmUnassignedCount: z.number().int().nonnegative(),
+                    }),
+                    z.looseObject({}),
+                  )
+                    .then(async () => {
+                      setDeactivating(null);
+                      await refresh();
+                    })
+                    .catch(() => {
+                      setFormError(
+                        'No se pudo desactivar al vigilador con esa confirmación. Actualizá el impacto e intentá nuevamente.',
+                      );
+                    });
+                }}
+              >
+                Confirmar que {futureShifts.data.length} turnos quedan sin vigilador
+              </button>
+            )}
             <button
               type="button"
               className="rounded border px-3 py-2"
