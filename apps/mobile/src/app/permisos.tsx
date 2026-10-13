@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   requestFieldPermissions,
@@ -15,6 +16,7 @@ const messages: Record<FieldPermissionState, string> = {
 };
 
 export default function PermissionsScreen() {
+  const router = useRouter();
   const [state, setState] = useState<FieldPermissionState | null>(null);
   const [loading, setLoading] = useState(false);
   const request = async () => {
@@ -52,6 +54,16 @@ export default function PermissionsScreen() {
           <Text style={styles.buttonText}>Configurar permisos</Text>
         )}
       </Pressable>
+      {state === 'ok' && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Continuar a mis turnos"
+          onPress={() => router.replace('/(guard)')}
+          style={styles.button}
+        >
+          <Text style={styles.buttonText}>Continuar</Text>
+        </Pressable>
+      )}
       {state && (
         <Text accessibilityLiveRegion="polite" style={styles.status}>
           {messages[state]}

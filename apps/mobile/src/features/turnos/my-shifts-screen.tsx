@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text } from 'react-native';
 import { z } from 'zod';
+import { useRouter } from 'expo-router';
 import { apiGet } from '@/lib/api-client';
 
 const shiftsSchema = z.array(
@@ -17,6 +18,7 @@ const shiftsSchema = z.array(
 type ShiftList = z.infer<typeof shiftsSchema>;
 
 export function MyShiftsScreen() {
+  const router = useRouter();
   const [shifts, setShifts] = useState<ShiftList>([]);
   const [refreshing, setRefreshing] = useState(true);
   const [error, setError] = useState(false);
@@ -69,6 +71,7 @@ export function MyShiftsScreen() {
       <Text style={styles.help}>Próximos 14 días · Deslizá hacia abajo para actualizar.</Text>
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel="Actualizar turnos"
         onPress={() => void load()}
         style={styles.refreshButton}
       >
@@ -84,7 +87,13 @@ export function MyShiftsScreen() {
       )}
       {!refreshing && !error && shifts.length === 0 && <Text>No tenés turnos próximos.</Text>}
       {shifts.map((shift) => (
-        <View key={shift.id} style={styles.card}>
+        <Pressable
+          key={shift.id}
+          accessibilityRole="button"
+          accessibilityLabel={`Ver turno en ${shift.site.name}`}
+          onPress={() => router.push(`/turno/${shift.id}`)}
+          style={styles.card}
+        >
           <Text style={styles.site}>{shift.site.name}</Text>
           <Text>Día del turno: {formatDay(shift.serviceDate)}</Text>
           <Text>
@@ -92,7 +101,7 @@ export function MyShiftsScreen() {
             {formatTime(shift.endsAt, shift.site.company.timezone)}
           </Text>
           <Text>Rondas: {shift.rounds.map(({ round }) => round.name).join(', ')}</Text>
-        </View>
+        </Pressable>
       ))}
     </ScrollView>
   );
