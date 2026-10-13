@@ -59,6 +59,38 @@ describe('registro del aislamiento tenant', () => {
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('RoundVersion');
   });
 
+  it('registra turnos y limita turnos y relaciones a los predios del supervisor', () => {
+    expect(COMPANY_ID_MODELS).toContain('Shift');
+    expect(INDIRECT_TENANT_MODELS).toHaveProperty('ShiftAssignment');
+    expect(INDIRECT_TENANT_MODELS).toHaveProperty('ShiftRound');
+    const user = {
+      userId: 'supervisor-1',
+      companyId: 'norte',
+      role: 'supervisor' as const,
+      status: 'active' as const,
+    };
+    expect(addSiteAssignmentFilter('Shift', { where: { status: 'scheduled' } }, user)).toEqual({
+      where: {
+        AND: [
+          { status: 'scheduled' },
+          { site: { supervisors: { some: { userId: 'supervisor-1' } } } },
+        ],
+      },
+    });
+    expect(addSiteAssignmentFilter('ShiftAssignment', { where: {} }, user)).toEqual({
+      where: {
+        AND: [
+          {},
+          {
+            shift: {
+              site: { supervisors: { some: { userId: 'supervisor-1' } } },
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it('falla cerrado ante operaciones tenant no soportadas', () => {
     expect(() => scopeArgs('User', 'futureOperation', {}, 'norte-company')).toThrow(
       'Operación futureOperation no soportada',

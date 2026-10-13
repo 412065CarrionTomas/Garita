@@ -166,6 +166,52 @@ async function main(): Promise<void> {
       update: { companyId: north, status },
     });
   }
+  const perimetral = await prisma.round.findUniqueOrThrow({
+    where: { siteId_name: { siteId: northSite.id, name: 'Perimetral' } },
+  });
+  const activeGuard = await prisma.user.findUniqueOrThrow({
+    where: { firebaseUid: 'seed-norte-guard' },
+  });
+  const pendingGuard = await prisma.user.findUniqueOrThrow({
+    where: { firebaseUid: 'seed-norte-pending' },
+  });
+  const seededShifts = [
+    {
+      startsAt: new Date('2030-10-14T23:00:00.000Z'),
+      endsAt: new Date('2030-10-15T11:00:00.000Z'),
+      guardId: activeGuard.id,
+    },
+    {
+      startsAt: new Date('2030-10-15T23:00:00.000Z'),
+      endsAt: new Date('2030-10-16T11:00:00.000Z'),
+      guardId: pendingGuard.id,
+    },
+  ];
+  for (const value of seededShifts) {
+    const existing = await prisma.shift.findFirst({
+      where: { siteId: northSite.id, startsAt: value.startsAt },
+    });
+    if (existing) continue;
+    await prisma.shift.create({
+      data: {
+        companyId: north,
+        siteId: northSite.id,
+        startsAt: value.startsAt,
+        endsAt: value.endsAt,
+        serviceDate: new Date(`${value.startsAt.toISOString().slice(0, 10)}T00:00:00.000Z`),
+        createdById: northSupervisor.id,
+        assignments: {
+          create: {
+            guardId: value.guardId,
+            startsAt: value.startsAt,
+            endsAt: value.endsAt,
+            assignedById: northSupervisor.id,
+          },
+        },
+        rounds: { create: { roundId: perimetral.id } },
+      },
+    });
+  }
 }
 
 void main()

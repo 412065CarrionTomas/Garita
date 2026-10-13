@@ -13,11 +13,14 @@ export const COMPANY_ID_MODELS = [
   'Checkpoint',
   'Round',
   'RoundVersionCheckpoint',
+  'Shift',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
   Invitation: { relation: 'user', foreignKey: 'userId', relatedModel: 'User' },
   RoundVersion: { relation: 'round', foreignKey: 'roundId', relatedModel: 'Round' },
+  ShiftAssignment: { relation: 'shift', foreignKey: 'shiftId', relatedModel: 'Shift' },
+  ShiftRound: { relation: 'shift', foreignKey: 'shiftId', relatedModel: 'Shift' },
 } as const;
 export const TENANT_MODELS = [
   ...COMPANY_ID_MODELS,
@@ -71,6 +74,11 @@ export function addSiteAssignmentFilter(
     return { ...args, where: { AND: [where, { round: { site: assignment } }] } };
   if (model === 'RoundVersionCheckpoint')
     return { ...args, where: { AND: [where, { roundVersion: { round: { site: assignment } } }] } };
+  if (model === 'Shift') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'ShiftAssignment')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'ShiftRound')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'Client') {
     const siteFilter = { supervisors: { some: { userId: user.userId } } };
     const constrainSites = (selection: unknown): unknown => {
