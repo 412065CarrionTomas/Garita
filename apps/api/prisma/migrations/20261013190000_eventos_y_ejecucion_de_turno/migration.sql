@@ -14,6 +14,7 @@ CREATE TABLE "ShiftEvent" (
   "type" "ShiftEventType" NOT NULL,
   "deviceEventId" UUID,
   "occurredAt" TIMESTAMPTZ(3) NOT NULL,
+  "occurredAtDevice" TIMESTAMPTZ(3),
   "receivedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "locationStatus" "ShiftEventLocationStatus",
   "latitude" DECIMAL(9,6),
@@ -24,6 +25,7 @@ CREATE TABLE "ShiftEvent" (
   "actorUserId" TEXT,
   "lateStartMinutes" INTEGER,
   "countsForCompliance" BOOLEAN NOT NULL DEFAULT true,
+  "response" JSONB,
   CONSTRAINT "ShiftEvent_pkey" PRIMARY KEY ("id")
 );
 CREATE UNIQUE INDEX "ShiftEvent_deviceEventId_key" ON "ShiftEvent"("deviceEventId");
