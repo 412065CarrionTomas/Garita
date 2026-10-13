@@ -101,7 +101,13 @@ export class UsersService {
       })
       .catch(async (error: unknown) => {
         // Compensación: evita dejar un usuario huérfano en Firebase si falla la BD.
-        await this.firebase.deleteUser(identity.uid).catch(() => undefined);
+        await this.firebase.deleteUser(identity.uid).catch((cleanupError: unknown) => {
+          this.logger.error({
+            event: 'personnel_firebase_cleanup_failed',
+            firebaseUid: identity.uid,
+            error: cleanupError instanceof Error ? cleanupError.message : 'unknown',
+          });
+        });
         throw error;
       });
     const invitation = user.invitations[0];

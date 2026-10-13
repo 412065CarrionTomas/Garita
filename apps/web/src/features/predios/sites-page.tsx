@@ -195,6 +195,12 @@ export function SitesPage() {
                         const selected = [...event.currentTarget.selectedOptions].map(
                           (option) => option.value,
                         );
+                        const previous =
+                          supervisorIds[site.id] ??
+                          site.supervisors?.map(({ user }) => user.id) ??
+                          [];
+                        // Muestra la selección al instante y la revierte si el guardado falla.
+                        setSupervisorIds((current) => ({ ...current, [site.id]: selected }));
                         setActionError('');
                         void apiPut(
                           `/predios/${site.id}/supervisores`,
@@ -202,11 +208,9 @@ export function SitesPage() {
                           z.object({ supervisorIds: z.array(z.string()) }),
                           z.array(z.unknown()),
                         )
-                          .then(() => {
-                            setSupervisorIds({ ...supervisorIds, [site.id]: selected });
-                            return sites.refetch();
-                          })
+                          .then(() => sites.refetch())
                           .catch((caught: unknown) => {
+                            setSupervisorIds((current) => ({ ...current, [site.id]: previous }));
                             setActionError(errorMessage(caught));
                           });
                       }}
