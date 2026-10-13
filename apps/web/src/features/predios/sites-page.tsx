@@ -8,6 +8,7 @@ import type { SyntheticEvent } from 'react';
 import { SiteLocation } from '../mapa/site-location';
 import { z } from 'zod';
 import { CheckpointsPanel } from '../puntos/checkpoints-panel';
+import { RoundsPanel } from '../rondas/rounds-panel';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -178,6 +179,7 @@ export function SitesPage() {
                 </span>
               )}
               <CheckpointsPanel site={site} />
+              <RoundsPanel site={site} />
               {user?.role === 'admin' && !site.hasActiveSupervisor && (
                 <p role="status">Sin supervisor activo</p>
               )}

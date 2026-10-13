@@ -16,6 +16,7 @@ catalog:
 
 # Dependencias autorizadas a ejecutar scripts de instalación.
 allowBuilds:
+  '@scarf/scarf': false
   '@firebase/util': true
   '@parcel/watcher': true
   '@prisma/engines': true

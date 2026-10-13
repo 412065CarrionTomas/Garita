@@ -11,6 +11,7 @@ import { UsersModule } from './modules/users/users.module';
 import { SitesModule } from './modules/sites/sites.module';
 import { CheckpointsModule } from './modules/checkpoints/checkpoints.module';
 import { NfcTagsModule } from './modules/nfc-tags/nfc-tags.module';
+import { RoundsModule } from './modules/rounds/rounds.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { NfcTagsModule } from './modules/nfc-tags/nfc-tags.module';
     SitesModule,
     CheckpointsModule,
     NfcTagsModule,
+    RoundsModule,
   ],
 })
 export class AppModule {}

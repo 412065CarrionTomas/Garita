@@ -106,6 +106,48 @@ async function main(): Promise<void> {
     create: { companyId: north, siteId: northSite.id, userId: northSupervisor.id },
     update: {},
   });
+  const checkpoints = await prisma.checkpoint.findMany({
+    where: { companyId: north, siteId: northSite.id, status: 'active' },
+    orderBy: { name: 'asc' },
+  });
+  const seedRound = async (name: string, frequencyMinutes: number, checkpointIds: string[]) => {
+    const round = await prisma.round.upsert({
+      where: { siteId_name: { siteId: northSite.id, name } },
+      create: { companyId: north, siteId: northSite.id, name },
+      update: { status: 'active' },
+    });
+    const version = await prisma.roundVersion.upsert({
+      where: { roundId_versionNumber: { roundId: round.id, versionNumber: 1 } },
+      create: {
+        roundId: round.id,
+        versionNumber: 1,
+        frequencyMinutes,
+        windowStartLocal: '22:00',
+        windowEndLocal: '06:00',
+        graceMinutes: frequencyMinutes === 120 ? 15 : 15,
+        createdById: northSupervisor.id,
+      },
+      update: {},
+    });
+    for (const [position, checkpointId] of checkpointIds.entries()) {
+      await prisma.roundVersionCheckpoint.upsert({
+        where: { roundVersionId_checkpointId: { roundVersionId: version.id, checkpointId } },
+        create: { companyId: north, roundVersionId: version.id, checkpointId, position },
+        update: { position },
+      });
+    }
+    await prisma.round.update({ where: { id: round.id }, data: { currentVersionId: version.id } });
+  };
+  await seedRound(
+    'Perimetral',
+    120,
+    checkpoints.map(({ id }) => id),
+  );
+  await seedRound(
+    'Interna',
+    60,
+    checkpoints.slice(0, 2).map(({ id }) => id),
+  );
   for (const [uid, status] of [
     ['seed-norte-deactivated', 'deactivated'],
     ['seed-norte-pending', 'invitation_pending'],
