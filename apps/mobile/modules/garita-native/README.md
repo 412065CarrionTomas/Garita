@@ -14,3 +14,7 @@ Android usa `LocationManager` para evitar agregar Google Play Services como depe
 - HU-23 agregará envío de SMS en Android, con permisos y comportamiento independiente.
 
 El módulo se autolinkea desde `apps/mobile/modules/garita-native` usando `expo-module.config.json`; su config plugin no añade capacidades del sistema. Para validar el autolinking, ejecutar `pnpm --filter mobile exec expo prebuild --no-install --clean --platform android` y comprobar `@garita/garita-native` en `settings.gradle`/autolinking.
+
+## Verificación en el primer build
+
+En el primer build de EAS para Android, revisar que Gradle compile el módulo `@garita/garita-native` y que una ejecución de `getCapabilities()` responda con `moduleVersion: "1.0.0"` y `simulationDetectionAvailable: true`. La compilación de iOS queda pendiente hasta contar con una Mac o ejecutar un build de EAS para iOS; el autolinking ya incluye el pod del módulo.
