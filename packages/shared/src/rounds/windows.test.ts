@@ -2,6 +2,7 @@ import {
   computeRoundWindows,
   defaultGraceMinutes,
   previewWindows,
+  validateWindowConfig,
   windowsForShift,
 } from './windows';
 
@@ -36,5 +37,26 @@ describe('round windows', () => {
   it('sets the default grace', () => {
     expect(defaultGraceMinutes(120)).toBe(15);
     expect(defaultGraceMinutes(20)).toBe(10);
+  });
+  it('associates window validation messages with their input fields', () => {
+    expect(
+      validateWindowConfig({
+        frequencyMinutes: 10,
+        windowStartLocal: 'bad',
+        windowEndLocal: 'also bad',
+        graceMinutes: 10,
+      }),
+    ).toEqual([
+      {
+        field: 'frequencyMinutes',
+        message: 'La frecuencia debe estar entre 15 minutos y 24 horas.',
+      },
+      {
+        field: 'graceMinutes',
+        message: 'La gracia puede ser, como máximo, 5 minutos: la mitad de la frecuencia.',
+      },
+      { field: 'windowStartLocal', message: 'La hora debe tener formato HH:mm.' },
+      { field: 'windowEndLocal', message: 'La hora debe tener formato HH:mm.' },
+    ]);
   });
 });

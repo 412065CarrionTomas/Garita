@@ -22,29 +22,39 @@ export function defaultGraceMinutes(frequencyMinutes: number): number {
 
 export function validateWindowConfig(
   config: Omit<RoundWindowConfig, 'timezone'> & { graceMinutes: number },
-): string[] {
-  const errors: string[] = [];
+): { field: keyof Omit<RoundWindowConfig, 'timezone'> | 'graceMinutes'; message: string }[] {
+  const errors: {
+    field: keyof Omit<RoundWindowConfig, 'timezone'> | 'graceMinutes';
+    message: string;
+  }[] = [];
   if (
     !Number.isInteger(config.frequencyMinutes) ||
     config.frequencyMinutes < 15 ||
     config.frequencyMinutes > 1440
   ) {
-    errors.push('La frecuencia debe estar entre 15 minutos y 24 horas.');
+    errors.push({
+      field: 'frequencyMinutes',
+      message: 'La frecuencia debe estar entre 15 minutos y 24 horas.',
+    });
   }
   if (
     !Number.isInteger(config.graceMinutes) ||
     config.graceMinutes < 0 ||
     config.graceMinutes > 60
   ) {
-    errors.push('La gracia debe estar entre 0 y 60 minutos.');
+    errors.push({ field: 'graceMinutes', message: 'La gracia debe estar entre 0 y 60 minutos.' });
   }
   if (config.graceMinutes > config.frequencyMinutes / 2) {
-    errors.push(
-      `La gracia puede ser, como máximo, ${config.frequencyMinutes / 2} minutos: la mitad de la frecuencia.`,
-    );
+    errors.push({
+      field: 'graceMinutes',
+      message: `La gracia puede ser, como máximo, ${config.frequencyMinutes / 2} minutos: la mitad de la frecuencia.`,
+    });
   }
   if (!isLocalTime(config.windowStartLocal) || !isLocalTime(config.windowEndLocal)) {
-    errors.push('La hora debe tener formato HH:mm.');
+    if (!isLocalTime(config.windowStartLocal))
+      errors.push({ field: 'windowStartLocal', message: 'La hora debe tener formato HH:mm.' });
+    if (!isLocalTime(config.windowEndLocal))
+      errors.push({ field: 'windowEndLocal', message: 'La hora debe tener formato HH:mm.' });
   }
   return errors;
 }

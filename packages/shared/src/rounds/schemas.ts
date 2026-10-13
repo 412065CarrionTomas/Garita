@@ -11,8 +11,8 @@ export const roundInputSchema = z
     graceMinutes: z.number().int(),
   })
   .superRefine((value, context) => {
-    for (const message of validateWindowConfig(value))
-      context.addIssue({ code: 'custom', message, path: ['graceMinutes'] });
+    for (const { field, message } of validateWindowConfig(value))
+      context.addIssue({ code: 'custom', message, path: [field] });
     if (new Set(value.checkpointIds).size !== value.checkpointIds.length)
       context.addIssue({
         code: 'custom',
@@ -29,6 +29,6 @@ export const previewRoundSchema = z
     graceMinutes: z.number().int(),
   })
   .superRefine((value, context) => {
-    for (const message of validateWindowConfig(value))
-      context.addIssue({ code: 'custom', message, path: ['graceMinutes'] });
+    for (const { field, message } of validateWindowConfig(value))
+      context.addIssue({ code: 'custom', message, path: [field] });
   });
