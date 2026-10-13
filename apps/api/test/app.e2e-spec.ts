@@ -507,7 +507,11 @@ describe('Aplicación (e2e)', () => {
 
   it('crea rondas, conserva las versiones anteriores y valida los permisos', async () => {
     const swagger = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
-    expect(Object.keys(swagger.body.paths)).toEqual(
+    const swaggerDocument: unknown = swagger.body as unknown;
+    const swaggerPaths = z
+      .object({ paths: z.record(z.string(), z.unknown()) })
+      .parse(swaggerDocument).paths;
+    expect(Object.keys(swaggerPaths)).toEqual(
       expect.arrayContaining([
         '/api/v1/predios/{id}/rondas',
         '/api/v1/rondas/{id}',
