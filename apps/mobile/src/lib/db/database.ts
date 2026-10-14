@@ -40,6 +40,7 @@ export interface FieldDatabase {
   getSyncMeta?(key: string): Promise<string | null>;
   setSyncMeta?(key: string, value: string): Promise<void>;
   getPendingEventRejectReason?(id: string): Promise<string | null>;
+  readEventDeliveryStatus?(id: string): Promise<{ sent: boolean; rejected: boolean } | null>;
   insertCheckpointRecord(record: LocalCheckpointRecord): Promise<void>;
   readCheckpointRecords(shiftId?: string): Promise<unknown[]>;
   updateCheckpointRecordServerResult(
@@ -259,6 +260,13 @@ export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
     );
     return row?.reject_reason ?? null;
   }
+  async readEventDeliveryStatus(id: string): Promise<{ sent: boolean; rejected: boolean } | null> {
+    const row = await this.db.getFirstAsync<{ sent: number; reject_reason: string | null }>(
+      'SELECT sent, reject_reason FROM pending_events WHERE id = ?',
+      id,
+    );
+    return row ? { sent: row.sent === 1, rejected: row.reject_reason !== null } : null;
+  }
   async insertCheckpointRecord(record: LocalCheckpointRecord): Promise<void> {
     await this.db.runAsync(
       'INSERT OR REPLACE INTO checkpoint_records (record_id, shift_id, checkpoint_id, checkpoint_name, occurred_at_utc, counted_for, out_of_window, server_result, server_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -382,6 +390,11 @@ export function createFieldRepository(database: FieldDatabase) {
         return database.getPendingEventRejectReason(id);
       }
       return null;
+    },
+    async isPendingEventConfirmed(id: string): Promise<boolean> {
+      if (!database.readEventDeliveryStatus) return false;
+      const status = await database.readEventDeliveryStatus(id);
+      return status?.sent === true && status.rejected === false;
     },
     async saveCheckpointRecord(input: unknown): Promise<LocalCheckpointRecord> {
       const record = localCheckpointRecordSchema.parse(input);

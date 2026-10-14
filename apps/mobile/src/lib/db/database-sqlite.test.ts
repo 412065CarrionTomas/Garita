@@ -182,6 +182,10 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     const nextBatch = await repo.listPendingEvents({ limit: 100 });
     expect(nextBatch).toHaveLength(100);
     expect(nextBatch[0]?.id).toBe('00000000-0000-4000-8000-000000000002');
+    expect(await repo.isPendingEventConfirmed('00000000-0000-4000-8000-000000000002')).toBe(false);
+    expect(await repo.isPendingEventConfirmed('00000000-0000-4000-8000-000000000001')).toBe(false);
+    await repo.markPendingEventSent('00000000-0000-4000-8000-000000000002');
+    expect(await repo.isPendingEventConfirmed('00000000-0000-4000-8000-000000000002')).toBe(true);
   });
 
   it('manages sync_state meta, shift data, and checkpoint_records accurately in SQLite', async () => {

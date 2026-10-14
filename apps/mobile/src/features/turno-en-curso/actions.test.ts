@@ -46,8 +46,9 @@ const repo = {
   saveShiftData: jest.fn(async () => shiftData),
   getShiftData: jest.fn(async () => shiftData),
   clearShiftData: jest.fn(async () => undefined),
-  addPendingEvent: jest.fn(async () => undefined),
-  listPendingEvents: jest.fn(async () => []),
+  addPendingEvent: jest.fn(async (_event: unknown) => undefined),
+  listPendingEvents: jest.fn(async (_options?: { limit?: number }) => []),
+  isPendingEventConfirmed: jest.fn(async () => false),
   markPendingEventSent: jest.fn(async () => undefined),
   saveCheckpointRecord: jest.fn(async (rec) => rec as never),
   listCheckpointRecords: jest.fn(async () => []),
@@ -176,6 +177,7 @@ describe('shift execution actions', () => {
 
   it('H-1: enqueues shift_close and triggers sync without direct close or premature deletion', async () => {
     setup({ now: () => new Date('2030-01-02T04:00:00.000Z') });
+    repo.isPendingEventConfirmed.mockResolvedValueOnce(true);
     await expect(finishShift(shiftData, 'Relevo solicitado')).resolves.toEqual({
       status: 'closed',
     });
@@ -214,6 +216,47 @@ describe('shift execution actions', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it('H-1: returns closed_pending after a network cut with more than 100 earlier events', async () => {
+    const events: {
+      id: string;
+      type: string;
+      payload: unknown;
+      occurredAtDevice: string;
+      createdAt: string;
+    }[] = [];
+    repo.addPendingEvent.mockImplementation(async (event: unknown) => {
+      events.push(event as (typeof events)[number]);
+    });
+    repo.listPendingEvents.mockImplementation(
+      async ({ limit } = {}) => events.slice(0, limit ?? events.length) as never,
+    );
+    // The queue absorbs sendBatch's network error and returns after scheduling a retry.
+    const syncWithNetworkCut = jest.fn(async () => undefined);
+    setup({
+      now: () => new Date('2030-01-02T04:00:00.000Z'),
+      repository: async () => repo as never,
+      triggerSync: syncWithNetworkCut,
+    });
+
+    for (let index = 0; index < 101; index++) {
+      events.push({
+        id: `prior-${index}`,
+        type: 'checkpoint_record',
+        payload: {},
+        occurredAtDevice: `2030-01-02T03:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.000Z`,
+        createdAt: '2030-01-02T03:00:00.000Z',
+      });
+    }
+
+    await expect(finishShift(shiftData, 'Relevo solicitado')).resolves.toEqual({
+      status: 'closed_pending',
+    });
+    expect(repo.isPendingEventConfirmed).toHaveBeenCalledWith(
+      '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
+    );
+    expect(repo.listPendingEvents).not.toHaveBeenCalled();
+  });
+
   it('H-1 Scenario TC-16: pending checkpoint records + close online sends records first, then close, and only deletes credentials when queue is empty', async () => {
     const queue: {
       id: string;
@@ -244,6 +287,7 @@ describe('shift execution actions', () => {
         queue.push(event);
       }),
       listPendingEvents: jest.fn(async () => queue.filter((e) => !e.sent)),
+      isPendingEventConfirmed: jest.fn(async () => true),
       countPendingEvents: jest.fn(async () => queue.filter((e) => !e.sent).length),
       markPendingEventSent: jest.fn(async (id: string) => {
         const item = queue.find((e) => e.id === id);

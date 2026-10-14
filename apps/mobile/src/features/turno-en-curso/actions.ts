@@ -195,10 +195,6 @@ export async function finishShift(
   } catch {
     return { status: 'closed_pending' };
   }
-  const pending = await repository.listPendingEvents({ limit: 100 });
-  const isPending = pending.some((event) => event.id === eventId);
-  if (isPending) {
-    return { status: 'closed_pending' };
-  }
-  return { status: 'closed' };
+  const isConfirmed = await repository.isPendingEventConfirmed(eventId);
+  return isConfirmed ? { status: 'closed' } : { status: 'closed_pending' };
 }
