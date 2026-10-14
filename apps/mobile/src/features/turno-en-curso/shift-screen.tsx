@@ -69,6 +69,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
         );
         return true;
       }
+      setData(null);
     } catch {
       setMessage('No pudimos leer los datos guardados del turno.');
     }

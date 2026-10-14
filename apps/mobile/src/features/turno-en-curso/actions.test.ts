@@ -67,6 +67,7 @@ const close = jest.fn(async () => ({
 const redirectToPermissions = jest.fn();
 const saveCredential = jest.fn(async () => undefined);
 const deleteCredential = jest.fn(async () => undefined);
+const triggerSync = jest.fn(async () => undefined);
 
 function setup(overrides: Parameters<typeof setShiftActionsForTesting>[0] = {}) {
   jest.clearAllMocks();
@@ -89,7 +90,7 @@ function setup(overrides: Parameters<typeof setShiftActionsForTesting>[0] = {}) 
     redirectToPermissions,
     saveCredential,
     deleteCredential,
-    triggerSync: async () => undefined,
+    triggerSync,
     ...overrides,
   });
 }
@@ -173,17 +174,140 @@ describe('shift execution actions', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it('sends an early close with a reason, marks it sent and clears local shift', async () => {
+  it('H-1: enqueues shift_close and triggers sync without direct close or premature deletion', async () => {
     setup({ now: () => new Date('2030-01-02T04:00:00.000Z') });
     await expect(finishShift(shiftData, 'Relevo solicitado')).resolves.toEqual({
       status: 'closed',
     });
-    expect(close).toHaveBeenCalledWith(
-      'shift-1',
-      expect.objectContaining({ reason: 'Relevo solicitado' }),
+    // Never calls legacy close endpoint
+    expect(close).not.toHaveBeenCalled();
+    // Enqueued shift_close
+    expect(repo.addPendingEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'shift_close',
+        payload: expect.objectContaining({ reason: 'Relevo solicitado' }),
+      }),
     );
-    expect(repo.markPendingEventSent).toHaveBeenCalledWith('0199c2c6-958d-7a4a-9f4f-f2ca1b852040');
-    expect(repo.clearShiftData).toHaveBeenCalled();
-    expect(deleteCredential).toHaveBeenCalled();
+    // Triggered synchronization
+    expect(triggerSync).toHaveBeenCalledTimes(1);
+    // Does not prematurely delete credentials or shift data directly in finishShift
+    expect(deleteCredential).not.toHaveBeenCalled();
+    expect(repo.clearShiftData).not.toHaveBeenCalled();
+  });
+
+  it('H-1: returns closed_pending when shift_close remains pending in queue', async () => {
+    repo.listPendingEvents.mockResolvedValueOnce([
+      {
+        id: '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
+        type: 'shift_close',
+        payload: {},
+        occurredAtDevice: '2030-01-02T04:00:00.000Z',
+        createdAt: '2030-01-02T04:00:00.000Z',
+      } as never,
+    ]);
+    setup({ now: () => new Date('2030-01-02T04:00:00.000Z') });
+
+    await expect(finishShift(shiftData, 'Relevo solicitado')).resolves.toEqual({
+      status: 'closed_pending',
+    });
+    expect(triggerSync).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('H-1 Scenario TC-16: pending checkpoint records + close online sends records first, then close, and only deletes credentials when queue is empty', async () => {
+    const queue: {
+      id: string;
+      type: string;
+      payload: unknown;
+      occurredAtDevice: string;
+      createdAt: string;
+      sent?: boolean;
+    }[] = [];
+    const sentBatches: { id: string; type: string }[][] = [];
+    let credentialDeleted = false;
+    let shiftDataCleared = false;
+
+    // Simulate 3 pending checkpoint records taken offline
+    for (let i = 1; i <= 3; i++) {
+      queue.push({
+        id: `point-${i}`,
+        type: 'checkpoint_record',
+        payload: { recordId: `point-${i}`, checkpointId: `cp-${i}` },
+        occurredAtDevice: `2030-01-02T01:00:0${i}.000Z`,
+        createdAt: `2030-01-02T01:00:0${i}.000Z`,
+      });
+    }
+
+    const testRepo = {
+      ...repo,
+      addPendingEvent: jest.fn(async (event: (typeof queue)[0]) => {
+        queue.push(event);
+      }),
+      listPendingEvents: jest.fn(async () => queue.filter((e) => !e.sent)),
+      countPendingEvents: jest.fn(async () => queue.filter((e) => !e.sent).length),
+      markPendingEventSent: jest.fn(async (id: string) => {
+        const item = queue.find((e) => e.id === id);
+        if (item) item.sent = true;
+      }),
+      clearShiftData: jest.fn(async () => {
+        shiftDataCleared = true;
+      }),
+    };
+
+    const simulatedDeleteCredential = jest.fn(async () => {
+      credentialDeleted = true;
+    });
+
+    const simulatedTriggerSync = jest.fn(async () => {
+      // Simulate sync-service: reads queue in order
+      const pendingBeforeSync = queue.filter((e) => !e.sent);
+      sentBatches.push(pendingBeforeSync.map((e) => ({ id: e.id, type: e.type })));
+
+      // Assert shift_close travels AFTER the checkpoint records
+      expect(pendingBeforeSync[0]?.type).toBe('checkpoint_record');
+      expect(pendingBeforeSync[1]?.type).toBe('checkpoint_record');
+      expect(pendingBeforeSync[2]?.type).toBe('checkpoint_record');
+      expect(pendingBeforeSync[3]?.type).toBe('shift_close');
+
+      // Assert credentials have NOT been deleted before/during sync
+      expect(credentialDeleted).toBe(false);
+
+      // Simulate server confirming all events
+      for (const e of pendingBeforeSync) {
+        e.sent = true;
+      }
+
+      // After queue is empty and shift_close confirmed, sync-service clears shift and deletes credential
+      if (queue.every((e) => e.sent)) {
+        await testRepo.clearShiftData();
+        await simulatedDeleteCredential();
+      }
+    });
+
+    setup({
+      now: () => new Date('2030-01-02T04:00:00.000Z'),
+      online: async () => true,
+      repository: async () => testRepo as never,
+      triggerSync: simulatedTriggerSync,
+      deleteCredential: simulatedDeleteCredential,
+    });
+
+    const result = await finishShift(shiftData, 'Fin de turno regular');
+
+    expect(result).toEqual({ status: 'closed' });
+    expect(testRepo.addPendingEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'shift_close',
+      }),
+    );
+    expect(sentBatches).toHaveLength(1);
+    expect(sentBatches[0]).toEqual([
+      { id: 'point-1', type: 'checkpoint_record' },
+      { id: 'point-2', type: 'checkpoint_record' },
+      { id: 'point-3', type: 'checkpoint_record' },
+      { id: '0199c2c6-958d-7a4a-9f4f-f2ca1b852040', type: 'shift_close' },
+    ]);
+    expect(credentialDeleted).toBe(true);
+    expect(shiftDataCleared).toBe(true);
   });
 });

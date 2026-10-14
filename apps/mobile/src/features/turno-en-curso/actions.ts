@@ -29,11 +29,11 @@ interface ShiftActionsDependencies {
   location(): Promise<FieldLocation>;
   uuid(): string;
   start(id: string, body: Parameters<typeof startShift>[1]): ReturnType<typeof startShift>;
-  close(id: string, body: Parameters<typeof closeShift>[1]): ReturnType<typeof closeShift>;
+  close?(id: string, body: Parameters<typeof closeShift>[1]): ReturnType<typeof closeShift>;
   repository(): ReturnType<typeof createDefaultFieldRepository>;
   redirectToPermissions(): void;
   saveCredential(credential: ShiftCredential): Promise<void>;
-  deleteCredential(): Promise<void>;
+  deleteCredential?(): Promise<void>;
   triggerSync(): Promise<unknown>;
 }
 
@@ -191,17 +191,14 @@ export async function finishShift(
   });
   if (!(await d.online())) return { status: 'closed_pending' };
   try {
-    await d.close(data.shift.id, {
-      eventId,
-      occurredAtDevice,
-      location,
-      ...(trimmedReason ? { reason: trimmedReason } : {}),
-    });
-    await repository.markPendingEventSent(eventId);
-    await repository.clearShiftData();
-    await d.deleteCredential();
-    return { status: 'closed' };
+    await d.triggerSync();
   } catch {
     return { status: 'closed_pending' };
   }
+  const pending = await repository.listPendingEvents({ limit: 100 });
+  const isPending = pending.some((event) => event.id === eventId);
+  if (isPending) {
+    return { status: 'closed_pending' };
+  }
+  return { status: 'closed' };
 }
