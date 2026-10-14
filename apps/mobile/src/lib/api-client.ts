@@ -23,8 +23,10 @@ export async function apiRequest<TSchema extends z.ZodType>(
 ): Promise<z.infer<TSchema>> {
   const headers = new Headers(init?.headers);
   headers.set('Accept', 'application/json');
-  const token = await auth.currentUser?.getIdToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (!headers.has('Authorization')) {
+    const token = await auth.currentUser?.getIdToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
   if (body !== undefined) headers.set('Content-Type', 'application/json');
   const response = await fetch(`${env.EXPO_PUBLIC_API_URL}${path}`, {
     ...init,
