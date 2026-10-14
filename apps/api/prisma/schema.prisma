@@ -151,6 +151,7 @@ model Checkpoint {
   site                  Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
   nfcTags               NfcTag[]
   roundVersions         RoundVersionCheckpoint[]
+  records               CheckpointRecord[]
 
   @@unique([siteId, name])
   @@index([companyId, status])
@@ -305,6 +306,8 @@ model Shift {
   assignments        ShiftAssignment[]
   rounds             ShiftRound[]
   events             ShiftEvent[]
+  checkpointRecords  CheckpointRecord[]
+  invalidScanAttempts InvalidScanAttempt[]
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
@@ -352,6 +355,8 @@ model ShiftAssignment {
   updatedAt    DateTime @updatedAt
   shift        Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   events       ShiftEvent[]
+  checkpointRecords CheckpointRecord[]
+  invalidScanAttempts InvalidScanAttempt[]
   guard        User?    @relation(fields: [guardId], references: [id], onDelete: Restrict)
 
   @@index([shiftId, isCurrent])
@@ -369,3 +374,81 @@ model ShiftRound {
   @@id([shiftId, roundId])
   @@index([roundId])
 }
+
+enum CheckpointRecordMethod {
+  qr
+  nfc
+}
+
+enum PhoneNfcState {
+  on
+  off
+  unsupported
+}
+
+enum InvalidScanReason {
+  malformed
+  signature
+  other_site
+  outdated_version
+  unknown_checkpoint
+  tag_not_associated
+  tag_replaced
+}
+
+model CheckpointRecord {
+  id                  String                    @id @default(cuid())
+  companyId           String
+  shiftId             String
+  assignmentId        String
+  checkpointId        String
+  recordId            String                    @unique @db.Uuid
+  method              CheckpointRecordMethod
+  occurredAtDevice    DateTime                  @db.Timestamptz(3)
+  receivedAt          DateTime                  @default(now()) @db.Timestamptz(3)
+  locationStatus      ShiftEventLocationStatus
+  latitude            Decimal?                  @db.Decimal(9, 6)
+  longitude           Decimal?                  @db.Decimal(10, 6)
+  accuracyMeters      Decimal?                  @db.Decimal(10, 2)
+  simulation          ShiftEventSimulation
+  phoneNfc            PhoneNfcState
+  countedFor          Json
+  outOfWindow         Boolean                   @default(false)
+  countsForCompliance Boolean                   @default(true)
+  requestHash         String
+  createdAt           DateTime                  @default(now())
+  shift               Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment          ShiftAssignment           @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  checkpoint          Checkpoint                @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, shiftId, occurredAtDevice])
+  @@index([shiftId, occurredAtDevice])
+  @@index([checkpointId, occurredAtDevice])
+}
+
+model InvalidScanAttempt {
+  id               String                    @id @default(cuid())
+  companyId        String
+  shiftId          String
+  assignmentId     String
+  recordId         String                    @unique @db.Uuid
+  method           CheckpointRecordMethod
+  reason           InvalidScanReason
+  scannedValue     String                    @db.VarChar(512)
+  occurredAtDevice DateTime                  @db.Timestamptz(3)
+  receivedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  locationStatus   ShiftEventLocationStatus
+  latitude         Decimal?                  @db.Decimal(9, 6)
+  longitude        Decimal?                  @db.Decimal(10, 6)
+  accuracyMeters   Decimal?                  @db.Decimal(10, 2)
+  simulation       ShiftEventSimulation
+  highlighted      Boolean                   @default(false)
+  requestHash      String
+  createdAt        DateTime                  @default(now())
+  shift            Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment       ShiftAssignment           @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, shiftId, occurredAtDevice])
+  @@index([shiftId, occurredAtDevice])
+}
+
