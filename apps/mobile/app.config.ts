@@ -40,6 +40,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withNfcFeature',
     'expo-audio',
     'expo-sqlite',
+    'expo-secure-store',
     ['./modules/garita-native/app.plugin.js', {}],
     [
       'expo-location',

@@ -2,6 +2,7 @@ import { Redirect, Stack, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/features/auth/auth-context';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
+import { initSyncService } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 export default function GuardLayout() {
   const { user, loading } = useAuth();
@@ -9,6 +10,9 @@ export default function GuardLayout() {
   const [permissionState, setPermissionState] = useState<FieldPermissionState | null>(null);
   const [savedShiftId, setSavedShiftId] = useState<string | null>(null);
   const [localCheckPath, setLocalCheckPath] = useState<string | null>(null);
+  useEffect(() => {
+    return initSyncService();
+  }, []);
   useEffect(() => {
     let mounted = true;
     void checkFieldPermissions()

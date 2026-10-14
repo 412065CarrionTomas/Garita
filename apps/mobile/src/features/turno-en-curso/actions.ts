@@ -4,11 +4,13 @@ import {
   isWithinStartMargin,
   SHIFT_EXECUTION_ERROR_CODES,
   type FieldLocation,
+  type ShiftCredential,
   type ShiftOfflineData,
 } from '@garita/shared';
 import * as Network from 'expo-network';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import { ApiError } from '@/lib/api-client';
+import { deleteShiftCredential, processSyncQueue, saveShiftCredential } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { getCurrentLocation } from '@/lib/location';
 import { closeShift, ShiftExecutionApiError, startShift } from './api';
@@ -27,9 +29,12 @@ interface ShiftActionsDependencies {
   location(): Promise<FieldLocation>;
   uuid(): string;
   start(id: string, body: Parameters<typeof startShift>[1]): ReturnType<typeof startShift>;
-  close(id: string, body: Parameters<typeof closeShift>[1]): ReturnType<typeof closeShift>;
+  close?(id: string, body: Parameters<typeof closeShift>[1]): ReturnType<typeof closeShift>;
   repository(): ReturnType<typeof createDefaultFieldRepository>;
   redirectToPermissions(): void;
+  saveCredential(credential: ShiftCredential): Promise<void>;
+  deleteCredential?(): Promise<void>;
+  triggerSync(): Promise<unknown>;
 }
 
 function uuid(): string {
@@ -87,6 +92,9 @@ const dependencies: ShiftActionsDependencies = {
   close: closeShift,
   repository: createDefaultFieldRepository,
   redirectToPermissions: () => undefined,
+  saveCredential: saveShiftCredential,
+  deleteCredential: deleteShiftCredential,
+  triggerSync: processSyncQueue,
 };
 
 let overrides: Partial<ShiftActionsDependencies> = {};
@@ -147,6 +155,9 @@ export async function beginShift(
       };
     });
   if (result.status === 'error') return result;
+  if ('credential' in result && result.credential) {
+    await d.saveCredential(result.credential);
+  }
   await d.repository().then((repository) => repository.saveShiftData(result.data));
   return { status: 'started', data: result.data, late: result.lateStartMinutes !== null };
 }
@@ -180,16 +191,10 @@ export async function finishShift(
   });
   if (!(await d.online())) return { status: 'closed_pending' };
   try {
-    await d.close(data.shift.id, {
-      eventId,
-      occurredAtDevice,
-      location,
-      ...(trimmedReason ? { reason: trimmedReason } : {}),
-    });
-    await repository.markPendingEventSent(eventId);
-    await repository.clearShiftData();
-    return { status: 'closed' };
+    await d.triggerSync();
   } catch {
     return { status: 'closed_pending' };
   }
+  const isConfirmed = await repository.isPendingEventConfirmed(eventId);
+  return isConfirmed ? { status: 'closed' } : { status: 'closed_pending' };
 }
