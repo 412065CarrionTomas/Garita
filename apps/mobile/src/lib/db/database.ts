@@ -33,7 +33,13 @@ export interface FieldDatabase {
   readShift(): Promise<unknown | null>;
   insertEvent(event: PendingFieldEvent): Promise<void>;
   markEventSent(id: string): Promise<void>;
-  readEvents(): Promise<unknown[]>;
+  markEventRejected(id: string, reason: string): Promise<void>;
+  countPendingEvents(): Promise<number>;
+  readEvents(limit?: number): Promise<unknown[]>;
+  readPendingEvents?(limit?: number): Promise<unknown[]>;
+  getSyncMeta?(key: string): Promise<string | null>;
+  setSyncMeta?(key: string, value: string): Promise<void>;
+  getPendingEventRejectReason?(id: string): Promise<string | null>;
   insertCheckpointRecord(record: LocalCheckpointRecord): Promise<void>;
   readCheckpointRecords(shiftId?: string): Promise<unknown[]>;
   updateCheckpointRecordServerResult(
@@ -87,6 +93,18 @@ export async function migrateDatabase(database: MigrationDatabase): Promise<void
         'CREATE TABLE IF NOT EXISTS checkpoint_records (record_id TEXT PRIMARY KEY, shift_id TEXT NOT NULL, checkpoint_id TEXT NOT NULL, checkpoint_name TEXT NOT NULL, occurred_at_utc TEXT NOT NULL, counted_for TEXT NOT NULL, out_of_window INTEGER NOT NULL DEFAULT 0, server_result TEXT, server_reason TEXT, created_at TEXT NOT NULL)',
       );
       await database.setVersion(3);
+    });
+  }
+  if (version < 4) {
+    await database.transaction(async () => {
+      await database.exec('ALTER TABLE pending_events ADD COLUMN reject_reason TEXT');
+      await database.exec(
+        'CREATE INDEX IF NOT EXISTS idx_pending_events_queue ON pending_events (sent, occurred_at_device, created_at)',
+      );
+      await database.exec(
+        'CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+      );
+      await database.setVersion(4);
     });
   }
 }
@@ -179,7 +197,20 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
   async markEventSent(id: string): Promise<void> {
     await this.db.runAsync('UPDATE pending_events SET sent = 1 WHERE id = ?', id);
   }
-  async readEvents(): Promise<unknown[]> {
+  async markEventRejected(id: string, reason: string): Promise<void> {
+    await this.db.runAsync('UPDATE pending_events SET reject_reason = ? WHERE id = ?', reason, id);
+  }
+  async countPendingEvents(): Promise<number> {
+    const row = await this.db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) as count FROM pending_events WHERE sent = 0 AND reject_reason IS NULL',
+    );
+    return row?.count ?? 0;
+  }
+  async readEvents(limit?: number): Promise<unknown[]> {
+    const query =
+      limit !== undefined && limit > 0
+        ? `SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL ORDER BY occurred_at_device ASC, created_at ASC LIMIT ${Math.floor(limit)}`
+        : 'SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL ORDER BY occurred_at_device ASC, created_at ASC';
     return (
       await this.db.getAllAsync<{
         id: string;
@@ -187,9 +218,7 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
         payload: string;
         occurred_at_device: string;
         created_at: string;
-      }>(
-        'SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 ORDER BY created_at',
-      )
+      }>(query)
     ).map((row) => ({
       id: row.id,
       type: row.type,
@@ -197,6 +226,30 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
       occurredAtDevice: row.occurred_at_device,
       createdAt: row.created_at,
     }));
+  }
+  async readPendingEvents(limit?: number): Promise<unknown[]> {
+    return this.readEvents(limit);
+  }
+  async getSyncMeta(key: string): Promise<string | null> {
+    const row = await this.db.getFirstAsync<{ value: string }>(
+      'SELECT value FROM sync_state WHERE key = ?',
+      key,
+    );
+    return row?.value ?? null;
+  }
+  async setSyncMeta(key: string, value: string): Promise<void> {
+    await this.db.runAsync(
+      'INSERT OR REPLACE INTO sync_state (key, value) VALUES (?, ?)',
+      key,
+      value,
+    );
+  }
+  async getPendingEventRejectReason(id: string): Promise<string | null> {
+    const row = await this.db.getFirstAsync<{ reject_reason: string | null }>(
+      'SELECT reject_reason FROM pending_events WHERE id = ?',
+      id,
+    );
+    return row?.reject_reason ?? null;
   }
   async insertCheckpointRecord(record: LocalCheckpointRecord): Promise<void> {
     await this.db.runAsync(
@@ -285,11 +338,42 @@ export function createFieldRepository(database: FieldDatabase) {
       const event = pendingFieldEventSchema.parse(input);
       await database.insertEvent(event);
     },
-    async listPendingEvents(): Promise<PendingFieldEvent[]> {
-      return (await database.readEvents()).map((event) => pendingFieldEventSchema.parse(event));
+    async listPendingEvents(options?: { limit?: number }): Promise<PendingFieldEvent[]> {
+      const rows = database.readPendingEvents
+        ? await database.readPendingEvents(options?.limit)
+        : await database.readEvents(options?.limit);
+      return rows.map((event) => pendingFieldEventSchema.parse(event));
     },
     async markPendingEventSent(id: string): Promise<void> {
       await database.markEventSent(id);
+    },
+    async markPendingEventRejected(id: string, reason: string): Promise<void> {
+      if (database.markEventRejected) {
+        await database.markEventRejected(id, reason);
+      }
+    },
+    async countPendingEvents(): Promise<number> {
+      if (database.countPendingEvents) {
+        return database.countPendingEvents();
+      }
+      return (await database.readEvents()).length;
+    },
+    async getSyncMeta(key: string): Promise<string | null> {
+      if (database.getSyncMeta) {
+        return database.getSyncMeta(key);
+      }
+      return null;
+    },
+    async setSyncMeta(key: string, value: string): Promise<void> {
+      if (database.setSyncMeta) {
+        await database.setSyncMeta(key, value);
+      }
+    },
+    async getPendingEventRejectReason(id: string): Promise<string | null> {
+      if (database.getPendingEventRejectReason) {
+        return database.getPendingEventRejectReason(id);
+      }
+      return null;
     },
     async saveCheckpointRecord(input: unknown): Promise<LocalCheckpointRecord> {
       const record = localCheckpointRecordSchema.parse(input);

@@ -12,8 +12,10 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
   shift: unknown | null = null;
   events: PendingFieldEvent[] = [];
   sent = new Set<string>();
+  rejected = new Map<string, string>();
   records: LocalCheckpointRecord[] = [];
   tables: string[] = [];
+  meta = new Map<string, string>();
   async getVersion() {
     return this.version;
   }
@@ -39,8 +41,32 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
   async markEventSent(id: string) {
     this.sent.add(id);
   }
-  async readEvents() {
-    return this.events.filter(({ id }) => !this.sent.has(id));
+  async markEventRejected(id: string, reason: string) {
+    this.rejected.set(id, reason);
+  }
+  async countPendingEvents() {
+    return this.events.filter(({ id }) => !this.sent.has(id) && !this.rejected.has(id)).length;
+  }
+  async readEvents(limit?: number) {
+    const active = this.events
+      .filter(({ id }) => !this.sent.has(id) && !this.rejected.has(id))
+      .sort((a, b) => {
+        const timeDiff = Date.parse(a.occurredAtDevice) - Date.parse(b.occurredAtDevice);
+        return timeDiff !== 0 ? timeDiff : Date.parse(a.createdAt) - Date.parse(b.createdAt);
+      });
+    return limit !== undefined ? active.slice(0, limit) : active;
+  }
+  async readPendingEvents(limit?: number) {
+    return this.readEvents(limit);
+  }
+  async getSyncMeta(key: string) {
+    return this.meta.get(key) ?? null;
+  }
+  async setSyncMeta(key: string, value: string) {
+    this.meta.set(key, value);
+  }
+  async getPendingEventRejectReason(id: string) {
+    return this.rejected.get(id) ?? null;
   }
   async insertCheckpointRecord(record: LocalCheckpointRecord) {
     const existingIndex = this.records.findIndex((r) => r.recordId === record.recordId);
@@ -85,14 +111,14 @@ describe('field database', () => {
   it('migrates an empty database and upgrades the previous version', async () => {
     const fresh = new MemoryDatabase();
     await migrateDatabase(fresh);
-    expect(fresh.version).toBe(3);
-    expect(fresh.tables).toHaveLength(8);
+    expect(fresh.version).toBe(4);
+    expect(fresh.tables).toHaveLength(11);
     const prior = new MemoryDatabase();
     prior.version = 0;
     await migrateDatabase(prior);
-    expect(prior.version).toBe(3);
+    expect(prior.version).toBe(4);
     await migrateDatabase(prior);
-    expect(prior.tables).toHaveLength(8);
+    expect(prior.tables).toHaveLength(11);
   });
   it('saves, reopens, replaces, clears, and validates pending events and checkpoint records', async () => {
     const disk = new MemoryDatabase();
@@ -112,8 +138,31 @@ describe('field database', () => {
     };
     await reopenedApp.addPendingEvent(event);
     await expect(reopenedApp.listPendingEvents()).resolves.toEqual([event]);
+    expect(await reopenedApp.countPendingEvents()).toBe(1);
+
+    // Event rejection test
+    const rejectedEvent = {
+      id: '0199c2c6-958d-7a4a-9f4f-f2ca1b852042',
+      type: 'checkpoint_record',
+      payload: {},
+      occurredAtDevice: '2026-10-13T10:01:00.000Z',
+      createdAt: '2026-10-13T10:01:01.000Z',
+    };
+    await reopenedApp.addPendingEvent(rejectedEvent);
+    expect(await reopenedApp.countPendingEvents()).toBe(2);
+    await reopenedApp.markPendingEventRejected(rejectedEvent.id, 'invalid_data');
+    expect(await reopenedApp.getPendingEventRejectReason(rejectedEvent.id)).toBe('invalid_data');
+    expect(await reopenedApp.countPendingEvents()).toBe(1);
+    await expect(reopenedApp.listPendingEvents()).resolves.toEqual([event]);
+
+    // Sync meta test
+    await reopenedApp.setSyncMeta('synced_until', '2026-10-13T10:00:00.000Z');
+    expect(await reopenedApp.getSyncMeta('synced_until')).toBe('2026-10-13T10:00:00.000Z');
+    expect(await reopenedApp.getSyncMeta('non_existent')).toBeNull();
+
     await reopenedApp.markPendingEventSent(event.id);
     await expect(reopenedApp.listPendingEvents()).resolves.toEqual([]);
+    expect(await reopenedApp.countPendingEvents()).toBe(0);
     await expect(reopenedApp.addPendingEvent({ ...event, id: 'bad' })).rejects.toThrow();
 
     // Checkpoint records
