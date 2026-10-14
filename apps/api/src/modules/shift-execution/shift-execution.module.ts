@@ -2,7 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ClockModule } from '../../common/clock';
-import { SyncModule } from '../sync/sync.module';
+import { ShiftCredentialModule } from '../sync/shift-credential.module';
 import { ShiftExecutionController } from './shift-execution.controller';
 import {
   ShiftExecutionService,
@@ -21,7 +21,7 @@ import {
     PrismaModule,
     ClockModule,
     BullModule.registerQueue({ name: SHIFT_AUTO_CLOSE_QUEUE }),
-    forwardRef(() => SyncModule),
+    ShiftCredentialModule,
   ],
   controllers: [ShiftExecutionController],
   providers: [

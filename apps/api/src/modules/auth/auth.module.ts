@@ -1,7 +1,7 @@
-import { forwardRef, MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from '../prisma/prisma.module';
-import { SyncModule } from '../sync/sync.module';
+import { ShiftCredentialModule } from '../sync/shift-credential.module';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
@@ -11,7 +11,7 @@ import { RequestIdMiddleware } from './request-id.middleware';
 import { TenantResourceService } from './tenant-resource.service';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => SyncModule)],
+  imports: [PrismaModule, ShiftCredentialModule],
   controllers: [AuthController],
   providers: [
     AuthService,
