@@ -90,6 +90,8 @@ describe('registro del aislamiento tenant', () => {
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('ShiftAssignment');
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('ShiftRound');
     expect(COMPANY_ID_MODELS).toContain('ShiftEvent');
+    expect(COMPANY_ID_MODELS).toContain('CheckpointRecord');
+    expect(COMPANY_ID_MODELS).toContain('InvalidScanAttempt');
     const user = {
       userId: 'supervisor-1',
       companyId: 'norte',
@@ -120,6 +122,24 @@ describe('registro del aislamiento tenant', () => {
       where: {
         AND: [
           { type: 'start' },
+          { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+    expect(addSiteAssignmentFilter('CheckpointRecord', { where: { method: 'qr' } }, user)).toEqual({
+      where: {
+        AND: [
+          { method: 'qr' },
+          { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+    expect(
+      addSiteAssignmentFilter('InvalidScanAttempt', { where: { method: 'qr' } }, user),
+    ).toEqual({
+      where: {
+        AND: [
+          { method: 'qr' },
           { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
         ],
       },

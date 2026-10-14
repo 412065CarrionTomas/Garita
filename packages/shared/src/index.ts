@@ -13,3 +13,4 @@ export * from './field/shift-offline-data';
 export * from './field/native-module';
 export * from './field/shift-execution';
 export * from './field/record-imputation';
+export * from './field/checkpoint-record';

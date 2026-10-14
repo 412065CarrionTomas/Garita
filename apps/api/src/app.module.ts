@@ -15,6 +15,7 @@ import { RoundsModule } from './modules/rounds/rounds.module';
 import { ClockModule } from './common/clock';
 import { ShiftsModule } from './modules/shifts/shifts.module';
 import { ShiftExecutionModule } from './modules/shift-execution/shift-execution.module';
+import { CheckpointRecordsModule } from './modules/checkpoint-records/checkpoint-records.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { ShiftExecutionModule } from './modules/shift-execution/shift-execution.
     ClockModule,
     ShiftsModule,
     ShiftExecutionModule,
+    CheckpointRecordsModule,
   ],
 })
 export class AppModule {}
