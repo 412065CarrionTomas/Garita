@@ -6,8 +6,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
+  forwardRef,
 } from '@nestjs/common';
+import { ShiftCredentialService } from '../sync/shift-credential.service';
 import { Prisma } from '../../generated/prisma/client';
 import {
   computeRoundWindows,
@@ -54,6 +57,9 @@ export class ShiftExecutionService {
     @Inject(SYNC_DEADLINE_PORT) private readonly syncDeadline: SyncDeadlinePort,
     @Inject(SHIFT_EXECUTION_EFFECTS_PORT)
     private readonly effects: ShiftExecutionEffectsPort,
+    @Optional()
+    @Inject(forwardRef(() => ShiftCredentialService))
+    private readonly shiftCredentialService?: ShiftCredentialService,
   ) {}
 
   async start(id: string, input: StartShiftRequest, user: AuthenticatedUser) {
@@ -151,11 +157,22 @@ export class ShiftExecutionService {
       throw error;
     }
     const data = await this.buildData(id);
+    let credential: { token: string; expiresAt: string } | undefined;
+    if (this.shiftCredentialService) {
+      credential = await this.shiftCredentialService.issueCredential({
+        shiftId: id,
+        assignmentId: assignment.id,
+        userId: user.userId,
+        companyId: shift.companyId,
+        scheduledEnd: shift.endsAt,
+      });
+    }
     const response = startShiftResponseSchema.parse({
       status: 'in_progress',
       startedAt: now.toISOString(),
       lateStartMinutes: late,
       data,
+      ...(credential ? { credential } : {}),
     });
     await this.prisma.tenantPrisma.shiftEvent.update({
       where: { deviceEventId: input.eventId },
@@ -563,8 +580,27 @@ export class ShiftExecutionService {
       where: { shiftId: id, type: 'start' },
       orderBy: { receivedAt: 'asc' },
     });
-    if (event?.response) return startShiftResponseSchema.parse(event.response);
-    return {
+    let credential: { token: string; expiresAt: string } | undefined;
+    if (this.shiftCredentialService) {
+      const assignment = await this.currentAssignment(id);
+      if (assignment?.guardId) {
+        credential = await this.shiftCredentialService.issueCredential({
+          shiftId: id,
+          assignmentId: assignment.id,
+          userId: assignment.guardId,
+          companyId: shift.companyId,
+          scheduledEnd: shift.endsAt,
+        });
+      }
+    }
+    if (event?.response) {
+      const parsed = startShiftResponseSchema.parse(event.response);
+      return {
+        ...parsed,
+        credential: parsed.credential ?? credential,
+      };
+    }
+    return startShiftResponseSchema.parse({
       status: 'in_progress' as const,
       startedAt:
         shift.startedAt?.toISOString() ??
@@ -572,7 +608,8 @@ export class ShiftExecutionService {
         this.clock.now().toISOString(),
       lateStartMinutes: shift.lateStartMinutes,
       data: await this.buildData(id),
-    };
+      ...(credential ? { credential } : {}),
+    });
   }
   private async ownedShift(id: string) {
     const shift = await this.prisma.tenantPrisma.shift.findFirst({

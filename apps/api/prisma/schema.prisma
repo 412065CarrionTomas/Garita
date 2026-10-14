@@ -73,6 +73,7 @@ model User {
   siteAssignments SiteSupervisor[]
   createdShifts Shift[] @relation("ShiftCreator")
   shiftAssignments ShiftAssignment[]
+  shiftCredentials ShiftCredential[]
 
   @@index([companyId])
 }
@@ -308,6 +309,10 @@ model Shift {
   events             ShiftEvent[]
   checkpointRecords  CheckpointRecord[]
   invalidScanAttempts InvalidScanAttempt[]
+  credentials        ShiftCredential[]
+  syncBatches        SyncBatch[]
+  connectionNotices  ConnectionNotice[]
+  syncState          ShiftSyncState?
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
@@ -450,5 +455,66 @@ model InvalidScanAttempt {
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
+}
+
+model ShiftCredential {
+  id        String    @id @default(cuid())
+  companyId String
+  shiftId   String
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(3)
+  revokedAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now())
+  shift     Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, shiftId])
+  @@index([shiftId])
+}
+
+model SyncBatch {
+  id           String    @id @default(cuid())
+  companyId    String
+  shiftId      String
+  receivedAt   DateTime  @default(now()) @db.Timestamptz(3)
+  eventCount   Int
+  pendingCount Int
+  syncedUntil  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now())
+  shift        Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, shiftId, receivedAt])
+  @@index([shiftId, receivedAt])
+}
+
+model ConnectionNotice {
+  id           String    @id @default(cuid())
+  companyId    String
+  shiftId      String
+  sentAtDevice DateTime  @db.Timestamptz(3)
+  receivedAt   DateTime  @default(now()) @db.Timestamptz(3)
+  pendingCount Int
+  syncedUntil  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now())
+  shift        Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, shiftId, receivedAt])
+  @@index([shiftId, receivedAt])
+}
+
+model ShiftSyncState {
+  id               String    @id @default(cuid())
+  companyId        String
+  shiftId          String    @unique
+  lastContactAt    DateTime  @db.Timestamptz(3)
+  lastPendingCount Int
+  syncedUntil      DateTime? @db.Timestamptz(3)
+  lastBatchAt      DateTime? @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+  shift            Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, shiftId])
 }
 

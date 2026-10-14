@@ -7,6 +7,7 @@ const REQUIRED = {
   FIREBASE_CLIENT_EMAIL: 'firebase-test@example.invalid',
   FIREBASE_PRIVATE_KEY: 'fake-test-key',
   QR_SIGNING_SECRET: 'garita-production-like-signing-key-value',
+  SHIFT_CREDENTIAL_SECRET: 'garita-production-shift-cred-secret-val',
 };
 
 describe('validateEnv', () => {
@@ -24,6 +25,7 @@ describe('validateEnv', () => {
       FIREBASE_CLIENT_EMAIL: REQUIRED.FIREBASE_CLIENT_EMAIL,
       FIREBASE_PRIVATE_KEY: REQUIRED.FIREBASE_PRIVATE_KEY,
       QR_SIGNING_SECRET: REQUIRED.QR_SIGNING_SECRET,
+      SHIFT_CREDENTIAL_SECRET: REQUIRED.SHIFT_CREDENTIAL_SECRET,
     });
   });
 
@@ -59,11 +61,20 @@ describe('validateEnv', () => {
   });
 
   it('permite omitir la clave solo en test y exige al menos 32 caracteres en otros entornos', () => {
-    const testEnv = validateEnv({ ...REQUIRED, NODE_ENV: 'test', QR_SIGNING_SECRET: undefined });
+    const testEnv = validateEnv({
+      ...REQUIRED,
+      NODE_ENV: 'test',
+      QR_SIGNING_SECRET: undefined,
+      SHIFT_CREDENTIAL_SECRET: undefined,
+    });
     expect(testEnv.QR_SIGNING_SECRET).toBe('garita-test-qr-signing-secret-fixed-value');
+    expect(testEnv.SHIFT_CREDENTIAL_SECRET).toBe('garita-test-shift-credential-secret-fixed-value');
     expect(() => validateEnv({ ...REQUIRED, QR_SIGNING_SECRET: 'short' })).toThrow();
-    const { QR_SIGNING_SECRET: _secret, ...withoutSecret } = REQUIRED;
-    expect(() => validateEnv(withoutSecret)).toThrow('QR_SIGNING_SECRET');
+    expect(() => validateEnv({ ...REQUIRED, SHIFT_CREDENTIAL_SECRET: 'short' })).toThrow();
+    const { QR_SIGNING_SECRET: _secret, ...withoutQrSecret } = REQUIRED;
+    expect(() => validateEnv(withoutQrSecret)).toThrow('QR_SIGNING_SECRET');
+    const { SHIFT_CREDENTIAL_SECRET: _shiftSecret, ...withoutShiftSecret } = REQUIRED;
+    expect(() => validateEnv(withoutShiftSecret)).toThrow('SHIFT_CREDENTIAL_SECRET');
   });
 
   it('solo usa el secreto QR de prueba cuando NODE_ENV es test', () => {
@@ -71,6 +82,16 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...withoutSecret, NODE_ENV: 'test' }).QR_SIGNING_SECRET).toBeTruthy();
     expect(() => validateEnv({ ...withoutSecret, NODE_ENV: 'production' })).toThrow(
       'QR_SIGNING_SECRET',
+    );
+  });
+
+  it('solo usa el secreto de credencial de turno de prueba cuando NODE_ENV es test', () => {
+    const { SHIFT_CREDENTIAL_SECRET: _omit, ...withoutSecret } = REQUIRED;
+    expect(
+      validateEnv({ ...withoutSecret, NODE_ENV: 'test' }).SHIFT_CREDENTIAL_SECRET,
+    ).toBeTruthy();
+    expect(() => validateEnv({ ...withoutSecret, NODE_ENV: 'production' })).toThrow(
+      'SHIFT_CREDENTIAL_SECRET',
     );
   });
 });

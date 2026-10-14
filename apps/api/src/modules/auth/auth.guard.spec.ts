@@ -6,6 +6,7 @@ import { AuthGuard } from './auth.guard';
 import type { AuthenticatedRequest, FirebaseIdentityProvider } from './auth.types';
 import type { TenantContext } from './tenant-context';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { ShiftCredentialService } from '../sync/shift-credential.service';
 
 describe('AuthGuard', () => {
   const handler = (): void => undefined;
@@ -102,6 +103,53 @@ describe('AuthGuard', () => {
         userId: 'user-1',
         companyId: 'company-1',
         reason: 'endpoint sin roles declarados',
+      }),
+    );
+    logger.mockRestore();
+  });
+
+  it('rechaza con 403 CREDENTIAL_SCOPE_NOT_ALLOWED si se presenta una credencial de turno en una ruta no permitida', async () => {
+    const logger = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const request: AuthenticatedRequest = {
+      headers: { authorization: 'Bearer shift-cred-token' },
+      method: 'GET',
+      originalUrl: '/api/v1/turnos/shift-1/estado',
+      path: '/api/v1/turnos/shift-1/estado',
+    } as AuthenticatedRequest;
+    const executionContext = {
+      switchToHttp: () => ({ getRequest: () => request }),
+      getHandler: () => () => undefined,
+      getClass: () => TestController,
+    } as unknown as ExecutionContext;
+    const reflector = {
+      getAllAndOverride: jest.fn(() => false),
+    } as unknown as Reflector;
+    const identity: FirebaseIdentityProvider = {
+      verifyIdToken: () => Promise.reject(new Error('Firebase token invalid')),
+      createDisabledUser: () => Promise.resolve({ uid: 'new-user' }),
+      deleteUser: () => Promise.resolve(),
+      setDisabled: () => Promise.resolve(),
+      revokeRefreshTokens: () => Promise.resolve(),
+      generatePasswordResetLink: () => Promise.resolve('https://example.invalid/reset'),
+    };
+    const shiftCredentialService = {
+      isPotentialShiftCredential: jest.fn().mockReturnValue(true),
+    } as unknown as ShiftCredentialService;
+    const guard = new AuthGuard(
+      reflector,
+      { systemPrisma: {} } as unknown as PrismaService,
+      identity,
+      { setUser: jest.fn() } as unknown as TenantContext,
+      shiftCredentialService,
+    );
+
+    await expect(guard.canActivate(executionContext)).rejects.toMatchObject({
+      status: 403,
+      response: { code: 'CREDENTIAL_SCOPE_NOT_ALLOWED' },
+    });
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'credencial de turno presentada en endpoint no permitido',
       }),
     );
     logger.mockRestore();
