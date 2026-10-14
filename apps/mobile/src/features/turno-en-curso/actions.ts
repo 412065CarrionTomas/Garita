@@ -4,11 +4,13 @@ import {
   isWithinStartMargin,
   SHIFT_EXECUTION_ERROR_CODES,
   type FieldLocation,
+  type ShiftCredential,
   type ShiftOfflineData,
 } from '@garita/shared';
 import * as Network from 'expo-network';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import { ApiError } from '@/lib/api-client';
+import { deleteShiftCredential, processSyncQueue, saveShiftCredential } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { getCurrentLocation } from '@/lib/location';
 import { closeShift, ShiftExecutionApiError, startShift } from './api';
@@ -30,6 +32,9 @@ interface ShiftActionsDependencies {
   close(id: string, body: Parameters<typeof closeShift>[1]): ReturnType<typeof closeShift>;
   repository(): ReturnType<typeof createDefaultFieldRepository>;
   redirectToPermissions(): void;
+  saveCredential(credential: ShiftCredential): Promise<void>;
+  deleteCredential(): Promise<void>;
+  triggerSync(): Promise<unknown>;
 }
 
 function uuid(): string {
@@ -87,6 +92,9 @@ const dependencies: ShiftActionsDependencies = {
   close: closeShift,
   repository: createDefaultFieldRepository,
   redirectToPermissions: () => undefined,
+  saveCredential: saveShiftCredential,
+  deleteCredential: deleteShiftCredential,
+  triggerSync: processSyncQueue,
 };
 
 let overrides: Partial<ShiftActionsDependencies> = {};
@@ -147,6 +155,9 @@ export async function beginShift(
       };
     });
   if (result.status === 'error') return result;
+  if ('credential' in result && result.credential) {
+    await d.saveCredential(result.credential);
+  }
   await d.repository().then((repository) => repository.saveShiftData(result.data));
   return { status: 'started', data: result.data, late: result.lateStartMinutes !== null };
 }
@@ -188,6 +199,7 @@ export async function finishShift(
     });
     await repository.markPendingEventSent(eventId);
     await repository.clearShiftData();
+    await d.deleteCredential();
     return { status: 'closed' };
   } catch {
     return { status: 'closed_pending' };

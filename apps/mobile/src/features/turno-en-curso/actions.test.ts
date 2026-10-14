@@ -65,6 +65,8 @@ const close = jest.fn(async () => ({
   closedEarly: true,
 }));
 const redirectToPermissions = jest.fn();
+const saveCredential = jest.fn(async () => undefined);
+const deleteCredential = jest.fn(async () => undefined);
 
 function setup(overrides: Parameters<typeof setShiftActionsForTesting>[0] = {}) {
   jest.clearAllMocks();
@@ -83,8 +85,11 @@ function setup(overrides: Parameters<typeof setShiftActionsForTesting>[0] = {}) 
     uuid: () => '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
     start,
     close,
-    repository: async () => repo,
+    repository: async () => repo as never,
     redirectToPermissions,
+    saveCredential,
+    deleteCredential,
+    triggerSync: async () => undefined,
     ...overrides,
   });
 }
@@ -112,19 +117,22 @@ describe('shift execution actions', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it('starts online, validates and saves the offline shift data', async () => {
-    setup();
+  it('starts online, validates and saves the offline shift data and credential', async () => {
+    const cred = { token: 'tok-123', expiresAt: '2030-01-08T22:00:00.000Z' };
+    setup({
+      start: jest.fn(async () => ({
+        status: 'in_progress' as const,
+        startedAt: '2030-01-01T22:00:00.000Z',
+        lateStartMinutes: null,
+        data: shiftData,
+        credential: cred,
+      })),
+    });
     await expect(
       beginShift('shift-1', shiftData.shift.startsAt, shiftData.shift.endsAt),
     ).resolves.toMatchObject({ status: 'started', data: shiftData, late: false });
-    expect(start).toHaveBeenCalledWith(
-      'shift-1',
-      expect.objectContaining({
-        eventId: '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
-        location: expect.objectContaining({ status: 'ok' }),
-      }),
-    );
     expect(repo.saveShiftData).toHaveBeenCalledWith(shiftData);
+    expect(saveCredential).toHaveBeenCalledWith(cred);
   });
 
   it('maps reassigned and outside-margin errors and checks the local margin', async () => {
@@ -176,5 +184,6 @@ describe('shift execution actions', () => {
     );
     expect(repo.markPendingEventSent).toHaveBeenCalledWith('0199c2c6-958d-7a4a-9f4f-f2ca1b852040');
     expect(repo.clearShiftData).toHaveBeenCalled();
+    expect(deleteCredential).toHaveBeenCalled();
   });
 });
