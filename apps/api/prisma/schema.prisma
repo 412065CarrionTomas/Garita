@@ -53,6 +53,7 @@ model Company {
   sites     Site[]
   rounds    Round[]
   shifts    Shift[]
+  recordFlags RecordFlag[]
 }
 
 model User {
@@ -106,6 +107,8 @@ model Site {
   accessInstructions String?
   observations       String?
   status             RecordStatus     @default(active)
+  maxSpeedProfile    SpeedProfile     @default(walking)
+  maxSpeedKmh        Int              @default(10)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   company            Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -308,6 +311,7 @@ model Shift {
   events             ShiftEvent[]
   checkpointRecords  CheckpointRecord[]
   invalidScanAttempts InvalidScanAttempt[]
+  recordFlags        RecordFlag[]
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
@@ -420,6 +424,7 @@ model CheckpointRecord {
   shift               Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   assignment          ShiftAssignment           @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
   checkpoint          Checkpoint                @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+  flags               RecordFlag[]
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
@@ -450,5 +455,48 @@ model InvalidScanAttempt {
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
+}
+
+enum SpeedProfile {
+  walking
+  bicycle
+  vehicle
+  custom
+}
+
+enum RecordFlagType {
+  out_of_range
+  simulated_location
+  impossible_time
+  location_disabled
+  qr_on_tagged_point
+  location_unverifiable
+}
+
+enum RecordFlagSeverity {
+  grave
+  media
+  leve
+}
+
+model RecordFlag {
+  id                 String             @id @default(cuid())
+  companyId          String
+  checkpointRecordId String
+  shiftId            String
+  type               RecordFlagType
+  severity           RecordFlagSeverity
+  reason             String?
+  details            Json?
+  createdAt          DateTime           @default(now())
+
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  checkpointRecord CheckpointRecord @relation(fields: [checkpointRecordId], references: [id], onDelete: Cascade)
+  shift            Shift            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([checkpointRecordId, type])
+  @@index([companyId, shiftId, createdAt])
+  @@index([shiftId, createdAt])
+  @@index([checkpointRecordId])
 }
 
