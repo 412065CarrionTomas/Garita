@@ -37,6 +37,29 @@ export function computeRequestHash(request: CheckpointRecordRequest): string {
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
+export interface CheckpointRecordBatchContext {
+  shift?: {
+    id: string;
+    companyId: string;
+    siteId: string;
+    status: string;
+    closedBy: string | null;
+    closedAt: Date | null;
+    assignments: Array<{
+      id: string;
+      guardId: string | null;
+      startsAt: Date;
+      endsAt: Date;
+    }>;
+  };
+  shiftData?: any;
+  previousRecords?: Array<{
+    checkpointId: string;
+    occurredAtUtc: string;
+    countedFor: Array<{ roundId: string; windowIndex: number }>;
+  }>;
+}
+
 @Injectable()
 export class CheckpointRecordsService {
   private readonly logger = new Logger(CheckpointRecordsService.name);
@@ -51,6 +74,7 @@ export class CheckpointRecordsService {
   async processRecord(
     input: CheckpointRecordRequest,
     user: AuthenticatedUser,
+    context?: CheckpointRecordBatchContext,
   ): Promise<CheckpointRecordResponse> {
     const requestHash = computeRequestHash(input);
 
@@ -86,16 +110,18 @@ export class CheckpointRecordsService {
     }
 
     // 2. Shift and assignment validation
-    const shift = await this.prisma.tenantPrisma.shift.findFirst({
-      where: { id: input.shiftId },
-      include: {
-        assignments: {
-          where: { isCurrent: true, active: true },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
+    const shift =
+      context?.shift ??
+      (await this.prisma.tenantPrisma.shift.findFirst({
+        where: { id: input.shiftId },
+        include: {
+          assignments: {
+            where: { isCurrent: true, active: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
-      },
-    });
+      }));
     if (!shift) {
       throw new NotFoundException('Turno no encontrado');
     }
@@ -104,8 +130,9 @@ export class CheckpointRecordsService {
     const isGuardAssigned = assignment?.guardId === user.userId;
     const isShiftInProgress = shift.status === 'in_progress';
     const isClosedByAdmin = shift.status === 'closed' && shift.closedBy === 'admin';
+    const isAutoClosed = shift.status === 'auto_closed';
 
-    if (!isGuardAssigned || (!isShiftInProgress && !isClosedByAdmin)) {
+    if (!isGuardAssigned || (!isShiftInProgress && !isClosedByAdmin && !isAutoClosed)) {
       throw new ConflictException({ code: CHECKPOINT_RECORD_ERROR_CODES.shiftNotInProgress });
     }
 
@@ -228,23 +255,32 @@ export class CheckpointRecordsService {
       throw new ConflictException('Checkpoint no identificado');
     }
 
-    const shiftData = await this.shiftExecution.getShiftOfflineData(shift.id);
-    const dbPreviousRecords = await this.prisma.tenantPrisma.checkpointRecord.findMany({
-      where: { shiftId: shift.id },
-      select: {
-        checkpointId: true,
-        occurredAtDevice: true,
-        countedFor: true,
-      },
-    });
-
-    const previousRecords = dbPreviousRecords.map((r) => ({
-      checkpointId: r.checkpointId,
-      occurredAtUtc: r.occurredAtDevice.toISOString(),
-      countedFor: Array.isArray(r.countedFor)
-        ? (r.countedFor as { roundId: string; windowIndex: number }[])
-        : [],
-    }));
+    const shiftData =
+      context?.shiftData ?? (await this.shiftExecution.getShiftOfflineData(shift.id));
+    let previousRecords: Array<{
+      checkpointId: string;
+      occurredAtUtc: string;
+      countedFor: Array<{ roundId: string; windowIndex: number }>;
+    }>;
+    if (context?.previousRecords) {
+      previousRecords = context.previousRecords;
+    } else {
+      const dbPreviousRecords = await this.prisma.tenantPrisma.checkpointRecord.findMany({
+        where: { shiftId: shift.id },
+        select: {
+          checkpointId: true,
+          occurredAtDevice: true,
+          countedFor: true,
+        },
+      });
+      previousRecords = dbPreviousRecords.map((r) => ({
+        checkpointId: r.checkpointId,
+        occurredAtUtc: r.occurredAtDevice.toISOString(),
+        countedFor: Array.isArray(r.countedFor)
+          ? (r.countedFor as { roundId: string; windowIndex: number }[])
+          : [],
+      }));
+    }
 
     const imputation = imputeRecord({
       rounds: shiftData.rounds,
@@ -259,6 +295,11 @@ export class CheckpointRecordsService {
     });
 
     if (imputation.kind === 'counted') {
+      context?.previousRecords?.push({
+        checkpointId,
+        occurredAtUtc: input.occurredAtDevice,
+        countedFor: imputation.countedFor,
+      });
       try {
         await this.prisma.tenantPrisma.checkpointRecord.create({
           data: {
