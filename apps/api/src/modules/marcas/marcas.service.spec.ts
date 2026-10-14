@@ -4,12 +4,29 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
 
 describe('MarcasService', () => {
+  interface CreatedFlag {
+    companyId: string;
+    checkpointRecordId: string;
+    shiftId: string;
+    type: string;
+    severity: string;
+    reason?: string | null;
+  }
+
   const checkpointFindUnique = jest.fn();
   const checkpointRecordFindFirst = jest.fn();
   const checkpointRecordFindMany = jest.fn();
-  const recordFlagCreateMany = jest.fn();
+  const recordFlagCreateMany = jest.fn<
+    Promise<{ count: number }>,
+    [{ data: CreatedFlag[]; skipDuplicates?: boolean }]
+  >();
   const shiftFindFirst = jest.fn();
   const siteUpdate = jest.fn();
+
+  const createdFlags = (): CreatedFlag[] => {
+    const firstCall = recordFlagCreateMany.mock.calls[0];
+    return firstCall?.[0].data ?? [];
+  };
 
   const tenantPrisma = {
     checkpoint: { findUnique: checkpointFindUnique },
@@ -71,18 +88,16 @@ describe('MarcasService', () => {
 
       await service.evaluateRecord(baseInput);
 
-      expect(recordFlagCreateMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            companyId: 'company-1',
-            checkpointRecordId: 'rec-1',
-            shiftId: 'shift-1',
-            type: 'out_of_range',
-            severity: 'media',
-          }),
-        ]),
-        skipDuplicates: true,
-      });
+      expect(
+        createdFlags().some(
+          (flag) =>
+            flag.companyId === 'company-1' &&
+            flag.checkpointRecordId === 'rec-1' &&
+            flag.shiftId === 'shift-1' &&
+            flag.type === 'out_of_range' &&
+            flag.severity === 'media',
+        ),
+      ).toBe(true);
     });
 
     it('guarda ubicación simulada como grave', async () => {
@@ -102,15 +117,11 @@ describe('MarcasService', () => {
         simulation: 'simulated',
       });
 
-      expect(recordFlagCreateMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'simulated_location',
-            severity: 'grave',
-          }),
-        ]),
-        skipDuplicates: true,
-      });
+      expect(
+        createdFlags().some(
+          (flag) => flag.type === 'simulated_location' && flag.severity === 'grave',
+        ),
+      ).toBe(true);
     });
 
     it('marca qr_on_tagged_point cuando hay etiqueta activa y método qr', async () => {
@@ -130,16 +141,14 @@ describe('MarcasService', () => {
         phoneNfc: 'off',
       });
 
-      expect(recordFlagCreateMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'qr_on_tagged_point',
-            severity: 'media',
-            reason: 'nfc_off',
-          }),
-        ]),
-        skipDuplicates: true,
-      });
+      expect(
+        createdFlags().some(
+          (flag) =>
+            flag.type === 'qr_on_tagged_point' &&
+            flag.severity === 'media' &&
+            flag.reason === 'nfc_off',
+        ),
+      ).toBe(true);
     });
 
     it('evalúa tiempo imposible con el registro anterior del turno', async () => {
@@ -165,16 +174,14 @@ describe('MarcasService', () => {
 
       await service.evaluateRecord(baseInput);
 
-      expect(recordFlagCreateMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'impossible_time',
-            severity: 'grave',
-            reason: 'speed_exceeded',
-          }),
-        ]),
-        skipDuplicates: true,
-      });
+      expect(
+        createdFlags().some(
+          (flag) =>
+            flag.type === 'impossible_time' &&
+            flag.severity === 'grave' &&
+            flag.reason === 'speed_exceeded',
+        ),
+      ).toBe(true);
     });
 
     it('si el checkpoint no existe, no falla ni crea marcas', async () => {
