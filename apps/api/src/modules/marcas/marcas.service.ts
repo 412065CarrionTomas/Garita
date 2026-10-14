@@ -76,9 +76,10 @@ export class MarcasService {
       const previousRecord = await this.prisma.tenantPrisma.checkpointRecord.findFirst({
         where: {
           shiftId: record.shiftId,
-          occurredAtDevice: { lt: record.occurredAtDevice },
+          id: { not: record.id },
+          occurredAtDevice: { lte: record.occurredAtDevice },
         },
-        orderBy: { occurredAtDevice: 'desc' },
+        orderBy: [{ occurredAtDevice: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         select: {
           occurredAtDevice: true,
           checkpoint: {

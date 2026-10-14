@@ -3135,7 +3135,7 @@ describe('Aplicación (e2e)', () => {
       })
       .expect(200);
 
-    // Registro 4: Tiempo imposible (punto lejano a 500m, 30s de diferencia respecto a rec3 -> 60 km/h > 10 km/h a pie)
+    // Registro 4: mismo instante que rec3 a 500m; el intervalo cero implica velocidad imposible.
     const rec4Id = randomUUID();
     await client
       .post('/api/v1/registros-puntos')
@@ -3145,14 +3145,14 @@ describe('Aplicación (e2e)', () => {
         shiftId: shift.id,
         method: 'qr',
         scannedValue: qrFar,
-        occurredAtDevice: '2026-11-25T02:10:30.000Z',
+        occurredAtDevice: '2026-11-25T02:10:00.000Z',
         location: {
           status: 'ok',
           latitude: -34.6037 + 500 / 111195,
           longitude: -58.3816,
           accuracyMeters: 10,
           simulation: 'not_simulated',
-          takenAt: '2026-11-25T02:10:30.000Z',
+          takenAt: '2026-11-25T02:10:00.000Z',
         },
         phoneNfc: 'on',
       })
