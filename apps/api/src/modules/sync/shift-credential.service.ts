@@ -120,9 +120,14 @@ export class ShiftCredentialService {
     try {
       const headerStr = Buffer.from(parts[0], 'base64url').toString('utf8');
       const bodyStr = Buffer.from(parts[1], 'base64url').toString('utf8');
-      const body = JSON.parse(bodyStr) as Record<string, unknown>;
+      const body = JSON.parse(bodyStr) as unknown;
 
-      if (body && typeof body === 'object' && typeof body.shiftId === 'string') {
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        'shiftId' in body &&
+        typeof (body as { shiftId?: unknown }).shiftId === 'string'
+      ) {
         return true;
       }
 
@@ -190,7 +195,10 @@ export class ShiftCredentialService {
       where: { tokenHash },
     });
 
-    if (!credRecord || credRecord.revokedAt !== null || credRecord.expiresAt <= now) {
+    if (!credRecord) {
+      return { valid: false, reason: 'revoked_or_not_found', payload };
+    }
+    if (credRecord.revokedAt !== null || credRecord.expiresAt <= now) {
       return { valid: false, reason: 'revoked_or_not_found', payload };
     }
 

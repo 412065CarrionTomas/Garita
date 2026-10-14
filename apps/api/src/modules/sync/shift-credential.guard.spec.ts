@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { ShiftCredentialGuard } from './shift-credential.guard';
+import type { SyncRequest } from './shift-credential.guard';
 import type { ShiftCredentialService } from './shift-credential.service';
 import type { TenantContext } from '../auth/tenant-context';
 
@@ -8,25 +9,29 @@ describe('ShiftCredentialGuard', () => {
   let guard: ShiftCredentialGuard;
   let shiftCredentialService: ShiftCredentialService;
   let tenantContext: TenantContext;
-  let request: any;
+  let request: SyncRequest;
   let executionContext: ExecutionContext;
+  let verifyCredentialMock: jest.Mock;
+  let setUserMock: jest.Mock;
 
   beforeEach(() => {
     request = {
       headers: {},
       method: 'POST',
       originalUrl: '/api/v1/sincronizacion/eventos',
-    };
+    } as unknown as SyncRequest;
     executionContext = {
       switchToHttp: () => ({ getRequest: () => request }),
     } as unknown as ExecutionContext;
 
+    verifyCredentialMock = jest.fn();
     shiftCredentialService = {
-      verifyCredential: jest.fn(),
+      verifyCredential: verifyCredentialMock,
     } as unknown as ShiftCredentialService;
 
+    setUserMock = jest.fn();
     tenantContext = {
-      setUser: jest.fn(),
+      setUser: setUserMock,
     } as unknown as TenantContext;
 
     guard = new ShiftCredentialGuard(shiftCredentialService, tenantContext);
@@ -49,7 +54,7 @@ describe('ShiftCredentialGuard', () => {
 
   it('lanza 401 si la credencial es inválida o vencida', async () => {
     request.headers.authorization = 'Bearer bad-token';
-    (shiftCredentialService.verifyCredential as jest.Mock).mockResolvedValue({
+    verifyCredentialMock.mockResolvedValue({
       valid: false,
       reason: 'expired',
     });
@@ -69,7 +74,7 @@ describe('ShiftCredentialGuard', () => {
       companyId: 'company-1',
       exp: 1800000000,
     };
-    (shiftCredentialService.verifyCredential as jest.Mock).mockResolvedValue({
+    verifyCredentialMock.mockResolvedValue({
       valid: true,
       payload,
     });
@@ -83,6 +88,6 @@ describe('ShiftCredentialGuard', () => {
       role: 'guard',
       status: 'active',
     });
-    expect(tenantContext.setUser).toHaveBeenCalledWith(request.user);
+    expect(setUserMock).toHaveBeenCalledWith(request.user);
   });
 });

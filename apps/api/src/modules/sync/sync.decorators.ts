@@ -1,4 +1,5 @@
-import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import { createParamDecorator } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
 import type { SyncRequest } from './shift-credential.guard';
 import type { ShiftCredentialPayload } from './shift-credential.service';
 

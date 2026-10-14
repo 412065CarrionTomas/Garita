@@ -1,4 +1,4 @@
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ClockModule } from '../../common/clock';
 import { ShiftExecutionModule } from '../shift-execution/shift-execution.module';

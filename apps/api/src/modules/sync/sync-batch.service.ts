@@ -83,7 +83,7 @@ export class SyncBatchService {
           checkpointId: r.checkpointId,
           occurredAtUtc: r.occurredAtDevice.toISOString(),
           countedFor: Array.isArray(r.countedFor)
-            ? (r.countedFor as Array<{ roundId: string; windowIndex: number }>)
+            ? (r.countedFor as { roundId: string; windowIndex: number }[])
             : [],
         }));
         batchContext = {
@@ -165,20 +165,22 @@ export class SyncBatchService {
             eventId: recordId,
             outcome,
           });
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? error.message : 'Datos del registro no válidos';
           this.logger.warn({
             event: 'sync_batch.checkpoint_error',
             recordId,
-            error: error.message,
+            error: errorMessage,
           });
           results.push({
             status: 'rejected',
             eventId: recordId,
             reason: 'invalid_data',
-            message: error.message ?? 'Datos del registro no válidos',
+            message: errorMessage,
           });
         }
-      } else if (event.type === 'shift_close') {
+      } else {
         const eventId = event.payload.eventId;
 
         // Chequeo de idempotencia sobre ShiftEvent
@@ -210,17 +212,19 @@ export class SyncBatchService {
             eventId,
             outcome,
           });
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? error.message : 'Datos de cierre de turno no válidos';
           this.logger.warn({
             event: 'sync_batch.shift_close_error',
             eventId,
-            error: error.message,
+            error: errorMessage,
           });
           results.push({
             status: 'rejected',
             eventId,
             reason: 'invalid_data',
-            message: error.message ?? 'Datos de cierre de turno no válidos',
+            message: errorMessage,
           });
         }
       }

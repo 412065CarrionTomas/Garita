@@ -275,13 +275,8 @@ describe('CheckpointRecordsService', () => {
       });
       const result = await service.processRecord(request, guardUser);
       expect(result.result).toBe('recorded');
-      expect(checkpointRecordCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            countsForCompliance: true,
-          }),
-        }),
-      );
+      const [call] = checkpointRecordCreate.mock.calls[0] as [{ data: Record<string, unknown> }];
+      expect(call.data.countsForCompliance).toBe(true);
     });
 
     it('lanza 409 SHIFT_NOT_IN_PROGRESS si la asignación vigente es de otro vigilador', async () => {

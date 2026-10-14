@@ -6,6 +6,7 @@ import { AuthGuard } from './auth.guard';
 import type { AuthenticatedRequest, FirebaseIdentityProvider } from './auth.types';
 import type { TenantContext } from './tenant-context';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { ShiftCredentialService } from '../sync/shift-credential.service';
 
 describe('AuthGuard', () => {
   const handler = (): void => undefined;
@@ -118,7 +119,7 @@ describe('AuthGuard', () => {
     const executionContext = {
       switchToHttp: () => ({ getRequest: () => request }),
       getHandler: () => () => undefined,
-      getClass: () => class {},
+      getClass: () => TestController,
     } as unknown as ExecutionContext;
     const reflector = {
       getAllAndOverride: jest.fn(() => false),
@@ -133,12 +134,12 @@ describe('AuthGuard', () => {
     };
     const shiftCredentialService = {
       isPotentialShiftCredential: jest.fn().mockReturnValue(true),
-    } as unknown as any;
+    } as unknown as ShiftCredentialService;
     const guard = new AuthGuard(
       reflector,
-      { systemPrisma: {} } as any,
+      { systemPrisma: {} } as unknown as PrismaService,
       identity,
-      { setUser: jest.fn() } as any,
+      { setUser: jest.fn() } as unknown as TenantContext,
       shiftCredentialService,
     );
 

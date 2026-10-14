@@ -8,7 +8,36 @@ import type { ShiftExecutionService } from '../shift-execution/shift-execution.s
 import type { ShiftSyncStateService } from './shift-sync-state.service';
 import type { ShiftCredentialPayload } from './shift-credential.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import type { SyncBatchRequest } from '@garita/shared';
+import type { CheckpointRecordRequest, ShiftOfflineData, SyncBatchRequest } from '@garita/shared';
+
+interface SyncBatchRecord {
+  id?: string;
+  shiftId: string;
+  receivedAt: Date;
+  eventCount: number;
+  pendingCount: number;
+  syncedUntil: Date | null;
+}
+
+interface CheckpointRecordMock {
+  recordId: string;
+  checkpointId: string;
+  occurredAtDevice: Date;
+  countedFor: { roundId: string; windowIndex: number }[];
+  outOfWindow: boolean;
+  requestHash: string;
+  shiftId?: string;
+}
+
+interface InvalidScanMock {
+  recordId: string;
+  requestHash: string;
+}
+
+interface ShiftEventMock {
+  shiftId: string;
+  deviceEventId: string;
+}
 
 describe('SyncBatchService', () => {
   const fixedNow = new Date('2026-10-14T12:00:00.000Z');
@@ -17,12 +46,13 @@ describe('SyncBatchService', () => {
   let checkpointRecordsService: CheckpointRecordsService;
   let shiftExecutionService: ShiftExecutionService;
   let syncStateService: ShiftSyncStateService;
+  let updateSyncStateMock: jest.Mock;
   let service: SyncBatchService;
 
-  let syncBatches: any[];
-  let checkpointRecords: Map<string, any>;
-  let invalidScanAttempts: Map<string, any>;
-  let shiftEvents: Map<string, any>;
+  let syncBatches: SyncBatchRecord[];
+  let checkpointRecords: Map<string, CheckpointRecordMock>;
+  let invalidScanAttempts: Map<string, InvalidScanMock>;
+  let shiftEvents: Map<string, ShiftEventMock>;
 
   const credential: ShiftCredentialPayload = {
     shiftId: 'shift-1',
@@ -50,79 +80,93 @@ describe('SyncBatchService', () => {
     prisma = {
       systemPrisma: {
         syncBatch: {
-          create: jest.fn(async ({ data }) => {
-            syncBatches.push(data);
-            return { id: 'batch-1', ...data };
+          create: jest.fn((args: { data: SyncBatchRecord }) => {
+            syncBatches.push(args.data);
+            return Promise.resolve({ id: 'batch-1', ...args.data });
           }),
         },
         shift: {
-          findFirst: jest.fn(async () => ({
-            id: 'shift-1',
-            companyId: 'company-1',
-            siteId: 'site-1',
-            status: 'in_progress',
-            assignments: [
-              {
-                id: 'assign-1',
-                guardId: 'guard-1',
-                startsAt: new Date('2026-10-14T08:00:00.000Z'),
-                endsAt: new Date('2026-10-14T16:00:00.000Z'),
-              },
-            ],
-          })),
+          findFirst: jest.fn(() =>
+            Promise.resolve({
+              id: 'shift-1',
+              companyId: 'company-1',
+              siteId: 'site-1',
+              status: 'in_progress',
+              assignments: [
+                {
+                  id: 'assign-1',
+                  guardId: 'guard-1',
+                  startsAt: new Date('2026-10-14T08:00:00.000Z'),
+                  endsAt: new Date('2026-10-14T16:00:00.000Z'),
+                },
+              ],
+            }),
+          ),
         },
         checkpointRecord: {
-          findUnique: jest.fn(async ({ where }) => checkpointRecords.get(where.recordId) ?? null),
-          findMany: jest.fn(async () => Array.from(checkpointRecords.values())),
+          findUnique: jest.fn((args: { where: { recordId: string } }) =>
+            Promise.resolve(checkpointRecords.get(args.where.recordId) ?? null),
+          ),
+          findMany: jest.fn(() => Promise.resolve(Array.from(checkpointRecords.values()))),
         },
         invalidScanAttempt: {
-          findUnique: jest.fn(async ({ where }) => invalidScanAttempts.get(where.recordId) ?? null),
+          findUnique: jest.fn((args: { where: { recordId: string } }) =>
+            Promise.resolve(invalidScanAttempts.get(args.where.recordId) ?? null),
+          ),
         },
         shiftEvent: {
-          findUnique: jest.fn(async ({ where }) => shiftEvents.get(where.deviceEventId) ?? null),
+          findUnique: jest.fn((args: { where: { deviceEventId: string } }) =>
+            Promise.resolve(shiftEvents.get(args.where.deviceEventId) ?? null),
+          ),
         },
       },
     } as unknown as PrismaService;
 
     checkpointRecordsService = {
-      processRecord: jest.fn(async (payload) => {
-        const hash = computeRequestHash(payload);
-        const record = {
-          recordId: payload.recordId,
-          checkpointId: 'cp-1',
-          occurredAtDevice: new Date(payload.occurredAtDevice),
-          countedFor: [{ roundId: 'round-1', windowIndex: 0 }],
-          outOfWindow: false,
-          requestHash: hash,
-        };
-        checkpointRecords.set(payload.recordId, record);
-        return {
-          result: 'recorded' as const,
-          recordId: payload.recordId,
-          checkpointId: 'cp-1',
-          countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
-          outOfWindow: false,
-        };
-      }),
+      processRecord: jest.fn(
+        (payload: CheckpointRecordRequest, _user: AuthenticatedUser, _ctx?: unknown) => {
+          const hash = computeRequestHash(payload);
+          const record: CheckpointRecordMock = {
+            recordId: payload.recordId,
+            checkpointId: 'cp-1',
+            occurredAtDevice: new Date(payload.occurredAtDevice),
+            countedFor: [{ roundId: 'round-1', windowIndex: 0 }],
+            outOfWindow: false,
+            requestHash: hash,
+            shiftId: payload.shiftId,
+          };
+          checkpointRecords.set(payload.recordId, record);
+          return Promise.resolve({
+            result: 'recorded' as const,
+            recordId: payload.recordId,
+            checkpointId: 'cp-1',
+            countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
+            outOfWindow: false,
+          });
+        },
+      ),
     } as unknown as CheckpointRecordsService;
 
     shiftExecutionService = {
-      getShiftOfflineData: jest.fn(async () => ({ rounds: [], windows: [] })),
-      close: jest.fn(async (_id, payload) => {
+      getShiftOfflineData: jest.fn(() =>
+        Promise.resolve({ rounds: [], windows: [] } as unknown as ShiftOfflineData),
+      ),
+      close: jest.fn((_id: string, payload: { eventId: string; occurredAtDevice: string }) => {
         shiftEvents.set(payload.eventId, {
           shiftId: 'shift-1',
           deviceEventId: payload.eventId,
         });
-        return {
+        return Promise.resolve({
           status: 'closed' as const,
           closedAt: payload.occurredAtDevice,
           closedEarly: false,
-        };
+        });
       }),
     } as unknown as ShiftExecutionService;
 
+    updateSyncStateMock = jest.fn();
     syncStateService = {
-      updateSyncState: jest.fn(),
+      updateSyncState: updateSyncStateMock,
     } as unknown as ShiftSyncStateService;
 
     service = new SyncBatchService(
@@ -195,7 +239,7 @@ describe('SyncBatchService', () => {
     );
 
     expect(syncBatches).toHaveLength(1);
-    expect(syncStateService.updateSyncState).toHaveBeenCalledWith(
+    expect(updateSyncStateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         shiftId: 'shift-1',
         isBatch: true,

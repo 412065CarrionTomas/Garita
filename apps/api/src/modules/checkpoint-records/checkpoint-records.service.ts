@@ -9,6 +9,7 @@ import {
   type CheckpointRecordResponse,
   type ImputedCountedWindow,
   type InvalidScanReason,
+  type ShiftOfflineData,
 } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,19 +46,19 @@ export interface CheckpointRecordBatchContext {
     status: string;
     closedBy: string | null;
     closedAt: Date | null;
-    assignments: Array<{
+    assignments: {
       id: string;
       guardId: string | null;
       startsAt: Date;
       endsAt: Date;
-    }>;
+    }[];
   };
-  shiftData?: any;
-  previousRecords?: Array<{
+  shiftData?: ShiftOfflineData;
+  previousRecords?: {
     checkpointId: string;
     occurredAtUtc: string;
-    countedFor: Array<{ roundId: string; windowIndex: number }>;
-  }>;
+    countedFor: { roundId: string; windowIndex: number }[];
+  }[];
 }
 
 @Injectable()
@@ -257,11 +258,11 @@ export class CheckpointRecordsService {
 
     const shiftData =
       context?.shiftData ?? (await this.shiftExecution.getShiftOfflineData(shift.id));
-    let previousRecords: Array<{
+    let previousRecords: {
       checkpointId: string;
       occurredAtUtc: string;
-      countedFor: Array<{ roundId: string; windowIndex: number }>;
-    }>;
+      countedFor: { roundId: string; windowIndex: number }[];
+    }[];
     if (context?.previousRecords) {
       previousRecords = context.previousRecords;
     } else {

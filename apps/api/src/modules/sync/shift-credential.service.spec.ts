@@ -1,4 +1,4 @@
-import { ConfigService } from '@nestjs/config';
+import type { ConfigService } from '@nestjs/config';
 import { ShiftCredentialService } from './shift-credential.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { Clock } from '../../common/clock';
@@ -31,35 +31,54 @@ describe('ShiftCredentialService', () => {
     prisma = {
       systemPrisma: {
         shiftCredential: {
-          upsert: jest.fn(async ({ where, create, update }) => {
-            const existing = storedCredentials.get(where.tokenHash);
-            if (existing) {
-              existing.expiresAt = update.expiresAt ?? existing.expiresAt;
-              existing.revokedAt =
-                update.revokedAt !== undefined ? update.revokedAt : existing.revokedAt;
-              return existing;
-            }
-            const record = { ...create, revokedAt: null };
-            storedCredentials.set(where.tokenHash, record);
-            return record;
-          }),
-          findUnique: jest.fn(async ({ where }) => {
-            return storedCredentials.get(where.tokenHash) ?? null;
+          upsert: jest.fn(
+            (args: {
+              where: { tokenHash: string };
+              create: { tokenHash: string; expiresAt: Date };
+              update: { expiresAt?: Date; revokedAt?: Date | null };
+            }) => {
+              const existing = storedCredentials.get(args.where.tokenHash);
+              if (existing) {
+                if (args.update.expiresAt) {
+                  existing.expiresAt = args.update.expiresAt;
+                }
+                if (args.update.revokedAt !== undefined) {
+                  existing.revokedAt = args.update.revokedAt;
+                }
+                return Promise.resolve(existing);
+              }
+              const record = { ...args.create, revokedAt: null };
+              storedCredentials.set(args.where.tokenHash, record);
+              return Promise.resolve(record);
+            },
+          ),
+          findUnique: jest.fn((args: { where: { tokenHash: string } }) => {
+            return Promise.resolve(storedCredentials.get(args.where.tokenHash) ?? null);
           }),
         },
         shift: {
-          findFirst: jest.fn(async ({ where }) => {
-            const shift = shifts.get(where.id);
-            if (!shift || shift.companyId !== where.companyId) return null;
-            const assignmentFilter = where.assignments?.where;
-            if (assignmentFilter) {
-              const matchingAssignments = shift.assignments.filter(
-                (a) => a.id === assignmentFilter.id && a.guardId === assignmentFilter.guardId,
-              );
-              return { ...shift, assignments: matchingAssignments };
-            }
-            return shift;
-          }),
+          findFirst: jest.fn(
+            (args: {
+              where: {
+                id: string;
+                companyId: string;
+                assignments?: { where: { id: string; guardId: string } };
+              };
+            }) => {
+              const shift = shifts.get(args.where.id);
+              if (shift?.companyId !== args.where.companyId) {
+                return Promise.resolve(null);
+              }
+              const assignmentFilter = args.where.assignments?.where;
+              if (assignmentFilter) {
+                const matchingAssignments = shift.assignments.filter(
+                  (a) => a.id === assignmentFilter.id && a.guardId === assignmentFilter.guardId,
+                );
+                return Promise.resolve({ ...shift, assignments: matchingAssignments });
+              }
+              return Promise.resolve(shift);
+            },
+          ),
         },
       },
     } as unknown as PrismaService;
