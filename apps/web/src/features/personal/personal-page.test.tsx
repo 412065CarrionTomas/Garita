@@ -8,9 +8,11 @@ import { PersonalPage } from './personal-page';
 jest.mock('@/lib/api-client', () => ({
   ApiError: class ApiError extends Error {
     status: number | undefined;
-    constructor(message: string, status?: number) {
+    body: unknown;
+    constructor(message: string, status?: number, body?: unknown) {
       super(message);
       this.status = status;
+      this.body = body;
     }
   },
   apiGet: jest.fn(),
@@ -38,6 +40,7 @@ const page = {
   ],
 };
 let futureShiftRows: unknown[] = [];
+let inProgressShiftMock: unknown = null;
 let listedStatus = 'active';
 const input = (name: string): HTMLInputElement => {
   const element = document.querySelector(`input[name=${name}]`);
@@ -51,23 +54,25 @@ const setup = (role = 'admin') => {
     .mocked(useAuth)
     .mockReturnValue({ user: { role }, loading: false } as ReturnType<typeof useAuth>);
   jest.mocked(apiGet).mockImplementation((path: string) =>
-    path.endsWith('/turnos-futuros')
-      ? Promise.resolve(futureShiftRows as never)
-      : path.includes('rol=guard')
-        ? Promise.resolve({
-            ...page,
-            items: [
-              ...page.items,
-              {
-                ...page.items[0],
-                id: 'u2',
-                firstName: 'Juan',
-                lastName: 'Pérez',
-                status: 'invitation_pending',
-              },
-            ],
-          })
-        : Promise.resolve({ ...page, items: [{ ...page.items[0], status: listedStatus }] }),
+    path.startsWith('/turnos/')
+      ? Promise.resolve(inProgressShiftMock as never)
+      : path.endsWith('/turnos-futuros')
+        ? Promise.resolve(futureShiftRows as never)
+        : path.includes('rol=guard')
+          ? Promise.resolve({
+              ...page,
+              items: [
+                ...page.items,
+                {
+                  ...page.items[0],
+                  id: 'u2',
+                  firstName: 'Juan',
+                  lastName: 'Pérez',
+                  status: 'invitation_pending',
+                },
+              ],
+            })
+          : Promise.resolve({ ...page, items: [{ ...page.items[0], status: listedStatus }] }),
   );
   return render(
     <QueryClientProvider client={client}>
@@ -79,6 +84,7 @@ const setup = (role = 'admin') => {
 describe('PersonalPage', () => {
   beforeEach(() => {
     futureShiftRows = [];
+    inProgressShiftMock = null;
     listedStatus = 'active';
     jest.clearAllMocks();
     jest.mocked(apiPost).mockResolvedValue({ ok: true });
@@ -218,6 +224,200 @@ describe('PersonalPage', () => {
       expect(apiPost).toHaveBeenCalledWith(
         '/usuarios/u1/desactivar',
         { leaveUnassigned: true, confirmUnassignedCount: 1 },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
+  it('cuando 409 tiene turno en curso muestra el turno, advertencia y Desactivar igual; valida motivo y envía con forceDeactivate', async () => {
+    const shiftInProgress = {
+      id: 'shift-in-progress-1',
+      startsAt: '2026-10-14T10:00:00.000Z',
+      endsAt: '2026-10-14T18:00:00.000Z',
+      site: {
+        name: 'Predio Central',
+        company: { timezone: 'America/Argentina/Buenos_Aires' },
+      },
+    };
+    inProgressShiftMock = shiftInProgress;
+    jest.mocked(apiPost).mockRejectedValueOnce(
+      new ApiError('Turno en curso', 409, {
+        code: 'GUARD_HAS_SHIFT_IN_PROGRESS',
+        shiftId: 'shift-in-progress-1',
+        shift: shiftInProgress,
+      }),
+    );
+
+    setup();
+    await screen.findByText(/Ana Pérez/);
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar desactivación' }));
+
+    // 1. Muestra el turno en curso con predio, inicio y fin en hora local
+    expect(await screen.findByText(/Turno en curso:/)).toBeInTheDocument();
+    expect(screen.getByText(/Predio Central/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /El turno se cerrará ahora como un cierre antes de hora del administrador y quedará sin cobertura/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Desactivar igual' })).toBeInTheDocument();
+
+    // 2. Sin motivo (o menor a 3 caracteres) no envía
+    const reasonInput = screen.getByLabelText(/Motivo de desactivación/i);
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar igual' }));
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    expect(reasonInput).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      screen.getByText('El motivo es obligatorio y debe tener al menos 3 caracteres.'),
+    ).toBeInTheDocument();
+
+    await userEvent.type(reasonInput, 'ab');
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar igual' }));
+    expect(apiPost).toHaveBeenCalledTimes(1);
+
+    // 3. Con motivo válido reenvía con forceDeactivate y reason
+    jest.mocked(apiPost).mockResolvedValueOnce({ ok: true });
+    await userEvent.clear(reasonInput);
+    await userEvent.type(reasonInput, 'Celular robado durante guardia');
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar igual' }));
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/usuarios/u1/desactivar',
+        { forceDeactivate: true, reason: 'Celular robado durante guardia' },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
+  it('combina Desactivar igual con derivación de turnos futuros', async () => {
+    futureShiftRows = [
+      {
+        id: 'shift-future-1',
+        startsAt: '2030-10-15T12:00:00.000Z',
+        endsAt: '2030-10-15T20:00:00.000Z',
+        site: { name: 'Predio Futuro' },
+      },
+    ];
+    inProgressShiftMock = {
+      id: 'shift-in-progress-2',
+      startsAt: '2026-10-14T08:00:00.000Z',
+      endsAt: '2026-10-14T16:00:00.000Z',
+      site: {
+        name: 'Predio Ruta 9',
+        company: { timezone: 'America/Argentina/Buenos_Aires' },
+      },
+    };
+    jest.mocked(apiPost).mockRejectedValueOnce(
+      new ApiError('Turno en curso', 409, {
+        code: 'GUARD_HAS_SHIFT_IN_PROGRESS',
+        shiftId: 'shift-in-progress-2',
+      }),
+    );
+
+    setup();
+    await screen.findByText(/Ana Pérez/);
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    expect(await screen.findByText('Tiene 1 turnos futuros:')).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Derivar turnos a'), 'u2');
+    await userEvent.click(screen.getByRole('button', { name: 'Derivar y desactivar' }));
+
+    // Responde 409 y muestra el turno en curso (obtenido por apiGet /turnos/shift-in-progress-2)
+    expect(await screen.findByText(/Predio Ruta 9/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Desactivar igual' })).toBeInTheDocument();
+
+    jest.mocked(apiPost).mockResolvedValueOnce({
+      ok: true,
+      derivedCount: 1,
+      unassignedCount: 0,
+      notDerived: [],
+    });
+    const reasonInput = screen.getByLabelText(/Motivo de desactivación/i);
+    await userEvent.type(reasonInput, 'Despido en plena guardia');
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar igual' }));
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/usuarios/u1/desactivar',
+        {
+          forceDeactivate: true,
+          reason: 'Despido en plena guardia',
+          deriveToUserId: 'u2',
+        },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
+  it('combina Desactivar igual con confirmación de dejar turnos sin vigilador', async () => {
+    futureShiftRows = [
+      {
+        id: 'shift-future-1',
+        startsAt: '2030-10-15T12:00:00.000Z',
+        endsAt: '2030-10-15T20:00:00.000Z',
+        site: { name: 'Predio Futuro' },
+      },
+      {
+        id: 'shift-future-2',
+        startsAt: '2030-10-16T12:00:00.000Z',
+        endsAt: '2030-10-16T20:00:00.000Z',
+        site: { name: 'Predio Futuro 2' },
+      },
+    ];
+    const shiftInProgress = {
+      id: 'shift-in-progress-3',
+      startsAt: '2026-10-14T06:00:00.000Z',
+      endsAt: '2026-10-14T14:00:00.000Z',
+      site: {
+        name: 'Planta Industrial',
+        company: { timezone: 'America/Argentina/Buenos_Aires' },
+      },
+    };
+    inProgressShiftMock = shiftInProgress;
+    jest.mocked(apiPost).mockRejectedValueOnce(
+      new ApiError('Turno en curso', 409, {
+        code: 'GUARD_HAS_SHIFT_IN_PROGRESS',
+        shiftId: 'shift-in-progress-3',
+        shift: shiftInProgress,
+      }),
+    );
+
+    setup();
+    await screen.findByText(/Ana Pérez/);
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await screen.findByText('Tiene 2 turnos futuros:');
+    await userEvent.click(screen.getByLabelText('Dejar los turnos sin vigilador'));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Confirmar que 2 turnos quedan sin vigilador' }),
+    );
+
+    expect(await screen.findByText(/Planta Industrial/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Desactivar igual' })).toBeInTheDocument();
+
+    jest.mocked(apiPost).mockResolvedValueOnce({
+      ok: true,
+      derivedCount: 0,
+      unassignedCount: 2,
+      notDerived: [],
+    });
+    const reasonInput = screen.getByLabelText(/Motivo de desactivación/i);
+    await userEvent.type(reasonInput, 'Abandono de guardia imprevisto');
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar igual' }));
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/usuarios/u1/desactivar',
+        {
+          forceDeactivate: true,
+          reason: 'Abandono de guardia imprevisto',
+          leaveUnassigned: true,
+          confirmUnassignedCount: 2,
+        },
         expect.anything(),
         expect.anything(),
       );

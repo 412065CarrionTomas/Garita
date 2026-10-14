@@ -6,6 +6,7 @@ import {
   emptyRequestSchema,
   emptyResponseSchema,
   personnelUserSchema,
+  SHIFT_EXECUTION_ERROR_CODES,
   updateUserRequestSchema,
   usersPageSchema,
 } from '@garita/shared';
@@ -13,6 +14,43 @@ import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 
 type Person = ReturnType<typeof personnelUserSchema.parse>;
+
+interface InProgressShift {
+  id?: string;
+  startsAt: string;
+  endsAt: string;
+  site: {
+    name: string;
+    company?: { timezone?: string };
+  };
+  timezone?: string;
+}
+
+const inProgressShiftSchema = z.looseObject({
+  id: z.string().optional(),
+  startsAt: z.string(),
+  endsAt: z.string(),
+  site: z.looseObject({
+    name: z.string(),
+    company: z.looseObject({ timezone: z.string().optional() }).optional(),
+  }),
+  timezone: z.string().optional(),
+});
+
+const guardHasShiftInProgressConflictSchema = z.looseObject({
+  code: z.literal(SHIFT_EXECUTION_ERROR_CODES.guardHasShiftInProgress),
+  shiftId: z.string().optional(),
+  shift: inProgressShiftSchema.optional(),
+});
+
+function formatInCompanyTimezone(value: string, timezone?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('es-AR', {
+    timeZone: timezone ?? 'America/Argentina/Buenos_Aires',
+  });
+}
 
 export function PersonalPage() {
   const { user } = useAuth();
@@ -25,10 +63,15 @@ export function PersonalPage() {
   const [deriveToUserId, setDeriveToUserId] = useState('');
   const [leaveUnassigned, setLeaveUnassigned] = useState(false);
   const [notDerived, setNotDerived] = useState<{ id: string; name: string }[]>([]);
+  const [inProgressShift, setInProgressShift] = useState<InProgressShift | null>(null);
+  const [forceReason, setForceReason] = useState('');
+  const [forceReasonError, setForceReasonError] = useState('');
+  const [dialogError, setDialogError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
   const editDialog = useRef<HTMLDialogElement>(null);
   const deactivateDialog = useRef<HTMLDialogElement>(null);
+  const reasonInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const futureShifts = useQuery({
     queryKey: ['personal', deactivating?.id, 'turnos-futuros'],
@@ -80,7 +123,123 @@ export function PersonalPage() {
       else dialog.removeAttribute('open');
     }
   }, [deactivating]);
+  useEffect(() => {
+    if (inProgressShift && reasonInputRef.current) {
+      reasonInputRef.current.focus();
+    }
+  }, [inProgressShift]);
   const refresh = async () => queryClient.invalidateQueries({ queryKey: ['personal'] });
+  const closeDeactivateDialog = () => {
+    setDeactivating(null);
+    setDeriveToUserId('');
+    setLeaveUnassigned(false);
+    setNotDerived([]);
+    setInProgressShift(null);
+    setForceReason('');
+    setForceReasonError('');
+    setDialogError('');
+  };
+  const handleDeactivateError = async (error: unknown, fallbackMessage: string) => {
+    if (error instanceof ApiError && error.status === 409) {
+      const conflict = guardHasShiftInProgressConflictSchema.safeParse(error.body);
+      if (conflict.success) {
+        if (conflict.data.shift) {
+          setInProgressShift(conflict.data.shift);
+        } else if (conflict.data.shiftId) {
+          try {
+            const shiftData = await apiGet(
+              `/turnos/${conflict.data.shiftId}`,
+              inProgressShiftSchema,
+            );
+            setInProgressShift(shiftData);
+          } catch {
+            setInProgressShift({
+              id: conflict.data.shiftId,
+              startsAt: '',
+              endsAt: '',
+              site: { name: 'Predio asignado' },
+            });
+          }
+        } else {
+          setInProgressShift({
+            startsAt: '',
+            endsAt: '',
+            site: { name: 'Predio asignado' },
+          });
+        }
+        setForceReason('');
+        setForceReasonError('');
+        setDialogError('');
+        return;
+      }
+    }
+    setDialogError(fallbackMessage);
+    setFormError(fallbackMessage);
+  };
+  const submitForceDeactivate = async () => {
+    if (!deactivating) return;
+    const trimmedReason = forceReason.trim();
+    if (trimmedReason.length < 3) {
+      setForceReasonError('El motivo es obligatorio y debe tener al menos 3 caracteres.');
+      reasonInputRef.current?.focus();
+      return;
+    }
+    setForceReasonError('');
+    setDialogError('');
+
+    const body: Record<string, unknown> = {
+      forceDeactivate: true,
+      reason: trimmedReason,
+    };
+
+    if (deriveToUserId) {
+      body.deriveToUserId = deriveToUserId;
+    } else if (leaveUnassigned && futureShifts.data) {
+      body.leaveUnassigned = true;
+      body.confirmUnassignedCount = futureShifts.data.length;
+    }
+
+    try {
+      const result = await apiPost(
+        `/usuarios/${deactivating.id}/desactivar`,
+        body,
+        z.union([
+          z.object({ forceDeactivate: z.literal(true), reason: z.string().trim().min(3) }),
+          z.object({
+            forceDeactivate: z.literal(true),
+            reason: z.string().trim().min(3),
+            deriveToUserId: z.string().min(1),
+          }),
+          z.object({
+            forceDeactivate: z.literal(true),
+            reason: z.string().trim().min(3),
+            leaveUnassigned: z.literal(true),
+            confirmUnassignedCount: z.number().int().nonnegative(),
+          }),
+        ]),
+        z.looseObject({
+          notDerived: z
+            .array(
+              z.looseObject({
+                id: z.string(),
+                site: z.looseObject({ name: z.string() }),
+              }),
+            )
+            .optional()
+            .default([]),
+        }),
+      );
+      if (result.notDerived.length > 0) {
+        setNotDerived(result.notDerived.map(({ id, site }) => ({ id, name: site.name })));
+        await refresh();
+      } else {
+        closeDeactivateDialog();
+        await refresh();
+      }
+    } catch (error: unknown) {
+      await handleDeactivateError(error, 'No se pudo desactivar el usuario.');
+    }
+  };
   const runAction = async (path: string, failure: string) => {
     try {
       await apiPost(path, {}, emptyRequestSchema, emptyResponseSchema);
@@ -302,6 +461,10 @@ export function PersonalPage() {
                           setDeriveToUserId('');
                           setLeaveUnassigned(false);
                           setNotDerived([]);
+                          setInProgressShift(null);
+                          setForceReason('');
+                          setForceReasonError('');
+                          setDialogError('');
                           setFormError('');
                         }}
                       >
@@ -418,7 +581,7 @@ export function PersonalPage() {
           aria-describedby="deactivate-description"
           onCancel={(event) => {
             event.preventDefault();
-            setDeactivating(null);
+            closeDeactivateDialog();
           }}
           className="fixed inset-0 m-auto w-[min(32rem,calc(100%-2rem))] rounded-lg border p-6 shadow-xl backdrop:bg-black/50"
         >
@@ -509,102 +672,187 @@ export function PersonalPage() {
                 )}
               </div>
             ))}
-          <div className="mt-4 flex gap-3">
-            <button
-              type="button"
-              disabled={
-                deactivating.role === 'guard' &&
-                (futureShifts.isPending || futureShifts.isError || futureShifts.data.length > 0)
-              }
-              className="rounded border px-3 py-2"
-              onClick={() => {
-                const person = deactivating;
-                void apiPost(
-                  `/usuarios/${person.id}/desactivar`,
-                  {},
-                  emptyRequestSchema,
-                  emptyResponseSchema,
-                )
-                  .then(async () => {
-                    setDeactivating(null);
-                    await refresh();
-                  })
-                  .catch(() => {
-                    setFormError('No se pudo desactivar el usuario.');
-                  });
-              }}
+          {inProgressShift && (
+            <div
+              className="mt-4 space-y-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm"
+              role="region"
+              aria-label="Turno en curso"
             >
-              Confirmar desactivación
-            </button>
-            {deactivating.role === 'guard' && deriveToUserId && (
+              <p className="font-semibold text-amber-900">Turno en curso:</p>
+              <ul className="list-disc pl-5 text-amber-800 space-y-1">
+                <li>
+                  <strong>Predio:</strong> {inProgressShift.site.name}
+                </li>
+                <li>
+                  <strong>Inicio:</strong>{' '}
+                  {formatInCompanyTimezone(
+                    inProgressShift.startsAt,
+                    inProgressShift.site.company?.timezone ?? inProgressShift.timezone,
+                  )}
+                </li>
+                <li>
+                  <strong>Fin:</strong>{' '}
+                  {formatInCompanyTimezone(
+                    inProgressShift.endsAt,
+                    inProgressShift.site.company?.timezone ?? inProgressShift.timezone,
+                  )}
+                </li>
+              </ul>
+              <p className="font-medium text-amber-900">
+                El turno se cerrará ahora como un cierre antes de hora del administrador y quedará
+                sin cobertura.
+              </p>
+              {/* HU-13: Eventos pendientes que informó el celular (pendiente de integración en HU-13) */}
+              <label htmlFor="force-deactivate-reason" className="mt-3 grid gap-1 text-gray-900">
+                <span>Motivo de desactivación</span>
+                <input
+                  ref={reasonInputRef}
+                  id="force-deactivate-reason"
+                  name="forceDeactivateReason"
+                  type="text"
+                  value={forceReason}
+                  onChange={(event) => {
+                    setForceReason(event.target.value);
+                    if (forceReasonError && event.target.value.trim().length >= 3) {
+                      setForceReasonError('');
+                    }
+                  }}
+                  aria-invalid={Boolean(forceReasonError)}
+                  aria-describedby={forceReasonError ? 'force-deactivate-reason-error' : undefined}
+                  className="rounded border p-2"
+                  placeholder="Indicá el motivo (mínimo 3 caracteres)"
+                />
+                {forceReasonError && (
+                  <span
+                    id="force-deactivate-reason-error"
+                    className="text-sm text-red-700"
+                    role="alert"
+                  >
+                    {forceReasonError}
+                  </span>
+                )}
+              </label>
+            </div>
+          )}
+          {dialogError && (
+            <p role="alert" className="mt-3 text-sm text-red-700">
+              {dialogError}
+            </p>
+          )}
+          <div className="mt-4 flex gap-3">
+            {inProgressShift ? (
               <button
                 type="button"
-                className="rounded border px-3 py-2"
-                onClick={() => {
-                  void apiPost(
-                    `/usuarios/${deactivating.id}/desactivar`,
-                    { deriveToUserId },
-                    z.object({ deriveToUserId: z.string() }),
-                    z.looseObject({
-                      notDerived: z.array(
+                className="rounded border bg-red-600 px-3 py-2 text-white hover:bg-red-700"
+                onClick={() => void submitForceDeactivate()}
+              >
+                Desactivar igual
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={
+                    deactivating.role === 'guard' &&
+                    (futureShifts.isPending || futureShifts.isError || futureShifts.data.length > 0)
+                  }
+                  className="rounded border px-3 py-2"
+                  onClick={() => {
+                    const person = deactivating;
+                    setDialogError('');
+                    void apiPost(
+                      `/usuarios/${person.id}/desactivar`,
+                      {},
+                      emptyRequestSchema,
+                      emptyResponseSchema,
+                    )
+                      .then(async () => {
+                        closeDeactivateDialog();
+                        await refresh();
+                      })
+                      .catch(async (error: unknown) => {
+                        await handleDeactivateError(error, 'No se pudo desactivar el usuario.');
+                      });
+                  }}
+                >
+                  Confirmar desactivación
+                </button>
+                {deactivating.role === 'guard' && deriveToUserId && (
+                  <button
+                    type="button"
+                    className="rounded border px-3 py-2"
+                    onClick={() => {
+                      setDialogError('');
+                      void apiPost(
+                        `/usuarios/${deactivating.id}/desactivar`,
+                        { deriveToUserId },
+                        z.object({ deriveToUserId: z.string() }),
                         z.looseObject({
-                          id: z.string(),
-                          site: z.looseObject({ name: z.string() }),
+                          notDerived: z.array(
+                            z.looseObject({
+                              id: z.string(),
+                              site: z.looseObject({ name: z.string() }),
+                            }),
+                          ),
                         }),
-                      ),
-                    }),
-                  )
-                    .then(async (result) => {
-                      setNotDerived(
-                        result.notDerived.map(({ id, site }) => ({ id, name: site.name })),
-                      );
-                      await refresh();
-                      if (result.notDerived.length === 0) setDeactivating(null);
-                    })
-                    .catch(() => {
-                      setFormError(
-                        'No se pudieron derivar los turnos. Revisá las superposiciones.',
-                      );
-                    });
-                }}
-              >
-                Derivar y desactivar
-              </button>
-            )}
-            {deactivating.role === 'guard' && leaveUnassigned && futureShifts.data && (
-              <button
-                type="button"
-                className="rounded border px-3 py-2"
-                onClick={() => {
-                  void apiPost(
-                    `/usuarios/${deactivating.id}/desactivar`,
-                    { leaveUnassigned: true, confirmUnassignedCount: futureShifts.data.length },
-                    z.object({
-                      leaveUnassigned: z.literal(true),
-                      confirmUnassignedCount: z.number().int().nonnegative(),
-                    }),
-                    z.looseObject({}),
-                  )
-                    .then(async () => {
-                      setDeactivating(null);
-                      await refresh();
-                    })
-                    .catch(() => {
-                      setFormError(
-                        'No se pudo desactivar al vigilador con esa confirmación. Actualizá el impacto e intentá nuevamente.',
-                      );
-                    });
-                }}
-              >
-                Confirmar que {futureShifts.data.length} turnos quedan sin vigilador
-              </button>
+                      )
+                        .then(async (result) => {
+                          setNotDerived(
+                            result.notDerived.map(({ id, site }) => ({ id, name: site.name })),
+                          );
+                          await refresh();
+                          if (result.notDerived.length === 0) closeDeactivateDialog();
+                        })
+                        .catch(async (error: unknown) => {
+                          await handleDeactivateError(
+                            error,
+                            'No se pudieron derivar los turnos. Revisá las superposiciones.',
+                          );
+                        });
+                    }}
+                  >
+                    Derivar y desactivar
+                  </button>
+                )}
+                {deactivating.role === 'guard' && leaveUnassigned && futureShifts.data && (
+                  <button
+                    type="button"
+                    className="rounded border px-3 py-2"
+                    onClick={() => {
+                      setDialogError('');
+                      void apiPost(
+                        `/usuarios/${deactivating.id}/desactivar`,
+                        {
+                          leaveUnassigned: true,
+                          confirmUnassignedCount: futureShifts.data.length,
+                        },
+                        z.object({
+                          leaveUnassigned: z.literal(true),
+                          confirmUnassignedCount: z.number().int().nonnegative(),
+                        }),
+                        z.looseObject({}),
+                      )
+                        .then(async () => {
+                          closeDeactivateDialog();
+                          await refresh();
+                        })
+                        .catch(async (error: unknown) => {
+                          await handleDeactivateError(
+                            error,
+                            'No se pudo desactivar al vigilador con esa confirmación. Actualizá el impacto e intentá nuevamente.',
+                          );
+                        });
+                    }}
+                  >
+                    Confirmar que {futureShifts.data.length} turnos quedan sin vigilador
+                  </button>
+                )}
+              </>
             )}
             <button
               type="button"
               className="rounded border px-3 py-2"
-              onClick={() => {
-                setDeactivating(null);
-              }}
+              onClick={closeDeactivateDialog}
             >
               Cancelar
             </button>
