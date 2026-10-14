@@ -33,9 +33,7 @@ function SiteSpeedConfig({
   canConfigure: boolean;
   onSaved: () => void;
 }) {
-  const [profile, setProfile] = useState<SpeedProfile>(
-    (site.maxSpeedProfile as SpeedProfile) ?? 'walking',
-  );
+  const [profile, setProfile] = useState<SpeedProfile>(site.maxSpeedProfile ?? 'walking');
   const [customSpeed, setCustomSpeed] = useState<number>(site.maxSpeedKmh ?? 10);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<boolean>(false);
@@ -65,7 +63,7 @@ function SiteSpeedConfig({
 
     const payload = {
       maxSpeedProfile: profile,
-      maxSpeedKmh: profile === 'custom' ? Number(customSpeed) : undefined,
+      maxSpeedKmh: profile === 'custom' ? customSpeed : undefined,
     };
     const parsed = updateSiteSpeedSchema.safeParse(payload);
     if (!parsed.success) {
