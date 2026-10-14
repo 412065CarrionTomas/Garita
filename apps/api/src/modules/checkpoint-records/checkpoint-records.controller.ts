@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -19,6 +19,7 @@ export class CheckpointRecordsController {
   constructor(private readonly checkpointRecordsService: CheckpointRecordsService) {}
 
   @Post()
+  @HttpCode(HttpStatus.OK)
   @Roles('guard')
   @AllowDeactivatedFieldEvent()
   @ApiOperation({
