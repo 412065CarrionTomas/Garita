@@ -56,6 +56,16 @@ export const fieldLocationSchema = z.object({
 });
 export type FieldLocation = z.infer<typeof fieldLocationSchema>;
 
+/**
+ * HU-13: credential issued by the server when a shift starts. The app sends it as `Authorization: Bearer <token>`
+ * on the sync endpoints (`sync-contract.ts`) and nowhere else; it gives access to nothing else.
+ */
+export const shiftCredentialSchema = z.object({
+  token: z.string().min(1),
+  expiresAt: isoDateTime,
+});
+export type ShiftCredential = z.infer<typeof shiftCredentialSchema>;
+
 /** Body of `POST /turnos/:id/iniciar`. The event id is generated on the phone (HU-13 reuses it). */
 export const startShiftRequestSchema = z.object({
   eventId: z.uuid(),
@@ -72,6 +82,8 @@ export const startShiftResponseSchema = z.object({
   lateStartMinutes: z.number().int().positive().nullable(),
   /** Everything the app needs to work without signal (contract of PR #15). */
   data: shiftOfflineDataSchema,
+  /** HU-13: credential to send the shift events without the user token; absent in responses of older servers. */
+  credential: shiftCredentialSchema.optional(),
 });
 export type StartShiftResponse = z.infer<typeof startShiftResponseSchema>;
 
