@@ -562,6 +562,55 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       expect(countAfter).toBe(1);
     });
 
+    it('rechaza un cierre reenviado con el mismo eventId y contenido distinto', async () => {
+      const client = request(app.getHttpServer());
+      const shift = await createTestShift({ status: 'in_progress' });
+      const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+        where: { shiftId: shift.id, isCurrent: true },
+      });
+      const { token } = await shiftCredentialService.issueCredential({
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        userId: northGuardId,
+        companyId: 'norte-company',
+        scheduledEnd: shift.endsAt,
+      });
+      const eventId = randomUUID();
+      const closePayload = {
+        eventId,
+        occurredAtDevice: new Date(shift.startsAt.getTime() + 60 * 60 * 1000).toISOString(),
+        location: {
+          ...defaultLocation,
+          takenAt: new Date(shift.startsAt.getTime() + 60 * 60 * 1000).toISOString(),
+        },
+        reason: 'Fin de turno',
+      };
+      const sendClose = (payload: typeof closePayload) =>
+        client
+          .post('/api/v1/sincronizacion/eventos')
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            shiftId: shift.id,
+            pendingCount: 0,
+            syncedUntil: null,
+            events: [{ type: 'shift_close', payload }],
+          });
+
+      const first = await sendClose(closePayload).expect(200);
+      const firstResults = syncBatchResponseSchema.parse(first.body).results;
+      expect(firstResults[0]).toMatchObject({ status: 'accepted', eventId });
+      const identical = await sendClose(closePayload).expect(200);
+      const identicalResults = syncBatchResponseSchema.parse(identical.body).results;
+      expect(identicalResults[0]).toMatchObject({ status: 'duplicate', eventId });
+      const altered = await sendClose({ ...closePayload, reason: 'Cierre alterado' }).expect(200);
+      const alteredResults = syncBatchResponseSchema.parse(altered.body).results;
+      expect(alteredResults[0]).toMatchObject({
+        status: 'rejected',
+        eventId,
+        reason: 'event_id_conflict',
+      });
+    });
+
     it('aísla fallos: evento con conflicto y de otro turno se rechazan sin frenar al evento válido', async () => {
       const client = request(app.getHttpServer());
       const shift = await createTestShift({ status: 'in_progress' });
@@ -1053,6 +1102,7 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
 
       const durationMs = performance.now() - startTime;
       // Exigencia del requerimiento: < 30 s (30000 ms)
+      process.stdout.write(`500 eventos procesados en ${durationMs.toFixed(2)} ms\n`);
       expect(durationMs).toBeLessThan(30000);
     }, 35000);
   });
