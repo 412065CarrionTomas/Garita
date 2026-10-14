@@ -43,7 +43,7 @@ export function evaluateRecordFlags(input: EvaluateRecordFlagsInput): EvaluatedF
         reason: 'no_gps_fix',
         details: { status: 'unverifiable' },
       });
-    } else if (record.location.status === 'ok') {
+    } else {
       const accuracy = record.location.accuracyMeters;
       if (accuracy === null || accuracy > 100) {
         flags.push({
