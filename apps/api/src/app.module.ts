@@ -16,6 +16,7 @@ import { ClockModule } from './common/clock';
 import { ShiftsModule } from './modules/shifts/shifts.module';
 import { ShiftExecutionModule } from './modules/shift-execution/shift-execution.module';
 import { CheckpointRecordsModule } from './modules/checkpoint-records/checkpoint-records.module';
+import { MarcasModule } from './modules/marcas/marcas.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { CheckpointRecordsModule } from './modules/checkpoint-records/checkpoint
     ShiftsModule,
     ShiftExecutionModule,
     CheckpointRecordsModule,
+    MarcasModule,
   ],
 })
 export class AppModule {}

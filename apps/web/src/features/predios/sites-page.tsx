@@ -1,5 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { siteInputSchema, sitesResponseSchema } from '@garita/shared';
+import {
+  siteInputSchema,
+  sitesResponseSchema,
+  updateSiteSpeedSchema,
+  type SpeedProfile,
+} from '@garita/shared';
 import { apiGet, apiPost, apiPut, apiPatch } from '@/lib/api-client';
 import { errorMessage } from '@/lib/error-message';
 import { useAuth } from '../auth/auth-context';
@@ -18,6 +23,139 @@ import {
   AlertDialogDescription,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+
+function SiteSpeedConfig({
+  site,
+  canConfigure,
+  onSaved,
+}: {
+  site: z.infer<typeof sitesResponseSchema>[number];
+  canConfigure: boolean;
+  onSaved: () => void;
+}) {
+  const [profile, setProfile] = useState<SpeedProfile>(site.maxSpeedProfile ?? 'walking');
+  const [customSpeed, setCustomSpeed] = useState<number>(site.maxSpeedKmh ?? 10);
+  const [error, setError] = useState<string>('');
+  const [success, setSuccess] = useState<boolean>(false);
+  const [saving, setSaving] = useState<boolean>(false);
+
+  if (!canConfigure) {
+    const profileLabel =
+      site.maxSpeedProfile === 'bicycle'
+        ? 'Bicicleta (25 km/h)'
+        : site.maxSpeedProfile === 'vehicle'
+          ? 'Vehículo (60 km/h)'
+          : site.maxSpeedProfile === 'custom'
+            ? `Personalizado (${site.maxSpeedKmh ?? 10} km/h)`
+            : 'A pie (10 km/h)';
+    return (
+      <div className="mt-2 text-sm text-muted-foreground">
+        <span>Velocidad máxima de recorrido: </span>
+        <span className="font-medium">{profileLabel}</span>
+      </div>
+    );
+  }
+
+  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    setSuccess(false);
+
+    const payload = {
+      maxSpeedProfile: profile,
+      maxSpeedKmh: profile === 'custom' ? customSpeed : undefined,
+    };
+    const parsed = updateSiteSpeedSchema.safeParse(payload);
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Revisá los datos');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await apiPatch(
+        `/predios/${site.id}/recorrido`,
+        parsed.data,
+        updateSiteSpeedSchema,
+        z.unknown(),
+      );
+      setSuccess(true);
+      onSaved();
+    } catch (caught: unknown) {
+      setError(errorMessage(caught, 'No se pudo actualizar la velocidad'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={(event) => void handleSubmit(event)} className="mt-3 rounded border p-3">
+      <label htmlFor={`speed-profile-${site.id}`} className="block text-sm font-medium">
+        Velocidad máxima de recorrido
+      </label>
+      <div className="mt-1 flex flex-wrap items-center gap-3">
+        <select
+          id={`speed-profile-${site.id}`}
+          aria-label={`Velocidad máxima de recorrido para ${site.name}`}
+          value={profile}
+          onChange={(event) => {
+            setProfile(event.target.value as SpeedProfile);
+            setSuccess(false);
+            setError('');
+          }}
+          className="rounded border p-2 text-sm"
+        >
+          <option value="walking">A pie (10 km/h)</option>
+          <option value="bicycle">Bicicleta (25 km/h)</option>
+          <option value="vehicle">Vehículo (60 km/h)</option>
+          <option value="custom">Personalizado</option>
+        </select>
+
+        {profile === 'custom' && (
+          <div className="flex items-center gap-2">
+            <label htmlFor={`speed-kmh-${site.id}`} className="text-sm font-medium">
+              km/h:
+            </label>
+            <input
+              id={`speed-kmh-${site.id}`}
+              type="number"
+              min={5}
+              max={120}
+              aria-label={`Velocidad personalizada en km/h para ${site.name}`}
+              value={customSpeed}
+              onChange={(event) => {
+                setCustomSpeed(Number(event.target.value));
+                setSuccess(false);
+                setError('');
+              }}
+              className="w-24 rounded border p-2 text-sm"
+              required
+            />
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+        >
+          {saving ? 'Guardando…' : 'Guardar velocidad'}
+        </button>
+      </div>
+
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {success && (
+        <p role="status" className="mt-2 text-sm text-green-700">
+          Velocidad actualizada correctamente
+        </p>
+      )}
+    </form>
+  );
+}
 
 export function SitesPage() {
   const { user } = useAuth();
@@ -196,6 +334,16 @@ export function SitesPage() {
               )}
               <CheckpointsPanel site={site} />
               <RoundsPanel site={site} />
+              <SiteSpeedConfig
+                site={site}
+                canConfigure={
+                  site.status === 'active' &&
+                  (user?.role === 'admin' ||
+                    (user?.role === 'supervisor' &&
+                      Boolean(site.supervisors?.some(({ user: u }) => u.id === user.id))))
+                }
+                onSaved={() => void sites.refetch()}
+              />
               {user?.role === 'admin' && !site.hasActiveSupervisor && (
                 <p role="status">Sin supervisor activo</p>
               )}

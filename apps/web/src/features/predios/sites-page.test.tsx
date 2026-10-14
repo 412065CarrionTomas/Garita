@@ -159,4 +159,74 @@ describe('SitesPage', () => {
       );
     });
   });
+
+  it('permite configurar la velocidad máxima de recorrido con etiqueta accesible y teclado', async () => {
+    jest.mocked(useAuth).mockReturnValue(profile('admin'));
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+
+    expect(await screen.findByText('Velocidad máxima de recorrido')).toBeInTheDocument();
+    const select = screen.getByRole('combobox', {
+      name: 'Velocidad máxima de recorrido para Sede',
+    });
+    expect(select).toBeInTheDocument();
+
+    // Select bicycle profile
+    await user.selectOptions(select, 'bicycle');
+    await user.click(screen.getByRole('button', { name: 'Guardar velocidad' }));
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        '/predios/site-1/recorrido',
+        { maxSpeedProfile: 'bicycle' },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    // Select custom profile and enter km/h
+    await user.selectOptions(select, 'custom');
+    const kmhInput = screen.getByRole('spinbutton', {
+      name: 'Velocidad personalizada en km/h para Sede',
+    });
+    expect(kmhInput).toBeInTheDocument();
+    await user.clear(kmhInput);
+    await user.type(kmhInput, '45');
+    await user.click(screen.getByRole('button', { name: 'Guardar velocidad' }));
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        '/predios/site-1/recorrido',
+        { maxSpeedProfile: 'custom', maxSpeedKmh: 45 },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
+  it('permite a un supervisor asignado configurar la velocidad del predio', async () => {
+    const supervisorProfile = profile('supervisor');
+    if (supervisorProfile.user) {
+      supervisorProfile.user.id = 'supervisor-1';
+    }
+    jest.mocked(useAuth).mockReturnValue(supervisorProfile);
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+
+    const select = await screen.findByRole('combobox', {
+      name: 'Velocidad máxima de recorrido para Sede',
+    });
+    expect(select).toBeInTheDocument();
+    await user.selectOptions(select, 'vehicle');
+    await user.click(screen.getByRole('button', { name: 'Guardar velocidad' }));
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        '/predios/site-1/recorrido',
+        { maxSpeedProfile: 'vehicle' },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
 });

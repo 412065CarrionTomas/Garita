@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { speedProfileSchema } from './marcas/types';
 
 export const recordStatusSchema = z.enum(['active', 'inactive']);
 export const clientInputSchema = z.object({
@@ -61,6 +62,9 @@ export const siteResponseSchema = z.looseObject({
   accessInstructions: z.string().nullable().optional(),
   observations: z.string().nullable().optional(),
   supervisors: z.array(z.looseObject({ user: z.looseObject({ id: z.string() }) })).optional(),
+  hasActiveSupervisor: z.boolean().optional(),
+  maxSpeedProfile: speedProfileSchema.optional(),
+  maxSpeedKmh: z.number().optional(),
   _count: z.looseObject({ sites: z.number() }).optional(),
 });
 export const sitesResponseSchema = z.array(siteResponseSchema);

@@ -3,6 +3,8 @@ import {
   liveHealthResponseSchema,
   startShiftResponseSchema,
   checkpointRecordResponseSchema,
+  shiftRecordsResponseSchema,
+  siteResponseSchema,
   USER_ROLES,
 } from '@garita/shared';
 import {
@@ -27,6 +29,7 @@ import { Roles } from '../src/modules/auth/auth.decorators';
 import { TenantResourceService } from '../src/modules/auth/tenant-resource.service';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 import { ShiftExecutionService } from '../src/modules/shift-execution/shift-execution.service';
+import { MarcasService } from '../src/modules/marcas/marcas.service';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { z } from 'zod';
@@ -279,6 +282,8 @@ describe('Aplicación (e2e)', () => {
 
   afterAll(async () => {
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.recordFlag.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
+    await prisma.checkpointRecord.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
     await prisma.shift.deleteMany({ where: { id: { in: createdShiftIds } } });
     await prisma.site.deleteMany({ where: { id: { in: createdSiteIds } } });
     const rounds = await prisma.round.findMany({
@@ -302,6 +307,7 @@ describe('Aplicación (e2e)', () => {
       await prisma.roundVersion.deleteMany({ where: { id: { in: versionIds } } });
       await prisma.round.deleteMany({ where: { id: { in: roundIds } } });
     }
+    await prisma.nfcTag.deleteMany({ where: { checkpointId: { in: createdCheckpointIds } } });
     await prisma.checkpoint.deleteMany({ where: { id: { in: createdCheckpointIds } } });
     await prisma.checkpoint.deleteMany({
       where: { name: { startsWith: 'Punto PDF E2E ' } },
@@ -2787,7 +2793,11 @@ describe('Aplicación (e2e)', () => {
 
     // b) QR con firma alterada
     const recAlterado = randomUUID();
-    const qrAlterado = `${qrGalpon.slice(0, -1)}${qrGalpon.endsWith('A') ? 'B' : 'A'}`;
+    const qrSignatureStart = qrGalpon.lastIndexOf('.') + 1;
+    const qrSignatureFirstCharacter = qrGalpon[qrSignatureStart];
+    const qrAlterado = `${qrGalpon.slice(0, qrSignatureStart)}${
+      qrSignatureFirstCharacter === 'A' ? 'B' : 'A'
+    }${qrGalpon.slice(qrSignatureStart + 1)}`;
     const resAlterado = await client
       .post('/api/v1/registros-puntos')
       .set(guardAuth)
@@ -2957,5 +2967,414 @@ describe('Aplicación (e2e)', () => {
       .set(guardAuth)
       .send({ ...req1, recordId: randomUUID(), shiftId: southShift.id })
       .expect(404);
+  });
+
+  it('detecta registros sospechosos (HU-15), guarda marcas y expone endpoints de consulta y velocidad', async () => {
+    const client = request(app.getHttpServer());
+    const prisma = app.get(PrismaService).systemPrisma;
+    const qrService = app.get(QrService);
+
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+
+    // 1. Predio y puntos para la prueba
+    const cpTagged = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Punto Con Tag E2E ${randomUUID()}`,
+        latitude: -34.6037,
+        longitude: -58.3816,
+        toleranceRadiusMeters: 30,
+        isIndoor: false,
+      },
+    });
+    createdCheckpointIds.push(cpTagged.id);
+
+    const validUid = randomUUID().replace(/-/g, '').slice(0, 14).toUpperCase();
+    const tag = await prisma.nfcTag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointId: cpTagged.id,
+        uid: validUid,
+        status: 'active',
+        associatedById: northSupervisorId,
+      },
+    });
+
+    const cpFar = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Punto Lejano E2E ${randomUUID()}`,
+        latitude: -34.6037 + 500 / 111195,
+        longitude: -58.3816,
+        toleranceRadiusMeters: 30,
+        isIndoor: false,
+      },
+    });
+    createdCheckpointIds.push(cpFar.id);
+
+    const qrTagged = qrService.createPayload(cpTagged.id, cpTagged.qrVersion);
+    const qrFar = qrService.createPayload(cpFar.id, cpFar.qrVersion);
+
+    // Turno en progreso en el predio asignado
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-11-25T01:00:00.000Z'),
+        endsAt: new Date('2026-11-25T09:00:00.000Z'),
+        serviceDate: new Date('2026-11-25T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+        startedAt: new Date('2026-11-25T01:00:00.000Z'),
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2026-11-25T01:00:00.000Z'),
+            endsAt: new Date('2026-11-25T09:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+
+    const guardAuth = { Authorization: 'Bearer token-guard' };
+    const supervisorAuth = { Authorization: 'Bearer token-supervisor' };
+    const adminAuth = { Authorization: 'Bearer token-admin' };
+
+    // Registro 1: Fuera de rango (80m, precisión 10m, radio 30m) y QR en punto con etiqueta activa (phoneNfc: 'on')
+    const rec1Id = randomUUID();
+    const evaluator = app.get(MarcasService);
+    let evaluationMs = 0;
+    const originalEvaluate = evaluator.evaluateRecord.bind(evaluator);
+    const evaluationSpy = jest
+      .spyOn(evaluator, 'evaluateRecord')
+      .mockImplementation(async (record) => {
+        const startedAt = performance.now();
+        await originalEvaluate(record);
+        evaluationMs = performance.now() - startedAt;
+      });
+    const firstRecordRequest = {
+      recordId: rec1Id,
+      shiftId: shift.id,
+      method: 'qr',
+      scannedValue: qrTagged,
+      occurredAtDevice: '2026-11-25T02:00:00.000Z',
+      location: {
+        status: 'ok',
+        latitude: -34.6037 + 80 / 111195,
+        longitude: -58.3816,
+        accuracyMeters: 10,
+        simulation: 'not_simulated',
+        takenAt: '2026-11-25T02:00:00.000Z',
+      },
+      phoneNfc: 'on',
+    };
+    await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send(firstRecordRequest)
+      .expect(200);
+
+    expect(evaluationMs).toBeLessThan(100);
+    await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send(firstRecordRequest)
+      .expect(200);
+    expect(evaluationSpy).toHaveBeenCalledTimes(1);
+    evaluationSpy.mockRestore();
+
+    // Registro 2: Ubicación simulada (simulation: 'simulated')
+    const rec2Id = randomUUID();
+    await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: rec2Id,
+        shiftId: shift.id,
+        method: 'nfc',
+        scannedValue: tag.uid,
+        occurredAtDevice: '2026-11-25T02:05:00.000Z',
+        location: {
+          status: 'ok',
+          latitude: -34.6037,
+          longitude: -58.3816,
+          accuracyMeters: 10,
+          simulation: 'simulated',
+          takenAt: '2026-11-25T02:05:00.000Z',
+        },
+        phoneNfc: 'on',
+      })
+      .expect(200);
+
+    // Registro 3: Celular sin NFC (phoneNfc: 'unsupported') en punto con tag -> NO se marca (CA7)
+    const rec3Id = randomUUID();
+    await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: rec3Id,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrTagged,
+        occurredAtDevice: '2026-11-25T02:10:00.000Z',
+        location: {
+          status: 'ok',
+          latitude: -34.6037,
+          longitude: -58.3816,
+          accuracyMeters: 10,
+          simulation: 'not_simulated',
+          takenAt: '2026-11-25T02:10:00.000Z',
+        },
+        phoneNfc: 'unsupported',
+      })
+      .expect(200);
+
+    // Registro 4: mismo instante que rec3 a 500m; el intervalo cero implica velocidad imposible.
+    const rec4Id = randomUUID();
+    await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: rec4Id,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrFar,
+        occurredAtDevice: '2026-11-25T02:10:00.000Z',
+        location: {
+          status: 'ok',
+          latitude: -34.6037 + 500 / 111195,
+          longitude: -58.3816,
+          accuracyMeters: 10,
+          simulation: 'not_simulated',
+          takenAt: '2026-11-25T02:10:00.000Z',
+        },
+        phoneNfc: 'on',
+      })
+      .expect(200);
+
+    // 2. Consulta de registros marcados (GET /turnos/:id/registros)
+    // Sin autenticación -> 401
+    await client.get(`/api/v1/turnos/${shift.id}/registros`).expect(401);
+
+    // Rol guard -> 403 (el vigilador no ve marcas)
+    await client.get(`/api/v1/turnos/${shift.id}/registros`).set(guardAuth).expect(403);
+
+    // Rol client -> 403
+    await client
+      .get(`/api/v1/turnos/${shift.id}/registros`)
+      .set('Authorization', 'Bearer token-client')
+      .expect(403);
+
+    // Turno inexistente -> 404
+    await client.get('/api/v1/turnos/shift-inexistente/registros').set(supervisorAuth).expect(404);
+
+    // Turno de otra empresa
+    const southShift = await prisma.shift.create({
+      data: {
+        companyId: 'sur-company',
+        siteId: southSiteId,
+        startsAt: new Date('2026-10-25T01:00:00.000Z'),
+        endsAt: new Date('2026-10-25T09:00:00.000Z'),
+        serviceDate: new Date('2026-10-25T00:00:00.000Z'),
+        createdById: (
+          await prisma.user.findUniqueOrThrow({ where: { firebaseUid: 'seed-sur-admin' } })
+        ).id,
+        status: 'in_progress',
+      },
+    });
+    createdShiftIds.push(southShift.id);
+
+    await client.get(`/api/v1/turnos/${southShift.id}/registros`).set(supervisorAuth).expect(404);
+
+    const unassignedSiteShift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        startsAt: new Date('2026-11-25T01:00:00.000Z'),
+        endsAt: new Date('2026-11-25T09:00:00.000Z'),
+        serviceDate: new Date('2026-11-25T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+      },
+    });
+    createdShiftIds.push(unassignedSiteShift.id);
+    await client
+      .get(`/api/v1/turnos/${unassignedSiteShift.id}/registros`)
+      .set(supervisorAuth)
+      .expect(404);
+
+    // Consulta exitosa por supervisor asignado
+    const resSupervisor = await client
+      .get(`/api/v1/turnos/${shift.id}/registros`)
+      .set(supervisorAuth)
+      .expect(200);
+
+    const shiftRecords = shiftRecordsResponseSchema.parse(resSupervisor.body as unknown);
+    expect(shiftRecords).toMatchObject({
+      shiftId: shift.id,
+      phoneWithoutNfc: true,
+    });
+    expect(shiftRecords.records).toHaveLength(4);
+    const recordForId = (recordId: string) => {
+      const record = shiftRecords.records.find((candidate) => candidate.recordId === recordId);
+      if (!record) throw new Error(`No se encontró el registro ${recordId}`);
+      return record;
+    };
+
+    const r1 = recordForId(rec1Id);
+    expect(r1.flags).toContainEqual(
+      expect.objectContaining({ type: 'out_of_range', severity: 'media' }),
+    );
+    expect(r1.flags).toContainEqual(
+      expect.objectContaining({
+        type: 'qr_on_tagged_point',
+        severity: 'media',
+        reason: 'nfc_on',
+      }),
+    );
+
+    const r2 = recordForId(rec2Id);
+    expect(r2.flags).toContainEqual(
+      expect.objectContaining({ type: 'simulated_location', severity: 'grave' }),
+    );
+
+    const r3 = recordForId(rec3Id);
+    expect(r3.flags).toHaveLength(0); // Sin marca por celular sin NFC
+
+    const r4 = recordForId(rec4Id);
+    expect(r4.flags).toContainEqual(
+      expect.objectContaining({ type: 'impossible_time', severity: 'grave' }),
+    );
+
+    // Filtro marcados=true
+    const resMarcados = await client
+      .get(`/api/v1/turnos/${shift.id}/registros?marcados=true`)
+      .set(supervisorAuth)
+      .expect(200);
+    const markedRecords = shiftRecordsResponseSchema.parse(resMarcados.body as unknown);
+    expect(markedRecords.records).toHaveLength(3);
+    expect(markedRecords.records.some((record) => record.recordId === rec3Id)).toBe(false);
+
+    // Filtro por gravedad=grave
+    const resGraves = await client
+      .get(`/api/v1/turnos/${shift.id}/registros?marcados=true&gravedad=grave`)
+      .set(supervisorAuth)
+      .expect(200);
+    const graveRecords = shiftRecordsResponseSchema.parse(resGraves.body as unknown);
+    expect(graveRecords.records).toHaveLength(2);
+    expect(
+      graveRecords.records.every((record) =>
+        record.flags.every((flag) => flag.severity === 'grave'),
+      ),
+    ).toBe(true);
+
+    // 3. Configuración de velocidad máxima de recorrido (PATCH /predios/:id/recorrido)
+    // Sin autenticación -> 401
+    await client
+      .patch(`/api/v1/predios/${northAssignedSiteId}/recorrido`)
+      .send({ maxSpeedProfile: 'walking' })
+      .expect(401);
+
+    // Rol guard -> 403
+    await client
+      .patch(`/api/v1/predios/${northAssignedSiteId}/recorrido`)
+      .set(guardAuth)
+      .send({ maxSpeedProfile: 'walking' })
+      .expect(403);
+
+    // Supervisor no asignado -> 404
+    await client
+      .patch(`/api/v1/predios/${northUnassignedSiteId}/recorrido`)
+      .set(supervisorAuth)
+      .send({ maxSpeedProfile: 'walking' })
+      .expect(404);
+
+    // Predio de otra empresa -> 404
+    await client
+      .patch(`/api/v1/predios/${southSiteId}/recorrido`)
+      .set(supervisorAuth)
+      .send({ maxSpeedProfile: 'walking' })
+      .expect(404);
+
+    // Validación 5-120: menor a 5 -> 400
+    await client
+      .patch(`/api/v1/predios/${northAssignedSiteId}/recorrido`)
+      .set(supervisorAuth)
+      .send({ maxSpeedProfile: 'walking', maxSpeedKmh: 4 })
+      .expect(400);
+
+    // Validación 5-120: mayor a 120 -> 400
+    await client
+      .patch(`/api/v1/predios/${northAssignedSiteId}/recorrido`)
+      .set(supervisorAuth)
+      .send({ maxSpeedProfile: 'walking', maxSpeedKmh: 121 })
+      .expect(400);
+
+    // Perfil custom sin indicar velocidad -> 400
+    await client
+      .patch(`/api/v1/predios/${northAssignedSiteId}/recorrido`)
+      .set(supervisorAuth)
+      .send({ maxSpeedProfile: 'custom' })
+      .expect(400);
+
+    // Actualización exitosa por supervisor asignado
+    const resSpeedSup = await client
+      .patch(`/api/v1/predios/${northAssignedSiteId}/recorrido`)
+      .set(supervisorAuth)
+      .send({ maxSpeedProfile: 'vehicle' })
+      .expect(200);
+    const vehicleSpeed = siteResponseSchema.parse(resSpeedSup.body as unknown);
+    expect(vehicleSpeed.maxSpeedProfile).toBe('vehicle');
+    expect(vehicleSpeed.maxSpeedKmh).toBe(60);
+
+    // Actualización exitosa por admin con perfil custom
+    const resSpeedAdmin = await client
+      .patch(`/api/v1/predios/${northAssignedSiteId}/recorrido`)
+      .set(adminAuth)
+      .send({ maxSpeedProfile: 'custom', maxSpeedKmh: 45 })
+      .expect(200);
+    const customSpeed = siteResponseSchema.parse(resSpeedAdmin.body as unknown);
+    expect(customSpeed.maxSpeedProfile).toBe('custom');
+    expect(customSpeed.maxSpeedKmh).toBe(45);
+
+    // 4. Evaluador roto no impide guardar el registro (CA5)
+    const marcasService = app.get(MarcasService);
+    const spy = jest
+      .spyOn(marcasService, 'evaluateRecord')
+      .mockRejectedValueOnce(new Error('Fallo crítico forzado'));
+    const rec5Id = randomUUID();
+    const resBroken = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: rec5Id,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrFar,
+        occurredAtDevice: '2026-11-25T02:15:00.000Z',
+        location: {
+          status: 'ok',
+          latitude: -34.6037 + 500 / 111195,
+          longitude: -58.3816,
+          accuracyMeters: 10,
+          simulation: 'not_simulated',
+          takenAt: '2026-11-25T02:15:00.000Z',
+        },
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(checkpointRecordResponseSchema.parse(resBroken.body as unknown).result).toBe('recorded');
+    spy.mockRestore();
+
+    const savedInDb = await prisma.checkpointRecord.findUnique({
+      where: { recordId: rec5Id },
+    });
+    expect(savedInDb).not.toBeNull();
   });
 });

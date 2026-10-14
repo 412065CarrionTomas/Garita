@@ -4,6 +4,7 @@ import { CheckpointRecordsService, computeRequestHash } from './checkpoint-recor
 import type { PrismaService } from '../prisma/prisma.service';
 import type { QrService } from '../checkpoints/qr.service';
 import type { ShiftExecutionService } from '../shift-execution/shift-execution.service';
+import type { MarcasService } from '../marcas/marcas.service';
 
 const now = new Date('2026-10-13T10:00:00.000Z');
 
@@ -67,9 +68,13 @@ describe('CheckpointRecordsService', () => {
   const getShiftOfflineData = jest.fn();
   const shiftExecution = { getShiftOfflineData } as unknown as ShiftExecutionService;
 
+  const evaluateRecord = jest.fn().mockResolvedValue(undefined);
+  const marcasService = { evaluateRecord } as unknown as MarcasService;
+
   let service: CheckpointRecordsService;
 
   beforeEach(() => {
+    evaluateRecord.mockReset().mockResolvedValue(undefined);
     checkpointRecordFindUnique.mockReset().mockResolvedValue(null);
     checkpointRecordFindMany.mockReset().mockResolvedValue([]);
     checkpointRecordCreate
@@ -129,7 +134,13 @@ describe('CheckpointRecordsService', () => {
       checkpoints: [{ id: 'cp-1', name: 'Punto 1', qrVersion: 1 }],
     });
 
-    service = new CheckpointRecordsService(prisma, { now: () => now }, qrService, shiftExecution);
+    service = new CheckpointRecordsService(
+      prisma,
+      { now: () => now },
+      qrService,
+      shiftExecution,
+      marcasService,
+    );
   });
 
   const guardUser = {
@@ -541,6 +552,32 @@ describe('CheckpointRecordsService', () => {
         retryAfterUtc: '2026-10-13T09:10:00.000Z',
       });
       expect(checkpointRecordCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Gancho de evaluación de marcas (HU-15)', () => {
+    it('llama al evaluador de marcas al guardar un registro válido', async () => {
+      const request = createSampleRequest();
+      const result = await service.processRecord(request, guardUser);
+
+      expect(result.result).toBe('recorded');
+      expect(checkpointRecordCreate).toHaveBeenCalled();
+      expect(evaluateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recordId: request.recordId,
+          shiftId: request.shiftId,
+        }),
+      );
+    });
+
+    it('si el evaluador de marcas lanza un error, el registro se guarda igual sin fallar (CA5)', async () => {
+      evaluateRecord.mockRejectedValue(new Error('Fallo simulado en evaluador'));
+      const request = createSampleRequest();
+
+      const result = await service.processRecord(request, guardUser);
+
+      expect(result.result).toBe('recorded');
+      expect(checkpointRecordCreate).toHaveBeenCalled();
     });
   });
 });
