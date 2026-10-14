@@ -190,10 +190,35 @@ export class ShiftExecutionService {
   async state(id: string, user: AuthenticatedUser) {
     const data = await this.data(id, user);
     const shift = await this.prisma.tenantPrisma.shift.findFirstOrThrow({ where: { id } });
+    const records = await this.prisma.tenantPrisma.checkpointRecord.findMany({
+      where: { shiftId: id, countsForCompliance: true },
+      select: { checkpointId: true, countedFor: true },
+    });
+    const recordedMap = new Map<string, Set<string>>();
+    for (const record of records) {
+      const countedList = Array.isArray(record.countedFor)
+        ? (record.countedFor as { roundId: string; windowIndex: number }[])
+        : [];
+      for (const item of countedList) {
+        if (typeof item.roundId === 'string' && typeof item.windowIndex === 'number') {
+          const key = `${item.roundId}:${item.windowIndex}`;
+          let set = recordedMap.get(key);
+          if (!set) {
+            set = new Set<string>();
+            recordedMap.set(key, set);
+          }
+          set.add(record.checkpointId);
+        }
+      }
+    }
     return {
       status: shift.status,
-      rounds: currentRoundProgress(data, this.clock.now().toISOString()),
+      rounds: currentRoundProgress(data, this.clock.now().toISOString(), recordedMap),
     };
+  }
+
+  async getShiftOfflineData(id: string): Promise<ShiftOfflineData> {
+    return this.buildData(id);
   }
 
   async close(id: string, input: CloseShiftRequest, user: AuthenticatedUser) {

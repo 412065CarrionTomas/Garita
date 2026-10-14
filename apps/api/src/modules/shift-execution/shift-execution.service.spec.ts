@@ -86,3 +86,74 @@ describe('ShiftExecutionService auto-close scheduling', () => {
     await expect(service.scheduleAutoCloseSafely('shift-1', 'site-1', endsAt)).resolves.toBe(false);
   });
 });
+
+describe('ShiftExecutionService.state', () => {
+  it('passes recorded checkpoints to currentRoundProgress', async () => {
+    const shiftData = {
+      shift: {
+        id: 'shift-1',
+        siteId: 'site-1',
+        siteName: 'Predio A',
+        startsAt: '2026-10-13T07:00:00.000Z',
+        endsAt: '2026-10-13T09:00:00.000Z',
+        timezone: 'America/Argentina/Buenos_Aires',
+        assignmentId: 'assign-1',
+      },
+      rounds: [
+        {
+          roundId: 'round-1',
+          name: 'Perimetral',
+          checkpointIds: ['cp-1', 'cp-2'],
+          roundVersionId: 'rv-1',
+          frequencyMinutes: 120,
+          windowStartLocal: '00:00',
+          windowEndLocal: '08:00',
+          graceMinutes: 15,
+        },
+      ],
+      windows: [
+        {
+          roundId: 'round-1',
+          index: 0,
+          startUtc: '2026-10-13T07:00:00.000Z',
+          endUtc: '2026-10-13T09:00:00.000Z',
+          label: '04:00 - 06:00',
+        },
+      ],
+      checkpoints: [],
+      serverTime: { serverNowUtc: now.toISOString() },
+    };
+    const tenantPrisma = {
+      shift: {
+        findFirstOrThrow: jest.fn().mockResolvedValue({ id: 'shift-1', status: 'in_progress' }),
+      },
+      checkpointRecord: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            checkpointId: 'cp-1',
+            countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
+          },
+        ]),
+      },
+    };
+    const service = new ShiftExecutionService(
+      { tenantPrisma, systemPrisma: {} } as unknown as PrismaService,
+      { now: () => now },
+      {} as Queue,
+      { deadlineForSite: () => Promise.resolve(null) },
+      new NoopShiftExecutionEffects(),
+    );
+    jest.spyOn(service, 'data').mockResolvedValue(shiftData);
+
+    const user = {
+      userId: 'guard-1',
+      companyId: 'c-1',
+      role: 'guard' as const,
+      status: 'active' as const,
+    };
+    const result = await service.state('shift-1', user);
+
+    expect(result.status).toBe('in_progress');
+    expect(result.rounds[0]?.pendingCheckpointIds).toEqual(['cp-2']);
+  });
+});
