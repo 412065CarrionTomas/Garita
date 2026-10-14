@@ -24,3 +24,40 @@ Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', {
   writable: true,
   configurable: true,
 });
+
+jest.mock('expo-haptics', () => ({
+  notificationAsync: jest.fn(),
+  impactAsync: jest.fn(),
+  selectionAsync: jest.fn(),
+  NotificationFeedbackType: {
+    Success: 'success',
+    Warning: 'warning',
+    Error: 'error',
+  },
+}));
+
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: jest.fn(() => ({
+    play: jest.fn(),
+    pause: jest.fn(),
+    stop: jest.fn(),
+  })),
+  useAudioPlayer: jest.fn(() => ({
+    play: jest.fn(),
+    pause: jest.fn(),
+    stop: jest.fn(),
+  })),
+}));
+
+jest.mock('expo-camera', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    CameraView: (props) => React.createElement(View, { testID: 'camera-view', ...props }),
+    useCameraPermissions: jest.fn(() => [{ granted: true }, jest.fn()]),
+    Camera: {
+      getCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
+      requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
+    },
+  };
+});
