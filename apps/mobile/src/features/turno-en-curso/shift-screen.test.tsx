@@ -6,8 +6,9 @@ import { ShiftScreen } from './shift-screen';
 
 jest.mock('@/lib/db/database', () => ({ createDefaultFieldRepository: jest.fn() }));
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ replace: jest.fn() }),
+  useRouter: () => ({ replace: jest.fn(), push: mockPush }),
   useFocusEffect: (callback: () => void) => {
     const React = jest.requireActual('react') as {
       useEffect: (effect: () => void, dependencies: readonly unknown[]) => void;
@@ -64,6 +65,7 @@ const repository = {
 describe('<ShiftScreen />', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    repository.listPendingEvents.mockResolvedValue([]);
     jest.mocked(createDefaultFieldRepository).mockResolvedValue(repository as never);
   });
 
@@ -100,5 +102,73 @@ describe('<ShiftScreen />', () => {
       expect(screen.getByText('Turno cerrado, pendiente de envío.')).toBeOnTheScreen(),
     );
     expect(screen.queryByRole('button', { name: 'Cerrar turno' })).toBeNull();
+  });
+
+  it('navigates to escaneo when clicking Escanear código QR', async () => {
+    await act(async () => {
+      await render(<ShiftScreen shiftId="shift-1" />);
+      await Promise.resolve();
+    });
+    const scanButton = screen.getByRole('button', { name: 'Escanear código QR' });
+    expect(scanButton).toBeOnTheScreen();
+    await act(async () => {
+      scanButton.props.onClick?.() ?? scanButton.props.onPress?.();
+    });
+    expect(mockPush).toHaveBeenCalledWith('/escaneo');
+  });
+
+  it('filters out locally recorded checkpoints from pending list', async () => {
+    const customRepo = {
+      ...repository,
+      listCheckpointRecords: jest.fn(async () => [
+        {
+          recordId: 'rec-1',
+          shiftId: 'shift-1',
+          checkpointId: 'point-2', // Acceso
+          checkpointName: 'Acceso',
+          occurredAtUtc: nowUtc,
+          countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
+          outOfWindow: false,
+          serverResult: 'recorded',
+          serverReason: null,
+          createdAt: nowUtc,
+        },
+      ]),
+    };
+    jest.mocked(createDefaultFieldRepository).mockResolvedValue(customRepo as never);
+    await act(async () => {
+      await render(<ShiftScreen shiftId="shift-1" />);
+      await Promise.resolve();
+    });
+    // Acceso is recorded, only Portón remains pending!
+    expect(screen.queryByText('• Acceso')).toBeNull();
+    expect(screen.getByText('• Portón')).toBeOnTheScreen();
+  });
+
+  it('displays alert for server-rejected records', async () => {
+    const customRepo = {
+      ...repository,
+      listCheckpointRecords: jest.fn(async () => [
+        {
+          recordId: 'rec-rejected',
+          shiftId: 'shift-1',
+          checkpointId: 'point-1',
+          checkpointName: 'Portón',
+          occurredAtUtc: nowUtc,
+          countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
+          outOfWindow: false,
+          serverResult: 'rejected' as const,
+          serverReason: 'outdated_version',
+          createdAt: nowUtc,
+        },
+      ]),
+    };
+    jest.mocked(createDefaultFieldRepository).mockResolvedValue(customRepo as never);
+    await act(async () => {
+      await render(<ShiftScreen shiftId="shift-1" />);
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Registros observados por el servidor')).toBeOnTheScreen();
+    expect(screen.getByText('• Portón: Código QR desactualizado')).toBeOnTheScreen();
   });
 });

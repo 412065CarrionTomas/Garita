@@ -49,6 +49,9 @@ const repo = {
   addPendingEvent: jest.fn(async () => undefined),
   listPendingEvents: jest.fn(async () => []),
   markPendingEventSent: jest.fn(async () => undefined),
+  saveCheckpointRecord: jest.fn(async (rec) => rec as never),
+  listCheckpointRecords: jest.fn(async () => []),
+  updateCheckpointRecordServerResult: jest.fn(async () => undefined),
 };
 const start = jest.fn(async () => ({
   status: 'in_progress' as const,

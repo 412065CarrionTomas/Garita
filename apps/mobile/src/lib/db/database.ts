@@ -1,10 +1,31 @@
 import * as SQLite from 'expo-sqlite';
+import { z } from 'zod';
 import {
   pendingFieldEventSchema,
   shiftOfflineDataSchema,
   type PendingFieldEvent,
   type ShiftOfflineData,
 } from '@garita/shared';
+
+export const localCheckpointRecordSchema = z.object({
+  recordId: z.string().uuid(),
+  shiftId: z.string().min(1),
+  checkpointId: z.string().min(1),
+  checkpointName: z.string().min(1),
+  occurredAtUtc: z.string(),
+  countedFor: z.array(
+    z.object({
+      roundId: z.string(),
+      windowIndex: z.number().int(),
+      late: z.boolean(),
+    }),
+  ),
+  outOfWindow: z.boolean(),
+  serverResult: z.enum(['recorded', 'rejected']).nullable().optional(),
+  serverReason: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+export type LocalCheckpointRecord = z.infer<typeof localCheckpointRecordSchema>;
 
 export interface FieldDatabase {
   transaction<T>(work: () => Promise<T>): Promise<T>;
@@ -13,6 +34,13 @@ export interface FieldDatabase {
   insertEvent(event: PendingFieldEvent): Promise<void>;
   markEventSent(id: string): Promise<void>;
   readEvents(): Promise<unknown[]>;
+  insertCheckpointRecord(record: LocalCheckpointRecord): Promise<void>;
+  readCheckpointRecords(shiftId?: string): Promise<unknown[]>;
+  updateCheckpointRecordServerResult(
+    recordId: string,
+    result: 'recorded' | 'rejected',
+    reason?: string | null,
+  ): Promise<void>;
 }
 
 export interface MigrationDatabase {
@@ -53,6 +81,14 @@ export async function migrateDatabase(database: MigrationDatabase): Promise<void
       await database.setVersion(2);
     });
   }
+  if (version < 3) {
+    await database.transaction(async () => {
+      await database.exec(
+        'CREATE TABLE IF NOT EXISTS checkpoint_records (record_id TEXT PRIMARY KEY, shift_id TEXT NOT NULL, checkpoint_id TEXT NOT NULL, checkpoint_name TEXT NOT NULL, occurred_at_utc TEXT NOT NULL, counted_for TEXT NOT NULL, out_of_window INTEGER NOT NULL DEFAULT 0, server_result TEXT, server_reason TEXT, created_at TEXT NOT NULL)',
+      );
+      await database.setVersion(3);
+    });
+  }
 }
 
 class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
@@ -81,6 +117,7 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
     await this.db.runAsync('DELETE FROM shift_windows');
     await this.db.runAsync('DELETE FROM shift_checkpoints');
     await this.db.runAsync('DELETE FROM server_time');
+    await this.db.runAsync('DELETE FROM checkpoint_records');
     if (!data) return;
     await this.db.runAsync(
       'INSERT INTO current_shift (id, data) VALUES (1, ?)',
@@ -161,6 +198,63 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
       createdAt: row.created_at,
     }));
   }
+  async insertCheckpointRecord(record: LocalCheckpointRecord): Promise<void> {
+    await this.db.runAsync(
+      'INSERT OR REPLACE INTO checkpoint_records (record_id, shift_id, checkpoint_id, checkpoint_name, occurred_at_utc, counted_for, out_of_window, server_result, server_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      record.recordId,
+      record.shiftId,
+      record.checkpointId,
+      record.checkpointName,
+      record.occurredAtUtc,
+      JSON.stringify(record.countedFor),
+      record.outOfWindow ? 1 : 0,
+      record.serverResult ?? null,
+      record.serverReason ?? null,
+      record.createdAt,
+    );
+  }
+  async readCheckpointRecords(shiftId?: string): Promise<unknown[]> {
+    const query = shiftId
+      ? 'SELECT record_id, shift_id, checkpoint_id, checkpoint_name, occurred_at_utc, counted_for, out_of_window, server_result, server_reason, created_at FROM checkpoint_records WHERE shift_id = ? ORDER BY occurred_at_utc ASC'
+      : 'SELECT record_id, shift_id, checkpoint_id, checkpoint_name, occurred_at_utc, counted_for, out_of_window, server_result, server_reason, created_at FROM checkpoint_records ORDER BY occurred_at_utc ASC';
+    const params = shiftId ? [shiftId] : [];
+    const rows = await this.db.getAllAsync<{
+      record_id: string;
+      shift_id: string;
+      checkpoint_id: string;
+      checkpoint_name: string;
+      occurred_at_utc: string;
+      counted_for: string;
+      out_of_window: number;
+      server_result: string | null;
+      server_reason: string | null;
+      created_at: string;
+    }>(query, ...params);
+    return rows.map((row) => ({
+      recordId: row.record_id,
+      shiftId: row.shift_id,
+      checkpointId: row.checkpoint_id,
+      checkpointName: row.checkpoint_name,
+      occurredAtUtc: row.occurred_at_utc,
+      countedFor: JSON.parse(row.counted_for) as unknown,
+      outOfWindow: Boolean(row.out_of_window),
+      serverResult: row.server_result as 'recorded' | 'rejected' | null,
+      serverReason: row.server_reason,
+      createdAt: row.created_at,
+    }));
+  }
+  async updateCheckpointRecordServerResult(
+    recordId: string,
+    result: 'recorded' | 'rejected',
+    reason?: string | null,
+  ): Promise<void> {
+    await this.db.runAsync(
+      'UPDATE checkpoint_records SET server_result = ?, server_reason = ? WHERE record_id = ?',
+      result,
+      reason ?? null,
+      recordId,
+    );
+  }
 }
 
 let databasePromise: Promise<ExpoFieldDatabase> | undefined;
@@ -197,8 +291,26 @@ export function createFieldRepository(database: FieldDatabase) {
     async markPendingEventSent(id: string): Promise<void> {
       await database.markEventSent(id);
     },
+    async saveCheckpointRecord(input: unknown): Promise<LocalCheckpointRecord> {
+      const record = localCheckpointRecordSchema.parse(input);
+      await database.insertCheckpointRecord(record);
+      return record;
+    },
+    async listCheckpointRecords(shiftId?: string): Promise<LocalCheckpointRecord[]> {
+      const records = await database.readCheckpointRecords(shiftId);
+      return records.map((record) => localCheckpointRecordSchema.parse(record));
+    },
+    async updateCheckpointRecordServerResult(
+      recordId: string,
+      result: 'recorded' | 'rejected',
+      reason?: string | null,
+    ): Promise<void> {
+      await database.updateCheckpointRecordServerResult(recordId, result, reason);
+    },
   };
 }
+
+export type FieldRepository = ReturnType<typeof createFieldRepository>;
 
 export async function createDefaultFieldRepository() {
   return createFieldRepository(await openFieldDatabase());

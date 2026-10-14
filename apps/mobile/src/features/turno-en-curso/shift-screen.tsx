@@ -9,7 +9,7 @@ import {
 } from '@garita/shared';
 import { z } from 'zod';
 import { apiGet } from '@/lib/api-client';
-import { createDefaultFieldRepository } from '@/lib/db/database';
+import { createDefaultFieldRepository, type LocalCheckpointRecord } from '@/lib/db/database';
 import { beginShift, finishShift } from './actions';
 
 const shiftsSchema = z.array(
@@ -26,6 +26,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const router = useRouter();
   const [scheduled, setScheduled] = useState<ScheduledShift | null>(null);
   const [data, setData] = useState<ShiftOfflineData | null>(null);
+  const [checkpointRecords, setCheckpointRecords] = useState<LocalCheckpointRecord[]>([]);
   const [pendingClose, setPendingClose] = useState(false);
   const [reason, setReason] = useState('');
   const [message, setMessage] = useState('');
@@ -38,6 +39,8 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
       if (saved?.shift.id === shiftId) {
         setData(saved);
         const pending = await repository.listPendingEvents();
+        const records = (await repository.listCheckpointRecords?.(shiftId)) ?? [];
+        setCheckpointRecords(records);
         setPendingClose(
           pending.some(
             (event) =>
@@ -127,7 +130,21 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
     ? isWithinStartMargin(scheduled.startsAt, scheduled.endsAt, now.toISOString())
     : false;
   const early = shift ? now.getTime() < Date.parse(shift.endsAt) : false;
-  const progress = data ? currentRoundProgress(data, now.toISOString()) : [];
+  const recordedMap = new Map<string, Set<string>>();
+  for (const record of checkpointRecords) {
+    if (record.serverResult === 'rejected') continue;
+    for (const item of record.countedFor) {
+      const key = `${item.roundId}:${item.windowIndex}`;
+      let set = recordedMap.get(key);
+      if (!set) {
+        set = new Set<string>();
+        recordedMap.set(key, set);
+      }
+      set.add(record.checkpointId);
+    }
+  }
+  const progress = data ? currentRoundProgress(data, now.toISOString(), recordedMap) : [];
+  const rejectedRecords = checkpointRecords.filter((r) => r.serverResult === 'rejected');
   const checkpointNames = new Map(
     data?.checkpoints.map((checkpoint) => [checkpoint.id, checkpoint.name]) ?? [],
   );
@@ -173,6 +190,26 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           )}
           {!pendingClose && (
             <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Escanear código QR"
+                onPress={() => router.push('/escaneo')}
+                style={styles.button}
+              >
+                <Text style={styles.buttonText}>Escanear código QR</Text>
+              </Pressable>
+              {rejectedRecords.length > 0 && (
+                <View style={styles.rejectedCard}>
+                  <Text accessibilityRole="alert" style={styles.rejectedTitle}>
+                    Registros observados por el servidor
+                  </Text>
+                  {rejectedRecords.map((r) => (
+                    <Text key={r.recordId} style={styles.rejectedText}>
+                      • {r.checkpointName}: {formatServerReason(r.serverReason)}
+                    </Text>
+                  ))}
+                </View>
+              )}
               <Text style={styles.section}>Ventanas y puntos pendientes</Text>
               {progress.map((round) => {
                 const definition = data.rounds.find((item) => item.roundId === round.roundId);
@@ -239,6 +276,24 @@ function formatTime(value: string): string {
     hourCycle: 'h23',
   }).format(new Date(value));
 }
+function formatServerReason(reason?: string | null): string {
+  switch (reason) {
+    case 'outdated_version':
+      return 'Código QR desactualizado';
+    case 'other_site':
+      return 'Este punto no pertenece a tu turno';
+    case 'malformed':
+      return 'Código QR no válido';
+    case 'signature':
+      return 'Firma inválida';
+    case 'tag_not_associated':
+      return 'Etiqueta no asociada';
+    case 'tag_replaced':
+      return 'Etiqueta reemplazada';
+    default:
+      return reason ?? 'Rechazado';
+  }
+}
 const styles = StyleSheet.create({
   content: { flexGrow: 1, gap: 16, padding: 24, backgroundColor: '#171717' },
   title: { color: '#fff', fontSize: 30, fontWeight: '700' },
@@ -269,4 +324,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   message: { color: '#fff', fontSize: 18 },
+  rejectedCard: {
+    gap: 8,
+    padding: 16,
+    backgroundColor: '#7f1d1d',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ef4444',
+  },
+  rejectedTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  rejectedText: {
+    color: '#fecaca',
+    fontSize: 16,
+  },
 });
