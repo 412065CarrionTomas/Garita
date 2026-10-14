@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   evaluateRecordFlags,
   DEFAULT_SPEEDS_KMH,
@@ -163,7 +163,7 @@ export class MarcasService {
   async getShiftRecords(
     shiftId: string,
     options: { marcados?: boolean; gravedad?: RecordFlagSeverity },
-    user: AuthenticatedUser,
+    _user: AuthenticatedUser,
   ): Promise<ShiftRecordsResponse> {
     // 1. Verify shift exists and is accessible for the tenant / supervisor
     const shift = await this.prisma.tenantPrisma.shift.findFirst({
@@ -215,7 +215,7 @@ export class MarcasService {
           type: f.type,
           severity: f.severity,
           reason: f.reason,
-          details: (f.details as Record<string, unknown>) ?? null,
+          details: f.details as Record<string, unknown> | null,
           createdAt: f.createdAt.toISOString(),
         })),
       })),
@@ -225,14 +225,16 @@ export class MarcasService {
   /**
    * Updates site max speed profile and speed in km/h.
    */
-  async updateSiteSpeed(siteId: string, input: UpdateSiteSpeedInput, user: AuthenticatedUser) {
+  async updateSiteSpeed(siteId: string, input: UpdateSiteSpeedInput, _user: AuthenticatedUser) {
     // findOwnedOrThrow throws 404 if site doesn't belong to company or supervisor not assigned
     await this.resources.findOwnedOrThrow('Site', siteId);
 
     const speedKmh =
-      input.maxSpeedProfile === 'custom'
-        ? input.maxSpeedKmh!
-        : (input.maxSpeedKmh ?? DEFAULT_SPEEDS_KMH[input.maxSpeedProfile]);
+      input.maxSpeedKmh ??
+      (input.maxSpeedProfile === 'custom' ? undefined : DEFAULT_SPEEDS_KMH[input.maxSpeedProfile]);
+    if (speedKmh === undefined) {
+      throw new BadRequestException('El perfil personalizado requiere indicar la velocidad');
+    }
 
     const updated = await this.prisma.tenantPrisma.site.update({
       where: { id: siteId },
