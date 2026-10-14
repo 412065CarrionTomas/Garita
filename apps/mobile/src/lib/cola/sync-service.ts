@@ -264,19 +264,16 @@ export async function processSyncQueue(): Promise<{
       batchesSent++;
       totalProcessed += batchSlice.length;
 
-      const acceptedInOrder: { occurredAtDevice: string }[] = [];
+      const receivedEventIds = new Set<string>();
 
       for (const result of response.results) {
         const matchingEvent = batchSlice.find(
           (e) => syncEventId(e as never) === result.eventId || e.id === result.eventId,
         );
-        const occurredAtDevice = matchingEvent?.occurredAtDevice ?? null;
 
         if (result.status === 'accepted') {
+          receivedEventIds.add(result.eventId);
           await repo.markPendingEventSent(result.eventId);
-          if (occurredAtDevice) {
-            acceptedInOrder.push({ occurredAtDevice });
-          }
           if (matchingEvent?.type === 'shift_close') {
             await repo.setSyncMeta('shift_closed_done', 'true');
           }
@@ -293,15 +290,14 @@ export async function processSyncQueue(): Promise<{
             }
           }
         } else if (result.status === 'duplicate') {
+          receivedEventIds.add(result.eventId);
           await repo.markPendingEventSent(result.eventId);
-          if (occurredAtDevice) {
-            acceptedInOrder.push({ occurredAtDevice });
-          }
           if (matchingEvent?.type === 'shift_close') {
             await repo.setSyncMeta('shift_closed_done', 'true');
           }
           await repo.updateCheckpointRecordServerResult(result.eventId, 'recorded');
         } else if (result.status === 'rejected') {
+          receivedEventIds.add(result.eventId);
           // Keep on phone for diagnosis, record reason, and continue with the rest
           await repo.markPendingEventRejected(result.eventId, result.reason);
           await repo.updateCheckpointRecordServerResult(result.eventId, 'rejected', result.reason);
@@ -309,7 +305,10 @@ export async function processSyncQueue(): Promise<{
       }
 
       // Update syncedUntil (CA7)
-      const nextSyncedUntil = computeSyncedUntil(acceptedInOrder, previousSyncedUntil);
+      const receivedInOrder = batchSlice
+        .filter((event) => receivedEventIds.has(syncEventId(event as never) ?? event.id))
+        .map(({ occurredAtDevice }) => ({ occurredAtDevice }));
+      const nextSyncedUntil = computeSyncedUntil(receivedInOrder, previousSyncedUntil);
       if (nextSyncedUntil) {
         await repo.setSyncMeta('synced_until', nextSyncedUntil);
       }

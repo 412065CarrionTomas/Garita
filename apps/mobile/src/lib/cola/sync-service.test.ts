@@ -197,6 +197,31 @@ describe('SyncService (HU-13)', () => {
     resetSyncServiceForTesting();
   });
 
+  async function addCheckpointEvent(id: string, occurredAtDevice: string): Promise<void> {
+    await repo.addPendingEvent({
+      id,
+      type: 'checkpoint_record',
+      payload: {
+        recordId: id,
+        shiftId: 'shift-100',
+        method: 'qr',
+        scannedValue: id,
+        occurredAtDevice,
+        location: {
+          status: 'disabled',
+          latitude: null,
+          longitude: null,
+          accuracyMeters: null,
+          simulation: 'unavailable',
+          takenAt: null,
+        },
+        phoneNfc: 'on',
+      },
+      occurredAtDevice,
+      createdAt: occurredAtDevice,
+    });
+  }
+
   it('sends pending events in batches of up to 100 in order of occurredAtDevice (CA1, CA2)', async () => {
     // Add 120 checkpoint records with different times
     for (let i = 1; i <= 120; i++) {
@@ -614,6 +639,81 @@ describe('SyncService (HU-13)', () => {
 
     await processSyncQueue();
     expect(await repo.getSyncMeta('synced_until')).toBe(time1);
+  });
+
+  it('CA7: advances syncedUntil through a rejected event at the end of the batch', async () => {
+    const time1 = '2026-10-14T08:10:00.000Z';
+    const time2 = '2026-10-14T08:20:00.000Z';
+    const id1 = '00000000-0000-4000-8000-000000000011';
+    const id2 = '00000000-0000-4000-8000-000000000012';
+    await addCheckpointEvent(id1, time1);
+    await addCheckpointEvent(id2, time2);
+    sendBatchMock.mockResolvedValueOnce({
+      results: [
+        {
+          status: 'accepted',
+          eventId: id1,
+          outcome: {
+            result: 'recorded',
+            recordId: id1,
+            checkpointId: 'cp-1',
+            countedFor: [],
+            outOfWindow: false,
+          },
+        },
+        { status: 'rejected', eventId: id2, reason: 'invalid_data', message: 'Datos inválidos' },
+      ],
+      receivedAt: '2026-10-14T10:00:00.000Z',
+    });
+
+    await processSyncQueue();
+
+    expect(await repo.getSyncMeta('synced_until')).toBe(time2);
+    expect(await repo.getPendingEventRejectReason(id2)).toBe('invalid_data');
+  });
+
+  it('CA7: advances syncedUntil through a rejected event in the middle when no later result arrives', async () => {
+    const time1 = '2026-10-14T08:10:00.000Z';
+    const time2 = '2026-10-14T08:20:00.000Z';
+    const time3 = '2026-10-14T08:30:00.000Z';
+    const id1 = '00000000-0000-4000-8000-000000000021';
+    const id2 = '00000000-0000-4000-8000-000000000022';
+    const id3 = '00000000-0000-4000-8000-000000000023';
+    await addCheckpointEvent(id1, time1);
+    await addCheckpointEvent(id2, time2);
+    await addCheckpointEvent(id3, time3);
+    sendBatchMock.mockResolvedValueOnce({
+      results: [
+        {
+          status: 'accepted',
+          eventId: id1,
+          outcome: {
+            result: 'recorded',
+            recordId: id1,
+            checkpointId: 'cp-1',
+            countedFor: [],
+            outOfWindow: false,
+          },
+        },
+        { status: 'rejected', eventId: id2, reason: 'invalid_data', message: 'Datos inválidos' },
+      ],
+      receivedAt: '2026-10-14T10:00:00.000Z',
+    });
+
+    await processSyncQueue();
+
+    expect(await repo.getSyncMeta('synced_until')).toBe(time2);
+  });
+
+  it('CA7: does not advance syncedUntil when the server does not respond', async () => {
+    const previous = '2026-10-14T08:00:00.000Z';
+    await repo.setSyncMeta('synced_until', previous);
+    await addCheckpointEvent('00000000-0000-4000-8000-000000000031', '2026-10-14T08:10:00.000Z');
+    sendBatchMock.mockRejectedValueOnce(new Error('Network error'));
+
+    await processSyncQueue();
+
+    expect(await repo.getSyncMeta('synced_until')).toBe(previous);
   });
 
   it('sends connection notice every 2 minutes only with shift in progress, online and foreground (CA5)', async () => {
