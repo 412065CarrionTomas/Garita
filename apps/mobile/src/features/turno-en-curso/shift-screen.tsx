@@ -9,6 +9,7 @@ import {
 } from '@garita/shared';
 import { z } from 'zod';
 import { apiGet } from '@/lib/api-client';
+import { getSyncSnapshot, subscribeSyncState } from '@/lib/cola';
 import { createDefaultFieldRepository, type LocalCheckpointRecord } from '@/lib/db/database';
 import { beginShift, finishShift } from './actions';
 
@@ -28,6 +29,10 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const [data, setData] = useState<ShiftOfflineData | null>(null);
   const [checkpointRecords, setCheckpointRecords] = useState<LocalCheckpointRecord[]>([]);
   const [pendingClose, setPendingClose] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [reason, setReason] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -39,6 +44,17 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
       if (saved?.shift.id === shiftId) {
         setData(saved);
         const pending = await repository.listPendingEvents();
+        const count = repository.countPendingEvents
+          ? await repository.countPendingEvents()
+          : pending.length;
+        setPendingCount(count);
+        const syncMeta = repository.getSyncMeta
+          ? await repository.getSyncMeta('last_sync_at')
+          : null;
+        setLastSyncAt(syncMeta);
+        const snapshot = await getSyncSnapshot();
+        setIsSyncing(snapshot.isSyncing);
+        setIsOffline(snapshot.isOffline);
         const records = (await repository.listCheckpointRecords?.(shiftId)) ?? [];
         setCheckpointRecords(records);
         setPendingClose(
@@ -84,6 +100,12 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
       clearInterval(timer);
       subscription.remove();
     };
+  }, [refreshLocal]);
+  useEffect(() => {
+    const unsubscribe = subscribeSyncState(() => {
+      void refreshLocal();
+    });
+    return unsubscribe;
   }, [refreshLocal]);
 
   const start = async () => {
@@ -177,6 +199,28 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
       )}
       {data && (
         <>
+          <View style={styles.syncCard}>
+            {isOffline && (
+              <Text accessibilityRole="text" style={styles.statusOffline}>
+                Sin conexión
+              </Text>
+            )}
+            {isSyncing && (
+              <Text accessibilityRole="text" style={styles.statusSending}>
+                Enviando…
+              </Text>
+            )}
+            <Text accessibilityRole="text" style={styles.copy}>
+              {pendingCount === 1
+                ? '1 registro pendiente de envío'
+                : `${pendingCount} registros pendientes de envío`}
+            </Text>
+            <Text accessibilityRole="text" style={styles.copy}>
+              {lastSyncAt
+                ? `Último envío: ${formatTime(lastSyncAt, data.shift.timezone)}`
+                : 'Todavía no se envió nada'}
+            </Text>
+          </View>
           {pendingClose && (
             <Text accessibilityRole="alert" style={styles.message}>
               Turno cerrado, pendiente de envío.
@@ -269,12 +313,21 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
     </ScrollView>
   );
 }
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat('es-AR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).format(new Date(value));
+function formatTime(value: string, timezone?: string): string {
+  try {
+    return new Intl.DateTimeFormat('es-AR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      ...(timezone ? { timeZone: timezone } : {}),
+    }).format(new Date(value));
+  } catch {
+    return new Intl.DateTimeFormat('es-AR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(new Date(value));
+  }
 }
 function formatServerReason(reason?: string | null): string {
   switch (reason) {
@@ -299,6 +352,24 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 30, fontWeight: '700' },
   site: { color: '#fff', fontSize: 22, fontWeight: '600' },
   copy: { color: '#fff', fontSize: 18 },
+  syncCard: {
+    gap: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#555',
+    borderRadius: 10,
+    backgroundColor: '#262626',
+  },
+  statusOffline: {
+    color: '#f87171',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  statusSending: {
+    color: '#facc15',
+    fontSize: 18,
+    fontWeight: '700',
+  },
   section: { marginTop: 8, color: '#fff', fontSize: 22, fontWeight: '700' },
   card: { gap: 8, padding: 18, borderWidth: 1, borderColor: '#777', borderRadius: 10 },
   cardTitle: { color: '#fff', fontSize: 20, fontWeight: '600' },
