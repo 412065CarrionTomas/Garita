@@ -55,11 +55,21 @@ class MockMemoryDatabase implements FieldDatabase, MigrationDatabase {
     this.rejected.set(id, reason);
   }
   async countPendingEvents() {
-    return this.events.filter(({ id }) => !this.sent.has(id) && !this.rejected.has(id)).length;
+    return this.events.filter(
+      ({ id, type }) =>
+        !this.sent.has(id) &&
+        !this.rejected.has(id) &&
+        (type === 'checkpoint_record' || type === 'shift_close'),
+    ).length;
   }
   async readEvents(limit?: number) {
     const active = this.events
-      .filter(({ id }) => !this.sent.has(id) && !this.rejected.has(id))
+      .filter(
+        ({ id, type }) =>
+          !this.sent.has(id) &&
+          !this.rejected.has(id) &&
+          (type === 'checkpoint_record' || type === 'shift_close'),
+      )
       .sort((a, b) => {
         const timeDiff = Date.parse(a.occurredAtDevice) - Date.parse(b.occurredAtDevice);
         return timeDiff !== 0 ? timeDiff : Date.parse(a.createdAt) - Date.parse(b.createdAt);
@@ -262,6 +272,55 @@ describe('SyncService (HU-13)', () => {
 
     // After sync, pending count is 0
     expect(await repo.countPendingEvents()).toBe(0);
+  });
+
+  it('H-2: limits database query to SYNC_BATCH_MAX_EVENTS per iteration without reading all rows into memory', async () => {
+    for (let i = 1; i <= 250; i++) {
+      const pad = String(i).padStart(3, '0');
+      const time = `2026-10-14T08:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.000Z`;
+      const id = `00000000-0000-4000-8000-${pad.padStart(12, '0')}`;
+      await repo.addPendingEvent({
+        id,
+        type: 'checkpoint_record',
+        payload: {
+          recordId: id,
+          shiftId: 'shift-100',
+          method: 'qr',
+          scannedValue: `QR-${i}`,
+          occurredAtDevice: time,
+          location: {
+            status: 'ok',
+            latitude: -34.6,
+            longitude: -58.4,
+            accuracyMeters: 5,
+            simulation: 'not_simulated',
+            takenAt: time,
+          },
+          phoneNfc: 'on',
+        },
+        occurredAtDevice: time,
+        createdAt: time,
+      });
+    }
+
+    const listSpy = jest.spyOn(repo, 'listPendingEvents');
+
+    const outcome = await processSyncQueue();
+    expect(outcome.success).toBe(true);
+    expect(outcome.batchesSent).toBe(3);
+
+    // Verify that every call to listPendingEvents received { limit: 100 }
+    // (or { limit: 1 } at cleanup check) and that no call returned more than 100 rows
+    expect(listSpy).toHaveBeenCalled();
+    for (const call of listSpy.mock.calls) {
+      const options = call[0];
+      expect(options?.limit).toBeDefined();
+      expect(options?.limit).toBeLessThanOrEqual(100);
+    }
+    for (const resultPromise of listSpy.mock.results) {
+      const rows = await resultPromise.value;
+      expect(rows.length).toBeLessThanOrEqual(100);
+    }
   });
 
   it('updates checkpoint_records with server result when accepted', async () => {

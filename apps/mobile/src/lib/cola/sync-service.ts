@@ -185,7 +185,7 @@ export async function processSyncQueue(): Promise<{
       }
 
       // Read pending events in order (occurredAtDevice / createdAt)
-      const allPending = await repo.listPendingEvents();
+      const allPending = await repo.listPendingEvents({ limit: SYNC_BATCH_MAX_EVENTS });
       // Only checkpoint_record and shift_close travel through this sync queue
       const syncableEvents = allPending.filter(
         (e) => e.type === 'checkpoint_record' || e.type === 'shift_close',
@@ -198,7 +198,7 @@ export async function processSyncQueue(): Promise<{
         if (shiftData && pendingCount === 0) {
           // If all events are sent, check if shift was closed locally
           // (i.e. shift_close was sent or shift marked closed)
-          const allEvents = await repo.listPendingEvents();
+          const allEvents = await repo.listPendingEvents({ limit: 1 });
           if (allEvents.length === 0) {
             // Check if shift close was sent in the past
             // If shift_close was processed, we clear shift data and credentials
@@ -215,7 +215,8 @@ export async function processSyncQueue(): Promise<{
 
       // Take batch of at most SYNC_BATCH_MAX_EVENTS (100)
       const batchSlice = syncableEvents.slice(0, SYNC_BATCH_MAX_EVENTS);
-      const remainingCount = syncableEvents.length - batchSlice.length;
+      const totalPending = await repo.countPendingEvents();
+      const remainingCount = Math.max(0, totalPending - batchSlice.length);
 
       // Extract shiftId from current shift or payload
       const shiftData = await repo.getShiftData();
