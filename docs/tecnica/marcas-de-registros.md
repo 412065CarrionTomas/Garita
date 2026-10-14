@@ -23,6 +23,8 @@ La evaluación no usa el reloj actual: recibe los datos del registro y del regis
 
 `CheckpointRecordsService` guarda primero el registro imputado y luego llama a `MarcasService.evaluateRecord` desde el servicio, de modo que también se evalúan los registros recibidos por lotes. El evaluador atrapa fallos de lectura o persistencia y el gancho también captura errores inesperados; un fallo queda en el log y no revierte el registro. La evaluación se mide con `performance.now()` y emite `record_flags_evaluated` con `elapsedMs`.
 
+La respuesta del guardado espera a que termine esta evaluación. Si la evaluación falla, el error se registra en el log y el registro ya guardado permanece persistido; la excepción no cambia el resultado del guardado.
+
 ## Consulta y configuración
 
 - `GET /api/v1/turnos/:id/registros?marcados=true&gravedad=grave` devuelve registros del turno con motivos, gravedad y el dato `phoneWithoutNfc`. Solo lo pueden consultar administradores y supervisores asignados al predio; los vigiladores no ven las marcas.
