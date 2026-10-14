@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CLOCK, type Clock } from '../../common/clock';
 import { QrService } from '../checkpoints/qr.service';
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
+import { MarcasService } from '../marcas/marcas.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 export function computeRequestHash(request: CheckpointRecordRequest): string {
@@ -46,6 +47,7 @@ export class CheckpointRecordsService {
     @Inject(CLOCK) private readonly clock: Clock,
     private readonly qrService: QrService,
     private readonly shiftExecution: ShiftExecutionService,
+    private readonly marcas: MarcasService,
   ) {}
 
   async processRecord(
@@ -259,8 +261,9 @@ export class CheckpointRecordsService {
     });
 
     if (imputation.kind === 'counted') {
+      let createdRecord;
       try {
-        await this.prisma.tenantPrisma.checkpointRecord.create({
+        createdRecord = await this.prisma.tenantPrisma.checkpointRecord.create({
           data: {
             companyId: shift.companyId,
             shiftId: shift.id,
@@ -301,6 +304,16 @@ export class CheckpointRecordsService {
         throw error;
       }
 
+      try {
+        await this.marcas.evaluateRecord(createdRecord);
+      } catch (error) {
+        this.logger.error({
+          event: 'checkpoint_record.marcas_evaluation_failed',
+          recordId: input.recordId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
       this.logger.log({
         event: 'checkpoint_record.recorded',
         shiftId: input.shiftId,
@@ -321,8 +334,9 @@ export class CheckpointRecordsService {
     }
 
     if (imputation.kind === 'out_of_window') {
+      let createdRecord;
       try {
-        await this.prisma.tenantPrisma.checkpointRecord.create({
+        createdRecord = await this.prisma.tenantPrisma.checkpointRecord.create({
           data: {
             companyId: shift.companyId,
             shiftId: shift.id,
@@ -361,6 +375,16 @@ export class CheckpointRecordsService {
           throw new ConflictException({ code: CHECKPOINT_RECORD_ERROR_CODES.recordIdConflict });
         }
         throw error;
+      }
+
+      try {
+        await this.marcas.evaluateRecord(createdRecord);
+      } catch (error) {
+        this.logger.error({
+          event: 'checkpoint_record.marcas_evaluation_failed',
+          recordId: input.recordId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
 
       this.logger.log({
