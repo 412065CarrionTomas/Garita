@@ -1,4 +1,5 @@
 import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import type { SyncBatchRequest, SyncBatchResponse, SyncEventResult } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CLOCK, type Clock } from '../../common/clock';
@@ -11,6 +12,10 @@ import {
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 import { ShiftSyncStateService } from './shift-sync-state.service';
 import type { ShiftCredentialPayload } from './shift-credential.service';
+
+function computeCloseRequestHash(payload: object): string {
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
 
 @Injectable()
 export class SyncBatchService {
@@ -188,14 +193,21 @@ export class SyncBatchService {
           where: { deviceEventId: eventId },
         });
         if (existingEvent) {
-          if (existingEvent.shiftId === credential.shiftId) {
+          const requestHash = computeCloseRequestHash(event.payload);
+          const storedHash =
+            existingEvent.response &&
+            typeof existingEvent.response === 'object' &&
+            'requestHash' in existingEvent.response
+              ? existingEvent.response.requestHash
+              : null;
+          if (existingEvent.shiftId === credential.shiftId && storedHash === requestHash) {
             results.push({ status: 'duplicate', eventId });
           } else {
             results.push({
               status: 'rejected',
               eventId,
               reason: 'event_id_conflict',
-              message: 'El identificador de evento ya fue utilizado en otro turno',
+              message: 'El identificador de evento ya fue utilizado con otro contenido',
             });
           }
           continue;
@@ -207,6 +219,16 @@ export class SyncBatchService {
             event.payload,
             user,
           );
+          // Conserva el hash del payload junto a la respuesta para validar reintentos de cierre.
+          await this.prisma.systemPrisma.shiftEvent.update({
+            where: { deviceEventId: eventId },
+            data: {
+              response: {
+                ...(outcome as Record<string, unknown>),
+                requestHash: computeCloseRequestHash(event.payload),
+              },
+            },
+          });
           results.push({
             status: 'accepted',
             eventId,

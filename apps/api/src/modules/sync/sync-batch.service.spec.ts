@@ -37,6 +37,7 @@ interface InvalidScanMock {
 interface ShiftEventMock {
   shiftId: string;
   deviceEventId: string;
+  response?: Record<string, unknown>;
 }
 
 describe('SyncBatchService', () => {
@@ -117,6 +118,16 @@ describe('SyncBatchService', () => {
         shiftEvent: {
           findUnique: jest.fn((args: { where: { deviceEventId: string } }) =>
             Promise.resolve(shiftEvents.get(args.where.deviceEventId) ?? null),
+          ),
+          update: jest.fn(
+            (args: {
+              where: { deviceEventId: string };
+              data: { response: Record<string, unknown> };
+            }) => {
+              const event = shiftEvents.get(args.where.deviceEventId);
+              if (event) event.response = args.data.response;
+              return Promise.resolve(event);
+            },
           ),
         },
       },
@@ -304,6 +315,48 @@ describe('SyncBatchService', () => {
     expect(replayResponse.results[1]).toEqual({
       status: 'duplicate',
       eventId: '22222222-2222-4222-8222-222222222222',
+    });
+  });
+
+  it('detecta conflicto si se reutiliza el eventId del cierre con otro contenido', async () => {
+    const close = {
+      type: 'shift_close' as const,
+      payload: {
+        eventId: '22222222-2222-4222-8222-222222222222',
+        occurredAtDevice: '2026-10-14T11:59:00.000Z',
+        location: {
+          status: 'ok' as const,
+          latitude: -34.6,
+          longitude: -58.4,
+          accuracyMeters: 10,
+          simulation: 'not_simulated' as const,
+          takenAt: '2026-10-14T11:59:00.000Z',
+        },
+      },
+    };
+    const input: SyncBatchRequest = {
+      shiftId: 'shift-1',
+      pendingCount: 0,
+      syncedUntil: null,
+      events: [close],
+    };
+    await service.processBatch(input, credential, guardUser);
+
+    const conflict = await service.processBatch(
+      {
+        ...input,
+        events: [
+          { ...close, payload: { ...close.payload, occurredAtDevice: '2026-10-14T11:58:00.000Z' } },
+        ],
+      },
+      credential,
+      guardUser,
+    );
+
+    expect(conflict.results[0]).toMatchObject({
+      status: 'rejected',
+      eventId: close.payload.eventId,
+      reason: 'event_id_conflict',
     });
   });
 
