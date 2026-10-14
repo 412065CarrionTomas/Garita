@@ -48,7 +48,9 @@ export default function GuardLayout() {
   if (user.role !== 'guard') return <Redirect href="/(configuration)" />;
   if (permissionState === null) return null;
   if (permissionState !== 'ok') return <Redirect href="/permisos" />;
-  if (savedShiftId && localCheckPath === pathname && !pathname.endsWith(`/turno/${savedShiftId}`)) {
+  const isAllowedSubroute =
+    pathname.endsWith(`/turno/${savedShiftId}`) || pathname.includes('escaneo');
+  if (savedShiftId && localCheckPath === pathname && !isAllowedSubroute) {
     return <Redirect href={`/turno/${savedShiftId}`} />;
   }
   return <Stack screenOptions={{ headerShown: false }} />;
