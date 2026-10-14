@@ -2,6 +2,7 @@ import {
   authMeResponseSchema,
   liveHealthResponseSchema,
   startShiftResponseSchema,
+  checkpointRecordResponseSchema,
   USER_ROLES,
 } from '@garita/shared';
 import {
@@ -2403,5 +2404,558 @@ describe('Aplicación (e2e)', () => {
       .map(({ id }) => id);
     expect(mineIds).toContain(owned.id);
     expect(mineIds).not.toContain(other.id);
+  });
+
+  it('registra pasos por puntos de control con QR, valida predio, imputa a ventanas y registra intentos rechazados (HU-11)', async () => {
+    const client = request(app.getHttpServer());
+    const prisma = app.get(PrismaService).systemPrisma;
+    const qrService = app.get(QrService);
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+
+    const cpGalpon = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Galpón 1-${randomUUID()}`,
+        latitude: -34.601,
+        longitude: -58.401,
+        qrVersion: 1,
+      },
+    });
+    createdCheckpointIds.push(cpGalpon.id);
+
+    const cpPorton = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Portón trasero-${randomUUID()}`,
+        latitude: -34.602,
+        longitude: -58.402,
+        qrVersion: 1,
+      },
+    });
+    createdCheckpointIds.push(cpPorton.id);
+
+    const cpOtro = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Oficina-${randomUUID()}`,
+        latitude: -34.603,
+        longitude: -58.403,
+        qrVersion: 1,
+      },
+    });
+    createdCheckpointIds.push(cpOtro.id);
+
+    const cpOtroPredio = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        name: `Planta Norte-${randomUUID()}`,
+        latitude: -34.65,
+        longitude: -58.45,
+        qrVersion: 1,
+      },
+    });
+    createdCheckpointIds.push(cpOtroPredio.id);
+
+    const round1Name = `Perimetral-${randomUUID()}`;
+    createdRoundNames.push(round1Name);
+    const r1 = await prisma.round.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: round1Name,
+        versions: {
+          create: {
+            versionNumber: 1,
+            frequencyMinutes: 120,
+            graceMinutes: 15,
+            windowStartLocal: '22:00',
+            windowEndLocal: '06:00',
+            createdById: actor.id,
+            checkpoints: {
+              create: [
+                { companyId: 'norte-company', checkpointId: cpGalpon.id, position: 0 },
+                { companyId: 'norte-company', checkpointId: cpPorton.id, position: 1 },
+              ],
+            },
+          },
+        },
+      },
+      include: { versions: true },
+    });
+    const firstV1 = r1.versions[0];
+    if (!firstV1) {
+      throw new Error('Version 1 no creada');
+    }
+    const r1VersionId = firstV1.id;
+    await prisma.round.update({
+      where: { id: r1.id },
+      data: { currentVersionId: r1VersionId },
+    });
+
+    const round2Name = `Interna-${randomUUID()}`;
+    createdRoundNames.push(round2Name);
+    const r2 = await prisma.round.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: round2Name,
+        versions: {
+          create: {
+            versionNumber: 1,
+            frequencyMinutes: 120,
+            graceMinutes: 15,
+            windowStartLocal: '22:00',
+            windowEndLocal: '06:00',
+            createdById: actor.id,
+            checkpoints: {
+              create: [
+                { companyId: 'norte-company', checkpointId: cpGalpon.id, position: 0 },
+                { companyId: 'norte-company', checkpointId: cpOtro.id, position: 1 },
+              ],
+            },
+          },
+        },
+      },
+      include: { versions: true },
+    });
+    const firstV2 = r2.versions[0];
+    if (!firstV2) {
+      throw new Error('Version 2 no creada');
+    }
+    const r2VersionId = firstV2.id;
+    await prisma.round.update({
+      where: { id: r2.id },
+      data: { currentVersionId: r2VersionId },
+    });
+
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-14T01:00:00.000Z'),
+        endsAt: new Date('2026-10-14T09:00:00.000Z'),
+        serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+        startedAt: new Date('2026-10-14T01:00:00.000Z'),
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2026-10-14T01:00:00.000Z'),
+            endsAt: new Date('2026-10-14T09:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+        rounds: {
+          create: [
+            { roundId: r1.id, roundVersionId: r1VersionId },
+            { roundId: r2.id, roundVersionId: r2VersionId },
+          ],
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+
+    const guardAuth = { Authorization: 'Bearer token-guard' };
+    const defaultLocation = {
+      status: 'ok' as const,
+      latitude: -34.601,
+      longitude: -58.401,
+      accuracyMeters: 5,
+      simulation: 'not_simulated' as const,
+      takenAt: '2026-10-14T01:30:00.000Z',
+    };
+
+    // 1. Punto compartido cuenta para dos rondas (CA9, BDD 7) y es idempotente por recordId
+    testNow = new Date('2026-10-14T01:30:00.000Z');
+    const qrGalpon = qrService.createPayload(cpGalpon.id, cpGalpon.qrVersion);
+    const recordId1 = randomUUID();
+    const req1 = {
+      recordId: recordId1,
+      shiftId: shift.id,
+      method: 'qr' as const,
+      scannedValue: qrGalpon,
+      occurredAtDevice: '2026-10-14T01:30:00.000Z',
+      location: defaultLocation,
+      phoneNfc: 'on' as const,
+    };
+
+    const res1 = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send(req1)
+      .expect(200);
+
+    const parsed1 = checkpointRecordResponseSchema.parse(res1.body);
+    expect(parsed1.result).toBe('recorded');
+    if (parsed1.result === 'recorded') {
+      expect(parsed1.recordId).toBe(recordId1);
+      expect(parsed1.checkpointId).toBe(cpGalpon.id);
+      expect(parsed1.outOfWindow).toBe(false);
+      expect(parsed1.countedFor).toHaveLength(2);
+      expect(parsed1.countedFor).toContainEqual({ roundId: r1.id, windowIndex: 0, late: false });
+      expect(parsed1.countedFor).toContainEqual({ roundId: r2.id, windowIndex: 0, late: false });
+    }
+
+    const replay1 = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send(req1)
+      .expect(200);
+    expect(replay1.body).toEqual(res1.body);
+
+    const conflict1 = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({ ...req1, occurredAtDevice: '2026-10-14T01:31:00.000Z' })
+      .expect(409);
+    expect(conflict1.body).toMatchObject({ code: 'RECORD_ID_CONFLICT' });
+
+    // 2. Comprobar que estado refleja los pendientes (BDD 1)
+    const estado1 = await client
+      .get(`/api/v1/turnos/${shift.id}/estado`)
+      .set(guardAuth)
+      .expect(200);
+    const r1State1 = (
+      estado1.body as { rounds: { roundId: string; pendingCheckpointIds: string[] }[] }
+    ).rounds.find((r) => r.roundId === r1.id);
+    expect(r1State1?.pendingCheckpointIds).toEqual([cpPorton.id]);
+
+    testNow = new Date('2026-10-14T01:45:00.000Z');
+    const qrPorton = qrService.createPayload(cpPorton.id, cpPorton.qrVersion);
+    const recordIdPorton = randomUUID();
+    const resPorton = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recordIdPorton,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrPorton,
+        occurredAtDevice: '2026-10-14T01:45:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resPorton.body).toMatchObject({
+      result: 'recorded',
+      checkpointId: cpPorton.id,
+      outOfWindow: false,
+    });
+
+    const estado2 = await client
+      .get(`/api/v1/turnos/${shift.id}/estado`)
+      .set(guardAuth)
+      .expect(200);
+    const r1State2 = (
+      estado2.body as { rounds: { roundId: string; pendingCheckpointIds: string[] }[] }
+    ).rounds.find((r) => r.roundId === r1.id);
+    expect(r1State2?.pendingCheckpointIds).toEqual([]);
+
+    // 3. Punto ya registrado en la ventana (CA4, BDD 4) -> not_generated already_recorded
+    testNow = new Date('2026-10-14T02:30:00.000Z');
+    const recordIdRepetido = randomUUID();
+    const resRepetido = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recordIdRepetido,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrPorton,
+        occurredAtDevice: '2026-10-14T02:30:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resRepetido.body).toEqual({
+      result: 'not_generated',
+      recordId: recordIdRepetido,
+      cause: 'already_recorded',
+      retryAfterUtc: null,
+    });
+
+    // 4. Registro durante la gracia (CA6, BDD 5) -> late: true
+    testNow = new Date('2026-10-14T03:10:00.000Z');
+    const qrOtro = qrService.createPayload(cpOtro.id, cpOtro.qrVersion);
+    const recordIdGracia = randomUUID();
+    const resGracia = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recordIdGracia,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrOtro,
+        occurredAtDevice: '2026-10-14T03:10:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resGracia.body).toEqual({
+      result: 'recorded',
+      recordId: recordIdGracia,
+      checkpointId: cpOtro.id,
+      countedFor: [{ roundId: r2.id, windowIndex: 0, late: true }],
+      outOfWindow: false,
+    });
+
+    // 5. Escaneo antes del tiempo mínimo (CA7, BDD 6) -> too_soon con retryAfterUtc
+    testNow = new Date('2026-10-14T03:11:00.000Z');
+    const recordIdTooSoon = randomUUID();
+    const resTooSoon = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recordIdTooSoon,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrOtro,
+        occurredAtDevice: '2026-10-14T03:11:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resTooSoon.body).toEqual({
+      result: 'not_generated',
+      recordId: recordIdTooSoon,
+      cause: 'too_soon',
+      retryAfterUtc: '2026-10-14T04:10:00.000Z',
+    });
+
+    // 6. Fuera de ventana (CA5) -> outOfWindow: true, countedFor: []
+    testNow = new Date('2026-10-14T00:00:00.000Z');
+    const recordIdFuera = randomUUID();
+    const resFuera = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recordIdFuera,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrGalpon,
+        occurredAtDevice: '2026-10-14T00:00:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resFuera.body).toEqual({
+      result: 'recorded',
+      recordId: recordIdFuera,
+      checkpointId: cpGalpon.id,
+      countedFor: [],
+      outOfWindow: true,
+    });
+    const dbRecordFuera = await prisma.checkpointRecord.findUniqueOrThrow({
+      where: { recordId: recordIdFuera },
+    });
+    expect(dbRecordFuera.outOfWindow).toBe(true);
+    expect(dbRecordFuera.countedFor).toEqual([]);
+
+    // 7. QR inválidos guardados como InvalidScanAttempt (CA2, BDD 2)
+    // a) QR mal formado
+    const recMalformado = randomUUID();
+    const resMalformado = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recMalformado,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: 'invalid-qr-content',
+        occurredAtDevice: '2026-10-14T01:30:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resMalformado.body).toEqual({
+      result: 'rejected',
+      recordId: recMalformado,
+      reason: 'malformed',
+    });
+    const attemptMalformado = await prisma.invalidScanAttempt.findUniqueOrThrow({
+      where: { recordId: recMalformado },
+    });
+    expect(attemptMalformado.reason).toBe('malformed');
+    expect(attemptMalformado.highlighted).toBe(false);
+
+    // b) QR con firma alterada
+    const recAlterado = randomUUID();
+    const qrAlterado = `${qrGalpon.slice(0, -1)}${qrGalpon.endsWith('A') ? 'B' : 'A'}`;
+    const resAlterado = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recAlterado,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrAlterado,
+        occurredAtDevice: '2026-10-14T01:30:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resAlterado.body).toEqual({
+      result: 'rejected',
+      recordId: recAlterado,
+      reason: 'signature',
+    });
+
+    // c) QR de versión regenerada (destacado highlighted=true)
+    await prisma.checkpoint.update({
+      where: { id: cpPorton.id },
+      data: { qrVersion: 2 },
+    });
+    const recOutdated = randomUUID();
+    const resOutdated = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recOutdated,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrPorton,
+        occurredAtDevice: '2026-10-14T01:30:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resOutdated.body).toEqual({
+      result: 'rejected',
+      recordId: recOutdated,
+      reason: 'outdated_version',
+    });
+    const attemptOutdated = await prisma.invalidScanAttempt.findUniqueOrThrow({
+      where: { recordId: recOutdated },
+    });
+    expect(attemptOutdated.reason).toBe('outdated_version');
+    expect(attemptOutdated.highlighted).toBe(true);
+
+    // d) QR de otro predio (BDD 2)
+    const qrOtroPredio = qrService.createPayload(cpOtroPredio.id, cpOtroPredio.qrVersion);
+    const recOtroPredio = randomUUID();
+    const resOtroPredio = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        recordId: recOtroPredio,
+        shiftId: shift.id,
+        method: 'qr',
+        scannedValue: qrOtroPredio,
+        occurredAtDevice: '2026-10-14T01:30:00.000Z',
+        location: defaultLocation,
+        phoneNfc: 'on',
+      })
+      .expect(200);
+    expect(resOtroPredio.body).toEqual({
+      result: 'rejected',
+      recordId: recOtroPredio,
+      reason: 'other_site',
+    });
+
+    // 8. Turno no en curso -> 409 SHIFT_NOT_IN_PROGRESS
+    const scheduledShift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-25T01:00:00.000Z'),
+        endsAt: new Date('2026-10-25T09:00:00.000Z'),
+        serviceDate: new Date('2026-10-25T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'scheduled',
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2026-10-25T01:00:00.000Z'),
+            endsAt: new Date('2026-10-25T09:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(scheduledShift.id);
+
+    const resScheduled = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({
+        ...req1,
+        recordId: randomUUID(),
+        shiftId: scheduledShift.id,
+      })
+      .expect(409);
+    expect(resScheduled.body).toMatchObject({ code: 'SHIFT_NOT_IN_PROGRESS' });
+
+    // 9. Permisos
+    await client.post('/api/v1/registros-puntos').send(req1).expect(401);
+    await client
+      .post('/api/v1/registros-puntos')
+      .set('Authorization', 'Bearer token-admin')
+      .send(req1)
+      .expect(403);
+    await client
+      .post('/api/v1/registros-puntos')
+      .set('Authorization', 'Bearer token-supervisor')
+      .send(req1)
+      .expect(403);
+    await client
+      .post('/api/v1/registros-puntos')
+      .set('Authorization', 'Bearer token-client')
+      .send(req1)
+      .expect(403);
+
+    const otherGuardShift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-14T01:00:00.000Z'),
+        endsAt: new Date('2026-10-14T09:00:00.000Z'),
+        serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+        assignments: {
+          create: {
+            guardId: (
+              await prisma.user.findUniqueOrThrow({ where: { firebaseUid: 'seed-norte-pending' } })
+            ).id,
+            startsAt: new Date('2026-10-14T01:00:00.000Z'),
+            endsAt: new Date('2026-10-14T09:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(otherGuardShift.id);
+    await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({ ...req1, recordId: randomUUID(), shiftId: otherGuardShift.id })
+      .expect(409);
+
+    const southShift = await prisma.shift.create({
+      data: {
+        companyId: 'sur-company',
+        siteId: southSiteId,
+        startsAt: new Date('2026-10-14T01:00:00.000Z'),
+        endsAt: new Date('2026-10-14T09:00:00.000Z'),
+        serviceDate: new Date('2026-10-13T00:00:00.000Z'),
+        createdById: (
+          await prisma.user.findUniqueOrThrow({ where: { firebaseUid: 'seed-sur-admin' } })
+        ).id,
+        status: 'in_progress',
+      },
+    });
+    createdShiftIds.push(southShift.id);
+    await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send({ ...req1, recordId: randomUUID(), shiftId: southShift.id })
+      .expect(404);
   });
 });
