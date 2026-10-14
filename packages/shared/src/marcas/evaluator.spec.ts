@@ -451,6 +451,53 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
   });
 
   describe('CA10 & BDD 4: Precisión de GPS', () => {
+    it('marca ubicación activa sin coordenadas utilizables como location_unverifiable', () => {
+      const input = createInput({
+        record: {
+          method: 'qr',
+          occurredAtDevice: '2026-10-14T10:00:00.000Z',
+          location: {
+            status: 'ok',
+            latitude: null,
+            longitude: null,
+            accuracyMeters: 10,
+            simulation: 'not_simulated',
+          },
+          phoneNfc: 'on',
+        },
+      });
+
+      expect(evaluateRecordFlags(input)).toContainEqual(
+        expect.objectContaining({
+          type: 'location_unverifiable',
+          severity: 'leve',
+          reason: 'no_gps_fix',
+        }),
+      );
+    });
+
+    it('no marca ubicación sin coordenadas en un punto interior', () => {
+      const input = createInput({
+        record: {
+          method: 'qr',
+          occurredAtDevice: '2026-10-14T10:00:00.000Z',
+          location: {
+            status: 'ok',
+            latitude: null,
+            longitude: null,
+            accuracyMeters: 10,
+            simulation: 'not_simulated',
+          },
+          phoneNfc: 'on',
+        },
+        checkpoint: { ...baseCheckpoint, isIndoor: true },
+      });
+
+      expect(evaluateRecordFlags(input).some((flag) => flag.type === 'location_unverifiable')).toBe(
+        false,
+      );
+    });
+
     it('CA10: registro a 80m de un punto con radio de 30m y precisión de 90m NO queda marcado como fuera de rango', () => {
       // 80m - 90m = -10m <= 30m, and accuracy <= 100m, so neither out_of_range nor location_unverifiable
       const lat80m = offsetMetersNorth(baseCheckpoint.latitude, 80);

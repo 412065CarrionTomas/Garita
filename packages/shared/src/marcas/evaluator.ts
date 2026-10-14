@@ -44,18 +44,18 @@ export function evaluateRecordFlags(input: EvaluateRecordFlagsInput): EvaluatedF
         details: { status: 'unverifiable' },
       });
     } else {
-      const accuracy = record.location.accuracyMeters;
-      if (accuracy === null || accuracy > 100) {
+      const { accuracyMeters: accuracy, latitude, longitude } = record.location;
+      if (latitude === null || longitude === null || accuracy === null || accuracy > 100) {
         flags.push({
           type: 'location_unverifiable',
           severity: FLAG_SEVERITY.location_unverifiable,
-          reason: 'low_accuracy',
+          reason: latitude === null || longitude === null ? 'no_gps_fix' : 'low_accuracy',
           details: { status: 'ok', accuracyMeters: accuracy },
         });
-      } else if (record.location.latitude !== null && record.location.longitude !== null) {
+      } else {
         const distance = haversineMeters(
-          record.location.latitude,
-          record.location.longitude,
+          latitude,
+          longitude,
           checkpoint.latitude,
           checkpoint.longitude,
         );
