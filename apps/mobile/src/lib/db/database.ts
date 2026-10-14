@@ -107,9 +107,17 @@ export async function migrateDatabase(database: MigrationDatabase): Promise<void
       await database.setVersion(4);
     });
   }
+  if (version < 5) {
+    await database.transaction(async () => {
+      await database.exec(
+        "UPDATE pending_events SET type = 'checkpoint_record' WHERE type = 'invalid_scan_attempt' AND sent = 0 AND reject_reason IS NULL",
+      );
+      await database.setVersion(5);
+    });
+  }
 }
 
-class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
+export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
   constructor(private readonly db: SQLite.SQLiteDatabase) {}
   async getVersion(): Promise<number> {
     return this.db
@@ -202,15 +210,15 @@ class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
   }
   async countPendingEvents(): Promise<number> {
     const row = await this.db.getFirstAsync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM pending_events WHERE sent = 0 AND reject_reason IS NULL',
+      "SELECT COUNT(*) as count FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close')",
     );
     return row?.count ?? 0;
   }
   async readEvents(limit?: number): Promise<unknown[]> {
     const query =
       limit !== undefined && limit > 0
-        ? `SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL ORDER BY occurred_at_device ASC, created_at ASC LIMIT ${Math.floor(limit)}`
-        : 'SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL ORDER BY occurred_at_device ASC, created_at ASC';
+        ? `SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY occurred_at_device ASC, created_at ASC LIMIT ${Math.floor(limit)}`
+        : "SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY occurred_at_device ASC, created_at ASC";
     return (
       await this.db.getAllAsync<{
         id: string;

@@ -206,7 +206,7 @@ export async function processScan(
     const repository = await d.repository();
     await repository.addPendingEvent({
       id: recordId,
-      type: 'invalid_scan_attempt',
+      type: 'checkpoint_record',
       payload: requestPayload,
       occurredAtDevice,
       createdAt: now.toISOString(),

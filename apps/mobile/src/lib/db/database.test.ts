@@ -45,11 +45,21 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
     this.rejected.set(id, reason);
   }
   async countPendingEvents() {
-    return this.events.filter(({ id }) => !this.sent.has(id) && !this.rejected.has(id)).length;
+    return this.events.filter(
+      ({ id, type }) =>
+        !this.sent.has(id) &&
+        !this.rejected.has(id) &&
+        (type === 'checkpoint_record' || type === 'shift_close'),
+    ).length;
   }
   async readEvents(limit?: number) {
     const active = this.events
-      .filter(({ id }) => !this.sent.has(id) && !this.rejected.has(id))
+      .filter(
+        ({ id, type }) =>
+          !this.sent.has(id) &&
+          !this.rejected.has(id) &&
+          (type === 'checkpoint_record' || type === 'shift_close'),
+      )
       .sort((a, b) => {
         const timeDiff = Date.parse(a.occurredAtDevice) - Date.parse(b.occurredAtDevice);
         return timeDiff !== 0 ? timeDiff : Date.parse(a.createdAt) - Date.parse(b.createdAt);
@@ -111,14 +121,14 @@ describe('field database', () => {
   it('migrates an empty database and upgrades the previous version', async () => {
     const fresh = new MemoryDatabase();
     await migrateDatabase(fresh);
-    expect(fresh.version).toBe(4);
-    expect(fresh.tables).toHaveLength(11);
+    expect(fresh.version).toBe(5);
+    expect(fresh.tables).toHaveLength(12);
     const prior = new MemoryDatabase();
     prior.version = 0;
     await migrateDatabase(prior);
-    expect(prior.version).toBe(4);
+    expect(prior.version).toBe(5);
     await migrateDatabase(prior);
-    expect(prior.tables).toHaveLength(11);
+    expect(prior.tables).toHaveLength(12);
   });
   it('saves, reopens, replaces, clears, and validates pending events and checkpoint records', async () => {
     const disk = new MemoryDatabase();
@@ -131,7 +141,7 @@ describe('field database', () => {
     await expect(firstApp.getShiftData()).resolves.toEqual(replacement);
     const event = {
       id: '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
-      type: 'shift_start',
+      type: 'checkpoint_record',
       payload: {},
       occurredAtDevice: '2026-10-13T10:00:00.000Z',
       createdAt: '2026-10-13T10:00:01.000Z',
@@ -192,5 +202,39 @@ describe('field database', () => {
     await reopenedApp.clearShiftData();
     await expect(reopenedApp.getShiftData()).resolves.toBeNull();
     await expect(reopenedApp.listCheckpointRecords('next')).resolves.toEqual([]);
+  });
+
+  it('migration 5 and syncable types: converts invalid_scan_attempt and counts only syncable types', async () => {
+    const db = new MemoryDatabase();
+    db.version = 4;
+    await migrateDatabase(db);
+    expect(db.version).toBe(5);
+    expect(
+      db.tables.some((sql) => sql.includes("UPDATE pending_events SET type = 'checkpoint_record'")),
+    ).toBe(true);
+
+    const repo = createFieldRepository(db);
+    // Add invalid_scan_attempt directly to events
+    db.events.push({
+      id: '0199c2c6-958d-7a4a-9f4f-f2ca1b852099',
+      type: 'invalid_scan_attempt',
+      payload: {},
+      occurredAtDevice: '2026-10-13T10:00:00.000Z',
+      createdAt: '2026-10-13T10:00:00.000Z',
+    });
+    // Add a valid checkpoint_record
+    await repo.addPendingEvent({
+      id: '0199c2c6-958d-7a4a-9f4f-f2ca1b852098',
+      type: 'checkpoint_record',
+      payload: {},
+      occurredAtDevice: '2026-10-13T10:01:00.000Z',
+      createdAt: '2026-10-13T10:01:00.000Z',
+    });
+
+    // countPendingEvents should only count the 1 checkpoint_record, NOT the invalid_scan_attempt
+    expect(await repo.countPendingEvents()).toBe(1);
+    const pending = await repo.listPendingEvents();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.id).toBe('0199c2c6-958d-7a4a-9f4f-f2ca1b852098');
   });
 });
