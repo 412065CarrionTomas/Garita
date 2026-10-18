@@ -144,6 +144,46 @@ describe('registro del aislamiento tenant', () => {
         ],
       },
     });
+    expect(COMPANY_ID_MODELS).toContain('ShiftCredential');
+    expect(COMPANY_ID_MODELS).toContain('SyncBatch');
+    expect(COMPANY_ID_MODELS).toContain('ConnectionNotice');
+    expect(COMPANY_ID_MODELS).toContain('ShiftSyncState');
+    expect(addSiteAssignmentFilter('ShiftCredential', { where: { shiftId: 's-1' } }, user)).toEqual(
+      {
+        where: {
+          AND: [
+            { shiftId: 's-1' },
+            { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+          ],
+        },
+      },
+    );
+    expect(addSiteAssignmentFilter('SyncBatch', { where: { shiftId: 's-1' } }, user)).toEqual({
+      where: {
+        AND: [
+          { shiftId: 's-1' },
+          { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+    expect(
+      addSiteAssignmentFilter('ConnectionNotice', { where: { shiftId: 's-1' } }, user),
+    ).toEqual({
+      where: {
+        AND: [
+          { shiftId: 's-1' },
+          { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+    expect(addSiteAssignmentFilter('ShiftSyncState', { where: { shiftId: 's-1' } }, user)).toEqual({
+      where: {
+        AND: [
+          { shiftId: 's-1' },
+          { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
   });
 
   it('falla cerrado ante operaciones tenant no soportadas', () => {

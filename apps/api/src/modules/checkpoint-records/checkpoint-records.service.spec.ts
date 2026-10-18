@@ -236,6 +236,49 @@ describe('CheckpointRecordsService', () => {
       });
     });
 
+    it('acepta registros si el turno fue cerrado automáticamente (CA9)', async () => {
+      shiftFindFirst.mockResolvedValue({
+        id: 'shift-1',
+        companyId: 'company-1',
+        siteId: 'site-1',
+        status: 'auto_closed',
+        closedBy: 'system',
+        closedAt: new Date('2026-10-13T12:00:00.000Z'),
+        assignments: [
+          {
+            id: 'assign-1',
+            guardId: 'guard-1',
+            startsAt: new Date('2026-10-13T08:00:00.000Z'),
+            endsAt: new Date('2026-10-13T12:00:00.000Z'),
+          },
+        ],
+      });
+      verifyQrPayload.mockResolvedValue({
+        valid: true,
+        checkpoint: { id: 'cp-1', siteId: 'site-1', qrVersion: 1 },
+      });
+      getShiftOfflineData.mockResolvedValue({
+        rounds: [{ roundId: 'round-1', checkpointIds: ['cp-1'] }],
+        windows: [
+          {
+            roundId: 'round-1',
+            index: 0,
+            startUtc: '2026-10-13T08:00:00.000Z',
+            endUtc: '2026-10-13T12:00:00.000Z',
+            label: '08:00 - 12:00',
+          },
+        ],
+      });
+
+      const request = createSampleRequest({
+        occurredAtDevice: '2026-10-13T10:00:00.000Z',
+      });
+      const result = await service.processRecord(request, guardUser);
+      expect(result.result).toBe('recorded');
+      const [call] = checkpointRecordCreate.mock.calls[0] as [{ data: Record<string, unknown> }];
+      expect(call.data.countsForCompliance).toBe(true);
+    });
+
     it('lanza 409 SHIFT_NOT_IN_PROGRESS si la asignación vigente es de otro vigilador', async () => {
       shiftFindFirst.mockResolvedValue({
         id: 'shift-1',
