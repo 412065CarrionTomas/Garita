@@ -17,6 +17,7 @@ import { ShiftsModule } from './modules/shifts/shifts.module';
 import { ShiftExecutionModule } from './modules/shift-execution/shift-execution.module';
 import { CheckpointRecordsModule } from './modules/checkpoint-records/checkpoint-records.module';
 import { MarcasModule } from './modules/marcas/marcas.module';
+import { SyncModule } from './modules/sync/sync.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { MarcasModule } from './modules/marcas/marcas.module';
     ShiftExecutionModule,
     CheckpointRecordsModule,
     MarcasModule,
+    SyncModule,
   ],
 })
 export class AppModule {}

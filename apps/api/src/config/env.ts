@@ -24,6 +24,7 @@ export const envSchema = z
     FIREBASE_CLIENT_EMAIL: z.email().optional(),
     FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
     QR_SIGNING_SECRET: z.string().min(32).optional(),
+    SHIFT_CREDENTIAL_SECRET: z.string().min(32).optional(),
   })
   .superRefine((env, context) => {
     if (env.NODE_ENV !== 'test') {
@@ -32,6 +33,7 @@ export const envSchema = z
         'FIREBASE_CLIENT_EMAIL',
         'FIREBASE_PRIVATE_KEY',
         'QR_SIGNING_SECRET',
+        'SHIFT_CREDENTIAL_SECRET',
       ] as const) {
         if (!env[key])
           context.addIssue({
@@ -47,6 +49,9 @@ export const envSchema = z
     QR_SIGNING_SECRET:
       env.QR_SIGNING_SECRET ??
       (env.NODE_ENV === 'test' ? 'garita-test-qr-signing-secret-fixed-value' : undefined),
+    SHIFT_CREDENTIAL_SECRET:
+      env.SHIFT_CREDENTIAL_SECRET ??
+      (env.NODE_ENV === 'test' ? 'garita-test-shift-credential-secret-fixed-value' : undefined),
   }));
 
 export type Env = z.infer<typeof envSchema>;

@@ -19,6 +19,10 @@ export const COMPANY_ID_MODELS = [
   'CheckpointRecord',
   'InvalidScanAttempt',
   'RecordFlag',
+  'ShiftCredential',
+  'SyncBatch',
+  'ConnectionNotice',
+  'ShiftSyncState',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
@@ -93,6 +97,14 @@ export function addSiteAssignmentFilter(
   if (model === 'InvalidScanAttempt')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'RecordFlag')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'ShiftCredential')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'SyncBatch')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'ConnectionNotice')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'ShiftSyncState')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'Client') {
     const siteFilter = { supervisors: { some: { userId: user.userId } } };

@@ -17,7 +17,10 @@ import {
 } from './auth.decorators';
 import { FIREBASE_IDENTITY_PROVIDER } from './auth.types';
 import type { AuthenticatedRequest, FirebaseIdentityProvider } from './auth.types';
+import { Optional } from '@nestjs/common';
+import { SYNC_ERROR_CODES } from '@garita/shared';
 import { TenantContext } from './tenant-context';
+import { ShiftCredentialService } from '../sync/shift-credential.service';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -27,6 +30,7 @@ export class AuthGuard implements CanActivate {
     private readonly prisma: PrismaService,
     @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly identity: FirebaseIdentityProvider,
     private readonly tenantContext: TenantContext,
+    @Optional() private readonly shiftCredentialService?: ShiftCredentialService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -36,10 +40,18 @@ export class AuthGuard implements CanActivate {
     if (this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, [handler, controller])) return true;
     const auth = request.headers.authorization;
     if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException();
+    const rawToken = auth.slice(7).trim();
     let identity: { uid: string };
     try {
-      identity = await this.identity.verifyIdToken(auth.slice(7));
+      identity = await this.identity.verifyIdToken(rawToken);
     } catch {
+      if (this.shiftCredentialService?.isPotentialShiftCredential(rawToken)) {
+        this.deny(request, 'credencial de turno presentada en endpoint no permitido');
+        throw new ForbiddenException({
+          code: SYNC_ERROR_CODES.credentialScope,
+          message: 'La credencial de turno solo es válida en los endpoints de sincronización',
+        });
+      }
       throw new UnauthorizedException();
     }
     const user = await this.prisma.systemPrisma.user.findUnique({

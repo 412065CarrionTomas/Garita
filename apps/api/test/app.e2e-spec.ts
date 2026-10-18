@@ -2793,11 +2793,14 @@ describe('Aplicación (e2e)', () => {
 
     // b) QR con firma alterada
     const recAlterado = randomUUID();
-    const qrSignatureStart = qrGalpon.lastIndexOf('.') + 1;
-    const qrSignatureFirstCharacter = qrGalpon[qrSignatureStart];
-    const qrAlterado = `${qrGalpon.slice(0, qrSignatureStart)}${
-      qrSignatureFirstCharacter === 'A' ? 'B' : 'A'
-    }${qrGalpon.slice(qrSignatureStart + 1)}`;
+    const signatureStart = qrGalpon.lastIndexOf('.') + 1;
+    const signatureMiddle = signatureStart + Math.floor((qrGalpon.length - signatureStart) / 2);
+    const originalSignatureCharacter = qrGalpon[signatureMiddle];
+    const replacementSignatureCharacter = originalSignatureCharacter === 'A' ? 'B' : 'A';
+    const qrAlterado =
+      qrGalpon.slice(0, signatureMiddle) +
+      replacementSignatureCharacter +
+      qrGalpon.slice(signatureMiddle + 1);
     const resAlterado = await client
       .post('/api/v1/registros-puntos')
       .set(guardAuth)
