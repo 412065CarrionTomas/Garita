@@ -190,7 +190,7 @@ export class ShiftCredentialService {
     const tokenHash = this.computeTokenHash(token);
 
     // systemPrisma se usa para auditar y verificar el estado de revocación de la credencial de turno
-    this.logger.debug({ event: 'shift_credential.lookup', tokenHash });
+    this.logger.debug({ event: 'shift_credential.lookup' });
     const credRecord = await this.prisma.systemPrisma.shiftCredential.findUnique({
       where: { tokenHash },
     });
