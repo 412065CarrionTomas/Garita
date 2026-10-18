@@ -229,7 +229,7 @@ describe('scan-action: processScan', () => {
   });
 
   // CA2, BDD 2
-  it('CA2 & BDD 2: QR of another site is saved as invalid_scan_attempt and informs user', async () => {
+  it('CA2 & BDD 2: QR of another site is saved as checkpoint_record and informs user', async () => {
     const result = await processScan('GQR1.cp-planta-norte.1.sig123', shiftData);
 
     expect(result).toEqual({
@@ -242,7 +242,7 @@ describe('scan-action: processScan', () => {
     expect(mockRepo.saveCheckpointRecord).not.toHaveBeenCalled();
     expect(mockRepo.addPendingEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'invalid_scan_attempt',
+        type: 'checkpoint_record',
         payload: expect.objectContaining({
           scannedValue: 'GQR1.cp-planta-norte.1.sig123',
         }),
@@ -250,7 +250,7 @@ describe('scan-action: processScan', () => {
     );
   });
 
-  it('CA2: malformed QR saves invalid_scan_attempt and informs user', async () => {
+  it('CA2: malformed QR saves checkpoint_record and informs user', async () => {
     const result = await processScan('CORRUPTED_CODE', shiftData);
 
     expect(result).toEqual({
@@ -261,13 +261,13 @@ describe('scan-action: processScan', () => {
     });
     expect(mockRepo.addPendingEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'invalid_scan_attempt',
+        type: 'checkpoint_record',
         payload: expect.objectContaining({ scannedValue: 'CORRUPTED_CODE' }),
       }),
     );
   });
 
-  it('CA2: outdated QR version saves invalid_scan_attempt and informs user', async () => {
+  it('CA2: outdated QR version saves checkpoint_record and informs user', async () => {
     // cp-porton has qrVersion 1, scanned version 2
     const result = await processScan('GQR1.cp-porton.2.sig123', shiftData);
 
@@ -279,7 +279,7 @@ describe('scan-action: processScan', () => {
     });
     expect(mockRepo.addPendingEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'invalid_scan_attempt',
+        type: 'checkpoint_record',
       }),
     );
   });

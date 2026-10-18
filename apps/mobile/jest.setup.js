@@ -61,3 +61,15 @@ jest.mock('expo-camera', () => {
     },
   };
 });
+
+const mockSecureStoreData = new Map();
+jest.mock('expo-secure-store', () => ({
+  setItemAsync: jest.fn(async (key, value) => {
+    mockSecureStoreData.set(key, String(value));
+  }),
+  getItemAsync: jest.fn(async (key) => mockSecureStoreData.get(key) ?? null),
+  deleteItemAsync: jest.fn(async (key) => {
+    mockSecureStoreData.delete(key);
+  }),
+  __store: mockSecureStoreData,
+}));

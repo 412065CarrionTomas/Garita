@@ -171,4 +171,39 @@ describe('<ShiftScreen />', () => {
     expect(screen.getByText('Registros observados por el servidor')).toBeOnTheScreen();
     expect(screen.getByText('• Portón: Código QR desactualizado')).toBeOnTheScreen();
   });
+
+  it('displays pending count in singular and plural, and last sync timestamp (ID-162, BDD 1, 2)', async () => {
+    // 1 pending: singular
+    const singleRepo = {
+      ...repository,
+      countPendingEvents: jest.fn(async () => 1),
+      getSyncMeta: jest.fn(async (key: string) => {
+        if (key === 'last_sync_at') return '2026-10-14T14:30:00.000Z';
+        return null;
+      }),
+    };
+    jest.mocked(createDefaultFieldRepository).mockResolvedValue(singleRepo as never);
+    await act(async () => {
+      await render(<ShiftScreen shiftId="shift-1" />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('1 registro pendiente de envío')).toBeOnTheScreen();
+    expect(screen.getByText(/Último envío:/)).toBeOnTheScreen();
+
+    // 5 pending: plural (BDD 1)
+    const multiRepo = {
+      ...repository,
+      countPendingEvents: jest.fn(async () => 5),
+      getSyncMeta: jest.fn(async () => null),
+    };
+    jest.mocked(createDefaultFieldRepository).mockResolvedValue(multiRepo as never);
+    await act(async () => {
+      await render(<ShiftScreen shiftId="shift-1" />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('5 registros pendientes de envío')).toBeOnTheScreen();
+    expect(screen.getByText('Todavía no se envió nada')).toBeOnTheScreen();
+  });
 });
