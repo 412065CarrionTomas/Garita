@@ -35,7 +35,11 @@ describe('QrService', () => {
 
   it('rejects altered signatures and malformed QR contents', async () => {
     const payload = service.createPayload('point-1', 1);
-    const altered = `${payload.slice(0, -1)}${payload.endsWith('A') ? 'B' : 'A'}`;
+    const signatureStart = payload.lastIndexOf('.') + 1;
+    const firstSignatureCharacter = payload[signatureStart];
+    const altered = `${payload.slice(0, signatureStart)}${
+      firstSignatureCharacter === 'A' ? 'B' : 'A'
+    }${payload.slice(signatureStart + 1)}`;
     await expect(service.verifyQrPayload(altered)).resolves.toEqual({
       valid: false,
       reason: 'signature',

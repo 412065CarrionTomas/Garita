@@ -92,6 +92,7 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('ShiftEvent');
     expect(COMPANY_ID_MODELS).toContain('CheckpointRecord');
     expect(COMPANY_ID_MODELS).toContain('InvalidScanAttempt');
+    expect(COMPANY_ID_MODELS).toContain('RecordFlag');
     const user = {
       userId: 'supervisor-1',
       companyId: 'norte',
@@ -140,6 +141,16 @@ describe('registro del aislamiento tenant', () => {
       where: {
         AND: [
           { method: 'qr' },
+          { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+    expect(
+      addSiteAssignmentFilter('RecordFlag', { where: { type: 'out_of_range' } }, user),
+    ).toEqual({
+      where: {
+        AND: [
+          { type: 'out_of_range' },
           { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
         ],
       },

@@ -16,6 +16,7 @@ import { ClockModule } from './common/clock';
 import { ShiftsModule } from './modules/shifts/shifts.module';
 import { ShiftExecutionModule } from './modules/shift-execution/shift-execution.module';
 import { CheckpointRecordsModule } from './modules/checkpoint-records/checkpoint-records.module';
+import { MarcasModule } from './modules/marcas/marcas.module';
 import { SyncModule } from './modules/sync/sync.module';
 
 @Module({
@@ -41,6 +42,7 @@ import { SyncModule } from './modules/sync/sync.module';
     ShiftsModule,
     ShiftExecutionModule,
     CheckpointRecordsModule,
+    MarcasModule,
     SyncModule,
   ],
 })

@@ -18,6 +18,7 @@ export const COMPANY_ID_MODELS = [
   'ShiftEvent',
   'CheckpointRecord',
   'InvalidScanAttempt',
+  'RecordFlag',
   'ShiftCredential',
   'SyncBatch',
   'ConnectionNotice',
@@ -94,6 +95,8 @@ export function addSiteAssignmentFilter(
   if (model === 'CheckpointRecord')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'InvalidScanAttempt')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'RecordFlag')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'ShiftCredential')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
