@@ -3,12 +3,7 @@ import { AppState, StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
 import { Badge, Banner, Button, Card, Input, Screen, Text } from '@/ui';
 import { useFocusEffect, useRouter } from 'expo-router';
-import {
-  currentRoundProgress,
-  isWithinStartMargin,
-  lateStartMinutes,
-  type ShiftOfflineData,
-} from '@garita/shared';
+import { currentRoundProgress, lateStartMinutes, type ShiftOfflineData } from '@garita/shared';
 import { z } from 'zod';
 import { apiGet } from '@/lib/api-client';
 import { getSyncSnapshot, subscribeSyncState } from '@/lib/cola';
@@ -159,9 +154,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const shift = data?.shift;
   const startsAt = shift?.startsAt ?? scheduled?.startsAt;
   const endsAt = shift?.endsAt ?? scheduled?.endsAt;
-  const startAllowed = scheduled
-    ? isWithinStartMargin(scheduled.startsAt, scheduled.endsAt, now.toISOString())
-    : false;
+  const startAllowed = scheduled ? now.getTime() <= Date.parse(scheduled.endsAt) : false;
   const early = shift ? now.getTime() < Date.parse(shift.endsAt) : false;
   const recordedMap = new Map<string, Set<string>>();
   for (const record of checkpointRecords) {

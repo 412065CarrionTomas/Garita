@@ -133,19 +133,6 @@ export function isEarlyClose(scheduledEndUtc: string, closingAtUtc: string): boo
   return Date.parse(closingAtUtc) < Date.parse(scheduledEndUtc);
 }
 
-/** `true` when `nowUtc` is inside the start margin of a shift (from 30 min before start until its end). */
-export function isWithinStartMargin(
-  startsAtUtc: string,
-  endsAtUtc: string,
-  nowUtc: string,
-): boolean {
-  const now = Date.parse(nowUtc);
-  return (
-    now >= Date.parse(startsAtUtc) - SHIFT_START_MARGIN_MINUTES * 60_000 &&
-    now <= Date.parse(endsAtUtc)
-  );
-}
-
 /** Minutes late against the assignment start, or `null` when on time. */
 export function lateStartMinutes(assignmentStartUtc: string, startedAtUtc: string): number | null {
   const minutes = Math.floor((Date.parse(startedAtUtc) - Date.parse(assignmentStartUtc)) / 60_000);

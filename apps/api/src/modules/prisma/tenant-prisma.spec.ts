@@ -4,6 +4,7 @@ import type { PrismaClient } from '../../generated/prisma/client';
 import {
   COMPANY_ID_MODELS,
   addSiteAssignmentFilter,
+  addClientFilter,
   createTenantPrismaClient,
   INDIRECT_TENANT_MODELS,
   scopeArgs,
@@ -225,5 +226,53 @@ describe('bloqueo de SQL crudo', () => {
       }),
     ).toThrow('SQL crudo');
     expect(tx.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+});
+
+describe('aislamiento del portal por cliente', () => {
+  const user = {
+    userId: 'portal-user',
+    companyId: 'north',
+    role: 'client' as const,
+    status: 'active' as const,
+    clientId: 'client-a',
+  };
+  it('conserva el filtro tenant y exige predio y cliente activos aunque se intente otro filtro', () => {
+    expect(
+      addClientFilter(
+        'Site',
+        {
+          where: {
+            companyId: 'north',
+            clientId: 'client-b',
+            status: 'inactive',
+            AND: [{ name: 'A' }],
+          },
+        },
+        user,
+      ),
+    ).toEqual({
+      where: {
+        companyId: 'north',
+        clientId: 'client-b',
+        status: 'inactive',
+        AND: [
+          { companyId: 'north', clientId: 'client-b', status: 'inactive', AND: [{ name: 'A' }] },
+          { clientId: 'client-a', status: 'active', client: { status: 'active' } },
+        ],
+      },
+    });
+  });
+  it('falla cerrado sin clientId y limita perfil e invitaciones al propio usuario', () => {
+    expect(() => addClientFilter('Site', {}, { ...user, clientId: null })).toThrow();
+    expect(addClientFilter('User', { where: { id: 'other', companyId: 'north' } }, user)).toEqual({
+      where: { id: 'portal-user', companyId: 'north' },
+    });
+    expect(addClientFilter('Invitation', {}, user)).toEqual({ where: { userId: 'portal-user' } });
+    expect(() => addClientFilter('Checkpoint', {}, user)).toThrow();
+  });
+  it('no modifica los permisos del administrador', () => {
+    const args = { where: { status: 'inactive' } };
+    expect(addClientFilter('Site', args, { ...user, role: 'admin' })).toBe(args);
   });
 });

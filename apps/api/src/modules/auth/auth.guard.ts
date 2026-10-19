@@ -56,7 +56,15 @@ export class AuthGuard implements CanActivate {
     }
     const user = await this.prisma.systemPrisma.user.findUnique({
       where: { firebaseUid: identity.uid },
-      select: { id: true, companyId: true, role: true, status: true },
+      select: {
+        id: true,
+        companyId: true,
+        role: true,
+        status: true,
+        clientId: true,
+        lastLoginAt: true,
+        client: { select: { status: true } },
+      },
     });
     if (!user) throw new UnauthorizedException();
     request.user = {
@@ -64,6 +72,7 @@ export class AuthGuard implements CanActivate {
       companyId: user.companyId,
       role: user.role,
       status: user.status,
+      clientId: user.clientId,
     };
     this.tenantContext.setUser(request.user);
     const roles: readonly string[] | undefined = this.reflector.getAllAndOverride(ALLOWED_ROLES, [
@@ -93,6 +102,18 @@ export class AuthGuard implements CanActivate {
     if (!roles.includes(user.role)) {
       this.deny(request, `rol ${user.role} no permitido`);
       throw new ForbiddenException();
+    }
+    if (user.role === 'client') {
+      if (!user.clientId || user.client?.status !== 'active') throw new ForbiddenException();
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      if (!user.lastLoginAt || user.lastLoginAt < today) {
+        // Identidad ya verificada; escritura de sistema condicional evita repetirla en el día.
+        await this.prisma.systemPrisma.user.updateMany({
+          where: { id: user.id, OR: [{ lastLoginAt: null }, { lastLoginAt: { lt: today } }] },
+          data: { lastLoginAt: new Date() },
+        });
+      }
     }
     return true;
   }

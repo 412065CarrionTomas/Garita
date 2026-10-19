@@ -1,7 +1,6 @@
 import {
   fieldLocationSchema,
   isEarlyClose,
-  isWithinStartMargin,
   SHIFT_EXECUTION_ERROR_CODES,
   type FieldLocation,
   type ShiftCredential,
@@ -111,7 +110,7 @@ export function resetShiftActionsForTesting(): void {
 
 export async function beginShift(
   id: string,
-  scheduledStart: string,
+  _scheduledStart: string,
   scheduledEnd: string,
 ): Promise<ShiftActionResult> {
   const d = deps();
@@ -123,7 +122,7 @@ export async function beginShift(
     return { status: 'permissions', permission };
   }
   const now = d.now();
-  if (!isWithinStartMargin(scheduledStart, scheduledEnd, now.toISOString()))
+  if (now.getTime() > Date.parse(scheduledEnd))
     return {
       status: 'error',
       message: 'Todavía no podés iniciar este turno o el turno ya terminó',
@@ -140,8 +139,9 @@ export async function beginShift(
         const messages: Record<string, string> = {
           [SHIFT_EXECUTION_ERROR_CODES.reassigned]:
             'Tu turno fue reasignado. Consultá a tu supervisor',
-          [SHIFT_EXECUTION_ERROR_CODES.outsideStartMargin]:
-            'Todavía no podés iniciar este turno o el turno ya terminó',
+          [SHIFT_EXECUTION_ERROR_CODES.outsideStartMargin]: error.allowedStart
+            ? `Podés iniciarlo desde las ${new Date(error.allowedStart.startFrom).toLocaleTimeString('es-AR', { timeZone: error.allowedStart.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`
+            : 'Todavía no podés iniciar este turno o el turno ya terminó',
           [SHIFT_EXECUTION_ERROR_CODES.anotherInProgress]: 'Ya tenés otro turno en curso',
           [SHIFT_EXECUTION_ERROR_CODES.invitationPending]:
             'Tu invitación está pendiente. Consultá a tu supervisor',

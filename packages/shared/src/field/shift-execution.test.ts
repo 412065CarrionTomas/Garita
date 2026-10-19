@@ -2,7 +2,6 @@ import {
   closeShiftRequestSchema,
   currentRoundProgress,
   isEarlyClose,
-  isWithinStartMargin,
   lateStartMinutes,
   startShiftRequestSchema,
 } from './shift-execution';
@@ -34,15 +33,6 @@ describe('shift execution contract', () => {
         location,
       }).success,
     ).toBe(false);
-  });
-
-  it('opens the start margin 30 minutes before the start and closes it at the end', () => {
-    const start = '2026-10-14T01:00:00.000Z';
-    const end = '2026-10-14T09:00:00.000Z';
-    expect(isWithinStartMargin(start, end, '2026-10-14T00:29:00.000Z')).toBe(false);
-    expect(isWithinStartMargin(start, end, '2026-10-14T00:30:00.000Z')).toBe(true);
-    expect(isWithinStartMargin(start, end, '2026-10-14T09:00:00.000Z')).toBe(true);
-    expect(isWithinStartMargin(start, end, '2026-10-14T09:00:01.000Z')).toBe(false);
   });
 
   it('computes the late start in whole minutes', () => {

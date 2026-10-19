@@ -1,3 +1,10 @@
+import { getQueueToken } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
+import {
+  SYNC_DEADLINE_PORT,
+  SHIFT_AUTO_CLOSE_QUEUE,
+  type SyncDeadlinePort,
+} from '../src/modules/shift-execution/shift-execution.service';
 import {
   authMeResponseSchema,
   liveHealthResponseSchema,
@@ -197,6 +204,8 @@ describe('Aplicación (e2e)', () => {
       .overrideProvider(FIREBASE_IDENTITY_PROVIDER)
       .useValue({
         verifyIdToken: (token: string) => {
+          if (token === 'token-connectivity')
+            return Promise.resolve({ uid: 'e2e-connectivity-guard' });
           if (token === 'token-admin') return Promise.resolve({ uid: 'seed-norte-admin' });
           if (token === 'token-deactivated')
             return Promise.resolve({ uid: 'seed-norte-deactivated' });
@@ -223,6 +232,10 @@ describe('Aplicación (e2e)', () => {
     await app.init();
 
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.user.updateMany({
+      where: { firebaseUid: 'seed-norte-client' },
+      data: { status: 'active' },
+    });
     await prisma.nfcTag.deleteMany({ where: { checkpointId: { in: createdNfcCheckpointIds } } });
     await prisma.checkpoint.deleteMany({ where: { id: { in: createdNfcCheckpointIds } } });
     const northClient = await prisma.client.findUniqueOrThrow({
@@ -320,6 +333,10 @@ describe('Aplicación (e2e)', () => {
     await prisma.user.updateMany({
       where: { firebaseUid: 'seed-norte-pending' },
       data: { status: 'invitation_pending' },
+    });
+    await prisma.user.updateMany({
+      where: { firebaseUid: 'seed-norte-client' },
+      data: { status: 'active' },
     });
     await app.close();
   });
@@ -800,7 +817,7 @@ describe('Aplicación (e2e)', () => {
       .expect(403);
   });
 
-  it.each(['seed-norte-admin', 'seed-norte-client'])(
+  it.each(['seed-norte-admin'])(
     'oculta usuarios que no son personal en todos los endpoints de gestión (%s)',
     async (firebaseUid) => {
       const user = await app.get(PrismaService).systemPrisma.user.findUniqueOrThrow({
@@ -1335,7 +1352,10 @@ describe('Aplicación (e2e)', () => {
       });
       await request(app.getHttpServer()).get('/api/v1/clientes').set(auth).expect(403);
       await request(app.getHttpServer()).get(`/api/v1/clientes/${client.id}`).set(auth).expect(403);
-      await request(app.getHttpServer()).get('/api/v1/predios').set(auth).expect(403);
+      await request(app.getHttpServer())
+        .get('/api/v1/predios')
+        .set(auth)
+        .expect(role === 'client' ? 200 : 403);
       await request(app.getHttpServer())
         .get(`/api/v1/predios/${northAssignedSiteId}`)
         .set(auth)
@@ -3387,5 +3407,237 @@ describe('Aplicación (e2e)', () => {
       where: { recordId: rec5Id },
     });
     expect(savedInDb).not.toBeNull();
+  });
+
+  it('HU-34: permisos de los tres endpoints de conectividad', async () => {
+    const http = request(app.getHttpServer());
+    const conn = { type: 'without_signal', minutesToSignal: 180, marginMinutes: 20 };
+    for (const endpoint of ['get', 'put', 'simulate'] as const) {
+      const call = (id: string, token?: string) => {
+        const url = `/api/v1/predios/${id}/conectividad`;
+        const req =
+          endpoint === 'put'
+            ? http.put(url).send(conn)
+            : endpoint === 'simulate'
+              ? http
+                  .get(`${url}/simular`)
+                  .query({ inicio: '2031-01-01T13:00:00-03:00', fin: '2031-01-01T15:00:00-03:00' })
+              : http.get(url);
+        return token ? req.set('Authorization', `Bearer ${token}`) : req;
+      };
+      await call(northAssignedSiteId).expect(401);
+      await call(northAssignedSiteId, 'token-guard').expect(403);
+      await call(northAssignedSiteId, 'token-client').expect(403);
+      await call(southSiteId, 'token-admin').expect(404);
+      await call(northUnassignedSiteId, 'token-supervisor').expect(404);
+    }
+  });
+
+  it('HU-34 CA1-CA4: ventana inclusiva, snapshot y cierre max con job BullMQ', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const http = request(app.getHttpServer());
+    const previousNow = testNow;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const client = await prisma.client.findFirstOrThrow({ where: { companyId: 'norte-company' } });
+    const site = await prisma.site.create({
+      data: {
+        companyId: 'norte-company',
+        clientId: client.id,
+        name: `Conectividad ${randomUUID()}`,
+        address: 'Campo',
+        latitude: -34,
+        longitude: -58,
+        supervisors: { create: { companyId: 'norte-company', userId: northSupervisorId } },
+      },
+    });
+    const guard = await prisma.user.create({
+      data: {
+        companyId: 'norte-company',
+        firebaseUid: 'e2e-connectivity-guard',
+        firstName: 'Prueba',
+        lastName: 'Conectividad',
+        email: 'connectivity@e2e.invalid',
+        role: 'guard',
+        status: 'active',
+      },
+    });
+    const ids: string[] = [];
+    const queue = app.get<Queue>(getQueueToken(SHIFT_AUTO_CLOSE_QUEUE));
+    try {
+      const url = `/api/v1/predios/${site.id}/conectividad`;
+      const conn = { type: 'without_signal', minutesToSignal: 180, marginMinutes: 20 };
+      await http
+        .put(url)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ ...conn, minutesToSignal: 0 })
+        .expect(400);
+      for (const invalid of [
+        { minutesToSignal: 721 },
+        { marginMinutes: 181 },
+        { minutesToSignal: -1 },
+        { marginMinutes: -1 },
+      ])
+        await http
+          .put(url)
+          .set('Authorization', 'Bearer token-admin')
+          .send({ ...conn, ...invalid })
+          .expect(400);
+      const startedSaving = performance.now();
+      await http.put(url).set('Authorization', 'Bearer token-admin').send(conn).expect(200);
+      expect(performance.now() - startedSaving).toBeLessThan(1000);
+      const get = await http.get(url).set('Authorization', 'Bearer token-supervisor').expect(200);
+      expect(get.body).toEqual(conn);
+      const simulation = await http
+        .get(`${url}/simular`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .query({ inicio: '2031-01-01T13:00:00-03:00', fin: '2031-01-01T15:00:00-03:00' })
+        .expect(200);
+      expect(simulation.body).toEqual({
+        startFrom: '2031-01-01T12:40:00.000Z',
+        syncDeadline: '2031-01-01T21:20:00.000Z',
+      });
+      await http
+        .get(`${url}/simular`)
+        .set('Authorization', 'Bearer token-admin')
+        .query({ inicio: 'bad', fin: 'bad' })
+        .expect(400);
+      await http
+        .get(`${url}/simular`)
+        .set('Authorization', 'Bearer token-admin')
+        .query({ inicio: '2031-01-02T13:00:00Z', fin: '2031-01-01T15:00:00Z' })
+        .expect(400);
+      const make = async (day: number) => {
+        const startsAt = new Date(`2031-01-0${day}T16:00:00Z`);
+        const endsAt = new Date(`2031-01-0${day}T18:00:00Z`);
+        const shift = await prisma.shift.create({
+          data: {
+            companyId: 'norte-company',
+            siteId: site.id,
+            startsAt,
+            endsAt,
+            serviceDate: new Date(`2031-01-0${day}T00:00:00Z`),
+            createdById: actor.id,
+            assignments: {
+              create: { guardId: guard.id, startsAt, endsAt, assignedById: actor.id },
+            },
+          },
+        });
+        ids.push(shift.id);
+        return shift;
+      };
+      const shift = await make(1);
+      const next = await make(2);
+      const body = {
+        eventId: randomUUID(),
+        occurredAtDevice: '2031-01-01T12:00:00Z',
+        location: {
+          status: 'disabled',
+          latitude: null,
+          longitude: null,
+          accuracyMeters: null,
+          simulation: 'unavailable',
+          takenAt: null,
+        },
+      };
+      testNow = new Date('2031-01-01T12:00:00Z');
+      const rejected = await http
+        .post(`/api/v1/turnos/${shift.id}/iniciar`)
+        .set('Authorization', 'Bearer token-connectivity')
+        .send(body)
+        .expect(422);
+      expect(rejected.body).toMatchObject({
+        code: 'OUTSIDE_START_MARGIN',
+        startFrom: '2031-01-01T12:40:00.000Z',
+        timezone: 'America/Argentina/Buenos_Aires',
+      });
+      testNow = new Date('2031-01-01T12:40:00Z');
+      await http
+        .post(`/api/v1/turnos/${shift.id}/iniciar`)
+        .set('Authorization', 'Bearer token-connectivity')
+        .send(body)
+        .expect(201);
+      const snapshot = await prisma.shift.findUniqueOrThrow({ where: { id: shift.id } });
+      expect(snapshot).toMatchObject({
+        connectivityType: 'without_signal',
+        minutesToSignal: 180,
+        marginMinutes: 20,
+        syncDeadlineAt: new Date('2031-01-01T21:20:00Z'),
+      });
+      const job = await queue.getJob(`shift-auto-close-${shift.id}`);
+      expect(job?.delay).toBe(520 * 60_000);
+      await http
+        .put(url)
+        .set('Authorization', 'Bearer token-supervisor')
+        .send({ ...conn, marginMinutes: 60 })
+        .expect(200);
+      const data = await http
+        .get(`/api/v1/turnos/${shift.id}/datos`)
+        .set('Authorization', 'Bearer token-connectivity')
+        .expect(200);
+      expect(startShiftResponseSchema.shape.data.parse(data.body).shift.syncDeadlineAt).toBe(
+        '2031-01-01T21:20:00.000Z',
+      );
+      const port = app.get<SyncDeadlinePort>(SYNC_DEADLINE_PORT);
+      // Use an authenticated endpoint for tenant queries; system auto-close consumes the frozen snapshot.
+      expect(typeof port.deadlineForShift).toBe('function');
+      testNow = new Date('2031-01-01T21:19:59Z');
+      await expect(app.get(ShiftExecutionService).autoClose(shift.id)).resolves.toBe(false);
+      testNow = new Date('2031-01-01T21:20:00Z');
+      await expect(app.get(ShiftExecutionService).autoClose(shift.id)).resolves.toBe(true);
+      // Next shift picks the new margin: 13:00 minus four hours is 09:00.
+      testNow = new Date('2031-01-02T12:00:00Z');
+      const nextStart = await http
+        .post(`/api/v1/turnos/${next.id}/iniciar`)
+        .set('Authorization', 'Bearer token-connectivity')
+        .send({ ...body, eventId: randomUUID(), occurredAtDevice: testNow.toISOString() })
+        .expect(201);
+      expect(startShiftResponseSchema.parse(nextStart.body).data.shift.syncDeadlineAt).toBe(
+        '2031-01-02T22:00:00.000Z',
+      );
+    } finally {
+      testNow = previousNow;
+      for (const id of ids) await (await queue.getJob(`shift-auto-close-${id}`))?.remove();
+      await prisma.shift.deleteMany({ where: { id: { in: ids } } });
+      await prisma.user.delete({ where: { id: guard.id } });
+      await prisma.siteSupervisor.deleteMany({ where: { siteId: site.id } });
+      await prisma.site.delete({ where: { id: site.id } });
+    }
+  }, 30000);
+
+  it('HU-27 nuevos endpoints requieren token, administrador y cliente de la empresa', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+
+    const north = await prisma.client.findFirstOrThrow({ where: { companyId: 'norte-company' } });
+
+    const south = await prisma.client.findFirstOrThrow({ where: { companyId: 'sur-company' } });
+
+    for (const method of ['get', 'post'] as const) {
+      await request(app.getHttpServer())
+        [method](`/api/v1/clientes/${north.id}/usuarios`)
+
+        .send({})
+
+        .expect(401);
+
+      await request(app.getHttpServer())
+        [method](`/api/v1/clientes/${north.id}/usuarios`)
+
+        .set('Authorization', 'Bearer token-supervisor')
+
+        .send({})
+
+        .expect(403);
+
+      await request(app.getHttpServer())
+        [method](`/api/v1/clientes/${south.id}/usuarios`)
+
+        .set('Authorization', 'Bearer token-admin')
+
+        .send({ firstName: 'Marta', lastName: 'Ruiz', email: 'hu27-permisos@example.invalid' })
+
+        .expect(404);
+    }
   });
 });

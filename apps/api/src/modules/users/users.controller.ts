@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Ip,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -19,6 +20,7 @@ import {
 import { z } from 'zod';
 import {
   createUserRequestSchema,
+  createClientUserRequestSchema,
   invitationRedeemRequestSchema,
   listUsersQuerySchema,
   updateUserRequestSchema,
@@ -70,8 +72,11 @@ export class UsersController {
 
   @Get(':id')
   @Roles('admin', 'supervisor')
-  detail(@Param('id') id: string) {
-    return this.users.detail(id);
+  async detail(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    const user = await this.users.detail(id);
+    if (user.role === 'client' && actor.role !== 'admin')
+      throw new NotFoundException('Recurso no encontrado');
+    return user;
   }
 
   @Post()
@@ -149,5 +154,41 @@ export class InvitationsController {
   @Public()
   redeem(@Body() raw: unknown, @Ip() ip: string) {
     return this.users.redeem(invitationRedeemRequestSchema.parse(raw).token, ip);
+  }
+}
+
+@ApiTags('Usuarios de cliente')
+@ApiBearerAuth()
+@Controller('clientes/:id/usuarios')
+export class ClientUsersController {
+  constructor(private readonly users: UsersService) {}
+
+  @Get()
+  @Roles('admin')
+  @ApiOperation({ summary: 'Lista accesos al portal, cargo, invitación y Último ingreso' })
+  list(@Param('id') id: string) {
+    return this.users.listClientUsers(id);
+  }
+
+  @Post()
+  @Roles('admin')
+  @ApiOperation({ summary: 'Invita un usuario al portal de un cliente activo por 72 horas' })
+  @ApiConflictResponse({ description: 'Correo en uso o cliente dado de baja' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['firstName', 'lastName', 'email'],
+      properties: {
+        firstName: { type: 'string', minLength: 2, maxLength: 60 },
+        lastName: { type: 'string', minLength: 2, maxLength: 60 },
+        email: { type: 'string', format: 'email' },
+        position: { type: 'string', maxLength: 80 },
+      },
+    },
+  })
+  create(@Param('id') id: string, @Body() raw: unknown, @CurrentUser() admin: AuthenticatedUser) {
+    const parsed = createClientUserRequestSchema.safeParse(raw);
+    if (!parsed.success) throw new BadRequestException('Los datos enviados no son válidos');
+    return this.users.createClientUser(id, parsed.data, admin.userId, admin.companyId);
   }
 }

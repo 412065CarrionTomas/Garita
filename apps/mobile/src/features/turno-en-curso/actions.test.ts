@@ -139,7 +139,7 @@ describe('shift execution actions', () => {
     expect(saveCredential).toHaveBeenCalledWith(cred);
   });
 
-  it('maps reassigned and outside-margin errors and checks the local margin', async () => {
+  it('maps reassigned errors and keeps the local expired-end check', async () => {
     setup({
       start: jest
         .fn()
@@ -151,7 +151,7 @@ describe('shift execution actions', () => {
       status: 'error',
       message: 'Tu turno fue reasignado. Consultá a tu supervisor',
     });
-    setup({ now: () => new Date('2030-01-01T20:00:00.000Z') });
+    setup({ now: () => new Date('2030-01-02T07:00:00.000Z') });
     await expect(
       beginShift('shift-1', shiftData.shift.startsAt, shiftData.shift.endsAt),
     ).resolves.toMatchObject({
@@ -159,6 +159,20 @@ describe('shift execution actions', () => {
       message: 'Todavía no podés iniciar este turno o el turno ya terminó',
     });
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it('HU-34: asks the server before the old 30-minute margin and shows 09:40', async () => {
+    const start = jest.fn().mockRejectedValue(
+      new ShiftExecutionApiError(SHIFT_EXECUTION_ERROR_CODES.outsideStartMargin, {
+        startFrom: '2030-01-01T12:40:00Z',
+        timezone: 'America/Argentina/Buenos_Aires',
+      }),
+    );
+    setup({ now: () => new Date('2030-01-01T12:00:00Z'), start });
+    await expect(
+      beginShift('shift-1', '2030-01-01T16:00:00Z', '2030-01-01T18:00:00Z'),
+    ).resolves.toMatchObject({ status: 'error', message: 'Podés iniciarlo desde las 09:40' });
+    expect(start).toHaveBeenCalledTimes(1);
   });
 
   it('requires an early-close reason, then persists before offline send', async () => {
