@@ -178,6 +178,122 @@ describe('scan-action: processScan', () => {
     resetScanActionsForTesting();
   });
 
+  it('HU-12: normaliza el UID y reutiliza imputación, cola y feedback para NFC', async () => {
+    const data = {
+      ...shiftData,
+      checkpoints: shiftData.checkpoints.map((p) => ({
+        ...p,
+        nfcUid: p.id === 'cp-galpon' ? '04AABBCC' : null,
+      })),
+    };
+    const result = await processScan('04:aa:bb:cc', data, 'nfc');
+    expect(result).toMatchObject({ status: 'counted', checkpointId: 'cp-galpon' });
+    expect(mockRepo.pendingEvents[0]?.payload).toMatchObject({
+      method: 'nfc',
+      scannedValue: '04AABBCC',
+      phoneNfc: 'on',
+    });
+    expect(mockRepo.checkpointRecords[0]?.countedFor).toHaveLength(2);
+    expect(feedbackMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('HU-12: conserva una etiqueta desconocida o reemplazada como intento pendiente sin registro', async () => {
+    setScanActionsForTesting({ online: async () => false });
+    expect(await processScan('04AABBCC', shiftData, 'nfc')).toMatchObject({
+      status: 'invalid_attempt',
+      reason: 'tag_not_associated',
+    });
+    expect(mockRepo.checkpointRecords).toHaveLength(0);
+    expect(mockRepo.pendingEvents[0]?.payload).toMatchObject({
+      method: 'nfc',
+      scannedValue: '04AABBCC',
+    });
+    expect(feedbackMock).not.toHaveBeenCalled();
+  });
+
+  it('HU-12: confirma después de guardar y antes de una respuesta HTTP lenta, aun sin ubicación', async () => {
+    const data = {
+      ...shiftData,
+      checkpoints: shiftData.checkpoints.map((p) => ({
+        ...p,
+        nfcUid: p.id === 'cp-porton' ? '04AABBCC' : null,
+      })),
+    };
+    let resolveSend!: (response: CheckpointRecordResponse) => void;
+    const slowResponse = new Promise<CheckpointRecordResponse>((resolve) => {
+      resolveSend = resolve;
+    });
+    const location = jest.fn(async () => ({
+      status: 'unverifiable' as const,
+      latitude: null,
+      longitude: null,
+      accuracyMeters: null,
+      simulation: 'unavailable' as const,
+      takenAt: null,
+    }));
+    setScanActionsForTesting({ location, send: async () => slowResponse });
+    let saved = false;
+    const operation = processScan('04AABBCC', data, 'nfc', (result) => {
+      saved = true;
+      expect(result.status).toBe('counted');
+      expect(mockRepo.pendingEvents).toHaveLength(1);
+      expect(mockRepo.checkpointRecords).toHaveLength(1);
+      expect(feedbackMock).toHaveBeenCalledTimes(1);
+    });
+    for (let index = 0; index < 30 && !saved; index++) await Promise.resolve();
+    expect(saved).toBe(true);
+    expect(location).toHaveBeenCalledWith(1500);
+    expect(mockRepo.pendingEvents[0]?.payload).toMatchObject({
+      location: { status: 'unverifiable' },
+    });
+    resolveSend({
+      result: 'recorded',
+      recordId: '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
+      checkpointId: 'cp-porton',
+      countedFor: [],
+      outOfWindow: false,
+    });
+    await operation;
+  });
+
+  it('HU-12: informa reemplazo que confirma la API y no crea un registro local', async () => {
+    sendMock.mockImplementation(async (request) => ({
+      result: 'rejected',
+      recordId: request.recordId,
+      reason: 'tag_replaced',
+    }));
+    expect(await processScan('04AABBCC', shiftData, 'nfc')).toMatchObject({
+      status: 'invalid_attempt',
+      reason: 'tag_replaced',
+      message: 'Etiqueta reemplazada. Intento guardado.',
+    });
+    expect(mockRepo.checkpointRecords).toHaveLength(0);
+    expect(mockRepo.sentEvents.size).toBe(1);
+  });
+
+  it('HU-12: invalida una etiqueta reemplazada después de descargar el turno', async () => {
+    const data = {
+      ...shiftData,
+      checkpoints: shiftData.checkpoints.map((p) => ({
+        ...p,
+        nfcUid: p.id === 'cp-porton' ? '04AABBCC' : null,
+      })),
+    };
+    sendMock.mockImplementation(async (request) => ({
+      result: 'rejected',
+      recordId: request.recordId,
+      reason: 'tag_replaced',
+    }));
+    expect(await processScan('04AABBCC', data, 'nfc')).toMatchObject({
+      status: 'invalid_attempt',
+      reason: 'tag_replaced',
+    });
+    expect(mockRepo.checkpointRecords[0]).toMatchObject({
+      serverResult: 'rejected',
+      serverReason: 'tag_replaced',
+    });
+  });
+
   // CA1, BDD 1
   it('CA1 & BDD 1: valid QR scan confirms immediately with vibration/sound and "{Punto} registrado"', async () => {
     const result = await processScan(

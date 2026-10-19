@@ -1,15 +1,23 @@
 import { Platform } from 'react-native';
-import NfcManager, { NfcTech } from 'react-native-nfc-manager';
+import NfcManager, { NfcTech, NfcEvents } from 'react-native-nfc-manager';
 import type * as Nfc from './nfc';
-import { readFactoryUid } from './nfc';
+import { readFactoryUid, cancelNfcRead, nfcAvailability, openNfcSettings } from './nfc';
 
 jest.mock('react-native-nfc-manager', () => ({
   __esModule: true,
   default: {
+    isSupported: jest.fn(async () => true),
+    isEnabled: jest.fn(async () => true),
+    start: jest.fn(async () => undefined),
+    goToNfcSetting: jest.fn(async () => undefined),
     requestTechnology: jest.fn(),
     getTag: jest.fn(),
     cancelTechnologyRequest: jest.fn(),
+    registerTagEvent: jest.fn(async () => undefined),
+    unregisterTagEvent: jest.fn(async () => undefined),
+    setEventListener: jest.fn(),
   },
+  NfcEvents: { DiscoverTag: 'discover' },
   NfcTech: {
     NfcA: 'NfcA',
     NfcV: 'NfcV',
@@ -53,6 +61,35 @@ describe('lectura del UID NFC', () => {
 
     expect(requestTechnology).toHaveBeenCalledWith([NfcTech.NfcA, NfcTech.NfcV], {});
     expect(cancelTechnologyRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('detecta NFC apagado y ofrece los ajustes del adaptador en Android', async () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    jest.mocked(NfcManager.isEnabled).mockResolvedValueOnce(false);
+    await expect(nfcAvailability()).resolves.toBe('disabled');
+    await openNfcSettings();
+    expect(NfcManager.goToNfcSetting).toHaveBeenCalled();
+  });
+
+  it('sin hardware NFC no inicia sesión', async () => {
+    jest.mocked(NfcManager.isSupported).mockResolvedValueOnce(false);
+    await expect(nfcAvailability()).resolves.toBe('unsupported');
+    expect(NfcManager.start).not.toHaveBeenCalled();
+  });
+
+  it('Android mantiene la lectura de UID hasta cancelar al salir', async () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    const onTag = jest.fn();
+    await readFactoryUid(onTag);
+    expect(NfcManager.registerTagEvent).toHaveBeenCalledWith({ isReaderModeEnabled: true });
+    const listener = jest.mocked(NfcManager.setEventListener).mock.calls[0]?.[1];
+    (listener as (tag: unknown) => void)({ id: '04:aa:bb:cc' });
+    (listener as (tag: unknown) => void)({ id: 'invalid' });
+    expect(onTag).toHaveBeenCalledTimes(1);
+    expect(onTag).toHaveBeenCalledWith('04AABBCC');
+    await cancelNfcRead();
+    expect(NfcManager.setEventListener).toHaveBeenLastCalledWith(NfcEvents.DiscoverTag, null);
+    expect(NfcManager.unregisterTagEvent).toHaveBeenCalledTimes(1);
   });
 
   it('libera la sesión si falla la solicitud de tecnología', async () => {

@@ -14,6 +14,7 @@ import { apiGet } from '@/lib/api-client';
 import { getSyncSnapshot, subscribeSyncState } from '@/lib/cola';
 import { createDefaultFieldRepository, type LocalCheckpointRecord } from '@/lib/db/database';
 import { beginShift, finishShift } from './actions';
+import { NfcReader } from '@/features/escaneo/nfc-reader';
 
 const shiftsSchema = z.array(
   z.looseObject({
@@ -242,12 +243,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           )}
           {!pendingClose && (
             <>
-              <Button
-                label="Escanear código QR"
-                variant="signal"
-                size="lg"
-                onPress={() => router.push('/escaneo')}
-              />
+              <NfcReader shiftData={data} onQr={() => router.push('/escaneo')} />
               {rejectedRecords.length > 0 && (
                 <Banner tone="danger" title="Registros observados por el servidor">
                   {rejectedRecords.map((r) => (

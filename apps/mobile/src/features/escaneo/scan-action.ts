@@ -2,6 +2,8 @@ import {
   fieldLocationSchema,
   formatTooSoonMessage,
   imputeRecord,
+  nfcTagUidSchema,
+  type CheckpointRecordMethod,
   type CheckpointRecordRequest,
   type CheckpointRecordResponse,
   type FieldLocation,
@@ -67,7 +69,7 @@ export interface ScanActionsDependencies {
   now(): Date;
   online(): Promise<boolean>;
   permissions(): Promise<FieldPermissionState>;
-  location(): Promise<FieldLocation>;
+  location(timeoutMs?: number): Promise<FieldLocation>;
   nfc(): Promise<PhoneNfcState>;
   uuid(): string;
   send(body: CheckpointRecordRequest): Promise<CheckpointRecordResponse>;
@@ -84,7 +86,7 @@ function generateUuid(): string {
   });
 }
 
-async function readLocation(): Promise<FieldLocation> {
+async function readLocation(timeoutMs = 5000): Promise<FieldLocation> {
   let permission: FieldPermissionState;
   try {
     permission = await checkFieldPermissions();
@@ -108,7 +110,7 @@ async function readLocation(): Promise<FieldLocation> {
   }
 
   try {
-    const location = await getCurrentLocation({ timeoutMs: 5000 });
+    const location = await getCurrentLocation({ timeoutMs });
     return fieldLocationSchema.parse({
       status: 'ok',
       latitude: location.latitude,
@@ -182,21 +184,45 @@ function deps(): ScanActionsDependencies {
 export async function processScan(
   scannedValue: string,
   shiftData: ShiftOfflineData,
+  method: CheckpointRecordMethod = 'qr',
+  onSaved?: (result: ScanActionResult) => void,
 ): Promise<ScanActionResult> {
   const d = deps();
   const now = d.now();
-  const parsed = parseAndValidateQr(scannedValue, shiftData.checkpoints);
+  let uid: string | null = null;
+  if (method === 'nfc') {
+    try {
+      uid = nfcTagUidSchema.parse(scannedValue);
+      scannedValue = uid;
+    } catch {
+      // Conserva el valor original para guardar el intento inválido.
+    }
+  }
+  const nfcCheckpoint = uid
+    ? shiftData.checkpoints.find((point) => point.nfcUid === uid)
+    : undefined;
+  const parsed =
+    method === 'qr'
+      ? parseAndValidateQr(scannedValue, shiftData.checkpoints)
+      : nfcCheckpoint
+        ? { valid: true as const, checkpoint: nfcCheckpoint }
+        : {
+            valid: false as const,
+            reason: 'tag_not_associated' as const,
+            message:
+              'Etiqueta no válida para este turno. Intento guardado; se verificará al enviar.',
+          };
 
   if (!parsed.valid) {
     const recordId = d.uuid();
-    const location = await d.location();
+    const location = await d.location(method === 'nfc' ? 1500 : 5000);
     const phoneNfc = await d.nfc();
     const occurredAtDevice = now.toISOString();
 
     const requestPayload: CheckpointRecordRequest = {
       recordId,
       shiftId: shiftData.shift.id,
-      method: 'qr',
+      method,
       scannedValue,
       occurredAtDevice,
       location,
@@ -212,10 +238,25 @@ export async function processScan(
       createdAt: now.toISOString(),
     });
 
+    const attempt: ScanActionResult = {
+      status: 'invalid_attempt',
+      reason: parsed.reason,
+      message: parsed.message,
+      recordId,
+    };
+    onSaved?.(attempt);
+
     if (await d.online()) {
       try {
-        await d.send(requestPayload);
+        const response = await d.send(requestPayload);
         await repository.markPendingEventSent(recordId);
+        if (response.result === 'rejected' && response.reason === 'tag_replaced') {
+          return {
+            ...attempt,
+            reason: response.reason,
+            message: 'Etiqueta reemplazada. Intento guardado.',
+          };
+        }
       } catch {
         // Keeps event pending for sync
       }
@@ -276,10 +317,10 @@ export async function processScan(
     : `${checkpoint.name} registrado fuera de ventana`;
 
   // Visual and audio confirmation
-  await d.feedback();
+  if (method === 'qr') await d.feedback();
 
   const recordId = d.uuid();
-  const location = await d.location();
+  const location = await d.location(method === 'nfc' ? 1500 : 5000);
   const phoneNfc = await d.nfc();
   const occurredAtDevice = now.toISOString();
 
@@ -301,7 +342,7 @@ export async function processScan(
   const requestPayload: CheckpointRecordRequest = {
     recordId,
     shiftId: shiftData.shift.id,
-    method: 'qr',
+    method,
     scannedValue,
     occurredAtDevice,
     location,
@@ -316,21 +357,7 @@ export async function processScan(
     createdAt: now.toISOString(),
   });
 
-  if (await d.online()) {
-    try {
-      const response = await d.send(requestPayload);
-      await repository.markPendingEventSent(recordId);
-      if (response.result === 'recorded') {
-        await repository.updateCheckpointRecordServerResult(recordId, 'recorded');
-      } else if (response.result === 'rejected') {
-        await repository.updateCheckpointRecordServerResult(recordId, 'rejected', response.reason);
-      }
-    } catch {
-      // Keeps event pending for sync
-    }
-  }
-
-  return isCounted
+  const saved: ScanActionResult = isCounted
     ? {
         status: 'counted',
         message,
@@ -346,4 +373,32 @@ export async function processScan(
         checkpointName: checkpoint.name,
         recordId,
       };
+  if (method === 'nfc') await d.feedback();
+  onSaved?.(saved);
+
+  if (await d.online()) {
+    try {
+      const response = await d.send(requestPayload);
+      await repository.markPendingEventSent(recordId);
+      if (response.result === 'recorded') {
+        await repository.updateCheckpointRecordServerResult(recordId, 'recorded');
+      } else if (response.result === 'rejected') {
+        await repository.updateCheckpointRecordServerResult(recordId, 'rejected', response.reason);
+        if (method === 'nfc')
+          return {
+            status: 'invalid_attempt',
+            recordId,
+            reason: response.reason,
+            message:
+              response.reason === 'tag_replaced'
+                ? 'Etiqueta reemplazada. Intento guardado.'
+                : 'Etiqueta no válida para este turno. Intento guardado.',
+          };
+      }
+    } catch {
+      // Keeps event pending for sync
+    }
+  }
+
+  return saved;
 }
