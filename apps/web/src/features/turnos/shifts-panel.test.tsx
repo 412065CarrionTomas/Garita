@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
@@ -46,6 +46,53 @@ function mockQueries(shifts: unknown[] = []) {
 }
 
 describe('<ShiftsPanel />', () => {
+  it.each(['light', 'dark'])('usa superficies semánticas en tema %s', async (theme) => {
+    mockQueries();
+    const { container } = renderWithQueryClient(
+      <div className={theme}>
+        <ShiftsPanel />
+      </div>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Turnos' })).toBeInTheDocument();
+    expect(container.innerHTML).not.toMatch(
+      /(?:bg|text|border)-(?:white|black|red|amber|gray|slate|zinc|blue|green)(?:-|\b)|#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i,
+    );
+  });
+
+  it.each([
+    ['scheduled', 'Programado', 'info'],
+    ['unassigned', 'Sin asignar', 'warning'],
+    ['in_progress', 'En curso', 'signal'],
+    ['closed', 'Cerrado', 'success'],
+    ['auto_closed', 'Cerrado por el sistema', 'warning'],
+    ['cancelled', 'Cancelado', 'neutral'],
+  ])('valida y muestra el estado %s con tono %s', async (status, label, tone) => {
+    mockQueries();
+    const fallback = jest.mocked(apiGet).getMockImplementation();
+    jest.mocked(apiGet).mockImplementation((path, schema) => {
+      if (path.startsWith('/turnos'))
+        return Promise.resolve(
+          schema.parse([
+            {
+              id: 'shift-status',
+              siteId: site.id,
+              startsAt: '2030-10-14T23:00:00.000Z',
+              endsAt: '2030-10-15T11:00:00.000Z',
+              serviceDate: '2030-10-14T00:00:00.000Z',
+              status,
+              site,
+              assignments: [],
+              rounds: [],
+            },
+          ]) as never,
+        );
+      if (!fallback) throw new Error('Falta el mock de consultas');
+      return fallback(path, schema);
+    });
+    renderWithQueryClient(<ShiftsPanel />);
+    expect(await screen.findByText(label)).toHaveAttribute('data-variant', tone);
+  });
+
   it('muestra turnos en hora local e indica una invitación pendiente', async () => {
     jest.mocked(apiGet).mockImplementation((path: string) => {
       if (path.startsWith('/turnos'))
@@ -78,7 +125,7 @@ describe('<ShiftsPanel />', () => {
     mockQueries();
     const user = userEvent.setup();
     renderWithQueryClient(<ShiftsPanel />);
-    await user.click(screen.getByRole('button', { name: 'Crear turno' }));
+    await user.click(screen.getByRole('button', { name: 'Nuevo turno' }));
     await user.selectOptions(screen.getByLabelText('Predio del turno'), 'site-1');
     await user.click(await screen.findByLabelText('Perimetral'));
     await user.type(screen.getByLabelText('Fecha de inicio'), '2030-10-14');
@@ -114,7 +161,7 @@ describe('<ShiftsPanel />', () => {
     mockQueries();
     const user = userEvent.setup();
     renderWithQueryClient(<ShiftsPanel />);
-    await user.click(screen.getByRole('button', { name: 'Crear turno' }));
+    await user.click(screen.getByRole('button', { name: 'Nuevo turno' }));
     await user.selectOptions(screen.getByLabelText('Predio del turno'), 'site-1');
     await user.click(await screen.findByLabelText('Perimetral'));
     await user.type(screen.getByLabelText('Fecha de inicio'), '2030-10-14');
@@ -131,6 +178,41 @@ describe('<ShiftsPanel />', () => {
     });
   });
 
+  it.each(['in_progress', 'closed', 'auto_closed', 'cancelled'])(
+    'conserva la cobertura de ventanas para %s',
+    async (status) => {
+      mockQueries([
+        {
+          id: 'covering',
+          siteId: site.id,
+          startsAt: '2030-10-15T04:00:00.000Z',
+          endsAt: '2030-10-15T09:00:00.000Z',
+          serviceDate: '2030-10-15T00:00:00.000Z',
+          status,
+          site,
+          assignments: [],
+          rounds: [{ roundId: round.id, round }],
+        },
+      ]);
+      const user = userEvent.setup();
+      renderWithQueryClient(<ShiftsPanel />);
+      await user.click(screen.getByRole('button', { name: 'Nuevo turno' }));
+      await user.selectOptions(screen.getByLabelText('Predio del turno'), site.id);
+      await user.click(await screen.findByLabelText('Perimetral'));
+      fireEvent.change(screen.getByLabelText('Fecha de inicio'), {
+        target: { value: '2030-10-14' },
+      });
+      fireEvent.change(screen.getByLabelText('Hora de inicio (24 h)'), {
+        target: { value: '21:00' },
+      });
+      fireEvent.change(screen.getByLabelText('Fecha de fin'), { target: { value: '2030-10-15' } });
+      fireEvent.change(screen.getByLabelText('Hora de fin (24 h)'), { target: { value: '01:00' } });
+      if (status === 'cancelled')
+        expect(screen.getByRole('status')).toHaveTextContent('00:00–02:00');
+      else expect(screen.queryByText(/Advertencia: estas ventanas/)).not.toBeInTheDocument();
+    },
+  );
+
   it('muestra el turno que causa una superposición', async () => {
     mockQueries();
     jest.mocked(apiPost).mockRejectedValueOnce(
@@ -141,7 +223,7 @@ describe('<ShiftsPanel />', () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(<ShiftsPanel />);
-    await user.click(screen.getByRole('button', { name: 'Crear turno' }));
+    await user.click(screen.getByRole('button', { name: 'Nuevo turno' }));
     await user.selectOptions(screen.getByLabelText('Predio del turno'), 'site-1');
     await user.click(await screen.findByLabelText('Perimetral'));
     await user.type(screen.getByLabelText('Fecha de inicio'), '2030-10-14');
@@ -194,7 +276,9 @@ describe('<ShiftsPanel />', () => {
     const user = userEvent.setup();
     renderWithQueryClient(<ShiftsPanel />);
     const unassigned = await screen.findByText('Sin vigilador');
-    expect(unassigned.closest('article')).toHaveClass('bg-amber-50');
+    expect(unassigned.closest('article')?.querySelector('[data-slot=card]')).toHaveClass(
+      'bg-warning-soft',
+    );
     await user.click(screen.getByRole('button', { name: 'Asignar vigilador' }));
     expect(screen.getByRole('dialog', { name: 'Editar turno' })).toBeInTheDocument();
   });
