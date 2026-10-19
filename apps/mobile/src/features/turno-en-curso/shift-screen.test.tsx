@@ -8,6 +8,7 @@ import { ShiftScreen } from './shift-screen';
 
 jest.mock('@/lib/db/database', () => ({ createDefaultFieldRepository: jest.fn() }));
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+jest.mock('./actions', () => ({ beginShift: jest.fn(), finishShift: jest.fn() }));
 const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
   useRouter: () => ({ replace: jest.fn(), push: mockPush }),
@@ -91,7 +92,8 @@ describe('<ShiftScreen />', () => {
       backgroundColor: colors.light.signal,
     });
     expect(screen.queryByRole('button', { name: 'Iniciar turno' })).toBeNull();
-  });
+    // shortcut: first render warms React Native modules (~10 s in CI); drop if the jest-expo preset gets faster.
+  }, 30_000);
 
   it('shows closed-pending state reconstructed from local pending events', async () => {
     repository.listPendingEvents.mockResolvedValue([

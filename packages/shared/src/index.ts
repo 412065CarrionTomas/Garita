@@ -16,3 +16,5 @@ export * from './field/record-imputation';
 export * from './field/checkpoint-record';
 export * from './field/sync-contract';
 export * from './marcas';
+export * from './notifications';
+export * from './realtime';

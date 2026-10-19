@@ -13,6 +13,7 @@ import { CheckpointsModule } from './modules/checkpoints/checkpoints.module';
 import { NfcTagsModule } from './modules/nfc-tags/nfc-tags.module';
 import { RoundsModule } from './modules/rounds/rounds.module';
 import { ClockModule } from './common/clock';
+import { PortsModule } from './common/ports/ports.module';
 import { ShiftsModule } from './modules/shifts/shifts.module';
 import { ShiftExecutionModule } from './modules/shift-execution/shift-execution.module';
 import { CheckpointRecordsModule } from './modules/checkpoint-records/checkpoint-records.module';
@@ -39,6 +40,7 @@ import { SyncModule } from './modules/sync/sync.module';
     NfcTagsModule,
     RoundsModule,
     ClockModule,
+    PortsModule,
     ShiftsModule,
     ShiftExecutionModule,
     CheckpointRecordsModule,
