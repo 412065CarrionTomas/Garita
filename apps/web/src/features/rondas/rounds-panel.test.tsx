@@ -30,6 +30,24 @@ function setup() {
 }
 
 describe('RoundsPanel', () => {
+  it.each(['light', 'dark'])('conserva el formulario y los tokens en tema %s', async (theme) => {
+    setup().unmount();
+    const { container } = renderWithQueryClient(
+      <div className={theme}>
+        <RoundsPanel site={site} />
+      </div>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Rondas', level: 3 })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Puntos en orden de recorrido' })).toBeInTheDocument();
+    expect(container.querySelector('[data-slot=card]')).toHaveClass(
+      'bg-card',
+      'text-card-foreground',
+    );
+    expect(container.innerHTML).not.toMatch(
+      /(?:bg|text|border)-(?:white|black|red|amber|gray|slate|zinc|blue|green)(?:-|\b)|#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i,
+    );
+  });
+
   it('muestra las ventanas nocturnas y recorta la última', async () => {
     setup();
     expect(await screen.findByText('22:00–00:00')).toBeInTheDocument();
