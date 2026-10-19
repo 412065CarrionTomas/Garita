@@ -11,6 +11,21 @@ import {
   usersPageSchema,
 } from '@garita/shared';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { EmptyState } from '@/components/empty-state';
+import { PageHeader } from '@/components/page-header';
+import { StatusBadge } from '@/components/status-badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 import { useAuth } from '../auth/auth-context';
 
 type Person = ReturnType<typeof personnelUserSchema.parse>;
@@ -284,42 +299,45 @@ export function PersonalPage() {
       </span>
     ));
   return (
-    <section className="space-y-4">
-      <h1 className="text-3xl font-semibold">Personal</h1>
-      <p>Supervisores y vigiladores de tu empresa.</p>
+    <section aria-labelledby="personal-title" className="min-w-0 space-y-6">
+      <PageHeader
+        id="personal-title"
+        title="Personal"
+        description="Supervisores y vigiladores de tu empresa."
+      />
       <div className="flex flex-wrap gap-3">
         <label>
           Rol
-          <select
+          <NativeSelect
             aria-label="Filtrar por rol"
-            className="ml-2 rounded border p-2"
+            className="w-full"
             value={role}
             onChange={(event) => {
               setRole(event.target.value);
               setPage(1);
             }}
           >
-            <option value="">Todos</option>
-            <option value="supervisor">Supervisor</option>
-            <option value="guard">Vigilador</option>
-          </select>
+            <NativeSelectOption value="">Todos</NativeSelectOption>
+            <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
+            <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
+          </NativeSelect>
         </label>
         <label>
           Estado
-          <select
+          <NativeSelect
             aria-label="Filtrar por estado"
-            className="ml-2 rounded border p-2"
+            className="w-full"
             value={status}
             onChange={(event) => {
               setStatus(event.target.value);
               setPage(1);
             }}
           >
-            <option value="">Todos</option>
-            <option value="invitation_pending">Invitación pendiente</option>
-            <option value="active">Activo</option>
-            <option value="deactivated">Desactivado</option>
-          </select>
+            <NativeSelectOption value="">Todos</NativeSelectOption>
+            <NativeSelectOption value="invitation_pending">Invitación pendiente</NativeSelectOption>
+            <NativeSelectOption value="active">Activo</NativeSelectOption>
+            <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
+          </NativeSelect>
         </label>
       </div>
       {user?.role === 'admin' && (
@@ -394,10 +412,10 @@ export function PersonalPage() {
           ))}
           <label className="grid gap-1">
             Rol
-            <select name="role" className="rounded border p-2">
-              <option value="guard">Vigilador</option>
-              <option value="supervisor">Supervisor</option>
-            </select>
+            <NativeSelect name="role" className="rounded border p-2">
+              <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
+              <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
+            </NativeSelect>
           </label>
           <div className="sm:col-span-2">
             {formError && <p role="alert">{formError}</p>}
@@ -406,114 +424,169 @@ export function PersonalPage() {
         </form>
       )}
       {result.isPending ? (
-        <p role="status">Cargando personal…</p>
+        <div role="status" className="space-y-3">
+          <span className="sr-only">Cargando personal…</span>
+          {[0, 1, 2, 3].map((row) => (
+            <Skeleton key={row} className="h-10 w-full" />
+          ))}
+        </div>
       ) : result.isError ? (
         <p role="alert">No se pudo cargar el personal.</p>
       ) : (
         <>
-          <ul className="divide-y">
-            {result.data.items.map((person) => (
-              <li key={person.id} className="py-3">
-                <strong>
-                  {person.firstName} {person.lastName}
-                </strong>{' '}
-                · {person.role === 'guard' ? 'Vigilador' : 'Supervisor'} ·{' '}
-                {person.status === 'invitation_pending'
-                  ? person.invitationStatus === 'failed'
-                    ? 'Envío fallido'
-                    : 'Invitación pendiente'
-                  : person.status === 'active'
-                    ? 'Activo'
-                    : 'Desactivado'}
-                <p>{person.email}</p>
-                {user?.role === 'admin' && (
-                  <div className="mt-2 flex gap-3">
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => {
-                        setEditing(person);
-                        setErrors({});
-                        setFormError('');
-                      }}
-                    >
-                      Editar
-                    </button>
-                    {person.status === 'deactivated' ? (
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() =>
-                          void runAction(
-                            `/usuarios/${person.id}/reactivar`,
-                            'No se pudo reactivar el usuario.',
-                          )
-                        }
-                      >
-                        Reactivar
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() => {
-                          setDeactivating(person);
-                          setDeriveToUserId('');
-                          setLeaveUnassigned(false);
-                          setNotDerived([]);
-                          setInProgressShift(null);
-                          setForceReason('');
-                          setForceReasonError('');
-                          setDialogError('');
-                          setFormError('');
-                        }}
-                      >
-                        Desactivar
-                      </button>
-                    )}
-                    {person.status === 'invitation_pending' && (
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() =>
-                          void runAction(
-                            `/usuarios/${person.id}/reenviar-invitacion`,
-                            'No se pudo reenviar la invitación.',
-                          )
-                        }
-                      >
-                        Reenviar invitación
-                      </button>
-                    )}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          <nav aria-label="Paginación" className="flex items-center gap-3">
-            <button
+          {result.data.items.length === 0 ? (
+            <EmptyState
+              title="No hay personal para mostrar"
+              description="Revisá los filtros o agregá personal a tu empresa."
+              action={
+                user?.role === 'admin' ? (
+                  <Button variant="outline" onClick={() => setCreating(true)}>
+                    Agregar personal
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <Card className="min-w-0 overflow-hidden py-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {['Nombre', 'Correo', 'Rol', 'Estado', 'Acciones'].map((heading) => (
+                      <TableHead key={heading} className="text-muted-foreground">
+                        {heading}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {result.data.items.map((person) => (
+                    <TableRow key={person.id}>
+                      <TableCell className="font-medium">
+                        <strong>
+                          {person.firstName} {person.lastName}
+                        </strong>
+                      </TableCell>
+                      <TableCell>{person.email}</TableCell>
+                      <TableCell>{person.role === 'guard' ? 'Vigilador' : 'Supervisor'}</TableCell>
+                      <TableCell>
+                        <StatusBadge
+                          tone={
+                            person.status === 'active'
+                              ? 'success'
+                              : person.status === 'invitation_pending'
+                                ? 'warning'
+                                : 'neutral'
+                          }
+                        >
+                          {person.status === 'invitation_pending'
+                            ? person.invitationStatus === 'failed'
+                              ? 'Envío fallido'
+                              : 'Invitación pendiente'
+                            : person.status === 'active'
+                              ? 'Activo'
+                              : 'Desactivado'}
+                        </StatusBadge>
+                      </TableCell>
+                      <TableCell>
+                        {user?.role === 'admin' && (
+                          <div className="mt-2 flex gap-3">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEditing(person);
+                                setErrors({});
+                                setFormError('');
+                              }}
+                            >
+                              Editar
+                            </Button>
+                            {person.status === 'deactivated' ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  void runAction(
+                                    `/usuarios/${person.id}/reactivar`,
+                                    'No se pudo reactivar el usuario.',
+                                  )
+                                }
+                              >
+                                Reactivar
+                              </Button>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setDeactivating(person);
+                                  setDeriveToUserId('');
+                                  setLeaveUnassigned(false);
+                                  setNotDerived([]);
+                                  setInProgressShift(null);
+                                  setForceReason('');
+                                  setForceReasonError('');
+                                  setDialogError('');
+                                  setFormError('');
+                                }}
+                              >
+                                Desactivar
+                              </Button>
+                            )}
+                            {person.status === 'invitation_pending' && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  void runAction(
+                                    `/usuarios/${person.id}/reenviar-invitacion`,
+                                    'No se pudo reenviar la invitación.',
+                                  )
+                                }
+                              >
+                                Reenviar invitación
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+          <nav
+            aria-label="Paginación"
+            className="flex flex-wrap items-center gap-3 text-sm tabular-nums"
+          >
+            <Button
               type="button"
-              className="rounded border px-3 py-2"
+              variant="outline"
               disabled={page <= 1}
               onClick={() => {
                 setPage((value) => value - 1);
               }}
             >
               Anterior
-            </button>
+            </Button>
             <span>
               Página {result.data.pagina} de {Math.max(1, result.data.paginas)}
             </span>
-            <button
+            <Button
               type="button"
-              className="rounded border px-3 py-2"
+              variant="outline"
               disabled={page >= result.data.paginas}
               onClick={() => {
                 setPage((value) => value + 1);
               }}
             >
               Siguiente
-            </button>
+            </Button>
           </nav>
         </>
       )}
@@ -612,7 +685,7 @@ export function PersonalPage() {
                     </ul>
                     <label className="grid gap-1">
                       Derivar turnos a
-                      <select
+                      <NativeSelect
                         className="rounded border p-2"
                         value={deriveToUserId}
                         onChange={(event) => {
@@ -620,7 +693,9 @@ export function PersonalPage() {
                           setLeaveUnassigned(false);
                         }}
                       >
-                        <option value="">Seleccioná un vigilador destino</option>
+                        <NativeSelectOption value="">
+                          Seleccioná un vigilador destino
+                        </NativeSelectOption>
                         {guardOptions.data?.items
                           .filter(
                             (candidate) =>
@@ -629,14 +704,14 @@ export function PersonalPage() {
                                 candidate.status === 'invitation_pending'),
                           )
                           .map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
+                            <NativeSelectOption key={candidate.id} value={candidate.id}>
                               {candidate.firstName} {candidate.lastName}
                               {candidate.status === 'invitation_pending'
                                 ? ' · invitación pendiente'
                                 : ''}
-                            </option>
+                            </NativeSelectOption>
                           ))}
-                      </select>
+                      </NativeSelect>
                     </label>
                     <label className="flex items-start gap-2">
                       <input
