@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { space } from '@garita/tokens';
+import { Badge, Banner, Button, Card, ListItem, Loading, Text, useTheme } from '@/ui';
 import { z } from 'zod';
 import { useRouter } from 'expo-router';
 import { apiGet } from '@/lib/api-client';
@@ -19,6 +21,7 @@ type ShiftList = z.infer<typeof shiftsSchema>;
 
 export function MyShiftsScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [shifts, setShifts] = useState<ShiftList>([]);
   const [refreshing, setRefreshing] = useState(true);
   const [error, setError] = useState(false);
@@ -56,52 +59,54 @@ export function MyShiftsScreen() {
 
   return (
     <ScrollView
+      style={styles.fill}
       contentContainerStyle={styles.content}
       testID="shift-list"
       refreshControl={
         <RefreshControl
           testID="shift-refresh"
+          tintColor={colors.primary}
+          colors={[colors.primary]}
           refreshing={refreshing}
           onRefresh={() => void load()}
         />
       }
       accessibilityLabel="Próximos turnos"
     >
-      <Text style={styles.title}>Mis turnos</Text>
-      <Text style={styles.help}>Próximos 14 días · Deslizá hacia abajo para actualizar.</Text>
-      <Pressable
+      <Text variant="title">Mis turnos</Text>
+      <Text color="mutedForeground">Próximos 14 días · Deslizá hacia abajo para actualizar.</Text>
+      <Button
+        variant="outline"
+        label="Actualizar turnos"
         accessibilityRole="button"
         accessibilityLabel="Actualizar turnos"
         onPress={() => void load()}
-        style={styles.refreshButton}
-      >
-        <Text style={styles.refreshText}>Actualizar turnos</Text>
-      </Pressable>
-      {refreshing && shifts.length === 0 && (
-        <Text accessibilityRole="progressbar">Cargando turnos…</Text>
-      )}
+      />
+      {refreshing && shifts.length === 0 && <Loading label="Cargando turnos…" />}
       {error && (
-        <Text accessibilityRole="alert">
-          No se pudieron cargar los turnos. Deslizá para reintentar.
-        </Text>
+        <Banner tone="danger">No se pudieron cargar los turnos. Deslizá para reintentar.</Banner>
       )}
-      {!refreshing && !error && shifts.length === 0 && <Text>No tenés turnos próximos.</Text>}
+      {!refreshing && !error && shifts.length === 0 && (
+        <Card style={styles.empty}>
+          <Text>No tenés turnos próximos.</Text>
+        </Card>
+      )}
       {shifts.map((shift) => (
-        <Pressable
+        <ListItem
           key={shift.id}
+          title={`Día del turno: ${formatDay(shift.serviceDate)}`}
+          subtitle={`${formatTime(shift.startsAt, shift.site.company.timezone)}–${formatTime(shift.endsAt, shift.site.company.timezone)}`}
+          detail={`${shift.site.name}\nRondas: ${shift.rounds.map(({ round }) => round.name).join(', ')}`}
+          trailing={
+            <Badge
+              tone={shift.status === 'in_progress' ? 'signal' : 'info'}
+              label={shift.status === 'in_progress' ? 'En curso' : 'Programado'}
+            />
+          }
           accessibilityRole="button"
           accessibilityLabel={`Ver turno en ${shift.site.name}`}
           onPress={() => router.push(`/turno/${shift.id}`)}
-          style={styles.card}
-        >
-          <Text style={styles.site}>{shift.site.name}</Text>
-          <Text>Día del turno: {formatDay(shift.serviceDate)}</Text>
-          <Text>
-            {formatTime(shift.startsAt, shift.site.company.timezone)}–
-            {formatTime(shift.endsAt, shift.site.company.timezone)}
-          </Text>
-          <Text>Rondas: {shift.rounds.map(({ round }) => round.name).join(', ')}</Text>
-        </Pressable>
+        />
       ))}
     </ScrollView>
   );
@@ -123,16 +128,7 @@ function formatTime(value: string, timezone: string): string {
 }
 
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, gap: 14, padding: 24 },
-  title: { fontSize: 30, fontWeight: '700' },
-  help: { fontSize: 16 },
-  card: { gap: 8, borderWidth: 1, borderColor: '#a3a3a3', borderRadius: 8, padding: 18 },
-  site: { fontSize: 20, fontWeight: '600' },
-  refreshButton: {
-    alignSelf: 'flex-start',
-    borderRadius: 8,
-    backgroundColor: '#174ea6',
-    padding: 14,
-  },
-  refreshText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  fill: { flex: 1 },
+  content: { flexGrow: 1, gap: space[4] },
+  empty: { alignItems: 'center' },
 });

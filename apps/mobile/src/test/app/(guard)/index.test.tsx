@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Alert } from 'react-native';
+import { ThemeProvider } from '@/ui';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import GuardHome from '@/app/(guard)/index';
 
@@ -99,4 +100,17 @@ describe('GuardHome logout with pending events (CA6)', () => {
 
     expect(mockLogout).toHaveBeenCalledTimes(1);
   });
+});
+
+it('permite elegir la apariencia desde el inicio', async () => {
+  await render(
+    <ThemeProvider>
+      <GuardHome />
+    </ThemeProvider>,
+  );
+  expect(screen.getByLabelText('Apariencia')).toBeOnTheScreen();
+  await act(async () => fireEvent.press(screen.getByRole('radio', { name: 'Oscuro' })));
+  expect(screen.getByRole('radio', { name: 'Oscuro' })).toBeChecked();
+  await act(async () => fireEvent.press(screen.getByRole('radio', { name: 'Claro' })));
+  expect(screen.getByRole('radio', { name: 'Claro' })).toBeChecked();
 });
