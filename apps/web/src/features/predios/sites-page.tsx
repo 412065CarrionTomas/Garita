@@ -1,6 +1,8 @@
+import { SiteConnectivityForm } from './site-connectivity-form';
 import { useQuery } from '@tanstack/react-query';
 import {
   siteInputSchema,
+  siteConnectivitySchema,
   sitesResponseSchema,
   updateSiteSpeedSchema,
   type SpeedProfile,
@@ -460,6 +462,23 @@ export function SitesPage() {
                       <RoundsPanel site={site} />
                     </TabsContent>
                   </Tabs>
+                  {site.status === 'active' &&
+                    (user?.role === 'admin' ||
+                      (user?.role === 'supervisor' &&
+                        site.supervisors?.some(
+                          ({ user: assigned }) => assigned.id === user.id,
+                        ))) && (
+                      <SiteConnectivityForm
+                        key={`${site.id}-${String(site.connectivityType)}-${String(site.minutesToSignal)}-${String(site.marginMinutes)}`}
+                        siteId={site.id}
+                        initial={siteConnectivitySchema.parse({
+                          type: site.connectivityType ?? 'with_signal',
+                          minutesToSignal: site.minutesToSignal ?? 0,
+                          marginMinutes: site.marginMinutes ?? 30,
+                        })}
+                        onSaved={() => void sites.refetch()}
+                      />
+                    )}
                   <SiteSpeedConfig
                     site={site}
                     canConfigure={
