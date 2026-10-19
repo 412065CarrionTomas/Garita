@@ -12,6 +12,7 @@ import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { SiteLocation } from '../mapa/site-location';
 import { z } from 'zod';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CheckpointsPanel } from '../puntos/checkpoints-panel';
 import { RoundsPanel } from '../rondas/rounds-panel';
 import {
@@ -435,7 +436,7 @@ export function SitesPage() {
                         Editar predio
                       </Button>
                       <Button
-                        variant="ghost"
+                        variant="ghostDestructive"
                         size="sm"
                         onClick={() => {
                           setDeleting({ id: site.id, name: site.name });
@@ -447,8 +448,18 @@ export function SitesPage() {
                   )}
                 </CardHeader>
                 <CardContent className="min-w-0 space-y-6">
-                  <CheckpointsPanel site={site} />
-                  <RoundsPanel site={site} />
+                  <Tabs defaultValue="puntos">
+                    <TabsList>
+                      <TabsTrigger value="puntos">Puntos de control</TabsTrigger>
+                      <TabsTrigger value="rondas">Rondas</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="puntos">
+                      <CheckpointsPanel site={site} />
+                    </TabsContent>
+                    <TabsContent value="rondas">
+                      <RoundsPanel site={site} />
+                    </TabsContent>
+                  </Tabs>
                   <SiteSpeedConfig
                     site={site}
                     canConfigure={

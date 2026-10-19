@@ -469,7 +469,7 @@ export function ShiftsPanel() {
                         </Button>
                         <Button
                           type="button"
-                          variant="ghost"
+                          variant="ghostDestructive"
                           size="sm"
                           onClick={() => {
                             setCancelId(shift.id);

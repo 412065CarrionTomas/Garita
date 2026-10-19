@@ -247,7 +247,7 @@ export function ClientsPage() {
                             Editar
                           </Button>
                           <Button
-                            variant="ghost"
+                            variant="ghostDestructive"
                             size="sm"
                             onClick={() => {
                               setDeleting({ id: client.id, name: client.name });

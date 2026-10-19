@@ -148,7 +148,7 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
                       Editar
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="ghostDestructive"
                       size="sm"
                       onClick={() => {
                         setConfirmId(round.id);
