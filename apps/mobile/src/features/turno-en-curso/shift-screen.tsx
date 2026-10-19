@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, StyleSheet, View } from 'react-native';
+import { space } from '@garita/tokens';
+import { Badge, Banner, Button, Card, Input, Screen, Text } from '@/ui';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   currentRoundProgress,
@@ -172,146 +174,152 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
     data?.checkpoints.map((checkpoint) => [checkpoint.id, checkpoint.name]) ?? [],
   );
   return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text accessibilityRole="header" style={styles.title}>
+    <Screen scroll>
+      <Text variant="heading" accessibilityRole="header">
         Turno
       </Text>
       {startsAt && endsAt && (
-        <>
-          <Text style={styles.site}>{shift?.siteName ?? scheduled?.site.name}</Text>
-          <Text style={styles.copy}>
+        <Card>
+          <Text variant="title">{shift?.siteName ?? scheduled?.site.name}</Text>
+          <Text>
             Horario: {formatTime(startsAt)}–{formatTime(endsAt)}
           </Text>
-        </>
+          {data && (
+            <>
+              <Badge
+                tone={pendingClose ? 'warning' : 'signal'}
+                label={pendingClose ? 'Cerrado, pendiente de envío' : 'En curso'}
+              />
+              {isOffline && (
+                <View accessible accessibilityRole="text">
+                  <Badge tone="warning" label="Sin conexión" />
+                </View>
+              )}
+              {isSyncing && (
+                <View accessible accessibilityRole="text">
+                  <Badge tone="info" label="Enviando…" />
+                </View>
+              )}
+              <View accessible accessibilityRole="text">
+                <Badge
+                  tone="warning"
+                  label={
+                    pendingCount === 1
+                      ? '1 registro pendiente de envío'
+                      : `${pendingCount} registros pendientes de envío`
+                  }
+                />
+              </View>
+              <Text accessibilityRole="text" color="mutedForeground">
+                {lastSyncAt
+                  ? `Último envío: ${formatTime(lastSyncAt, data.shift.timezone)}`
+                  : 'Todavía no se envió nada'}
+              </Text>
+            </>
+          )}
+        </Card>
       )}
       {!data && scheduled && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Iniciar turno"
+        <Button
+          label="Iniciar turno"
+          variant="signal"
+          size="lg"
           disabled={busy || !startAllowed}
           onPress={() => void start()}
-          style={[styles.button, (!startAllowed || busy) && styles.disabled]}
-        >
-          <Text style={styles.buttonText}>Iniciar turno</Text>
-        </Pressable>
+        />
       )}
       {!data && !scheduled && (
-        <Text style={styles.copy}>El turno no está disponible o ya no está asignado.</Text>
+        <Banner tone="warning">El turno no está disponible o ya no está asignado.</Banner>
       )}
       {data && (
         <>
-          <View style={styles.syncCard}>
-            {isOffline && (
-              <Text accessibilityRole="text" style={styles.statusOffline}>
-                Sin conexión
-              </Text>
-            )}
-            {isSyncing && (
-              <Text accessibilityRole="text" style={styles.statusSending}>
-                Enviando…
-              </Text>
-            )}
-            <Text accessibilityRole="text" style={styles.copy}>
-              {pendingCount === 1
-                ? '1 registro pendiente de envío'
-                : `${pendingCount} registros pendientes de envío`}
-            </Text>
-            <Text accessibilityRole="text" style={styles.copy}>
-              {lastSyncAt
-                ? `Último envío: ${formatTime(lastSyncAt, data.shift.timezone)}`
-                : 'Todavía no se envió nada'}
-            </Text>
-          </View>
-          {pendingClose && (
-            <Text accessibilityRole="alert" style={styles.message}>
-              Turno cerrado, pendiente de envío.
-            </Text>
-          )}
+          {pendingClose && <Banner tone="warning">Turno cerrado, pendiente de envío.</Banner>}
           {lateStartMinutes(data.shift.startsAt, data.serverTime.serverNowUtc) !== null && (
-            <Text style={styles.copy}>
+            <Text>
               Inicio tardío: {lateStartMinutes(data.shift.startsAt, data.serverTime.serverNowUtc)}{' '}
               minutos.
             </Text>
           )}
           {!pendingClose && (
             <>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Escanear código QR"
+              <Button
+                label="Escanear código QR"
+                variant="signal"
+                size="lg"
                 onPress={() => router.push('/escaneo')}
-                style={styles.button}
-              >
-                <Text style={styles.buttonText}>Escanear código QR</Text>
-              </Pressable>
+              />
               {rejectedRecords.length > 0 && (
-                <View style={styles.rejectedCard}>
-                  <Text accessibilityRole="alert" style={styles.rejectedTitle}>
-                    Registros observados por el servidor
-                  </Text>
+                <Banner tone="danger" title="Registros observados por el servidor">
                   {rejectedRecords.map((r) => (
-                    <Text key={r.recordId} style={styles.rejectedText}>
+                    <Text key={r.recordId} color="danger">
                       • {r.checkpointName}: {formatServerReason(r.serverReason)}
                     </Text>
                   ))}
-                </View>
+                </Banner>
               )}
-              <Text style={styles.section}>Ventanas y puntos pendientes</Text>
+              <Text variant="heading">Ventanas y puntos pendientes</Text>
               {progress.map((round) => {
                 const definition = data.rounds.find((item) => item.roundId === round.roundId);
                 return (
-                  <View key={round.roundId} style={styles.card}>
-                    <Text style={styles.cardTitle}>{definition?.name ?? 'Ronda'}</Text>
-                    <Text style={styles.copy}>
+                  <Card key={round.roundId}>
+                    <Text variant="subheading">{definition?.name ?? 'Ronda'}</Text>
+                    <Text>
                       {round.currentWindow
                         ? `Ventana ${round.currentWindow.label}`
                         : 'Sin ventana activa'}
                     </Text>
+                    {round.currentWindow && (
+                      <Text color="mutedForeground">
+                        {formatTime(round.currentWindow.startUtc, data.shift.timezone)}–
+                        {formatTime(round.currentWindow.endUtc, data.shift.timezone)}
+                      </Text>
+                    )}
                     {round.pendingCheckpointIds.length ? (
                       round.pendingCheckpointIds.map((id) => (
-                        <Text key={id} style={styles.copy}>
-                          • {checkpointNames.get(id) ?? id}
-                        </Text>
+                        <View key={id} style={styles.checkpoint}>
+                          <Text style={styles.checkpointName}>
+                            • {checkpointNames.get(id) ?? id}
+                          </Text>
+                          <Badge tone="warning" label="Pendiente" />
+                        </View>
                       ))
                     ) : (
-                      <Text style={styles.copy}>Sin puntos pendientes en esta ventana.</Text>
+                      <Text color="mutedForeground">Sin puntos pendientes en esta ventana.</Text>
                     )}
-                  </View>
+                  </Card>
                 );
               })}
               {early && (
-                <TextInput
+                <Input
+                  label="Motivo del cierre anticipado"
                   accessibilityLabel="Motivo del cierre anticipado"
                   placeholder="Motivo del cierre anticipado"
                   value={reason}
                   onChangeText={setReason}
                   multiline
-                  style={styles.input}
                 />
               )}
               {early && reason.trim().length < 3 && (
-                <Text style={styles.copy}>
+                <Text color="mutedForeground">
                   Para cerrar antes de hora, indicá un motivo de al menos 3 caracteres.
                 </Text>
               )}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Cerrar turno"
+              <Button
+                label="Cerrar turno"
+                variant="danger"
                 disabled={busy || (early && reason.trim().length < 3)}
                 onPress={() => void close()}
-                style={[styles.button, styles.closeButton]}
-              >
-                <Text style={[styles.buttonText, styles.closeButtonText]}>Cerrar turno</Text>
-              </Pressable>
+              />
             </>
           )}
         </>
       )}
       {!!message && (
-        <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.message}>
+        <Text accessibilityLiveRegion="polite" accessibilityRole="alert">
           {message}
         </Text>
       )}
-    </ScrollView>
+    </Screen>
   );
 }
 function formatTime(value: string, timezone?: string): string {
@@ -349,68 +357,6 @@ function formatServerReason(reason?: string | null): string {
   }
 }
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, gap: 16, padding: 24, backgroundColor: '#171717' },
-  title: { color: '#fff', fontSize: 30, fontWeight: '700' },
-  site: { color: '#fff', fontSize: 22, fontWeight: '600' },
-  copy: { color: '#fff', fontSize: 18 },
-  syncCard: {
-    gap: 8,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#555',
-    borderRadius: 10,
-    backgroundColor: '#262626',
-  },
-  statusOffline: {
-    color: '#f87171',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  statusSending: {
-    color: '#facc15',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  section: { marginTop: 8, color: '#fff', fontSize: 22, fontWeight: '700' },
-  card: { gap: 8, padding: 18, borderWidth: 1, borderColor: '#777', borderRadius: 10 },
-  cardTitle: { color: '#fff', fontSize: 20, fontWeight: '600' },
-  button: {
-    minHeight: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: '#facc15',
-    padding: 16,
-  },
-  closeButton: { backgroundColor: '#dc2626' },
-  buttonText: { color: '#171717', fontSize: 19, fontWeight: '700' },
-  closeButtonText: { color: '#fff' },
-  disabled: { opacity: 0.45 },
-  input: {
-    minHeight: 64,
-    borderWidth: 1,
-    borderColor: '#aaa',
-    borderRadius: 8,
-    padding: 12,
-    color: '#fff',
-    fontSize: 18,
-  },
-  message: { color: '#fff', fontSize: 18 },
-  rejectedCard: {
-    gap: 8,
-    padding: 16,
-    backgroundColor: '#7f1d1d',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ef4444',
-  },
-  rejectedTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  rejectedText: {
-    color: '#fecaca',
-    fontSize: 16,
-  },
+  checkpoint: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  checkpointName: { flexShrink: 1 },
 });
