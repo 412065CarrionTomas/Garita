@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Children, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
@@ -11,6 +11,31 @@ import {
   usersPageSchema,
 } from '@garita/shared';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { EmptyState } from '@/components/empty-state';
+import { PageHeader } from '@/components/page-header';
+import { StatusBadge } from '@/components/status-badge';
+import { Alert } from '@/components/ui/alert';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 import { useAuth } from '../auth/auth-context';
 
 type Person = ReturnType<typeof personnelUserSchema.parse>;
@@ -69,8 +94,6 @@ export function PersonalPage() {
   const [dialogError, setDialogError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
-  const editDialog = useRef<HTMLDialogElement>(null);
-  const deactivateDialog = useRef<HTMLDialogElement>(null);
   const reasonInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const futureShifts = useQuery({
@@ -101,28 +124,6 @@ export function PersonalPage() {
     queryKey: ['personal', role, status, page],
     queryFn: () => apiGet(`/usuarios?${params.toString()}`, usersPageSchema),
   });
-  useEffect(() => {
-    const dialog = editDialog.current;
-    if (editing && dialog && !dialog.open) {
-      if (typeof dialog.showModal === 'function') dialog.showModal();
-      else dialog.setAttribute('open', '');
-    }
-    if (!editing && dialog?.open) {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
-    }
-  }, [editing]);
-  useEffect(() => {
-    const dialog = deactivateDialog.current;
-    if (deactivating && dialog && !dialog.open) {
-      if (typeof dialog.showModal === 'function') dialog.showModal();
-      else dialog.setAttribute('open', '');
-    }
-    if (!deactivating && dialog?.open) {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
-    }
-  }, [deactivating]);
   useEffect(() => {
     if (inProgressShift && reasonInputRef.current) {
       reasonInputRef.current.focus();
@@ -279,586 +280,740 @@ export function PersonalPage() {
   };
   const renderErrors = () =>
     Object.entries(errors).map(([field, message]) => (
-      <span id={`${field}-error`} className="text-sm text-red-700" key={field}>
+      <span id={`${field}-error`} className="text-sm text-danger" key={field}>
         {message}
       </span>
     ));
   return (
-    <section className="space-y-4">
-      <h1 className="text-3xl font-semibold">Personal</h1>
-      <p>Supervisores y vigiladores de tu empresa.</p>
+    <section aria-labelledby="personal-title" className="min-w-0 space-y-6">
+      <PageHeader
+        id="personal-title"
+        title="Personal"
+        description="Supervisores y vigiladores de tu empresa."
+        actions={
+          user?.role === 'admin' && (
+            <Button
+              type="button"
+              onClick={() => {
+                setCreating(!creating);
+                setFormError('');
+              }}
+            >
+              Agregar personal
+            </Button>
+          )
+        }
+      />
       <div className="flex flex-wrap gap-3">
-        <label>
+        <Label className="grid gap-2">
           Rol
-          <select
+          <NativeSelect
             aria-label="Filtrar por rol"
-            className="ml-2 rounded border p-2"
+            className="w-full"
             value={role}
             onChange={(event) => {
               setRole(event.target.value);
               setPage(1);
             }}
           >
-            <option value="">Todos</option>
-            <option value="supervisor">Supervisor</option>
-            <option value="guard">Vigilador</option>
-          </select>
-        </label>
-        <label>
+            <NativeSelectOption value="">Todos</NativeSelectOption>
+            <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
+            <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
+          </NativeSelect>
+        </Label>
+        <Label className="grid gap-2">
           Estado
-          <select
+          <NativeSelect
             aria-label="Filtrar por estado"
-            className="ml-2 rounded border p-2"
+            className="w-full"
             value={status}
             onChange={(event) => {
               setStatus(event.target.value);
               setPage(1);
             }}
           >
-            <option value="">Todos</option>
-            <option value="invitation_pending">Invitación pendiente</option>
-            <option value="active">Activo</option>
-            <option value="deactivated">Desactivado</option>
-          </select>
-        </label>
+            <NativeSelectOption value="">Todos</NativeSelectOption>
+            <NativeSelectOption value="invitation_pending">Invitación pendiente</NativeSelectOption>
+            <NativeSelectOption value="active">Activo</NativeSelectOption>
+            <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
+          </NativeSelect>
+        </Label>
       </div>
-      {user?.role === 'admin' && (
-        <button
-          type="button"
-          onClick={() => {
-            setCreating(!creating);
-            setFormError('');
-          }}
-          className="rounded-md border px-3 py-2"
-        >
-          Agregar personal
-        </button>
-      )}
-      {creating && (
-        <form
-          aria-label="Agregar personal"
-          className="grid gap-3 rounded border p-4 sm:grid-cols-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const parsed = createUserRequestSchema.safeParse(
-              Object.fromEntries(new FormData(event.currentTarget)),
-            );
-            if (!parsed.success) {
-              setErrors(
-                Object.fromEntries(
-                  parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message]),
-                ),
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent className="space-y-4">
+          <DialogTitle className="text-lg font-semibold">Agregar personal</DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            Completá los datos para enviar una invitación.
+          </DialogDescription>
+          <form
+            aria-label="Agregar personal"
+            className="grid gap-4 sm:grid-cols-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const parsed = createUserRequestSchema.safeParse(
+                Object.fromEntries(new FormData(event.currentTarget)),
               );
-              return;
-            }
-            setErrors({});
-            setFormError('');
-            void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
-              .then(async () => {
-                await refresh();
-                setCreating(false);
-              })
-              .catch((error: unknown) => {
-                setFormError(
-                  error instanceof ApiError && error.status === 409
-                    ? 'Ese correo ya está en uso'
-                    : 'No se pudo crear la invitación.',
+              if (!parsed.success) {
+                setErrors(
+                  Object.fromEntries(
+                    parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message]),
+                  ),
                 );
-              });
-          }}
-        >
-          {(['firstName', 'lastName', 'email', 'phone', 'employeeNumber'] as const).map((field) => (
-            <label key={field} className="grid gap-1">
-              {
-                {
-                  firstName: 'Nombre',
-                  lastName: 'Apellido',
-                  email: 'Correo',
-                  phone: 'Teléfono celular',
-                  employeeNumber: 'Legajo',
-                }[field]
+                return;
               }
-              <input
-                name={field}
-                type={field === 'email' ? 'email' : 'text'}
-                aria-invalid={Boolean(errors[field])}
-                aria-describedby={errors[field] ? `${field}-error` : undefined}
-                className="rounded border p-2"
-              />
-              {errors[field] && (
-                <span id={`${field}-error`} className="text-sm text-red-700">
-                  {errors[field]}
-                </span>
+              setErrors({});
+              setFormError('');
+              void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
+                .then(async () => {
+                  await refresh();
+                  setCreating(false);
+                })
+                .catch((error: unknown) => {
+                  setFormError(
+                    error instanceof ApiError && error.status === 409
+                      ? 'Ese correo ya está en uso'
+                      : 'No se pudo crear la invitación.',
+                  );
+                });
+            }}
+          >
+            {(['firstName', 'lastName', 'email', 'phone', 'employeeNumber'] as const).map(
+              (field) => (
+                <Label htmlFor={`create-${field}`} key={field} className="grid gap-1">
+                  {
+                    {
+                      firstName: 'Nombre',
+                      lastName: 'Apellido',
+                      email: 'Correo',
+                      phone: 'Teléfono celular',
+                      employeeNumber: 'Legajo',
+                    }[field]
+                  }
+                  <Input
+                    id={`create-${field}`}
+                    name={field}
+                    type={field === 'email' ? 'email' : 'text'}
+                    aria-invalid={Boolean(errors[field])}
+                    aria-describedby={errors[field] ? `${field}-error` : undefined}
+                    className="w-full"
+                  />
+                  {errors[field] && (
+                    <span id={`${field}-error`} className="text-sm text-danger">
+                      {errors[field]}
+                    </span>
+                  )}
+                </Label>
+              ),
+            )}
+            <Label className="grid gap-1">
+              Rol
+              <NativeSelect name="role" className="w-full">
+                <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
+                <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
+              </NativeSelect>
+            </Label>
+            <div className="flex flex-wrap justify-end gap-3 sm:col-span-2">
+              {formError && (
+                <Alert variant="destructive" role="alert">
+                  {formError}
+                </Alert>
               )}
-            </label>
-          ))}
-          <label className="grid gap-1">
-            Rol
-            <select name="role" className="rounded border p-2">
-              <option value="guard">Vigilador</option>
-              <option value="supervisor">Supervisor</option>
-            </select>
-          </label>
-          <div className="sm:col-span-2">
-            {formError && <p role="alert">{formError}</p>}
-            <button className="rounded border px-3 py-2">Enviar invitación</button>
-          </div>
-        </form>
-      )}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCreating(false);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit">Enviar invitación</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
       {result.isPending ? (
-        <p role="status">Cargando personal…</p>
+        <div role="status" className="space-y-3">
+          <span className="sr-only">Cargando personal…</span>
+          {[0, 1, 2, 3].map((row) => (
+            <Skeleton key={row} className="h-10 w-full" />
+          ))}
+        </div>
       ) : result.isError ? (
-        <p role="alert">No se pudo cargar el personal.</p>
+        <Alert variant="destructive" role="alert">
+          No se pudo cargar el personal.
+        </Alert>
       ) : (
         <>
-          <ul className="divide-y">
-            {result.data.items.map((person) => (
-              <li key={person.id} className="py-3">
-                <strong>
-                  {person.firstName} {person.lastName}
-                </strong>{' '}
-                · {person.role === 'guard' ? 'Vigilador' : 'Supervisor'} ·{' '}
-                {person.status === 'invitation_pending'
-                  ? person.invitationStatus === 'failed'
-                    ? 'Envío fallido'
-                    : 'Invitación pendiente'
-                  : person.status === 'active'
-                    ? 'Activo'
-                    : 'Desactivado'}
-                <p>{person.email}</p>
-                {user?.role === 'admin' && (
-                  <div className="mt-2 flex gap-3">
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => {
-                        setEditing(person);
-                        setErrors({});
-                        setFormError('');
-                      }}
-                    >
-                      Editar
-                    </button>
-                    {person.status === 'deactivated' ? (
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() =>
-                          void runAction(
-                            `/usuarios/${person.id}/reactivar`,
-                            'No se pudo reactivar el usuario.',
-                          )
-                        }
-                      >
-                        Reactivar
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() => {
-                          setDeactivating(person);
-                          setDeriveToUserId('');
-                          setLeaveUnassigned(false);
-                          setNotDerived([]);
-                          setInProgressShift(null);
-                          setForceReason('');
-                          setForceReasonError('');
-                          setDialogError('');
-                          setFormError('');
-                        }}
-                      >
-                        Desactivar
-                      </button>
-                    )}
-                    {person.status === 'invitation_pending' && (
-                      <button
-                        type="button"
-                        className="underline"
-                        onClick={() =>
-                          void runAction(
-                            `/usuarios/${person.id}/reenviar-invitacion`,
-                            'No se pudo reenviar la invitación.',
-                          )
-                        }
-                      >
-                        Reenviar invitación
-                      </button>
-                    )}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          <nav aria-label="Paginación" className="flex items-center gap-3">
-            <button
+          {result.data.items.length === 0 ? (
+            <EmptyState
+              title="No hay personal para mostrar"
+              description="Revisá los filtros o agregá personal a tu empresa."
+              action={
+                user?.role === 'admin' ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setCreating(true);
+                    }}
+                  >
+                    Agregar personal
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <Card className="min-w-0 overflow-hidden py-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {['Nombre', 'Correo', 'Rol', 'Estado', 'Acciones'].map((heading) => (
+                      <TableHead key={heading} className="text-muted-foreground">
+                        {heading}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {result.data.items.map((person) => {
+                    const actions: React.ReactElement<{ children: React.ReactNode }> = (
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditing(person);
+                            setErrors({});
+                            setFormError('');
+                          }}
+                        >
+                          Editar
+                        </Button>
+                        {person.status === 'deactivated' ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              void runAction(
+                                `/usuarios/${person.id}/reactivar`,
+                                'No se pudo reactivar el usuario.',
+                              )
+                            }
+                          >
+                            Reactivar
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setDeactivating(person);
+                              setDeriveToUserId('');
+                              setLeaveUnassigned(false);
+                              setNotDerived([]);
+                              setInProgressShift(null);
+                              setForceReason('');
+                              setForceReasonError('');
+                              setDialogError('');
+                              setFormError('');
+                            }}
+                          >
+                            Desactivar
+                          </Button>
+                        )}
+                        {person.status === 'invitation_pending' && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              void runAction(
+                                `/usuarios/${person.id}/reenviar-invitacion`,
+                                'No se pudo reenviar la invitación.',
+                              )
+                            }
+                          >
+                            Reenviar invitación
+                          </Button>
+                        )}
+                      </>
+                    );
+                    return (
+                      <TableRow key={person.id}>
+                        <TableCell className="font-medium">
+                          <strong>
+                            {person.firstName} {person.lastName}
+                          </strong>
+                        </TableCell>
+                        <TableCell>{person.email}</TableCell>
+                        <TableCell>
+                          {person.role === 'guard' ? 'Vigilador' : 'Supervisor'}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge
+                            tone={
+                              person.status === 'active'
+                                ? 'success'
+                                : person.status === 'invitation_pending'
+                                  ? 'warning'
+                                  : 'neutral'
+                            }
+                          >
+                            {person.status === 'invitation_pending'
+                              ? person.invitationStatus === 'failed'
+                                ? 'Envío fallido'
+                                : 'Invitación pendiente'
+                              : person.status === 'active'
+                                ? 'Activo'
+                                : 'Desactivado'}
+                          </StatusBadge>
+                        </TableCell>
+                        <TableCell>
+                          {user?.role === 'admin' && (
+                            <>
+                              {person.status === 'invitation_pending' ? (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm">
+                                      Acciones
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    {Children.map(
+                                      actions.props.children,
+                                      (action) =>
+                                        action && (
+                                          <DropdownMenuItem asChild>{action}</DropdownMenuItem>
+                                        ),
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              ) : (
+                                <div className="flex gap-2">{actions}</div>
+                              )}
+                            </>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+          <nav
+            aria-label="Paginación"
+            className="flex flex-wrap items-center gap-3 text-sm tabular-nums"
+          >
+            <Button
               type="button"
-              className="rounded border px-3 py-2"
+              variant="outline"
               disabled={page <= 1}
               onClick={() => {
                 setPage((value) => value - 1);
               }}
             >
               Anterior
-            </button>
+            </Button>
             <span>
               Página {result.data.pagina} de {Math.max(1, result.data.paginas)}
             </span>
-            <button
+            <Button
               type="button"
-              className="rounded border px-3 py-2"
+              variant="outline"
               disabled={page >= result.data.paginas}
               onClick={() => {
                 setPage((value) => value + 1);
               }}
             >
               Siguiente
-            </button>
+            </Button>
           </nav>
         </>
       )}
-      {formError && !creating && !editing && <p role="alert">{formError}</p>}
-      {editing && (
-        <dialog
-          ref={editDialog}
-          aria-labelledby="edit-title"
-          aria-describedby="edit-description"
-          onCancel={(event) => {
-            event.preventDefault();
-            setEditing(null);
-          }}
-          className="fixed inset-0 m-auto w-[min(36rem,calc(100%-2rem))] rounded-lg border p-6 shadow-xl backdrop:bg-black/50"
-        >
-          <form aria-label="Editar personal" onSubmit={(event) => void saveEdit(event)}>
-            <h2 id="edit-title" className="text-xl font-semibold">
-              Editar personal
-            </h2>
-            <p id="edit-description">Actualizá nombre, apellido, teléfono o legajo.</p>
-            {(['firstName', 'lastName', 'phone', 'employeeNumber'] as const).map((field) => (
-              <label key={field} className="mt-3 grid gap-1">
-                {
-                  {
-                    firstName: 'Nombre',
-                    lastName: 'Apellido',
-                    phone: 'Teléfono celular',
-                    employeeNumber: 'Legajo',
-                  }[field]
-                }
-                <input
-                  name={field}
-                  defaultValue={editing[field] ?? ''}
-                  aria-invalid={Boolean(errors[field])}
-                  aria-describedby={errors[field] ? `${field}-error` : undefined}
-                  className="rounded border p-2"
-                />
-                {errors[field] && (
-                  <span id={`${field}-error`} className="text-sm text-red-700">
-                    {errors[field]}
-                  </span>
-                )}
-              </label>
-            ))}
-            {formError && <p role="alert">{formError}</p>}
-            <div className="mt-4 flex gap-3">
-              <button className="rounded border px-3 py-2">Guardar cambios</button>
-              <button
-                type="button"
-                className="rounded border px-3 py-2"
-                onClick={() => {
-                  setEditing(null);
-                }}
-              >
-                Cancelar
-              </button>
-            </div>
-          </form>
-        </dialog>
+      {formError && !creating && !editing && (
+        <Alert variant="destructive" role="alert">
+          {formError}
+        </Alert>
       )}
-      {deactivating && (
-        <dialog
-          ref={deactivateDialog}
-          aria-labelledby="deactivate-title"
-          aria-describedby="deactivate-description"
-          onCancel={(event) => {
-            event.preventDefault();
-            closeDeactivateDialog();
-          }}
-          className="fixed inset-0 m-auto w-[min(32rem,calc(100%-2rem))] rounded-lg border p-6 shadow-xl backdrop:bg-black/50"
-        >
-          <h2 id="deactivate-title" className="text-xl font-semibold">
-            Desactivar usuario
-          </h2>
-          <p id="deactivate-description">
-            ¿Querés desactivar a {deactivating.firstName} {deactivating.lastName}? Ya no podrá
-            acceder a Garita.
-          </p>
-          {deactivating.role === 'guard' &&
-            (futureShifts.isPending ? (
-              <p role="status">Consultando turnos futuros…</p>
-            ) : futureShifts.isError ? (
-              <p role="alert">No se pudieron consultar los turnos futuros.</p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {futureShifts.data.length > 0 ? (
-                  <>
-                    <p>Tiene {futureShifts.data.length} turnos futuros:</p>
-                    <ul className="max-h-40 list-disc overflow-auto pl-5">
-                      {futureShifts.data.map((shift) => (
-                        <li key={shift.id}>
-                          {shift.site.name} · {new Date(shift.startsAt).toLocaleString('es-AR')}–
-                          {new Date(shift.endsAt).toLocaleString('es-AR')}
-                        </li>
-                      ))}
-                    </ul>
-                    <label className="grid gap-1">
-                      Derivar turnos a
-                      <select
-                        className="rounded border p-2"
-                        value={deriveToUserId}
-                        onChange={(event) => {
-                          setDeriveToUserId(event.target.value);
-                          setLeaveUnassigned(false);
-                        }}
-                      >
-                        <option value="">Seleccioná un vigilador destino</option>
-                        {guardOptions.data?.items
-                          .filter(
-                            (candidate) =>
-                              candidate.id !== deactivating.id &&
-                              (candidate.status === 'active' ||
-                                candidate.status === 'invitation_pending'),
-                          )
-                          .map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
-                              {candidate.firstName} {candidate.lastName}
-                              {candidate.status === 'invitation_pending'
-                                ? ' · invitación pendiente'
-                                : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <label className="flex items-start gap-2">
-                      <input
-                        type="checkbox"
-                        checked={leaveUnassigned}
-                        onChange={(event) => {
-                          setLeaveUnassigned(event.target.checked);
-                          setDeriveToUserId('');
-                        }}
-                      />
-                      <span>Dejar los turnos sin vigilador</span>
-                    </label>
-                    {leaveUnassigned && (
-                      <p role="alert">
-                        Se desactivará a {deactivating.firstName} y {futureShifts.data.length}{' '}
-                        turnos quedarán sin vigilador. Si nadie los cubre, sus rondas contarán como
-                        no realizadas. Confirmá esta cantidad en una segunda instancia.
-                      </p>
-                    )}
-                    {notDerived.length > 0 && (
-                      <div role="status">
-                        <p>{notDerived.length} turnos no se pudieron derivar por superposición:</p>
-                        <ul className="list-disc pl-5">
-                          {notDerived.map((shift) => (
-                            <li key={shift.id}>{shift.name}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p>No tiene turnos futuros.</p>
-                )}
-              </div>
-            ))}
-          {inProgressShift && (
-            <div
-              className="mt-4 space-y-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm"
-              role="region"
-              aria-label="Turno en curso"
+      <Dialog
+        open={Boolean(editing)}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+      >
+        {editing && (
+          <DialogContent
+            aria-labelledby="edit-title"
+            aria-describedby="edit-description"
+            className="space-y-4"
+          >
+            <form
+              aria-label="Editar personal"
+              className="grid gap-4 sm:grid-cols-2"
+              onSubmit={(event) => void saveEdit(event)}
             >
-              <p className="font-semibold text-amber-900">Turno en curso:</p>
-              <ul className="list-disc pl-5 text-amber-800 space-y-1">
-                <li>
-                  <strong>Predio:</strong> {inProgressShift.site.name}
-                </li>
-                <li>
-                  <strong>Inicio:</strong>{' '}
-                  {formatInCompanyTimezone(
-                    inProgressShift.startsAt,
-                    inProgressShift.site.company?.timezone ?? inProgressShift.timezone,
-                  )}
-                </li>
-                <li>
-                  <strong>Fin:</strong>{' '}
-                  {formatInCompanyTimezone(
-                    inProgressShift.endsAt,
-                    inProgressShift.site.company?.timezone ?? inProgressShift.timezone,
-                  )}
-                </li>
-              </ul>
-              <p className="font-medium text-amber-900">
-                El turno se cerrará ahora como un cierre antes de hora del administrador y quedará
-                sin cobertura.
-              </p>
-              {/* HU-13: Eventos pendientes que informó el celular (pendiente de integración en HU-13) */}
-              <label htmlFor="force-deactivate-reason" className="mt-3 grid gap-1 text-gray-900">
-                <span>Motivo de desactivación</span>
-                <input
-                  ref={reasonInputRef}
-                  id="force-deactivate-reason"
-                  name="forceDeactivateReason"
-                  type="text"
-                  value={forceReason}
-                  onChange={(event) => {
-                    setForceReason(event.target.value);
-                    if (forceReasonError && event.target.value.trim().length >= 3) {
-                      setForceReasonError('');
-                    }
-                  }}
-                  aria-invalid={Boolean(forceReasonError)}
-                  aria-describedby={forceReasonError ? 'force-deactivate-reason-error' : undefined}
-                  className="rounded border p-2"
-                  placeholder="Indicá el motivo (mínimo 3 caracteres)"
-                />
-                {forceReasonError && (
-                  <span
-                    id="force-deactivate-reason-error"
-                    className="text-sm text-red-700"
-                    role="alert"
-                  >
-                    {forceReasonError}
-                  </span>
-                )}
-              </label>
-            </div>
-          )}
-          {dialogError && (
-            <p role="alert" className="mt-3 text-sm text-red-700">
-              {dialogError}
-            </p>
-          )}
-          <div className="mt-4 flex gap-3">
-            {inProgressShift ? (
-              <button
-                type="button"
-                className="rounded border bg-red-600 px-3 py-2 text-white hover:bg-red-700"
-                onClick={() => void submitForceDeactivate()}
+              <DialogTitle id="edit-title" className="text-lg font-semibold sm:col-span-2">
+                Editar personal
+              </DialogTitle>
+              <DialogDescription
+                id="edit-description"
+                className="text-sm text-muted-foreground sm:col-span-2"
               >
-                Desactivar igual
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  disabled={
-                    deactivating.role === 'guard' &&
-                    (futureShifts.isPending || futureShifts.isError || futureShifts.data.length > 0)
+                Actualizá nombre, apellido, teléfono o legajo.
+              </DialogDescription>
+              {(['firstName', 'lastName', 'phone', 'employeeNumber'] as const).map((field) => (
+                <Label htmlFor={`edit-${field}`} key={field} className="grid gap-1">
+                  {
+                    {
+                      firstName: 'Nombre',
+                      lastName: 'Apellido',
+                      phone: 'Teléfono celular',
+                      employeeNumber: 'Legajo',
+                    }[field]
                   }
-                  className="rounded border px-3 py-2"
+                  <Input
+                    id={`edit-${field}`}
+                    name={field}
+                    defaultValue={editing[field] ?? ''}
+                    aria-invalid={Boolean(errors[field])}
+                    aria-describedby={errors[field] ? `${field}-error` : undefined}
+                    className="w-full"
+                  />
+                  {errors[field] && (
+                    <span id={`${field}-error`} className="text-sm text-danger">
+                      {errors[field]}
+                    </span>
+                  )}
+                </Label>
+              ))}
+              {formError && (
+                <Alert variant="destructive" role="alert">
+                  {formError}
+                </Alert>
+              )}
+              <div className="flex flex-wrap justify-end gap-3 sm:col-span-2">
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={() => {
-                    const person = deactivating;
-                    setDialogError('');
-                    void apiPost(
-                      `/usuarios/${person.id}/desactivar`,
-                      {},
-                      emptyRequestSchema,
-                      emptyResponseSchema,
-                    )
-                      .then(async () => {
-                        closeDeactivateDialog();
-                        await refresh();
-                      })
-                      .catch(async (error: unknown) => {
-                        await handleDeactivateError(error, 'No se pudo desactivar el usuario.');
-                      });
+                    setEditing(null);
                   }}
                 >
-                  Confirmar desactivación
-                </button>
-                {deactivating.role === 'guard' && deriveToUserId && (
-                  <button
-                    type="button"
-                    className="rounded border px-3 py-2"
-                    onClick={() => {
-                      setDialogError('');
-                      void apiPost(
-                        `/usuarios/${deactivating.id}/desactivar`,
-                        { deriveToUserId },
-                        z.object({ deriveToUserId: z.string() }),
-                        z.looseObject({
-                          notDerived: z.array(
-                            z.looseObject({
-                              id: z.string(),
-                              site: z.looseObject({ name: z.string() }),
-                            }),
-                          ),
-                        }),
-                      )
-                        .then(async (result) => {
-                          setNotDerived(
-                            result.notDerived.map(({ id, site }) => ({ id, name: site.name })),
-                          );
-                          await refresh();
-                          if (result.notDerived.length === 0) closeDeactivateDialog();
-                        })
-                        .catch(async (error: unknown) => {
-                          await handleDeactivateError(
-                            error,
-                            'No se pudieron derivar los turnos. Revisá las superposiciones.',
-                          );
-                        });
+                  Cancelar
+                </Button>
+                <Button type="submit">Guardar cambios</Button>
+              </div>
+            </form>
+          </DialogContent>
+        )}
+      </Dialog>
+      <Dialog
+        open={Boolean(deactivating)}
+        onOpenChange={(open) => {
+          if (!open) closeDeactivateDialog();
+        }}
+      >
+        {deactivating && (
+          <DialogContent
+            aria-labelledby="deactivate-title"
+            aria-describedby="deactivate-description"
+            className="space-y-4"
+          >
+            <DialogTitle id="deactivate-title" className="text-lg font-semibold">
+              Desactivar usuario
+            </DialogTitle>
+            <DialogDescription
+              id="deactivate-description"
+              className="text-sm text-muted-foreground"
+            >
+              ¿Querés desactivar a {deactivating.firstName} {deactivating.lastName}? Ya no podrá
+              acceder a Garita.
+            </DialogDescription>
+            {deactivating.role === 'guard' &&
+              (futureShifts.isPending ? (
+                <p role="status">Consultando turnos futuros…</p>
+              ) : futureShifts.isError ? (
+                <Alert variant="destructive" role="alert">
+                  No se pudieron consultar los turnos futuros.
+                </Alert>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {futureShifts.data.length > 0 ? (
+                    <>
+                      <p>Tiene {futureShifts.data.length} turnos futuros:</p>
+                      <ul className="max-h-40 list-disc overflow-auto pl-5">
+                        {futureShifts.data.map((shift) => (
+                          <li key={shift.id}>
+                            {shift.site.name} · {new Date(shift.startsAt).toLocaleString('es-AR')}–
+                            {new Date(shift.endsAt).toLocaleString('es-AR')}
+                          </li>
+                        ))}
+                      </ul>
+                      <Label className="grid gap-1">
+                        Derivar turnos a
+                        <NativeSelect
+                          className="w-full"
+                          value={deriveToUserId}
+                          onChange={(event) => {
+                            setDeriveToUserId(event.target.value);
+                            setLeaveUnassigned(false);
+                          }}
+                        >
+                          <NativeSelectOption value="">
+                            Seleccioná un vigilador destino
+                          </NativeSelectOption>
+                          {guardOptions.data?.items
+                            .filter(
+                              (candidate) =>
+                                candidate.id !== deactivating.id &&
+                                (candidate.status === 'active' ||
+                                  candidate.status === 'invitation_pending'),
+                            )
+                            .map((candidate) => (
+                              <NativeSelectOption key={candidate.id} value={candidate.id}>
+                                {candidate.firstName} {candidate.lastName}
+                                {candidate.status === 'invitation_pending'
+                                  ? ' · invitación pendiente'
+                                  : ''}
+                              </NativeSelectOption>
+                            ))}
+                        </NativeSelect>
+                      </Label>
+                      <Label className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          checked={leaveUnassigned}
+                          onChange={(event) => {
+                            setLeaveUnassigned(event.target.checked);
+                            setDeriveToUserId('');
+                          }}
+                        />
+                        <span>Dejar los turnos sin vigilador</span>
+                      </Label>
+                      {leaveUnassigned && (
+                        <Alert className="border-warning bg-warning-soft text-warning" role="alert">
+                          Se desactivará a {deactivating.firstName} y {futureShifts.data.length}{' '}
+                          turnos quedarán sin vigilador. Si nadie los cubre, sus rondas contarán
+                          como no realizadas. Confirmá esta cantidad en una segunda instancia.
+                        </Alert>
+                      )}
+                      {notDerived.length > 0 && (
+                        <Alert
+                          role="status"
+                          className="border-warning bg-warning-soft text-warning"
+                        >
+                          <p>
+                            {notDerived.length} turnos no se pudieron derivar por superposición:
+                          </p>
+                          <ul className="list-disc pl-5">
+                            {notDerived.map((shift) => (
+                              <li key={shift.id}>{shift.name}</li>
+                            ))}
+                          </ul>
+                        </Alert>
+                      )}
+                    </>
+                  ) : (
+                    <p>No tiene turnos futuros.</p>
+                  )}
+                </div>
+              ))}
+            {inProgressShift && (
+              <Alert
+                className="space-y-3 border-warning bg-warning-soft text-warning"
+                role="region"
+                aria-label="Turno en curso"
+              >
+                <p className="font-semibold text-warning">Turno en curso:</p>
+                <ul className="list-disc pl-5 text-warning space-y-1">
+                  <li>
+                    <strong>Predio:</strong> {inProgressShift.site.name}
+                  </li>
+                  <li>
+                    <strong>Inicio:</strong>{' '}
+                    {formatInCompanyTimezone(
+                      inProgressShift.startsAt,
+                      inProgressShift.site.company?.timezone ?? inProgressShift.timezone,
+                    )}
+                  </li>
+                  <li>
+                    <strong>Fin:</strong>{' '}
+                    {formatInCompanyTimezone(
+                      inProgressShift.endsAt,
+                      inProgressShift.site.company?.timezone ?? inProgressShift.timezone,
+                    )}
+                  </li>
+                </ul>
+                <p className="font-medium text-warning">
+                  El turno se cerrará ahora como un cierre antes de hora del administrador y quedará
+                  sin cobertura.
+                </p>
+                {/* HU-13: Eventos pendientes que informó el celular (pendiente de integración en HU-13) */}
+                <Label
+                  htmlFor="force-deactivate-reason"
+                  className="mt-3 grid gap-1 text-foreground"
+                >
+                  <span>Motivo de desactivación</span>
+                  <Input
+                    ref={reasonInputRef}
+                    id="force-deactivate-reason"
+                    name="forceDeactivateReason"
+                    type="text"
+                    value={forceReason}
+                    onChange={(event) => {
+                      setForceReason(event.target.value);
+                      if (forceReasonError && event.target.value.trim().length >= 3) {
+                        setForceReasonError('');
+                      }
                     }}
-                  >
-                    Derivar y desactivar
-                  </button>
-                )}
-                {deactivating.role === 'guard' && leaveUnassigned && futureShifts.data && (
-                  <button
+                    aria-invalid={Boolean(forceReasonError)}
+                    aria-describedby={
+                      forceReasonError ? 'force-deactivate-reason-error' : undefined
+                    }
+                    className="w-full"
+                    placeholder="Indicá el motivo (mínimo 3 caracteres)"
+                  />
+                  {forceReasonError && (
+                    <span
+                      id="force-deactivate-reason-error"
+                      className="text-sm text-danger"
+                      role="alert"
+                    >
+                      {forceReasonError}
+                    </span>
+                  )}
+                </Label>
+              </Alert>
+            )}
+            {dialogError && (
+              <Alert variant="destructive" role="alert">
+                {dialogError}
+              </Alert>
+            )}
+            <div className="flex flex-wrap justify-end gap-3">
+              <Button type="button" variant="outline" onClick={closeDeactivateDialog}>
+                Cancelar
+              </Button>
+              {inProgressShift ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void submitForceDeactivate()}
+                >
+                  Desactivar igual
+                </Button>
+              ) : (
+                <>
+                  <Button
                     type="button"
-                    className="rounded border px-3 py-2"
+                    disabled={
+                      deactivating.role === 'guard' &&
+                      (futureShifts.isPending ||
+                        futureShifts.isError ||
+                        futureShifts.data.length > 0)
+                    }
+                    variant="destructive"
                     onClick={() => {
+                      const person = deactivating;
                       setDialogError('');
                       void apiPost(
-                        `/usuarios/${deactivating.id}/desactivar`,
-                        {
-                          leaveUnassigned: true,
-                          confirmUnassignedCount: futureShifts.data.length,
-                        },
-                        z.object({
-                          leaveUnassigned: z.literal(true),
-                          confirmUnassignedCount: z.number().int().nonnegative(),
-                        }),
-                        z.looseObject({}),
+                        `/usuarios/${person.id}/desactivar`,
+                        {},
+                        emptyRequestSchema,
+                        emptyResponseSchema,
                       )
                         .then(async () => {
                           closeDeactivateDialog();
                           await refresh();
                         })
                         .catch(async (error: unknown) => {
-                          await handleDeactivateError(
-                            error,
-                            'No se pudo desactivar al vigilador con esa confirmación. Actualizá el impacto e intentá nuevamente.',
-                          );
+                          await handleDeactivateError(error, 'No se pudo desactivar el usuario.');
                         });
                     }}
                   >
-                    Confirmar que {futureShifts.data.length} turnos quedan sin vigilador
-                  </button>
-                )}
-              </>
-            )}
-            <button
-              type="button"
-              className="rounded border px-3 py-2"
-              onClick={closeDeactivateDialog}
-            >
-              Cancelar
-            </button>
-          </div>
-        </dialog>
-      )}
+                    Confirmar desactivación
+                  </Button>
+                  {deactivating.role === 'guard' && deriveToUserId && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={() => {
+                        setDialogError('');
+                        void apiPost(
+                          `/usuarios/${deactivating.id}/desactivar`,
+                          { deriveToUserId },
+                          z.object({ deriveToUserId: z.string() }),
+                          z.looseObject({
+                            notDerived: z.array(
+                              z.looseObject({
+                                id: z.string(),
+                                site: z.looseObject({ name: z.string() }),
+                              }),
+                            ),
+                          }),
+                        )
+                          .then(async (result) => {
+                            setNotDerived(
+                              result.notDerived.map(({ id, site }) => ({ id, name: site.name })),
+                            );
+                            await refresh();
+                            if (result.notDerived.length === 0) closeDeactivateDialog();
+                          })
+                          .catch(async (error: unknown) => {
+                            await handleDeactivateError(
+                              error,
+                              'No se pudieron derivar los turnos. Revisá las superposiciones.',
+                            );
+                          });
+                      }}
+                    >
+                      Derivar y desactivar
+                    </Button>
+                  )}
+                  {deactivating.role === 'guard' && leaveUnassigned && futureShifts.data && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="h-auto min-h-9 whitespace-normal text-center"
+                      onClick={() => {
+                        setDialogError('');
+                        void apiPost(
+                          `/usuarios/${deactivating.id}/desactivar`,
+                          {
+                            leaveUnassigned: true,
+                            confirmUnassignedCount: futureShifts.data.length,
+                          },
+                          z.object({
+                            leaveUnassigned: z.literal(true),
+                            confirmUnassignedCount: z.number().int().nonnegative(),
+                          }),
+                          z.looseObject({}),
+                        )
+                          .then(async () => {
+                            closeDeactivateDialog();
+                            await refresh();
+                          })
+                          .catch(async (error: unknown) => {
+                            await handleDeactivateError(
+                              error,
+                              'No se pudo desactivar al vigilador con esa confirmación. Actualizá el impacto e intentá nuevamente.',
+                            );
+                          });
+                      }}
+                    >
+                      Confirmar que {futureShifts.data.length} turnos quedan sin vigilador
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          </DialogContent>
+        )}
+      </Dialog>
       {renderErrors()}
     </section>
   );
