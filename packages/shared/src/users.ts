@@ -49,9 +49,22 @@ export const usersPageSchema = z.object({
 export const invitationRedeemRequestSchema = z.object({ token: z.string().min(1).max(512) });
 export const invitationRedeemResponseSchema = z.object({
   passwordSetupUrl: z.url(),
-  role: personnelRoleSchema,
+  role: z.enum(['supervisor', 'guard', 'client']),
 });
 export const emptyResponseSchema = z.object({ ok: z.literal(true) });
 export const emptyRequestSchema = z.object({}).strict();
 export type CreateUserRequest = z.infer<typeof createUserRequestSchema>;
 export type UpdateUserRequest = z.infer<typeof updateUserRequestSchema>;
+
+export const createClientUserRequestSchema = createUserRequestSchema
+  .pick({ firstName: true, lastName: true, email: true })
+  .extend({ position: z.string().trim().max(80).optional() })
+  .strict();
+export const clientUserSchema = personnelUserSchema.extend({
+  role: z.literal('client'),
+  clientId: z.string(),
+  position: z.string().nullable(),
+  lastLoginAt: z.iso.datetime().nullable(),
+});
+export const clientUsersSchema = z.array(clientUserSchema);
+export type CreateClientUserRequest = z.infer<typeof createClientUserRequestSchema>;

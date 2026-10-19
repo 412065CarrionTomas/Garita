@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
-import { InvitationsController, UsersController } from './users.controller';
+import { ClientUsersController, InvitationsController, UsersController } from './users.controller';
 import { ResendInvitationMailer } from './email.service';
 import { UsersService } from './users.service';
 import { ShiftExecutionModule } from '../shift-execution/shift-execution.module';
@@ -12,7 +12,7 @@ import {
 
 @Module({
   imports: [PrismaModule, AuthModule, ShiftExecutionModule],
-  controllers: [UsersController, InvitationsController],
+  controllers: [UsersController, InvitationsController, ClientUsersController],
   providers: [
     UsersService,
     ResendInvitationMailer,

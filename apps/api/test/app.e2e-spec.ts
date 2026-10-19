@@ -231,6 +231,10 @@ describe('Aplicación (e2e)', () => {
     await app.init();
 
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.user.updateMany({
+      where: { firebaseUid: 'seed-norte-client' },
+      data: { status: 'active' },
+    });
     await prisma.nfcTag.deleteMany({ where: { checkpointId: { in: createdNfcCheckpointIds } } });
     await prisma.checkpoint.deleteMany({ where: { id: { in: createdNfcCheckpointIds } } });
     const northClient = await prisma.client.findUniqueOrThrow({
@@ -328,6 +332,10 @@ describe('Aplicación (e2e)', () => {
     await prisma.user.updateMany({
       where: { firebaseUid: 'seed-norte-pending' },
       data: { status: 'invitation_pending' },
+    });
+    await prisma.user.updateMany({
+      where: { firebaseUid: 'seed-norte-client' },
+      data: { status: 'active' },
     });
     await app.close();
   });
@@ -801,7 +809,7 @@ describe('Aplicación (e2e)', () => {
       .expect(403);
   });
 
-  it.each(['seed-norte-admin', 'seed-norte-client'])(
+  it.each(['seed-norte-admin'])(
     'oculta usuarios que no son personal en todos los endpoints de gestión (%s)',
     async (firebaseUid) => {
       const user = await app.get(PrismaService).systemPrisma.user.findUniqueOrThrow({
@@ -1336,7 +1344,10 @@ describe('Aplicación (e2e)', () => {
       });
       await request(app.getHttpServer()).get('/api/v1/clientes').set(auth).expect(403);
       await request(app.getHttpServer()).get(`/api/v1/clientes/${client.id}`).set(auth).expect(403);
-      await request(app.getHttpServer()).get('/api/v1/predios').set(auth).expect(403);
+      await request(app.getHttpServer())
+        .get('/api/v1/predios')
+        .set(auth)
+        .expect(role === 'client' ? 200 : 403);
       await request(app.getHttpServer())
         .get(`/api/v1/predios/${northAssignedSiteId}`)
         .set(auth)
@@ -3389,6 +3400,7 @@ describe('Aplicación (e2e)', () => {
     });
     expect(savedInDb).not.toBeNull();
   });
+
   it('HU-34: permisos de los tres endpoints de conectividad', async () => {
     const http = request(app.getHttpServer());
     const conn = { type: 'without_signal', minutesToSignal: 180, marginMinutes: 20 };
@@ -3585,4 +3597,39 @@ describe('Aplicación (e2e)', () => {
       await prisma.site.delete({ where: { id: site.id } });
     }
   }, 30000);
+
+  it('HU-27 nuevos endpoints requieren token, administrador y cliente de la empresa', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+
+    const north = await prisma.client.findFirstOrThrow({ where: { companyId: 'norte-company' } });
+
+    const south = await prisma.client.findFirstOrThrow({ where: { companyId: 'sur-company' } });
+
+    for (const method of ['get', 'post'] as const) {
+      await request(app.getHttpServer())
+        [method](`/api/v1/clientes/${north.id}/usuarios`)
+
+        .send({})
+
+        .expect(401);
+
+      await request(app.getHttpServer())
+        [method](`/api/v1/clientes/${north.id}/usuarios`)
+
+        .set('Authorization', 'Bearer token-supervisor')
+
+        .send({})
+
+        .expect(403);
+
+      await request(app.getHttpServer())
+        [method](`/api/v1/clientes/${south.id}/usuarios`)
+
+        .set('Authorization', 'Bearer token-admin')
+
+        .send({ firstName: 'Marta', lastName: 'Ruiz', email: 'hu27-permisos@example.invalid' })
+
+        .expect(404);
+    }
+  });
 });

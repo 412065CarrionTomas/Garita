@@ -3,6 +3,8 @@ import { clientInputSchema, clientsResponseSchema, clientResponseSchema } from '
 import { lazy, Suspense, useState } from 'react';
 import { useParams } from 'react-router';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
+import { useAuth } from '../auth/auth-context';
+import { ClientUsersPanel } from './client-users-panel';
 import { env } from '@/config/env';
 import { errorMessage } from '@/lib/error-message';
 import { z } from 'zod';
@@ -82,6 +84,7 @@ export function ClientsPage() {
       apiGet(
         `/clientes/${deleting?.id ?? ''}/impacto-baja`,
         z.looseObject({
+          usersToDeactivate: z.number().optional(),
           shiftsToCancel: z.number(),
           weeklySchedulesToEnd: z.number(),
           inProgressShiftsToClose: z.number(),
@@ -369,7 +372,8 @@ export function ClientsPage() {
               <p>
                 Se cancelarán {impact.data.shiftsToCancel} turnos, terminarán{' '}
                 {impact.data.weeklySchedulesToEnd} programaciones semanales y se cerrarán{' '}
-                {impact.data.inProgressShiftsToClose} turnos en curso.
+                {impact.data.inProgressShiftsToClose} turnos en curso. Se desactivarán{' '}
+                {impact.data.usersToDeactivate ?? 0} usuarios del portal.
               </p>
               {impact.data.shifts.length > 0 && (
                 <ul aria-label="Turnos que se cancelarán">
@@ -416,6 +420,7 @@ export function ClientsPage() {
 }
 
 export function ClientDetailPage() {
+  const { user } = useAuth();
   const { id } = useParams();
   const client = useQuery({
     queryKey: ['cliente', id],
@@ -461,6 +466,9 @@ export function ClientDetailPage() {
           </dl>
         </CardContent>
       </Card>
+      {user?.role === 'admin' && (
+        <ClientUsersPanel clientId={client.data.id} active={client.data.status === 'active'} />
+      )}
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold">Predios activos</h2>

@@ -65,6 +65,10 @@ model User {
   lastName        String
   phone           String?
   employeeNumber  String?
+  clientId        String?
+  position        String?
+  lastLoginAt     DateTime?
+  client          Client?          @relation(fields: [clientId], references: [id], onDelete: Restrict)
   role            UserRole
   status          UserStatus       @default(invitation_pending)
   createdAt       DateTime         @default(now())
@@ -77,6 +81,7 @@ model User {
   shiftCredentials ShiftCredential[]
 
   @@index([companyId])
+  @@index([clientId])
 }
 
 model Client {
@@ -92,6 +97,7 @@ model Client {
   updatedAt   DateTime     @updatedAt
   company     Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
   sites       Site[]
+  users       User[]
 
   @@unique([companyId, name])
   @@index([companyId, status])
