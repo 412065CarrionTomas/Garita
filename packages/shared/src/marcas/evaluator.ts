@@ -139,8 +139,10 @@ export function evaluateRecordFlags(input: EvaluateRecordFlagsInput): EvaluatedF
 
     // Only evaluated if distance between configured checkpoints is at least 100 meters
     if (checkpointDistance >= 100) {
-      const tCurrent = new Date(record.occurredAtDevice).getTime();
-      const tPrevious = new Date(previousRecord.occurredAtDevice).getTime();
+      const tCurrent = new Date(record.clock?.trustedAt ?? record.occurredAtDevice).getTime();
+      const tPrevious = new Date(
+        previousRecord.trustedAt ?? previousRecord.occurredAtDevice,
+      ).getTime();
       const timeDeltaSeconds = (tCurrent - tPrevious) / 1000;
 
       let speedKmh: number;

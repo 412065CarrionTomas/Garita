@@ -30,8 +30,8 @@ describe('HU-14 trusted time', () => {
     expect(clock.timeStatus).toBe('verified');
     expect(
       isTimeAltered(
-        Date.parse(clock.deviceTime) - Date.parse(clock.trustedAt!),
-        clock.referenceOffsetMs!,
+        Date.parse(clock.deviceTime) - Date.parse(clock.trustedAt ?? ''),
+        clock.referenceOffsetMs ?? Number.NaN,
       ),
     ).toBe(true);
   });
@@ -52,7 +52,7 @@ describe('HU-14 trusted time', () => {
     });
     expect(clock?.trustedAt).toBe(event.deviceTime);
     expect(clock?.timeStatus).toBe('recalculated');
-    expect(isTimeAltered(0, clock!.referenceOffsetMs!)).toBe(false);
+    expect(isTimeAltered(0, clock?.referenceOffsetMs ?? Number.NaN)).toBe(false);
   });
   it('CA5 / BDD4: retains the pre-reboot baseline when the device moves back one hour', () => {
     const pending = trustedTimeFor(
@@ -67,7 +67,7 @@ describe('HU-14 trusted time', () => {
       offsetMs: -3600000,
     });
     expect(clock?.trustedAt).toBe(event.deviceTime);
-    expect(isTimeAltered(-3600000, clock!.referenceOffsetMs!)).toBe(true);
+    expect(isTimeAltered(-3600000, clock?.referenceOffsetMs ?? Number.NaN)).toBe(true);
   });
   it('CA6 / BDD5: only an abandoned boot is unverifiable; keeps resolved events', () => {
     const pending = trustedTimeFor({ ...event, bootId: 'b' }, reference);
@@ -86,7 +86,7 @@ describe('HU-14 trusted time', () => {
       { ...event, deviceTime: '2026-10-19T01:03:00.000Z' },
       { ...reference, offsetMs: 180000 },
     );
-    expect(isTimeAltered(180000, clock.referenceOffsetMs!)).toBe(false);
+    expect(isTimeAltered(180000, clock.referenceOffsetMs ?? Number.NaN)).toBe(false);
     expect(isTimeAltered(300000, 180000)).toBe(false);
     expect(isTimeAltered(300001, 180000)).toBe(true);
     expect(isTimeAltered(-120001, 0)).toBe(true);

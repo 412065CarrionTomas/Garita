@@ -100,6 +100,7 @@ export interface EvaluateRecordFlagsInput {
     hasActiveNfcTag: boolean;
   };
   previousRecord?: {
+    trustedAt?: string | Date | null;
     occurredAtDevice: string | Date;
     checkpoint: {
       id: string;
