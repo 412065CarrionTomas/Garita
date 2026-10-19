@@ -1,5 +1,10 @@
 import { Platform } from 'react-native';
 import type * as NfcModule from 'react-native-nfc-manager';
+import { nfcTagUidSchema } from '@garita/shared';
+import { z } from 'zod';
+
+const tagSchema = z.object({ id: nfcTagUidSchema });
+let continuousRead = false;
 
 // shortcut: Expo Go y web no tienen el módulo nativo y la librería lanza al cargarse; se requiere recién al usarla y, si falla, NFC queda como no soportado. Para NFC real hace falta un development build.
 function loadNfc(): typeof NfcModule | null {
@@ -19,9 +24,29 @@ export async function nfcAvailability(): Promise<'unsupported' | 'disabled' | 'r
   return 'ready';
 }
 
-export async function readFactoryUid(): Promise<string> {
+export function readFactoryUid(onTag: (uid: string) => void): Promise<void>;
+export function readFactoryUid(): Promise<string>;
+export async function readFactoryUid(onTag?: (uid: string) => void): Promise<string | void> {
   const nfc = loadNfc();
   if (!nfc) throw new Error('NFC no está disponible en este dispositivo');
+  if (Platform.OS === 'android' && onTag) {
+    continuousRead = true;
+    nfc.default.setEventListener(nfc.NfcEvents.DiscoverTag, (tag) => {
+      try {
+        const parsed = tagSchema.safeParse(tag);
+        if (parsed.success) onTag(parsed.data.id);
+      } catch {
+        // La normalización compartida puede lanzar en etiquetas sin UID hexadecimal.
+      }
+    });
+    try {
+      await nfc.default.registerTagEvent({ isReaderModeEnabled: true });
+    } catch (error) {
+      await cancelNfcRead();
+      throw error;
+    }
+    return;
+  }
   const technologies =
     Platform.OS === 'android'
       ? [nfc.NfcTech.NfcA, nfc.NfcTech.NfcV]
@@ -31,14 +56,20 @@ export async function readFactoryUid(): Promise<string> {
       ...(Platform.OS === 'ios' ? { alertMessage: 'Acercá la etiqueta NFC al iPhone.' } : {}),
     });
     const tag = await nfc.default.getTag();
-    if (!tag?.id) throw new Error('No se pudo leer el identificador de la etiqueta');
-    return tag.id;
+    return tagSchema.parse(tag).id;
   } finally {
     await cancelNfcRead();
   }
 }
 
 export async function cancelNfcRead(): Promise<void> {
+  const nfc = loadNfc();
+  if (nfc && continuousRead) {
+    continuousRead = false;
+    nfc.default.setEventListener(nfc.NfcEvents.DiscoverTag, null);
+    await nfc.default.unregisterTagEvent().catch(() => undefined);
+    return;
+  }
   await loadNfc()
     ?.default.cancelTechnologyRequest()
     .catch(() => undefined);

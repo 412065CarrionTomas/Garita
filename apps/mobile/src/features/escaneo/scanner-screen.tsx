@@ -7,7 +7,7 @@ import { colors as palettes, radius, space, touch } from '@garita/tokens';
 import { Banner, Button, Card, Loading, Screen, Text } from '@/ui';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createDefaultFieldRepository } from '@/lib/db/database';
-import { nfcAvailability } from '@/lib/nfc';
+import { NfcReader } from './nfc-reader';
 import { processScan, type ScanActionResult } from './scan-action';
 
 export interface ScannerScreenProps {
@@ -18,7 +18,6 @@ export interface ScannerScreenProps {
 export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: ScannerScreenProps) {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
-  const [hasNfc, setHasNfc] = useState<boolean | null>(null);
   const [shiftData, setShiftData] = useState<ShiftOfflineData | null>(initialShiftData ?? null);
   const [loadingShift, setLoadingShift] = useState(!initialShiftData);
   const [torch, setTorch] = useState(false);
@@ -27,22 +26,6 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
   const [result, setResult] = useState<ScanActionResult | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string>('');
   const lastScannedRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    void nfcAvailability()
-      .then((availability) => {
-        if (mounted) {
-          setHasNfc(availability !== 'unsupported');
-        }
-      })
-      .catch(() => {
-        if (mounted) setHasNfc(false);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (initialShiftData !== undefined) return;
@@ -157,19 +140,7 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
           accessibilityLabel="Habilitar permiso de cámara"
           onPress={() => void requestPermission()}
         />
-        {hasNfc && (
-          <Card>
-            <Text>Tu celular cuenta con lector NFC. Podés utilizarlo como alternativa.</Text>
-            <Button
-              label="Registrar con NFC"
-              variant="secondary"
-              size="lg"
-              onPress={() =>
-                setFeedbackMessage('El registro por NFC estará disponible en la próxima versión.')
-              }
-            />
-          </Card>
-        )}
+        {shiftData && <NfcReader shiftData={shiftData} />}
         {feedbackMessage !== '' && <Banner tone="info">{feedbackMessage}</Banner>}
         <Button label="Volver al turno" variant="outline" size="lg" onPress={goBack} />
       </Screen>

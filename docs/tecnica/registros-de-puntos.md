@@ -69,14 +69,53 @@ Para lecturas con `method: 'qr'`:
 2. Verificación de predio: si el punto es válido y vigente pero su `siteId` no coincide con el `siteId` del turno en curso, se rechaza con `other_site`.
 3. Todo escaneo rechazado genera un registro en `InvalidScanAttempt` y responde con `{ result: 'rejected', recordId, reason }`.
 
-## Verificación de etiquetas NFC
+## Registro por NFC
+
+En la pantalla del turno, acercá el celular a la etiqueta del punto. En Android la
+lectura permanece activa mientras la pantalla está enfocada y la app está en primer
+plano; se cancela al salir. En iPhone tocá **Leer etiqueta** para abrir la hoja del
+sistema y acercá la etiqueta. La lectura no requiere permiso de cámara ni luz.
+Si el turno tiene puntos con etiqueta vigente, NFC se ofrece primero y **Escanear
+código QR** queda como alternativa. El lector también está disponible desde la
+pantalla de escaneo cuando no se concedió permiso de cámara.
+
+Con NFC apagado se muestra **El NFC está apagado** y **Abrir ajustes**. Al volver de
+los ajustes se comprueba nuevamente el estado. Los teléfonos sin NFC muestran solo
+QR. Cada evento conserva el estado real del adaptador (`on`, `off`, `unsupported`).
+
+La app normaliza el UID y lo compara con `nfcUid` de los puntos descargados por
+`GET /turnos/:id/datos`. Reutiliza `processScan(uid, data, 'nfc', onSaved)` para
+imputación, persistencia y envío: no construye otro cuerpo ni otra cola. La
+confirmación NFC (vibración, sonido y texto accesible) sucede después de guardar el
+evento y antes de esperar HTTP. Para NFC se limita la búsqueda de ubicación a
+1500 ms; si no se obtiene, el evento conserva `location.status = 'unverifiable'`
+y el servidor aplica las marcas existentes. QR conserva su límite de 5 segundos.
+La meta de menos de 3 segundos requiere medir el flujo completo en dispositivos
+reales: Jest verifica que una respuesta HTTP lenta no demora el aviso local.
+
+Una etiqueta desconocida o antigua queda guardada como intento pendiente, sin
+registro local, con aviso de etiqueta no válida. La descarga solo contiene UID
+vigentes: sin conexión no permite distinguir una etiqueta reemplazada de una
+desconocida. El servidor vuelve a validar al enviar y guarda el motivo definitivo;
+cuando responde en la sesión, la app informa **Etiqueta reemplazada**.
+
+La función única `readFactoryUid` en `lib/nfc.ts` conserva la lectura puntual de
+configuración y acepta un callback para la sesión continua de Android. Utiliza
+`registerTagEvent`/`DiscoverTag` en Android y `requestTechnology` con
+`MifareIOS`/`Iso15693IOS` en iOS. HU-38 extenderá esta función para mensajes
+dinámicos; esta HU solo lee el número de fábrica.
+
+Referencia: [API oficial de react-native-nfc-manager 4.x](https://github.com/revtel/react-native-nfc-manager/blob/main/docs/reference/api.md)
+y sus [declaraciones de eventos y sesiones](https://github.com/revtel/react-native-nfc-manager/blob/main/index.d.ts).
+
+### Verificación del servidor
 
 Para lecturas con `method: 'nfc'`:
 
 - Se verifica que el UID escaneado coincida con la etiqueta NFC activa del punto de control en el predio del turno.
 - Si no está asociado a ningún punto del predio, se rechaza con motivo `tag_not_associated`.
 - Si el UID pertenecía a una etiqueta histórica ya reemplazada, se rechaza con `tag_replaced`.
-- Si pertenece a un punto de otro predio, se rechaza con `other_site`.
+- Si pertenece a un punto de otro predio o el UID está malformado, se rechaza con `tag_not_associated`.
 - Si es válido, continúa el mismo flujo de imputación a ventanas que un QR.
 
 ## Imputación a ventanas de ronda

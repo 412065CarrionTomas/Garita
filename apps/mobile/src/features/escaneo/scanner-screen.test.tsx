@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import type * as ReactType from 'react';
+import { AppState } from 'react-native';
 import { colors, touch } from '@garita/tokens';
 import { useCameraPermissions } from 'expo-camera';
 import type { ShiftOfflineData } from '@garita/shared';
@@ -9,11 +11,17 @@ import { ScannerScreen } from './scanner-screen';
 
 jest.mock('@/lib/nfc', () => ({
   nfcAvailability: jest.fn(),
+  cancelNfcRead: jest.fn(async () => undefined),
+  readFactoryUid: jest.fn(async () => '04AABBCC'),
 }));
 
 const mockBack = jest.fn();
 const mockReplace = jest.fn();
 jest.mock('expo-router', () => ({
+  useFocusEffect: (callback: () => void) => {
+    const React = jest.requireActual('react') as typeof ReactType;
+    React.useEffect(callback, [callback]);
+  },
   useRouter: () => ({
     back: mockBack,
     replace: mockReplace,
@@ -68,6 +76,7 @@ describe('<ScannerScreen />', () => {
   const requestPermissionMock = jest.fn();
 
   beforeEach(() => {
+    AppState.currentState = 'active';
     jest.clearAllMocks();
     jest.mocked(nfcAvailability).mockResolvedValue('ready');
     jest
@@ -138,7 +147,7 @@ describe('<ScannerScreen />', () => {
       screen.getByText(/Se requiere acceso a la cámara para escanear los códigos QR/),
     ).toBeOnTheScreen();
     expect(screen.getByRole('button', { name: 'Habilitar permiso de cámara' })).toBeOnTheScreen();
-    expect(screen.getByRole('button', { name: 'Registrar con NFC' })).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Leer etiqueta' })).toBeOnTheScreen();
 
     // Clicking enable camera requests permission
     const enableButton = screen.getByRole('button', { name: 'Habilitar permiso de cámara' });
@@ -147,13 +156,14 @@ describe('<ScannerScreen />', () => {
     });
     expect(requestPermissionMock).toHaveBeenCalledTimes(1);
 
-    // Clicking NFC alternative gives information
-    const nfcButton = screen.getByRole('button', { name: 'Registrar con NFC' });
+    const nfcButton = screen.getByRole('button', { name: 'Leer etiqueta' });
     await act(async () => {
       nfcButton.props.onClick?.() ?? nfcButton.props.onPress?.();
     });
     expect(
-      screen.getByText('El registro por NFC estará disponible en la próxima versión.'),
+      screen.getByText(
+        'Etiqueta no válida para este turno. Intento guardado; se verificará al enviar.',
+      ),
     ).toBeOnTheScreen();
   });
 
