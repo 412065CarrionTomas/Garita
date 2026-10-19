@@ -9,6 +9,8 @@ import {
   LogOutIcon,
   MapPinIcon,
   MenuIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   UsersIcon,
 } from 'lucide-react';
 
@@ -27,6 +29,8 @@ export interface NavSection {
   path: string;
   title: string;
 }
+
+const COLLAPSED_KEY = 'garita-sidebar-collapsed';
 
 const ICONS: Record<string, typeof UsersIcon> = {
   '/resumen': LayoutDashboardIcon,
@@ -60,6 +64,7 @@ function SidebarContent({
   companyName,
   onLogout,
   onNavigate,
+  onCollapse,
 }: {
   homePath: string;
   sections: NavSection[];
@@ -68,11 +73,26 @@ function SidebarContent({
   companyName: string;
   onLogout: () => void;
   onNavigate?: () => void;
+  onCollapse?: () => void;
 }) {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
       <div className="space-y-1 px-1">
-        <Brand to={homePath} />
+        <div className="flex items-center justify-between">
+          <Brand to={homePath} />
+          {onCollapse && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Ocultar menú"
+              onClick={onCollapse}
+              className="hidden text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground lg:inline-flex"
+            >
+              <PanelLeftCloseIcon aria-hidden="true" />
+            </Button>
+          )}
+        </div>
         <p className="truncate pl-[2.625rem] text-xs text-sidebar-foreground">{companyName}</p>
       </div>
       <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
@@ -140,19 +160,64 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setSidebarCollapsed = (next: boolean) => {
+    setCollapsed(next);
+    try {
+      localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0');
+    } catch {
+      // Sin almacenamiento (modo privado): vale solo para esta sesión.
+    }
+  };
   const sidebar = { homePath, sections, userName, roleLabel, companyName, onLogout };
   return (
-    <div className="min-h-svh lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+    <div
+      className={cn(
+        'min-h-svh lg:grid',
+        collapsed ? 'lg:grid-cols-1' : 'lg:grid-cols-[15rem_minmax(0,1fr)]',
+      )}
+    >
       <a
         href="#contenido"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:shadow"
       >
         Saltar al contenido
       </a>
-      <aside className="sticky top-0 hidden h-svh border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:block">
-        <SidebarContent {...sidebar} />
+      <aside
+        className={cn(
+          'sticky top-0 hidden h-svh border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
+          collapsed ? 'lg:hidden' : 'lg:block',
+        )}
+      >
+        <SidebarContent
+          {...sidebar}
+          onCollapse={() => {
+            setSidebarCollapsed(true);
+          }}
+        />
       </aside>
       <div className="flex min-w-0 flex-col">
+        {collapsed && (
+          <div className="hidden h-14 items-center px-4 lg:flex">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Mostrar menú"
+              onClick={() => {
+                setSidebarCollapsed(false);
+              }}
+            >
+              <PanelLeftOpenIcon aria-hidden="true" />
+            </Button>
+          </div>
+        )}
         <div className="sticky top-0 z-20 flex h-14 items-center justify-between bg-sidebar px-4 text-sidebar-foreground lg:hidden">
           <Brand to={homePath} />
           <Sheet open={open} onOpenChange={setOpen}>

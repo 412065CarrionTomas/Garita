@@ -34,3 +34,29 @@ it('muestra la navegación del rol, los datos del usuario y cierra sesión', asy
   await userEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
   expect(onLogout).toHaveBeenCalledTimes(1);
 });
+
+it('oculta y vuelve a mostrar el menú lateral y recuerda la elección', async () => {
+  localStorage.removeItem('garita-sidebar-collapsed');
+  render(
+    <ThemeProvider>
+      <AppShell
+        homePath="/turnos"
+        sections={[{ path: '/turnos', title: 'Turnos' }]}
+        userName="Ana Pérez"
+        roleLabel="Supervisor"
+        companyName="Seguridad Norte"
+        onLogout={jest.fn()}
+      >
+        <p>contenido</p>
+      </AppShell>
+    </ThemeProvider>,
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: 'Ocultar menú' }));
+  expect(localStorage.getItem('garita-sidebar-collapsed')).toBe('1');
+  expect(screen.getByRole('button', { name: 'Mostrar menú' })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Mostrar menú' }));
+  expect(localStorage.getItem('garita-sidebar-collapsed')).toBe('0');
+  expect(screen.queryByRole('button', { name: 'Mostrar menú' })).not.toBeInTheDocument();
+});
