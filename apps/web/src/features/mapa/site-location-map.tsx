@@ -5,8 +5,12 @@ import {
   useMap,
   useMapsLibrary,
 } from '@vis.gl/react-google-maps';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useId } from 'react';
 import { env } from '@/config/env';
+
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { EmptyState } from '@/components/empty-state';
 
 interface Props {
   latitude: number;
@@ -15,6 +19,7 @@ interface Props {
 }
 
 function InteractiveMap({ latitude, longitude, onChange }: Props) {
+  const id = useId();
   const map = useMap();
   const inputRef = useRef<HTMLInputElement>(null);
   const places = useMapsLibrary('places');
@@ -35,30 +40,34 @@ function InteractiveMap({ latitude, longitude, onChange }: Props) {
     map?.panTo({ lat: latitude, lng: longitude });
   }, [latitude, longitude, map]);
   return (
-    <section aria-label="Ubicación del predio" className="space-y-2">
-      <label htmlFor="site-address-search">Buscar dirección (Google Places)</label>
-      <input
-        id="site-address-search"
+    <section aria-label="Ubicación del predio" className="min-w-0 space-y-4">
+      <Label htmlFor={`${id}-site-address-search`}>Buscar dirección (Google Places)</Label>
+      <Input
+        id={`${id}-site-address-search`}
         ref={inputRef}
         placeholder="Escribí una dirección"
-        className="w-full rounded border p-2"
+        className="w-full"
       />
-      <p className="text-sm">Seleccioná la ubicación arrastrando el marcador.</p>
-      <Map
-        defaultCenter={{ lat: latitude, lng: longitude }}
-        defaultZoom={14}
-        mapId="GARITA_SITES"
-        className="h-72 w-full"
-      >
-        <AdvancedMarker
-          position={{ lat: latitude, lng: longitude }}
-          draggable
-          onDragEnd={(event) => {
-            const point = event.latLng?.toJSON();
-            if (point) onChange(point.lat, point.lng);
-          }}
-        />
-      </Map>
+      <p className="text-sm text-muted-foreground">
+        Seleccioná la ubicación arrastrando el marcador.
+      </p>
+      <div className="h-72 overflow-hidden rounded-xl border border-border">
+        <Map
+          defaultCenter={{ lat: latitude, lng: longitude }}
+          defaultZoom={14}
+          mapId="GARITA_SITES"
+          className="h-72 w-full"
+        >
+          <AdvancedMarker
+            position={{ lat: latitude, lng: longitude }}
+            draggable
+            onDragEnd={(event) => {
+              const point = event.latLng?.toJSON();
+              if (point) onChange(point.lat, point.lng);
+            }}
+          />
+        </Map>
+      </div>
     </section>
   );
 }
@@ -76,25 +85,27 @@ export function ClientSitesMap({
 }: {
   sites: { id: string; name: string; latitude: number | string; longitude: number | string }[];
 }) {
-  if (sites.length === 0) return <p>Este cliente no tiene predios activos.</p>;
+  if (sites.length === 0) return <EmptyState title="Este cliente no tiene predios activos." />;
   const firstSite = sites[0];
-  if (!firstSite) return <p>Este cliente no tiene predios activos.</p>;
+  if (!firstSite) return <EmptyState title="Este cliente no tiene predios activos." />;
   const position = (site: (typeof sites)[number]) => ({
     lat: Number(site.latitude),
     lng: Number(site.longitude),
   });
   return (
     <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY}>
-      <Map
-        defaultCenter={position(firstSite)}
-        defaultZoom={10}
-        mapId="GARITA_CLIENT_SITES"
-        className="h-96 w-full"
-      >
-        {sites.map((site) => (
-          <AdvancedMarker key={site.id} position={position(site)} title={site.name} />
-        ))}
-      </Map>
+      <div className="h-96 overflow-hidden rounded-xl border border-border">
+        <Map
+          defaultCenter={position(firstSite)}
+          defaultZoom={10}
+          mapId="GARITA_CLIENT_SITES"
+          className="h-96 w-full"
+        >
+          {sites.map((site) => (
+            <AdvancedMarker key={site.id} position={position(site)} title={site.name} />
+          ))}
+        </Map>
+      </div>
     </APIProvider>
   );
 }

@@ -1,5 +1,9 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useId } from 'react';
 import { env } from '@/config/env';
+
+import { Alert } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface Props {
   latitude: number;
@@ -12,39 +16,46 @@ const MapLocation = lazy(() =>
 );
 
 export function SiteLocation({ latitude, longitude, onChange }: Props) {
+  const id = useId();
   if (!env.VITE_GOOGLE_MAPS_API_KEY)
     return (
-      <fieldset className="space-y-3 rounded border p-4">
-        <legend>Ubicación (carga manual)</legend>
-        <p role="status">El mapa no está configurado. Ingresá las coordenadas manualmente.</p>
-        <label htmlFor="latitude">Latitud</label>
-        <input
-          id="latitude"
-          type="number"
-          min="-90"
-          max="90"
-          step="any"
-          required
-          value={latitude}
-          onChange={(event) => {
-            onChange(Number(event.target.value), longitude);
-          }}
-          className="block rounded border p-2"
-        />
-        <label htmlFor="longitude">Longitud</label>
-        <input
-          id="longitude"
-          type="number"
-          min="-180"
-          max="180"
-          step="any"
-          required
-          value={longitude}
-          onChange={(event) => {
-            onChange(latitude, Number(event.target.value));
-          }}
-          className="block rounded border p-2"
-        />
+      <fieldset className="min-w-0 space-y-4 rounded-xl border border-border p-4">
+        <legend className="px-1 text-sm font-medium">Ubicación (carga manual)</legend>
+        <Alert role="status" className="bg-info-soft text-info">
+          El mapa no está configurado. Ingresá las coordenadas manualmente.
+        </Alert>
+        <div className="grid gap-2">
+          <Label htmlFor={`${id}-latitude`}>Latitud</Label>
+          <Input
+            id={`${id}-latitude`}
+            type="number"
+            min="-90"
+            max="90"
+            step="any"
+            required
+            value={latitude}
+            onChange={(event) => {
+              onChange(Number(event.target.value), longitude);
+            }}
+            className="w-full tabular-nums"
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${id}-longitude`}>Longitud</Label>
+          <Input
+            id={`${id}-longitude`}
+            type="number"
+            min="-180"
+            max="180"
+            step="any"
+            required
+            value={longitude}
+            onChange={(event) => {
+              onChange(latitude, Number(event.target.value));
+            }}
+            className="w-full tabular-nums"
+          />
+        </div>
       </fieldset>
     );
   return (
