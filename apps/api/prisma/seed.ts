@@ -57,6 +57,10 @@ async function main(): Promise<void> {
       },
       update: {},
     });
+    await prisma.user.update({
+      where: { firebaseUid: `seed-${prefix}-client` },
+      data: { clientId: client.id },
+    });
     for (const [index, name] of ['Predio A', 'Predio B'].entries()) {
       const site = await prisma.site.upsert({
         where: { clientId_name: { clientId: client.id, name } },
