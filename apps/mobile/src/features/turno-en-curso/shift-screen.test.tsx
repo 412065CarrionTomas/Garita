@@ -92,8 +92,7 @@ describe('<ShiftScreen />', () => {
       backgroundColor: colors.light.signal,
     });
     expect(screen.queryByRole('button', { name: 'Iniciar turno' })).toBeNull();
-    // shortcut: first render warms React Native modules (~10 s in CI); drop if the jest-expo preset gets faster.
-  }, 30_000);
+  });
 
   it('shows closed-pending state reconstructed from local pending events', async () => {
     repository.listPendingEvents.mockResolvedValue([
