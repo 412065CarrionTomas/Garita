@@ -18,3 +18,4 @@ export * from './field/sync-contract';
 export * from './marcas';
 export * from './notifications';
 export * from './realtime';
+export * from './field/trusted-time';

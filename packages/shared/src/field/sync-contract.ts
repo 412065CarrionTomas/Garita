@@ -75,6 +75,7 @@ export type SyncEventResult = z.infer<typeof syncEventResultSchema>;
 
 /** Response of `POST /sincronizacion/eventos` (200 even when some events are rejected). */
 export const syncBatchResponseSchema = z.object({
+  serverTime: isoDateTime.optional(),
   results: z.array(syncEventResultSchema),
   receivedAt: isoDateTime,
 });
@@ -106,13 +107,14 @@ export const SYNC_ERROR_CODES = {
  * sent it is the latest `occurredAtDevice` among all events (CA7).
  */
 export function computeSyncedUntil(
-  sentInOrder: readonly { occurredAtDevice: string }[],
+  sentInOrder: readonly { occurredAtDevice: string; clock?: { trustedAt: string | null } }[],
   previous: string | null,
 ): string | null {
   let latest = previous;
   for (const event of sentInOrder) {
-    if (latest === null || Date.parse(event.occurredAtDevice) > Date.parse(latest)) {
-      latest = event.occurredAtDevice;
+    const occurredAt = event.clock?.trustedAt ?? event.occurredAtDevice;
+    if (latest === null || Date.parse(occurredAt) > Date.parse(latest)) {
+      latest = occurredAt;
     }
   }
   return latest;

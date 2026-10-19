@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { deviceClockSchema } from './trusted-time';
 import { shiftOfflineDataSchema, type ShiftOfflineData } from './shift-offline-data';
 
 /**
@@ -76,6 +77,7 @@ export type StartShiftRequest = z.infer<typeof startShiftRequestSchema>;
 
 /** Response of `POST /turnos/:id/iniciar` (also returned when the same eventId is sent again). */
 export const startShiftResponseSchema = z.object({
+  serverTime: isoDateTime.optional(),
   status: z.literal('in_progress'),
   startedAt: isoDateTime,
   /** Minutes late against the assignment start; `null` when it started on time. */
@@ -89,6 +91,7 @@ export type StartShiftResponse = z.infer<typeof startShiftResponseSchema>;
 
 /** Body of `POST /turnos/:id/cerrar`. `reason` is required when closing before the scheduled end. */
 export const closeShiftRequestSchema = z.object({
+  clock: deviceClockSchema.optional(),
   eventId: z.uuid(),
   occurredAtDevice: isoDateTime,
   location: fieldLocationSchema,

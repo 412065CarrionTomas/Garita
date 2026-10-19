@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { fieldLocationSchema } from './shift-execution';
+import { deviceClockSchema } from './trusted-time';
 
 /**
  * HU-11 contract between the guard app and the API for checkpoint records (`POST /registros-puntos`).
@@ -36,6 +37,7 @@ export const checkpointRecordRequestSchema = z.object({
   /** Raw content read: the QR payload or the NFC uid. The server verifies it again. */
   scannedValue: z.string().min(1).max(512),
   occurredAtDevice: isoDateTime,
+  clock: deviceClockSchema.optional(),
   location: fieldLocationSchema,
   phoneNfc: z.enum(PHONE_NFC_STATES),
 });
