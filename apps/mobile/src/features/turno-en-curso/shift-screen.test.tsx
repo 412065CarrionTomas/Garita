@@ -1,4 +1,6 @@
-import { act, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { colors } from '@garita/tokens';
+import { ThemeProvider, ThemeSwitch } from '@/ui';
 import type { PendingFieldEvent, ShiftOfflineData } from '@garita/shared';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { apiGet } from '@/lib/api-client';
@@ -65,6 +67,7 @@ const repository = {
 describe('<ShiftScreen />', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    repository.getShiftData.mockResolvedValue(data);
     repository.listPendingEvents.mockResolvedValue([]);
     jest.mocked(createDefaultFieldRepository).mockResolvedValue(repository as never);
   });
@@ -82,6 +85,12 @@ describe('<ShiftScreen />', () => {
         .map((item) => item.props.children.join?.('') ?? item.props.children),
     ).toEqual(['• Acceso', '• Portón']);
     expect(apiGet).not.toHaveBeenCalled();
+    expect(screen.getByText('En curso')).toBeOnTheScreen();
+    expect(screen.getAllByText('Pendiente')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Escanear código QR' })).toHaveStyle({
+      backgroundColor: colors.light.signal,
+    });
+    expect(screen.queryByRole('button', { name: 'Iniciar turno' })).toBeNull();
   });
 
   it('shows closed-pending state reconstructed from local pending events', async () => {
@@ -102,6 +111,8 @@ describe('<ShiftScreen />', () => {
       expect(screen.getByText('Turno cerrado, pendiente de envío.')).toBeOnTheScreen(),
     );
     expect(screen.queryByRole('button', { name: 'Cerrar turno' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Escanear código QR' })).toBeNull();
+    expect(screen.queryByText('En curso')).toBeNull();
   });
 
   it('navigates to escaneo when clicking Escanear código QR', async () => {
@@ -205,5 +216,56 @@ describe('<ShiftScreen />', () => {
 
     expect(screen.getByText('5 registros pendientes de envío')).toBeOnTheScreen();
     expect(screen.getByText('Todavía no se envió nada')).toBeOnTheScreen();
+  });
+
+  it('offers only the start action for a scheduled shift', async () => {
+    repository.getShiftData.mockResolvedValue(null as never);
+    jest.mocked(apiGet).mockResolvedValue([
+      {
+        id: 'shift-1',
+        startsAt: nowUtc,
+        endsAt: windowEndUtc,
+        site: { name: 'Predio A' },
+      },
+    ]);
+    await render(<ShiftScreen shiftId="shift-1" />);
+    expect(await screen.findByRole('button', { name: 'Iniciar turno' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Escanear código QR' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Iniciar turno' })).toHaveStyle({
+      backgroundColor: colors.light.signal,
+    });
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('announces an unavailable shift', async () => {
+    repository.getShiftData.mockResolvedValue(null as never);
+    jest.mocked(apiGet).mockResolvedValue([]);
+    await render(<ShiftScreen shiftId="shift-1" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'El turno no está disponible o ya no está asignado.',
+    );
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('uses the selected theme for the site, pending names and muted copy', async () => {
+    await render(
+      <ThemeProvider>
+        <ThemeSwitch />
+        <ShiftScreen shiftId="shift-1" />
+      </ThemeProvider>,
+    );
+    expect(await screen.findByText('Predio A')).toBeOnTheScreen();
+    for (const [label, palette] of [
+      ['Claro', colors.light],
+      ['Oscuro', colors.dark],
+    ] as const) {
+      await fireEvent.press(screen.getByLabelText(label));
+      expect(screen.getByText('Predio A')).toHaveStyle({ color: palette.foreground });
+      expect(screen.getByText('• Acceso')).toHaveStyle({ color: palette.foreground });
+      expect(screen.getByText('Todavía no se envió nada')).toHaveStyle({
+        color: palette.mutedForeground,
+      });
+      expect(screen.getByText('En curso')).toHaveStyle({ color: palette.signalForeground });
+    }
   });
 });
