@@ -11,6 +11,7 @@ import {
   type SyncBatchResponse,
 } from '@garita/shared';
 import { createDefaultFieldRepository, type FieldRepository } from '@/lib/db/database';
+import { prepareEventClocks, saveTimeReference } from '@/lib/clock/clock';
 import { sendConnectionNotice, sendSyncBatch } from './api';
 import { computeSyncBackoff } from './backoff';
 import { deleteShiftCredential, getShiftCredentialToken } from './credential';
@@ -214,7 +215,19 @@ export async function processSyncQueue(): Promise<{
       }
 
       // Take batch of at most SYNC_BATCH_MAX_EVENTS (100)
-      const batchSlice = syncableEvents.slice(0, SYNC_BATCH_MAX_EVENTS);
+      let batchSlice;
+      try {
+        batchSlice = await prepareEventClocks(repo, syncableEvents.slice(0, SYNC_BATCH_MAX_EVENTS));
+      } catch {
+        scheduleRetry(computeSyncBackoff(consecutiveFailures++));
+        overallSuccess = false;
+        break;
+      }
+      if (batchSlice.length === 0) {
+        scheduleRetry(computeSyncBackoff(consecutiveFailures++));
+        overallSuccess = false;
+        break;
+      }
       const totalPending = await repo.countPendingEvents();
       const remainingCount = Math.max(0, totalPending - batchSlice.length);
 
@@ -255,6 +268,7 @@ export async function processSyncQueue(): Promise<{
       }
 
       // Success for this batch
+      if (response.serverTime) await saveTimeReference(repo, response.serverTime);
       consecutiveFailures = 0;
       if (retryTimerId !== null) {
         d.clearTimeout(retryTimerId);
@@ -307,7 +321,10 @@ export async function processSyncQueue(): Promise<{
       // Update syncedUntil (CA7)
       const receivedInOrder = batchSlice
         .filter((event) => receivedEventIds.has(syncEventId(event as never) ?? event.id))
-        .map(({ occurredAtDevice }) => ({ occurredAtDevice }));
+        .map((event) => ({
+          occurredAtDevice: event.occurredAtDevice,
+          clock: batchRequest.events.find((item) => syncEventId(item) === event.id)?.payload.clock,
+        }));
       const nextSyncedUntil = computeSyncedUntil(receivedInOrder, previousSyncedUntil);
       if (nextSyncedUntil) {
         await repo.setSyncMeta('synced_until', nextSyncedUntil);

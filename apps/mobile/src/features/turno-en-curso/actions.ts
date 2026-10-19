@@ -13,6 +13,7 @@ import { ApiError } from '@/lib/api-client';
 import { deleteShiftCredential, processSyncQueue, saveShiftCredential } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { getCurrentLocation } from '@/lib/location';
+import { readClock, saveTimeReference } from '@/lib/clock/clock';
 import { closeShift, ShiftExecutionApiError, startShift } from './api';
 
 export type ShiftActionResult =
@@ -129,6 +130,7 @@ export async function beginShift(
     };
   const result = await d
     .start(id, {
+      clock: await readClock(await d.repository(), now.toISOString()),
       eventId: d.uuid(),
       occurredAtDevice: now.toISOString(),
       location: await d.location(),
@@ -155,6 +157,7 @@ export async function beginShift(
       };
     });
   if (result.status === 'error') return result;
+  if (result.serverTime) await saveTimeReference(await d.repository(), result.serverTime);
   if ('credential' in result && result.credential) {
     await d.saveCredential(result.credential);
   }
@@ -168,19 +171,21 @@ export async function finishShift(
 ): Promise<ShiftActionResult> {
   const d = deps();
   const now = d.now();
-  const early = isEarlyClose(data.shift.endsAt, now.toISOString());
+  const repository = await d.repository();
+  const clock = await readClock(repository, now.toISOString());
+  const early = isEarlyClose(data.shift.endsAt, clock.trustedAt ?? now.toISOString());
   const trimmedReason = reason.trim();
   if (early && trimmedReason.length < 3)
     return { status: 'error', message: 'Indicá un motivo de al menos 3 caracteres' };
   const eventId = d.uuid();
   const location = await d.location();
   const occurredAtDevice = now.toISOString();
-  const repository = await d.repository();
   await repository.addPendingEvent({
     id: eventId,
     type: 'shift_close',
     payload: {
       shiftId: data.shift.id,
+      clock,
       eventId,
       occurredAtDevice,
       location,
