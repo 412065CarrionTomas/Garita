@@ -15,13 +15,16 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@expo-google-fonts/geist": "^0.4.2",
     "@garita/shared": "workspace:*",
+    "@garita/tokens": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.27",
     "expo-audio": "~57.0.5",
     "expo-camera": "~57.0.6",
     "expo-constants": "~57.0.21",
     "expo-dev-client": "~57.0.19",
+    "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.3",
     "expo-linking": "~57.0.12",
     "expo-location": "~57.0.21",
