@@ -16,6 +16,27 @@ export function Link({
     </a>
   );
 }
+export function NavLink({
+  children,
+  to,
+  className,
+  ...props
+}: {
+  children: ReactNode;
+  to: string;
+  className?: string | ((state: { isActive: boolean }) => string);
+  [key: string]: unknown;
+}) {
+  return (
+    <a
+      href={to}
+      className={typeof className === 'function' ? className({ isActive: false }) : className}
+      {...props}
+    >
+      {children}
+    </a>
+  );
+}
 export function Navigate() {
   return null;
 }
