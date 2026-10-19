@@ -37,6 +37,7 @@ garita/
 │   └── mobile/              # Expo: app del vigilador (Android e iOS)
 ├── packages/
 │   ├── shared/              # @garita/shared: tipos, enums y esquemas Zod compartidos
+│   ├── tokens/              # @garita/tokens: tokens de diseño (color claro/oscuro, espaciado, tipografía)
 │   ├── typescript-config/   # @garita/typescript-config: tsconfig base
 │   └── eslint-config/       # @garita/eslint-config: flat config de ESLint
 ├── docs/                    # Documentación técnica
@@ -73,6 +74,12 @@ pnpm prisma generate
 Antes de dar una tarea por terminada: `pnpm lint`, `pnpm typecheck` y `pnpm test` deben pasar.
 
 ## 5. Convenciones de código
+
+### Interfaz (web y app)
+
+- Leer `docs/diseno/sistema-de-diseno.md` antes de tocar una pantalla. Los valores visuales viven en `@garita/tokens`; las pantallas **no llevan colores, tamaños ni espaciados literales**.
+- Web: componentes de `src/components/ui` (shadcn) y `PageHeader`, `EmptyState`, `StatusBadge`. App: solo componentes de `@/ui`, sin librería de UI externa.
+- Toda pantalla debe verse bien en modo claro y oscuro, y cumplir WCAG 2.1 AA (el estado nunca va solo en color).
 
 ### Generales
 
