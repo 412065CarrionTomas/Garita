@@ -69,7 +69,7 @@ export function LoginScreen() {
         >
           <Text style={styles.link}>{visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}</Text>
         </Pressable>
-        {(message || sessionError) && (
+        {!!(message || sessionError) && (
           <Text accessibilityRole="alert" style={styles.error}>
             {message || sessionError}
           </Text>

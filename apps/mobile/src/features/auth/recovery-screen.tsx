@@ -48,7 +48,7 @@ export function RecoveryScreen() {
               onChangeText={setEmail}
               style={styles.input}
             />
-            {error && (
+            {!!error && (
               <Text accessibilityRole="alert" style={styles.error}>
                 {error}
               </Text>
