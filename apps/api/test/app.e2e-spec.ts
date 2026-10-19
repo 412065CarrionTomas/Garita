@@ -2872,6 +2872,103 @@ describe('Aplicación (e2e)', () => {
       reason: 'other_site',
     });
 
+    // HU-12: misma imputación con NFC, UID vigente descargable e intentos durables.
+    const nfcUid = randomUUID().replace(/-/g, '').slice(0, 14).toUpperCase();
+    const nfcTag = await prisma.nfcTag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointId: cpGalpon.id,
+        uid: nfcUid,
+        status: 'active',
+        associatedById: actor.id,
+      },
+    });
+    const downloaded = await client
+      .get(`/api/v1/turnos/${shift.id}/datos`)
+      .set(guardAuth)
+      .expect(200);
+    expect(
+      z
+        .object({
+          checkpoints: z.array(z.object({ id: z.string(), nfcUid: z.string().nullable() })),
+        })
+        .parse(downloaded.body).checkpoints,
+    ).toContainEqual({ id: cpGalpon.id, nfcUid });
+    const nfcRequest = {
+      ...req1,
+      recordId: randomUUID(),
+      method: 'nfc',
+      scannedValue: nfcUid.toLowerCase().match(/../g)?.join(':'),
+      occurredAtDevice: '2026-10-14T08:30:00.000Z',
+    };
+    const nfcResponse = await client
+      .post('/api/v1/registros-puntos')
+      .set(guardAuth)
+      .send(nfcRequest)
+      .expect(200);
+    expect(nfcResponse.body).toMatchObject({
+      result: 'recorded',
+      checkpointId: cpGalpon.id,
+      outOfWindow: false,
+    });
+    const parsedNfc = checkpointRecordResponseSchema.parse(nfcResponse.body);
+    expect(parsedNfc.result).toBe('recorded');
+    if (parsedNfc.result === 'recorded')
+      expect(parsedNfc.countedFor).toEqual(
+        expect.arrayContaining([
+          { roundId: r1.id, windowIndex: 3, late: false },
+          { roundId: r2.id, windowIndex: 3, late: false },
+        ]),
+      );
+    expect(
+      await prisma.checkpointRecord.findUniqueOrThrow({ where: { recordId: nfcRequest.recordId } }),
+    ).toMatchObject({ method: 'nfc', phoneNfc: 'on' });
+    expect(
+      (await client.post('/api/v1/registros-puntos').set(guardAuth).send(nfcRequest).expect(200))
+        .body,
+    ).toEqual(nfcResponse.body);
+    await prisma.nfcTag.update({ where: { id: nfcTag.id }, data: { status: 'replaced' } });
+    const foreignUid = randomUUID().replace(/-/g, '').slice(0, 14).toUpperCase();
+    await prisma.nfcTag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointId: cpOtroPredio.id,
+        uid: foreignUid,
+        status: 'active',
+        associatedById: actor.id,
+      },
+    });
+    for (const [uid, reason] of [
+      [nfcUid, 'tag_replaced'],
+      [foreignUid, 'tag_not_associated'],
+      ['DEADBEEF', 'tag_not_associated'],
+      ['invalid', 'tag_not_associated'],
+    ] as const) {
+      const attempt = { ...nfcRequest, recordId: randomUUID(), scannedValue: uid };
+      const rejected = await client
+        .post('/api/v1/registros-puntos')
+        .set(guardAuth)
+        .send(attempt)
+        .expect(200);
+      expect(rejected.body).toMatchObject({ result: 'rejected', reason });
+      const savedAttempt = await prisma.invalidScanAttempt.findUniqueOrThrow({
+        where: { recordId: attempt.recordId },
+      });
+      expect(savedAttempt).toMatchObject({
+        method: 'nfc',
+        reason,
+        occurredAtDevice: new Date(attempt.occurredAtDevice),
+      });
+      expect(Number(savedAttempt.latitude)).toBe(defaultLocation.latitude);
+      expect(
+        await prisma.checkpointRecord.findUnique({ where: { recordId: attempt.recordId } }),
+      ).toBeNull();
+      expect(
+        (await client.post('/api/v1/registros-puntos').set(guardAuth).send(attempt).expect(200))
+          .body,
+      ).toEqual(rejected.body);
+    }
+
     // 8. Turno no en curso -> 409 SHIFT_NOT_IN_PROGRESS
     const scheduledShift = await prisma.shift.create({
       data: {

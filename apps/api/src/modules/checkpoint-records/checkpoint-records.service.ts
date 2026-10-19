@@ -176,12 +176,19 @@ export class CheckpointRecordsService {
         }
       }
     } else {
-      const normalizedUid = normalizeNfcUid(input.scannedValue);
-      const tag = await this.prisma.tenantPrisma.nfcTag.findFirst({
-        where: { uid: normalizedUid },
-        include: { checkpoint: true },
-        orderBy: { createdAt: 'desc' },
-      });
+      let normalizedUid: string | null = null;
+      try {
+        normalizedUid = normalizeNfcUid(input.scannedValue);
+      } catch {
+        invalidReason = 'tag_not_associated';
+      }
+      const tag = normalizedUid
+        ? await this.prisma.tenantPrisma.nfcTag.findFirst({
+            where: { uid: normalizedUid },
+            include: { checkpoint: true },
+            orderBy: { createdAt: 'desc' },
+          })
+        : null;
       if (!tag) {
         invalidReason = 'tag_not_associated';
       } else if (tag.status === 'replaced') {
@@ -189,7 +196,7 @@ export class CheckpointRecordsService {
       } else if (tag.status !== 'active') {
         invalidReason = 'tag_not_associated';
       } else if (tag.checkpoint.siteId !== shift.siteId) {
-        invalidReason = 'other_site';
+        invalidReason = 'tag_not_associated';
       } else if (tag.checkpoint.status !== 'active') {
         invalidReason = 'tag_not_associated';
       } else {

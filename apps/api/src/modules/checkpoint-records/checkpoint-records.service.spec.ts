@@ -468,7 +468,7 @@ describe('CheckpointRecordsService', () => {
       });
     });
 
-    it('rechaza con other_site si la etiqueta NFC pertenece a un punto de otro predio', async () => {
+    it('rechaza con tag_not_associated si la etiqueta NFC pertenece a un punto de otro predio', async () => {
       nfcTagFindFirst.mockResolvedValue({
         status: 'active',
         checkpoint: { siteId: 'other-site', status: 'active' },
@@ -480,8 +480,34 @@ describe('CheckpointRecordsService', () => {
       expect(result).toEqual({
         result: 'rejected',
         recordId: request.recordId,
-        reason: 'other_site',
+        reason: 'tag_not_associated',
       });
+    });
+
+    it('guarda un UID malformado como intento en lugar de lanzar un error', async () => {
+      const result = await service.processRecord(
+        createSampleRequest({ method: 'nfc', scannedValue: 'invalid' }),
+        guardUser,
+      );
+      expect(result).toMatchObject({ result: 'rejected', reason: 'tag_not_associated' });
+      expect(invalidScanAttemptCreate).toHaveBeenCalledTimes(1);
+      expect(checkpointRecordCreate).not.toHaveBeenCalled();
+    });
+
+    it('normaliza UID válido y aplica imputación y marcas como QR', async () => {
+      nfcTagFindFirst.mockResolvedValue({
+        status: 'active',
+        checkpoint: { id: 'cp-1', siteId: 'site-1', status: 'active' },
+      });
+      const result = await service.processRecord(
+        createSampleRequest({ method: 'nfc', scannedValue: '04:aa:bb:cc' }),
+        guardUser,
+      );
+      expect(nfcTagFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { uid: '04AABBCC' } }),
+      );
+      expect(result).toMatchObject({ result: 'recorded', checkpointId: 'cp-1' });
+      expect(evaluateRecord).toHaveBeenCalledWith(expect.objectContaining({ method: 'nfc' }));
     });
   });
 
