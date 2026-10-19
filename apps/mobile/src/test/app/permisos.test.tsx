@@ -1,8 +1,8 @@
 import { render, userEvent } from '@testing-library/react-native';
-import PermissionsScreen from './permisos';
-import * as Permissions from '../features/permisos/permissions';
+import PermissionsScreen from '@/app/permisos';
+import * as Permissions from '@/features/permisos/permissions';
 
-jest.mock('../features/permisos/permissions', () => ({ requestFieldPermissions: jest.fn() }));
+jest.mock('@/features/permisos/permissions', () => ({ requestFieldPermissions: jest.fn() }));
 describe('permissions setup screen', () => {
   it('explains location and camera, then requests permissions accessibly', async () => {
     jest.mocked(Permissions.requestFieldPermissions).mockResolvedValue('ok');

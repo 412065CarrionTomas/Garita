@@ -5,7 +5,7 @@ import { useAuth } from '@/features/auth/auth-context';
 import { ApiError, apiDelete, apiGet, apiRequest } from '@/lib/api-client';
 import { nfcAvailability, openNfcSettings, readFactoryUid } from '@/lib/nfc';
 import * as Network from 'expo-network';
-import ConfigurationHome from './index';
+import ConfigurationHome from '@/app/(configuration)/index';
 
 jest.mock('@/features/auth/auth-context', () => ({ useAuth: jest.fn() }));
 jest.mock('@/lib/api-client', () => ({
