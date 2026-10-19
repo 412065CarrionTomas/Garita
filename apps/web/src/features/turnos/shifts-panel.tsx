@@ -1,15 +1,26 @@
 import {
   computeRoundWindows,
+  SHIFT_EXECUTION_STATUSES,
   findUncoveredWindows,
   localDateTimeToUtc,
   shiftInputSchema,
   windowsForShift,
 } from '@garita/shared';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+
+import { PageHeader } from '@/components/page-header';
+import { StatusBadge } from '@/components/status-badge';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
 const shiftRowsSchema = z.array(
   z.looseObject({
@@ -18,7 +29,7 @@ const shiftRowsSchema = z.array(
     startsAt: z.string(),
     endsAt: z.string(),
     serviceDate: z.string(),
-    status: z.enum(['scheduled', 'unassigned', 'cancelled']),
+    status: z.enum(['scheduled', 'unassigned', 'cancelled', ...SHIFT_EXECUTION_STATUSES]),
     site: z.looseObject({ name: z.string(), company: z.looseObject({ timezone: z.string() }) }),
     assignments: z.array(
       z.looseObject({
@@ -94,6 +105,15 @@ interface FormValues {
   endTime: string;
   roundIds: string[];
 }
+const shiftStates = {
+  scheduled: { label: 'Programado', tone: 'info' },
+  unassigned: { label: 'Sin asignar', tone: 'warning' },
+  in_progress: { label: 'En curso', tone: 'signal' },
+  closed: { label: 'Cerrado', tone: 'success' },
+  auto_closed: { label: 'Cerrado por el sistema', tone: 'warning' },
+  cancelled: { label: 'Cancelado', tone: 'neutral' },
+} as const;
+
 const emptyForm: FormValues = {
   siteId: '',
   guardId: '',
@@ -192,7 +212,8 @@ export function ShiftsPanel() {
         id: shift.id,
         startsAt: shift.startsAt,
         endsAt: shift.endsAt,
-        status: shift.status,
+        // La cobertura solo distingue los turnos cancelados.
+        status: shift.status === 'cancelled' ? ('cancelled' as const) : undefined,
         roundIds: shift.rounds.map((item) => item.roundId),
       }))
       .filter((shift) => shift.id !== editing?.id);
@@ -307,70 +328,81 @@ export function ShiftsPanel() {
   };
 
   return (
-    <section className="space-y-5" aria-labelledby="shifts-title">
-      <h1 id="shifts-title" className="text-3xl font-semibold">
-        Turnos
-      </h1>
+    <section className="space-y-6" aria-labelledby="shifts-title">
+      <PageHeader
+        id="shifts-title"
+        title="Turnos"
+        description="Organizá los horarios, vigiladores y rondas de cada predio."
+        actions={
+          <Button
+            onClick={() => {
+              openForm();
+            }}
+          >
+            Nuevo turno
+          </Button>
+        }
+      />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label>
+        <Label className="grid min-w-0 gap-2">
           Predio
-          <select
-            className="block rounded border p-2"
+          <NativeSelect
+            className="w-full"
             value={siteId}
             onChange={(event) => {
               setSiteId(event.target.value);
             }}
           >
-            <option value="">Todos</option>
+            <NativeSelectOption value="">Todos</NativeSelectOption>
             {sites.data?.map((site) => (
-              <option key={site.id} value={site.id}>
+              <NativeSelectOption key={site.id} value={site.id}>
                 {site.name}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </Label>
+        <Label className="grid min-w-0 gap-2">
           Vigilador
-          <select
-            className="block rounded border p-2"
+          <NativeSelect
+            className="w-full"
             value={guardId}
             onChange={(event) => {
               setGuardId(event.target.value);
             }}
           >
-            <option value="">Todos</option>
+            <NativeSelectOption value="">Todos</NativeSelectOption>
             {guards.data?.items.map((guard) => (
-              <option key={guard.id} value={guard.id}>
+              <NativeSelectOption key={guard.id} value={guard.id}>
                 {guard.firstName} {guard.lastName}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </Label>
+        <Label className="grid min-w-0 gap-2">
           Desde
-          <input
-            className="block rounded border p-2"
+          <Input
+            className="w-full"
             type="date"
             value={from}
             onChange={(event) => {
               setFrom(event.target.value);
             }}
           />
-        </label>
-        <label>
+        </Label>
+        <Label className="grid min-w-0 gap-2">
           Hasta
-          <input
-            className="block rounded border p-2"
+          <Input
+            className="w-full"
             type="date"
             value={to}
             onChange={(event) => {
               setTo(event.target.value);
             }}
           />
-        </label>
+        </Label>
       </div>
       <div className="flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2">
+        <Label className="flex items-center gap-2">
           <input
             type="checkbox"
             checked={includeUnassigned}
@@ -379,22 +411,13 @@ export function ShiftsPanel() {
             }}
           />
           Incluir turnos sin vigilador
-        </label>
-        <button
-          type="button"
-          className="rounded border px-3 py-2"
-          onClick={() => {
-            openForm();
-          }}
-        >
-          Crear turno
-        </button>
+        </Label>
       </div>
       {message && <p role="status">{message}</p>}
       {shifts.isPending ? (
         <p role="status">Cargando turnos…</p>
       ) : shifts.isError ? (
-        <p role="alert">No se pudieron cargar los turnos.</p>
+        <Alert variant="destructive">No se pudieron cargar los turnos.</Alert>
       ) : null}
       <div className="space-y-3">
         {shifts.data?.map((shift) => {
@@ -402,80 +425,84 @@ export function ShiftsPanel() {
           const guard = assignment?.guard;
           const started = Date.parse(shift.startsAt) <= now;
           return (
-            <article
-              key={shift.id}
-              className={`space-y-2 rounded border p-4 ${shift.status === 'unassigned' ? 'border-amber-700 bg-amber-50' : ''}`}
-            >
-              <h2 className="font-semibold">
-                {shift.site.name} ·{' '}
-                {new Date(shift.serviceDate).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
-              </h2>
-              <p>
-                {formatShiftTime(shift.startsAt, shift.site.company.timezone)}–
-                {formatShiftTime(shift.endsAt, shift.site.company.timezone)}
-              </p>
-              {guard ? (
-                <p>
-                  {guard.firstName} {guard.lastName}
-                  {guard.status === 'invitation_pending' ? ' · invitación pendiente' : ''}
-                </p>
-              ) : (
-                <p className="font-semibold">
-                  <span aria-hidden="true">⚠ </span>Sin vigilador
-                </p>
-              )}
-              <p>Rondas: {shift.rounds.map(({ round }) => round.name).join(', ')}</p>
-              {shift.status !== 'cancelled' &&
-                (started ? (
-                  <p>Solo se puede reasignar (HU-44).</p>
-                ) : (
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => {
-                        openForm(shift);
-                      }}
+            <article key={shift.id}>
+              <Card
+                className={shift.status === 'unassigned' ? 'bg-warning-soft ring-warning/30' : ''}
+              >
+                <CardContent className="space-y-3">
+                  <StatusBadge tone={shiftStates[shift.status].tone}>
+                    {shiftStates[shift.status].label}
+                  </StatusBadge>
+                  <h2 className="font-semibold tabular-nums">
+                    {shift.site.name} ·{' '}
+                    {new Date(shift.serviceDate).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
+                  </h2>
+                  <p className="tabular-nums text-muted-foreground">
+                    {formatShiftTime(shift.startsAt, shift.site.company.timezone)}–
+                    {formatShiftTime(shift.endsAt, shift.site.company.timezone)}
+                  </p>
+                  {guard ? (
+                    <p>
+                      {guard.firstName} {guard.lastName}
+                      {guard.status === 'invitation_pending' ? ' · invitación pendiente' : ''}
+                    </p>
+                  ) : (
+                    <p className="font-semibold">
+                      <span aria-hidden="true">⚠ </span>Sin vigilador
+                    </p>
+                  )}
+                  <p>Rondas: {shift.rounds.map(({ round }) => round.name).join(', ')}</p>
+                  {shift.status !== 'cancelled' &&
+                    (started ? (
+                      <p>Solo se puede reasignar (HU-44).</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            openForm(shift);
+                          }}
+                        >
+                          {guard ? 'Editar turno' : 'Asignar vigilador'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setCancelId(shift.id);
+                          }}
+                        >
+                          Cancelar turno
+                        </Button>
+                      </div>
+                    ))}
+                  {cancelId === shift.id && (
+                    <Alert
+                      role="alertdialog"
+                      aria-modal="true"
+                      aria-label="Confirmar cancelación"
+                      className="space-y-3 border-warning bg-warning-soft text-warning"
                     >
-                      {guard ? 'Editar turno' : 'Asignar vigilador'}
-                    </button>
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => {
-                        setCancelId(shift.id);
-                      }}
-                    >
-                      Cancelar turno
-                    </button>
-                  </div>
-                ))}
-              {cancelId === shift.id && (
-                <div
-                  role="alertdialog"
-                  aria-modal="true"
-                  aria-label="Confirmar cancelación"
-                  className="rounded border p-3"
-                >
-                  <p>¿Cancelar el turno de {shift.site.name}?</p>
-                  <button
-                    type="button"
-                    className="rounded border px-3 py-2"
-                    onClick={() => void cancel(shift.id)}
-                  >
-                    Confirmar cancelación
-                  </button>
-                  <button
-                    type="button"
-                    className="ml-2 rounded border px-3 py-2"
-                    onClick={() => {
-                      setCancelId('');
-                    }}
-                  >
-                    Volver
-                  </button>
-                </div>
-              )}
+                      <p>¿Cancelar el turno de {shift.site.name}?</p>
+                      <Button type="button" variant="outline" onClick={() => void cancel(shift.id)}>
+                        Confirmar cancelación
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setCancelId('');
+                        }}
+                      >
+                        Volver
+                      </Button>
+                    </Alert>
+                  )}
+                </CardContent>
+              </Card>
             </article>
           );
         })}
@@ -519,216 +546,217 @@ function ShiftFormDialog(props: {
   onClose: () => void;
   onSubmit: (event: SyntheticEvent<HTMLFormElement>) => void;
 }) {
-  const formRef = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (props.open) formRef.current?.focus();
-  }, [props.open]);
-  if (!props.open) return null;
   const set = (patch: Partial<FormValues>) => {
     props.setForm({ ...props.form, ...patch });
   };
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="shift-form-title"
-      className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') props.onClose();
+    <Dialog
+      open={props.open}
+      onOpenChange={(open) => {
+        if (!open) props.onClose();
       }}
     >
-      <form
-        ref={formRef}
-        tabIndex={-1}
-        className="max-h-[90vh] w-full max-w-2xl space-y-4 overflow-auto rounded bg-white p-6"
-        onSubmit={props.onSubmit}
-      >
-        <h2 id="shift-form-title" className="text-xl font-semibold">
-          {props.editing ? 'Editar turno' : 'Crear turno'}
-        </h2>
-        <p>Zona horaria de la empresa: {props.timezone}</p>
-        <label className="grid gap-1">
-          Predio
-          <select
-            required
-            value={props.form.siteId}
-            aria-label="Predio del turno"
-            aria-invalid={Boolean(props.fieldErrors.siteId)}
-            aria-describedby={props.fieldErrors.siteId ? 'shift-site-error' : undefined}
-            onChange={(event) => {
-              set({ siteId: event.target.value, roundIds: [] });
-            }}
-            className="rounded border p-2"
-          >
-            <option value="">Seleccioná un predio</option>
-            {props.sites
-              .filter((site) => site.status === 'active')
-              .map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name}
-                </option>
-              ))}
-          </select>
-          {props.fieldErrors.siteId && (
-            <span id="shift-site-error">{props.fieldErrors.siteId}</span>
-          )}
-        </label>
-        <label className="grid gap-1">
-          Vigilador
-          <select
-            value={props.form.guardId}
-            aria-label="Vigilador del turno"
-            aria-invalid={Boolean(props.fieldErrors.guardId)}
-            aria-describedby={props.fieldErrors.guardId ? 'shift-guard-error' : undefined}
-            onChange={(event) => {
-              set({ guardId: event.target.value });
-            }}
-            className="rounded border p-2"
-          >
-            <option value="">Sin vigilador</option>
-            {props.guards
-              .filter((guard) => guard.status === 'active' || guard.status === 'invitation_pending')
-              .map((guard) => (
-                <option key={guard.id} value={guard.id}>
-                  {guard.firstName} {guard.lastName}
-                  {guard.status === 'invitation_pending' ? ' · invitación pendiente' : ''}
-                </option>
-              ))}
-          </select>
-          {props.fieldErrors.guardId && (
-            <span id="shift-guard-error">{props.fieldErrors.guardId}</span>
-          )}
-        </label>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1">
-            Fecha de inicio
-            <input
+      <DialogContent aria-labelledby="shift-form-title" aria-describedby="shift-form-description">
+        <form className="space-y-4" onSubmit={props.onSubmit}>
+          <DialogTitle id="shift-form-title" className="text-xl font-semibold">
+            {props.editing ? 'Editar turno' : 'Crear turno'}
+          </DialogTitle>
+          <DialogDescription id="shift-form-description" className="text-sm text-muted-foreground">
+            Zona horaria de la empresa: {props.timezone}
+          </DialogDescription>
+          <Label className="grid gap-1">
+            Predio
+            <NativeSelect
               required
-              type="date"
-              value={props.form.startDate}
-              aria-invalid={Boolean(props.fieldErrors.startsAt)}
-              aria-describedby={props.fieldErrors.startsAt ? 'shift-start-error' : undefined}
+              value={props.form.siteId}
+              aria-label="Predio del turno"
+              aria-invalid={Boolean(props.fieldErrors.siteId)}
+              aria-describedby={props.fieldErrors.siteId ? 'shift-site-error' : undefined}
               onChange={(event) => {
-                set({ startDate: event.target.value });
+                set({ siteId: event.target.value, roundIds: [] });
               }}
-              className="rounded border p-2"
-            />
-            {props.fieldErrors.startsAt && (
-              <span id="shift-start-error">{props.fieldErrors.startsAt}</span>
+              className="w-full"
+            >
+              <NativeSelectOption value="">Seleccioná un predio</NativeSelectOption>
+              {props.sites
+                .filter((site) => site.status === 'active')
+                .map((site) => (
+                  <NativeSelectOption key={site.id} value={site.id}>
+                    {site.name}
+                  </NativeSelectOption>
+                ))}
+            </NativeSelect>
+            {props.fieldErrors.siteId && (
+              <span className="text-sm text-danger" id="shift-site-error">
+                {props.fieldErrors.siteId}
+              </span>
             )}
-          </label>
-          <label className="grid gap-1">
-            Hora de inicio (24 h)
-            <input
-              required
-              type="time"
-              step="60"
-              value={props.form.startTime}
-              aria-invalid={Boolean(props.fieldErrors.startsAt)}
-              aria-describedby={props.fieldErrors.startsAt ? 'shift-start-error' : undefined}
+          </Label>
+          <Label className="grid gap-1">
+            Vigilador
+            <NativeSelect
+              value={props.form.guardId}
+              aria-label="Vigilador del turno"
+              aria-invalid={Boolean(props.fieldErrors.guardId)}
+              aria-describedby={props.fieldErrors.guardId ? 'shift-guard-error' : undefined}
               onChange={(event) => {
-                set({ startTime: event.target.value });
+                set({ guardId: event.target.value });
               }}
-              className="rounded border p-2"
-            />
-          </label>
-          <label className="grid gap-1">
-            Fecha de fin
-            <input
-              required
-              type="date"
-              value={props.form.endDate}
-              aria-invalid={Boolean(props.fieldErrors.endsAt)}
-              aria-describedby={props.fieldErrors.endsAt ? 'shift-end-error' : undefined}
-              onChange={(event) => {
-                set({ endDate: event.target.value });
-              }}
-              className="rounded border p-2"
-            />
-            {props.fieldErrors.endsAt && (
-              <span id="shift-end-error">{props.fieldErrors.endsAt}</span>
+              className="w-full"
+            >
+              <NativeSelectOption value="">Sin vigilador</NativeSelectOption>
+              {props.guards
+                .filter(
+                  (guard) => guard.status === 'active' || guard.status === 'invitation_pending',
+                )
+                .map((guard) => (
+                  <NativeSelectOption key={guard.id} value={guard.id}>
+                    {guard.firstName} {guard.lastName}
+                    {guard.status === 'invitation_pending' ? ' · invitación pendiente' : ''}
+                  </NativeSelectOption>
+                ))}
+            </NativeSelect>
+            {props.fieldErrors.guardId && (
+              <span className="text-sm text-danger" id="shift-guard-error">
+                {props.fieldErrors.guardId}
+              </span>
             )}
-          </label>
-          <label className="grid gap-1">
-            Hora de fin (24 h)
-            <input
-              required
-              type="time"
-              step="60"
-              value={props.form.endTime}
-              aria-invalid={Boolean(props.fieldErrors.endsAt)}
-              aria-describedby={props.fieldErrors.endsAt ? 'shift-end-error' : undefined}
-              onChange={(event) => {
-                set({ endTime: event.target.value });
-              }}
-              className="rounded border p-2"
-            />
-          </label>
-        </div>
-        <fieldset
-          aria-invalid={Boolean(props.fieldErrors.roundIds)}
-          aria-describedby={props.fieldErrors.roundIds ? 'shift-rounds-error' : undefined}
-          className="space-y-2"
-        >
-          <legend className="font-medium">Rondas del predio</legend>
-          {props.rounds
-            .filter((round) => round.status === 'active')
-            .map((round) => (
-              <label key={round.id} className="block">
-                <input
-                  type="checkbox"
-                  checked={props.form.roundIds.includes(round.id)}
-                  onChange={(event) => {
-                    set({
-                      roundIds: event.target.checked
-                        ? [...props.form.roundIds, round.id]
-                        : props.form.roundIds.filter((id) => id !== round.id),
-                    });
-                  }}
-                />{' '}
-                {round.name}
-              </label>
-            ))}
-          {props.fieldErrors.roundIds && (
-            <p id="shift-rounds-error">{props.fieldErrors.roundIds}</p>
-          )}
-        </fieldset>
-        <section aria-labelledby="expected-windows-title">
-          <h3 id="expected-windows-title" className="font-medium">
-            Ventanas esperadas del turno
-          </h3>
-          {props.preview.expected.length ? (
-            <ul>
-              {props.preview.expected.map((window, index) => (
-                <li key={`${window}-${index}`}>{window}</li>
+          </Label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Label className="grid gap-1">
+              Fecha de inicio
+              <Input
+                required
+                type="date"
+                value={props.form.startDate}
+                aria-invalid={Boolean(props.fieldErrors.startsAt)}
+                aria-describedby={props.fieldErrors.startsAt ? 'shift-start-error' : undefined}
+                onChange={(event) => {
+                  set({ startDate: event.target.value });
+                }}
+                className="w-full"
+              />
+              {props.fieldErrors.startsAt && (
+                <span className="text-sm text-danger" id="shift-start-error">
+                  {props.fieldErrors.startsAt}
+                </span>
+              )}
+            </Label>
+            <Label className="grid gap-1">
+              Hora de inicio (24 h)
+              <Input
+                required
+                type="time"
+                step="60"
+                value={props.form.startTime}
+                aria-invalid={Boolean(props.fieldErrors.startsAt)}
+                aria-describedby={props.fieldErrors.startsAt ? 'shift-start-error' : undefined}
+                onChange={(event) => {
+                  set({ startTime: event.target.value });
+                }}
+                className="w-full"
+              />
+            </Label>
+            <Label className="grid gap-1">
+              Fecha de fin
+              <Input
+                required
+                type="date"
+                value={props.form.endDate}
+                aria-invalid={Boolean(props.fieldErrors.endsAt)}
+                aria-describedby={props.fieldErrors.endsAt ? 'shift-end-error' : undefined}
+                onChange={(event) => {
+                  set({ endDate: event.target.value });
+                }}
+                className="w-full"
+              />
+              {props.fieldErrors.endsAt && (
+                <span className="text-sm text-danger" id="shift-end-error">
+                  {props.fieldErrors.endsAt}
+                </span>
+              )}
+            </Label>
+            <Label className="grid gap-1">
+              Hora de fin (24 h)
+              <Input
+                required
+                type="time"
+                step="60"
+                value={props.form.endTime}
+                aria-invalid={Boolean(props.fieldErrors.endsAt)}
+                aria-describedby={props.fieldErrors.endsAt ? 'shift-end-error' : undefined}
+                onChange={(event) => {
+                  set({ endTime: event.target.value });
+                }}
+                className="w-full"
+              />
+            </Label>
+          </div>
+          <fieldset
+            aria-invalid={Boolean(props.fieldErrors.roundIds)}
+            aria-describedby={props.fieldErrors.roundIds ? 'shift-rounds-error' : undefined}
+            className="space-y-2"
+          >
+            <legend className="font-medium">Rondas del predio</legend>
+            {props.rounds
+              .filter((round) => round.status === 'active')
+              .map((round) => (
+                <Label key={round.id} className="block">
+                  <input
+                    type="checkbox"
+                    checked={props.form.roundIds.includes(round.id)}
+                    onChange={(event) => {
+                      set({
+                        roundIds: event.target.checked
+                          ? [...props.form.roundIds, round.id]
+                          : props.form.roundIds.filter((id) => id !== round.id),
+                      });
+                    }}
+                  />{' '}
+                  {round.name}
+                </Label>
               ))}
-            </ul>
-          ) : (
-            <p>Seleccioná fechas y rondas para calcular las ventanas.</p>
+            {props.fieldErrors.roundIds && (
+              <p className="text-sm text-danger" id="shift-rounds-error">
+                {props.fieldErrors.roundIds}
+              </p>
+            )}
+          </fieldset>
+          <section aria-labelledby="expected-windows-title">
+            <h3 id="expected-windows-title" className="font-medium">
+              Ventanas esperadas del turno
+            </h3>
+            {props.preview.expected.length ? (
+              <ul>
+                {props.preview.expected.map((window, index) => (
+                  <li key={`${window}-${index}`}>{window}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>Seleccioná fechas y rondas para calcular las ventanas.</p>
+            )}
+          </section>
+          {props.preview.uncovered.length > 0 && (
+            <Alert role="status" className="border-warning bg-warning-soft text-warning">
+              Advertencia: estas ventanas no quedan cubiertas por ningún turno:{' '}
+              {props.preview.uncovered.join(', ')}. Podés guardar igual.
+            </Alert>
           )}
-        </section>
-        {props.preview.uncovered.length > 0 && (
-          <p role="status">
-            Advertencia: estas ventanas no quedan cubiertas por ningún turno:{' '}
-            {props.preview.uncovered.join(', ')}. Podés guardar igual.
-          </p>
-        )}
-        {props.error && (
-          <p role="alert">
-            {props.error}
-            {props.conflict ? ` Turno en conflicto: ${props.conflict}.` : ''}
-          </p>
-        )}
-        <div className="flex gap-3">
-          <button className="rounded bg-primary px-4 py-2 text-primary-foreground">
-            Guardar turno
-          </button>
-          <button type="button" className="rounded border px-4 py-2" onClick={props.onClose}>
-            Cancelar
-          </button>
-        </div>
-      </form>
-    </div>
+          {props.error && (
+            <Alert variant="destructive">
+              {props.error}
+              {props.conflict ? ` Turno en conflicto: ${props.conflict}.` : ''}
+            </Alert>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <Button type="submit">Guardar turno</Button>
+            <Button type="button" variant="outline" onClick={props.onClose}>
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
