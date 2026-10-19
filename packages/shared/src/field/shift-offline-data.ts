@@ -11,6 +11,7 @@ export const shiftOfflineDataSchema = z.object({
     endsAt: isoDateTime,
     timezone: z.string().min(1),
     assignmentId: z.string().min(1),
+    syncDeadlineAt: isoDateTime.optional(),
   }),
   rounds: z.array(
     z.object({
