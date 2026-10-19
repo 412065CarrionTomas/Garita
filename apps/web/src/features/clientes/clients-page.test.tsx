@@ -19,7 +19,9 @@ jest.mock('@/lib/api-client', () => {
             shiftsToCancel: 4,
             weeklySchedulesToEnd: 1,
             inProgressShiftsToClose: 2,
-            shifts: [],
+            shifts: [
+              { id: 'shift-1', startsAt: '2026-10-20T10:00:00Z', endsAt: '2026-10-20T18:00:00Z' },
+            ],
           })
         : Promise.resolve([
             {
@@ -40,8 +42,20 @@ jest.mock('@/lib/api-client', () => {
 });
 
 describe('ClientsPage', () => {
+  it('abre el alta desde el encabezado y permite cancelar sin enviar', async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<ClientsPage />);
+    expect(screen.queryByLabelText('Nombre o razón social')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Nuevo cliente' }));
+    expect(screen.getByRole('dialog', { name: 'Nuevo cliente' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo cliente' })).toHaveFocus();
+  });
+
   it('valida los campos obligatorios antes de enviar', async () => {
     renderWithQueryClient(<ClientsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo cliente' }));
     fireEvent.change(screen.getByLabelText('Nombre o razón social'), {
       target: { value: 'Cliente' },
     });
@@ -56,6 +70,7 @@ describe('ClientsPage', () => {
 
   it('muestra el conflicto de nombre duplicado enviado por la API', async () => {
     renderWithQueryClient(<ClientsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo cliente' }));
     for (const [label, value] of [
       ['Nombre o razón social', 'Cliente'],
       ['Persona de contacto', 'Ana'],
@@ -103,6 +118,9 @@ describe('ClientsPage', () => {
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Dar de baja al cliente' });
     expect(dialog).toHaveTextContent('Se cancelarán 4 turnos');
+    expect(
+      within(dialog).getByRole('list', { name: 'Turnos que se cancelarán' }).children,
+    ).toHaveLength(1);
     expect(dialog).toHaveTextContent('terminarán 1 programaciones semanales');
     expect(dialog).toHaveTextContent('se cerrarán 2 turnos en curso');
     await user.click(screen.getByRole('button', { name: 'Confirmar baja' }));
