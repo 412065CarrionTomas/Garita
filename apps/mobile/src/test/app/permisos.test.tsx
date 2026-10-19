@@ -13,5 +13,11 @@ describe('permissions setup screen', () => {
     await user.press(screen.getByRole('button', { name: 'Permitir ubicación precisa y cámara' }));
     expect(await screen.findByText(/permisos están listos/)).toBeTruthy();
     expect(Permissions.requestFieldPermissions).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Continuar a mis turnos' })).toBeTruthy();
+    expect(
+      screen
+        .getAllByRole('text', { name: 'Los permisos están listos para iniciar tu turno.' })
+        .some((element) => element.props.accessibilityLiveRegion === 'polite'),
+    ).toBe(true);
   });
 });
