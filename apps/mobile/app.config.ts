@@ -23,7 +23,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     package: 'com.garita.app',
     adaptiveIcon: {
-      backgroundColor: '#171717',
+      backgroundColor: '#0F2347',
       foregroundImage: './assets/images/android-icon-foreground.png',
       monochromeImage: './assets/images/android-icon-monochrome.png',
     },
@@ -65,7 +65,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-splash-screen',
       {
-        backgroundColor: '#171717',
+        backgroundColor: '#0F2347',
         image: './assets/images/splash-icon.png',
         imageWidth: 120,
       },

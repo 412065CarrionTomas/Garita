@@ -1,4 +1,6 @@
 import { Stack } from 'expo-router';
+import { useStackOptions } from '@/ui';
 export default function AuthLayout() {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  const options = useStackOptions();
+  return <Stack screenOptions={options} />;
 }
