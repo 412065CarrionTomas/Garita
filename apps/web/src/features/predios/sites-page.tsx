@@ -14,7 +14,14 @@ import { SiteLocation } from '../mapa/site-location';
 import { z } from 'zod';
 import { CheckpointsPanel } from '../puntos/checkpoints-panel';
 import { RoundsPanel } from '../rondas/rounds-panel';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +30,18 @@ import {
   AlertDialogDescription,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+
+import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { StatusBadge } from '@/components/status-badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Alert } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 
 function SiteSpeedConfig({
   site,
@@ -89,12 +108,12 @@ function SiteSpeedConfig({
   };
 
   return (
-    <form onSubmit={(event) => void handleSubmit(event)} className="mt-3 rounded border p-3">
-      <label htmlFor={`speed-profile-${site.id}`} className="block text-sm font-medium">
+    <form onSubmit={(event) => void handleSubmit(event)} className="space-y-3 border-t pt-4">
+      <Label htmlFor={`speed-profile-${site.id}`} className="block text-sm font-medium">
         Velocidad máxima de recorrido
-      </label>
+      </Label>
       <div className="mt-1 flex flex-wrap items-center gap-3">
-        <select
+        <NativeSelect
           id={`speed-profile-${site.id}`}
           aria-label={`Velocidad máxima de recorrido para ${site.name}`}
           value={profile}
@@ -103,20 +122,20 @@ function SiteSpeedConfig({
             setSuccess(false);
             setError('');
           }}
-          className="rounded border p-2 text-sm"
+          className="w-full sm:w-auto"
         >
-          <option value="walking">A pie (10 km/h)</option>
-          <option value="bicycle">Bicicleta (25 km/h)</option>
-          <option value="vehicle">Vehículo (60 km/h)</option>
-          <option value="custom">Personalizado</option>
-        </select>
+          <NativeSelectOption value="walking">A pie (10 km/h)</NativeSelectOption>
+          <NativeSelectOption value="bicycle">Bicicleta (25 km/h)</NativeSelectOption>
+          <NativeSelectOption value="vehicle">Vehículo (60 km/h)</NativeSelectOption>
+          <NativeSelectOption value="custom">Personalizado</NativeSelectOption>
+        </NativeSelect>
 
         {profile === 'custom' && (
           <div className="flex items-center gap-2">
-            <label htmlFor={`speed-kmh-${site.id}`} className="text-sm font-medium">
+            <Label htmlFor={`speed-kmh-${site.id}`} className="text-sm font-medium">
               km/h:
-            </label>
-            <input
+            </Label>
+            <Input
               id={`speed-kmh-${site.id}`}
               type="number"
               min={5}
@@ -128,28 +147,24 @@ function SiteSpeedConfig({
                 setSuccess(false);
                 setError('');
               }}
-              className="w-24 rounded border p-2 text-sm"
+              className="w-24"
               required
             />
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-        >
+        <Button type="submit" disabled={saving} variant="outline">
           {saving ? 'Guardando…' : 'Guardar velocidad'}
-        </button>
+        </Button>
       </div>
 
       {error && (
-        <p role="alert" className="mt-2 text-sm text-destructive">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {error}
         </p>
       )}
       {success && (
-        <p role="status" className="mt-2 text-sm text-green-700">
+        <p role="status" className="mt-2 text-sm text-success">
           Velocidad actualizada correctamente
         </p>
       )}
@@ -159,6 +174,7 @@ function SiteSpeedConfig({
 
 export function SitesPage() {
   const { user } = useAuth();
+  const [creating, setCreating] = useState(false);
   const sites = useQuery({
     queryKey: ['predios'],
     queryFn: () => apiGet('/predios', sitesResponseSchema),
@@ -228,195 +244,276 @@ export function SitesPage() {
     try {
       await apiPost('/predios', parsed.data, siteInputSchema, response);
       setCreateError('');
+      setCreating(false);
       await sites.refetch();
     } catch (caught) {
       setCreateError(errorMessage(caught, 'Ya existe un predio con ese nombre en el cliente'));
     }
   };
   return (
-    <section className="space-y-4">
-      <h1 className="text-3xl font-semibold">Predios</h1>
-      {user?.role === 'admin' && (
-        <form className="grid gap-3 rounded border p-4" onSubmit={(event) => void save(event)}>
-          <h2 className="text-xl font-semibold">Alta de predio</h2>
-          <label>
-            Cliente
-            <select
-              required
-              value={form.clientId}
-              onChange={(event) => {
-                setForm({ ...form, clientId: event.target.value });
-              }}
-              className="block rounded border p-2"
-            >
-              <option value="" disabled>
-                Seleccioná un cliente
-              </option>
-              {clients.data?.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Nombre
-            <input
-              required
-              value={form.name}
-              onChange={(event) => {
-                setForm({ ...form, name: event.target.value });
-              }}
-              className="block rounded border p-2"
-            />
-          </label>
-          <label>
-            Dirección
-            <input
-              required
-              value={form.address}
-              onChange={(event) => {
-                setForm({ ...form, address: event.target.value });
-              }}
-              className="block rounded border p-2"
-            />
-          </label>
-          <SiteLocation
-            latitude={form.latitude}
-            longitude={form.longitude}
-            onChange={(latitude, longitude) => {
-              setForm({ ...form, latitude, longitude });
-            }}
-          />
-          <label>
-            Instrucciones de acceso
-            <textarea
-              value={form.accessInstructions}
-              onChange={(event) => {
-                setForm({ ...form, accessInstructions: event.target.value });
-              }}
-              className="block rounded border p-2"
-            />
-          </label>
-          <label>
-            Observaciones
-            <textarea
-              value={form.observations}
-              onChange={(event) => {
-                setForm({ ...form, observations: event.target.value });
-              }}
-              className="block rounded border p-2"
-            />
-          </label>
-          {createError && <p role="alert">{createError}</p>}
-          <button className="rounded bg-primary px-4 py-2 text-primary-foreground">
-            Guardar predio
-          </button>
-        </form>
-      )}
-      {actionError && <p role="alert">{actionError}</p>}
+    <section aria-labelledby="sites-title" className="space-y-6">
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <PageHeader
+          id="sites-title"
+          title="Predios"
+          description="Organizá las ubicaciones, los supervisores y las rondas de cada predio."
+          actions={
+            user?.role === 'admin' && (
+              <DialogTrigger asChild>
+                <Button>Nuevo predio</Button>
+              </DialogTrigger>
+            )
+          }
+        />
+        {user?.role === 'admin' && (
+          <DialogContent className="space-y-4">
+            <DialogTitle className="text-lg font-semibold">Alta de predio</DialogTitle>
+            <DialogDescription>Ingresá los datos y la ubicación del predio.</DialogDescription>
+            <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => void save(event)}>
+              <div className="grid gap-2">
+                <Label htmlFor="site-create-clientId">Cliente</Label>
+                <NativeSelect
+                  id="site-create-clientId"
+                  required
+                  value={form.clientId}
+                  onChange={(event) => {
+                    setForm({ ...form, clientId: event.target.value });
+                  }}
+                  className="w-full"
+                >
+                  <NativeSelectOption value="" disabled>
+                    Seleccioná un cliente
+                  </NativeSelectOption>
+                  {clients.data?.map((client) => (
+                    <NativeSelectOption key={client.id} value={client.id}>
+                      {client.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="site-create-name">Nombre</Label>
+                <Input
+                  id="site-create-name"
+                  required
+                  value={form.name}
+                  onChange={(event) => {
+                    setForm({ ...form, name: event.target.value });
+                  }}
+                  className="w-full"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="site-create-address">Dirección</Label>
+                <Input
+                  id="site-create-address"
+                  required
+                  value={form.address}
+                  onChange={(event) => {
+                    setForm({ ...form, address: event.target.value });
+                  }}
+                  className="w-full"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <SiteLocation
+                  latitude={form.latitude}
+                  longitude={form.longitude}
+                  onChange={(latitude, longitude) => {
+                    setForm({ ...form, latitude, longitude });
+                  }}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="site-create-accessInstructions">Instrucciones de acceso</Label>
+                <Textarea
+                  id="site-create-accessInstructions"
+                  value={form.accessInstructions}
+                  onChange={(event) => {
+                    setForm({ ...form, accessInstructions: event.target.value });
+                  }}
+                  className="w-full"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="site-create-observations">Observaciones</Label>
+                <Textarea
+                  id="site-create-observations"
+                  value={form.observations}
+                  onChange={(event) => {
+                    setForm({ ...form, observations: event.target.value });
+                  }}
+                  className="w-full"
+                />
+              </div>
+              {createError && (
+                <Alert variant="destructive" className="sm:col-span-2">
+                  {createError}
+                </Alert>
+              )}
+              <div className="flex flex-wrap justify-end gap-2 sm:col-span-2">
+                <DialogClose asChild>
+                  <Button type="button" variant="outline">
+                    Cancelar
+                  </Button>
+                </DialogClose>
+                <Button>Guardar predio</Button>
+              </div>
+            </form>
+          </DialogContent>
+        )}
+      </Dialog>
+      {actionError && <Alert variant="destructive">{actionError}</Alert>}
       {sites.isPending ? (
-        <p role="status">Cargando predios…</p>
+        <div role="status" className="space-y-3">
+          <span className="sr-only">Cargando predios…</span>
+          {[0, 1, 2].map((row) => (
+            <Skeleton key={row} className="h-24 w-full" />
+          ))}
+        </div>
       ) : sites.isError ? (
-        <p role="alert">No se pudieron cargar los predios.</p>
+        <Alert variant="destructive">No se pudieron cargar los predios.</Alert>
+      ) : sites.data.length === 0 ? (
+        <EmptyState
+          title="Todavía no hay predios"
+          description="Los predios disponibles aparecerán acá."
+          action={
+            user?.role === 'admin' && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCreating(true);
+                }}
+              >
+                Nuevo predio
+              </Button>
+            )
+          }
+        />
       ) : (
-        <ul className="divide-y">
+        <ul className="space-y-6">
           {sites.data.map((site) => (
-            <li key={site.id} className="py-4">
-              <h2 className="font-semibold">{site.name}</h2>
-              <p>
-                {site.address} · {site.latitude}, {site.longitude}
-              </p>
-              {site.status === 'active' && (
-                <span className="text-sm">
-                  {user?.role === 'supervisor' ? 'Solo lectura' : 'Administración'}
-                </span>
-              )}
-              <CheckpointsPanel site={site} />
-              <RoundsPanel site={site} />
-              <SiteSpeedConfig
-                site={site}
-                canConfigure={
-                  site.status === 'active' &&
-                  (user?.role === 'admin' ||
-                    (user?.role === 'supervisor' &&
-                      Boolean(site.supervisors?.some(({ user: u }) => u.id === user.id))))
-                }
-                onSaved={() => void sites.refetch()}
-              />
-              {user?.role === 'admin' && !site.hasActiveSupervisor && (
-                <p role="status">Sin supervisor activo</p>
-              )}
-              {user?.role === 'admin' && site.status === 'active' && (
-                <div className="mt-2 space-y-2">
-                  <label className="block">
-                    Supervisores asignados
-                    <select
-                      multiple
-                      aria-label={`Supervisores de ${site.name}`}
-                      value={
-                        supervisorIds[site.id] ?? site.supervisors?.map(({ user }) => user.id) ?? []
-                      }
-                      onChange={(event) => {
-                        const selected = [...event.currentTarget.selectedOptions].map(
-                          (option) => option.value,
-                        );
-                        const previous =
-                          supervisorIds[site.id] ??
-                          site.supervisors?.map(({ user }) => user.id) ??
-                          [];
-                        // Muestra la selección al instante y la revierte si el guardado falla.
-                        setSupervisorIds((current) => ({ ...current, [site.id]: selected }));
-                        setActionError('');
-                        void apiPut(
-                          `/predios/${site.id}/supervisores`,
-                          { supervisorIds: selected },
-                          z.object({ supervisorIds: z.array(z.string()) }),
-                          z.array(z.unknown()),
-                        )
-                          .then(() => sites.refetch())
-                          .catch((caught: unknown) => {
-                            setSupervisorIds((current) => ({ ...current, [site.id]: previous }));
-                            setActionError(errorMessage(caught));
+            <li key={site.id}>
+              <Card>
+                <CardHeader className="border-b">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-lg font-semibold break-words">{site.name}</h2>
+                    <StatusBadge tone={site.status === 'active' ? 'success' : 'neutral'}>
+                      {site.status === 'active' ? 'Activo' : 'Inactivo'}
+                    </StatusBadge>
+                  </div>
+                  <p className="text-muted-foreground">
+                    Cliente: {clients.data?.find((client) => client.id === site.clientId)?.name}
+                  </p>
+                  <p>
+                    {site.address} · {site.latitude}, {site.longitude}
+                  </p>
+                  {site.status === 'active' && (
+                    <span className="text-sm">
+                      {user?.role === 'supervisor' ? 'Solo lectura' : 'Administración'}
+                    </span>
+                  )}
+                  {user?.role === 'admin' && site.status === 'active' && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEditError('');
+                          setEditing(site);
+                          setEditForm({
+                            clientId: site.clientId,
+                            name: site.name,
+                            address: site.address,
+                            latitude: Number(site.latitude),
+                            longitude: Number(site.longitude),
+                            accessInstructions: site.accessInstructions ?? '',
+                            observations: site.observations ?? '',
                           });
-                      }}
-                      className="block min-h-24 w-full rounded border p-2"
-                    >
-                      {supervisors.data?.map((supervisor) => (
-                        <option key={supervisor.id} value={supervisor.id}>
-                          {supervisor.firstName} {supervisor.lastName}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    className="underline"
-                    onClick={() => {
-                      setEditError('');
-                      setEditing(site);
-                      setEditForm({
-                        clientId: site.clientId,
-                        name: site.name,
-                        address: site.address,
-                        latitude: Number(site.latitude),
-                        longitude: Number(site.longitude),
-                        accessInstructions: site.accessInstructions ?? '',
-                        observations: site.observations ?? '',
-                      });
-                    }}
-                  >
-                    Editar predio
-                  </button>
-                  <button
-                    className="ml-4 underline"
-                    onClick={() => {
-                      setDeleting({ id: site.id, name: site.name });
-                    }}
-                  >
-                    Dar de baja
-                  </button>
-                </div>
-              )}
+                        }}
+                      >
+                        Editar predio
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setDeleting({ id: site.id, name: site.name });
+                        }}
+                      >
+                        Dar de baja
+                      </Button>
+                    </div>
+                  )}
+                </CardHeader>
+                <CardContent className="min-w-0 space-y-6">
+                  <CheckpointsPanel site={site} />
+                  <RoundsPanel site={site} />
+                  <SiteSpeedConfig
+                    site={site}
+                    canConfigure={
+                      site.status === 'active' &&
+                      (user?.role === 'admin' ||
+                        (user?.role === 'supervisor' &&
+                          Boolean(site.supervisors?.some(({ user: u }) => u.id === user.id))))
+                    }
+                    onSaved={() => void sites.refetch()}
+                  />
+                  {user?.role === 'admin' && !site.hasActiveSupervisor && (
+                    <p role="status">Sin supervisor activo</p>
+                  )}
+                  {user?.role === 'admin' && site.status === 'active' && (
+                    <div className="mt-2 space-y-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor={`supervisors-${site.id}`}>Supervisores asignados</Label>
+                        <NativeSelect
+                          id={`supervisors-${site.id}`}
+                          multiple
+                          aria-label={`Supervisores de ${site.name}`}
+                          value={
+                            supervisorIds[site.id] ??
+                            site.supervisors?.map(({ user }) => user.id) ??
+                            []
+                          }
+                          onChange={(event) => {
+                            const selected = [...event.currentTarget.selectedOptions].map(
+                              (option) => option.value,
+                            );
+                            const previous =
+                              supervisorIds[site.id] ??
+                              site.supervisors?.map(({ user }) => user.id) ??
+                              [];
+                            // Muestra la selección al instante y la revierte si el guardado falla.
+                            setSupervisorIds((current) => ({ ...current, [site.id]: selected }));
+                            setActionError('');
+                            void apiPut(
+                              `/predios/${site.id}/supervisores`,
+                              { supervisorIds: selected },
+                              z.object({ supervisorIds: z.array(z.string()) }),
+                              z.array(z.unknown()),
+                            )
+                              .then(() => sites.refetch())
+                              .catch((caught: unknown) => {
+                                setSupervisorIds((current) => ({
+                                  ...current,
+                                  [site.id]: previous,
+                                }));
+                                setActionError(errorMessage(caught));
+                              });
+                          }}
+                          className="w-full [&>select]:h-24 [&>svg]:hidden"
+                        >
+                          {supervisors.data?.map((supervisor) => (
+                            <NativeSelectOption key={supervisor.id} value={supervisor.id}>
+                              {supervisor.firstName} {supervisor.lastName}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </li>
           ))}
         </ul>
@@ -430,13 +527,13 @@ export function SitesPage() {
           }
         }}
       >
-        <DialogContent aria-describedby="site-edit-description">
-          <DialogTitle>Editar predio</DialogTitle>
+        <DialogContent aria-describedby="site-edit-description" className="space-y-4">
+          <DialogTitle className="text-lg font-semibold">Editar predio</DialogTitle>
           <DialogDescription id="site-edit-description">
             Actualizá los datos, la ubicación y las indicaciones del predio.
           </DialogDescription>
           <form
-            className="mt-4 grid gap-3"
+            className="grid gap-4 sm:grid-cols-2"
             onSubmit={(event) => {
               event.preventDefault();
               const parsed = siteInputSchema.safeParse(editForm);
@@ -458,69 +555,77 @@ export function SitesPage() {
                 });
             }}
           >
-            <label>
-              Nombre
-              <input
+            <div className="grid gap-2">
+              <Label htmlFor="site-edit-name">Nombre</Label>
+              <Input
+                id="site-edit-name"
                 required
                 value={editForm.name}
                 onChange={(event) => {
                   setEditForm({ ...editForm, name: event.target.value });
                 }}
-                className="block w-full rounded border p-2"
+                className="w-full"
               />
-            </label>
-            <label>
-              Dirección
-              <input
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="site-edit-address">Dirección</Label>
+              <Input
+                id="site-edit-address"
                 required
                 value={editForm.address}
                 onChange={(event) => {
                   setEditForm({ ...editForm, address: event.target.value });
                 }}
-                className="block w-full rounded border p-2"
+                className="w-full"
               />
-            </label>
-            <SiteLocation
-              latitude={editForm.latitude}
-              longitude={editForm.longitude}
-              onChange={(latitude, longitude) => {
-                setEditForm({ ...editForm, latitude, longitude });
-              }}
-            />
-            <label>
-              Instrucciones de acceso
-              <textarea
+            </div>
+            <div className="sm:col-span-2">
+              <SiteLocation
+                latitude={editForm.latitude}
+                longitude={editForm.longitude}
+                onChange={(latitude, longitude) => {
+                  setEditForm({ ...editForm, latitude, longitude });
+                }}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="site-edit-accessInstructions">Instrucciones de acceso</Label>
+              <Textarea
+                id="site-edit-accessInstructions"
                 value={editForm.accessInstructions}
                 onChange={(event) => {
                   setEditForm({ ...editForm, accessInstructions: event.target.value });
                 }}
-                className="block w-full rounded border p-2"
+                className="w-full"
               />
-            </label>
-            <label>
-              Observaciones
-              <textarea
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="site-edit-observations">Observaciones</Label>
+              <Textarea
+                id="site-edit-observations"
                 value={editForm.observations}
                 onChange={(event) => {
                   setEditForm({ ...editForm, observations: event.target.value });
                 }}
-                className="block w-full rounded border p-2"
+                className="w-full"
               />
-            </label>
-            {editError && <p role="alert">{editError}</p>}
-            <div className="flex gap-3">
-              <button
+            </div>
+            {editError && (
+              <Alert variant="destructive" className="sm:col-span-2">
+                {editError}
+              </Alert>
+            )}
+            <div className="flex flex-wrap justify-end gap-2 sm:col-span-2">
+              <Button
                 type="button"
-                className="rounded border px-4 py-2"
+                variant="outline"
                 onClick={() => {
                   setEditing(null);
                 }}
               >
                 Cancelar
-              </button>
-              <button className="rounded bg-primary px-4 py-2 text-primary-foreground">
-                Guardar cambios
-              </button>
+              </Button>
+              <Button>Guardar cambios</Button>
             </div>
           </form>
         </DialogContent>
@@ -531,17 +636,19 @@ export function SitesPage() {
           if (!open) setDeleting(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogTitle>Dar de baja el predio</AlertDialogTitle>
-          <AlertDialogDescription>
+        <AlertDialogContent className="max-h-dvh overflow-y-auto space-y-4">
+          <AlertDialogTitle className="text-lg font-semibold">
+            Dar de baja el predio
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-sm text-muted-foreground">
             Se dará de baja {deleting?.name} y se quitarán las asignaciones de supervisores.
           </AlertDialogDescription>
           {impact.isPending ? (
             <p role="status">Consultando el impacto de la baja…</p>
           ) : impact.isError ? (
-            <p role="alert">
+            <Alert variant="destructive">
               No se pudo consultar el impacto. Cerrá el diálogo e intentá nuevamente.
-            </p>
+            </Alert>
           ) : (
             <div className="my-4 space-y-2" aria-live="polite">
               <p>
@@ -561,11 +668,13 @@ export function SitesPage() {
               )}
             </div>
           )}
-          <div className="mt-5 flex justify-end gap-3">
-            <AlertDialogCancel className="rounded border px-4 py-2">Cancelar</AlertDialogCancel>
+          <div className="flex flex-wrap justify-end gap-2">
+            <AlertDialogCancel asChild>
+              <Button variant="outline">Cancelar</Button>
+            </AlertDialogCancel>
             <AlertDialogAction
               disabled={!impact.isSuccess}
-              className="rounded bg-destructive px-4 py-2 text-white"
+              asChild
               onClick={() => {
                 if (deleting) {
                   setActionError('');
@@ -582,7 +691,7 @@ export function SitesPage() {
                 }
               }}
             >
-              Confirmar baja
+              <Button variant="destructive">Confirmar baja</Button>
             </AlertDialogAction>
           </div>
         </AlertDialogContent>

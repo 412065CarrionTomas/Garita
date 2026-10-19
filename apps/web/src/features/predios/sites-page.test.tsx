@@ -13,7 +13,9 @@ jest.mock('@/lib/api-client', () => ({
         shiftsToCancel: 3,
         weeklySchedulesToEnd: 2,
         inProgressShiftsToClose: 1,
-        shifts: [],
+        shifts: [
+          { id: 'shift-1', startsAt: '2026-10-20T10:00:00Z', endsAt: '2026-10-20T18:00:00Z' },
+        ],
       });
     if (path === '/predios')
       return [
@@ -67,6 +69,25 @@ const profile = (role: 'admin' | 'supervisor') =>
   }) as ReturnType<typeof useAuth>;
 
 describe('SitesPage', () => {
+  it('abre el alta en un diálogo, conserva los campos y permite cancelar', async () => {
+    jest.mocked(useAuth).mockReturnValue(profile('admin'));
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+    expect(screen.queryByRole('button', { name: 'Guardar predio' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+    const dialog = screen.getByRole('dialog', { name: 'Alta de predio' });
+    expect(within(dialog).getByLabelText('Cliente')).toBeRequired();
+    expect(within(dialog).getByLabelText('Nombre')).toBeRequired();
+    expect(within(dialog).getByLabelText('Dirección')).toBeRequired();
+    expect(within(dialog).getByLabelText('Latitud')).toBeRequired();
+    expect(within(dialog).getByLabelText('Longitud')).toBeRequired();
+    expect(within(dialog).getByLabelText('Instrucciones de acceso')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Observaciones')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo predio' })).toHaveFocus();
+  });
+
   it('mantiene los controles de administración ocultos para el supervisor', async () => {
     jest.mocked(useAuth).mockReturnValue(profile('supervisor'));
     renderWithQueryClient(<SitesPage />);
@@ -137,6 +158,9 @@ describe('SitesPage', () => {
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Dar de baja el predio' });
     expect(dialog).toHaveTextContent('Se cancelarán 3 turnos');
+    expect(
+      within(dialog).getByRole('list', { name: 'Turnos que se cancelarán' }).children,
+    ).toHaveLength(1);
     expect(dialog).toHaveTextContent('terminarán 2 programaciones semanales');
     expect(dialog).toHaveTextContent('se cerrarán 1 turnos en curso');
     await user.click(screen.getByRole('button', { name: 'Cancelar' }));
