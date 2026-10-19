@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import type { ShiftOfflineData } from '@garita/shared';
+import { colors as palettes, radius, space, touch } from '@garita/tokens';
+import { Banner, Button, Card, Loading, Screen, Text } from '@/ui';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { nfcAvailability } from '@/lib/nfc';
 import { processScan, type ScanActionResult } from './scan-action';
@@ -124,334 +127,177 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
 
   if (loadingShift) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#facc15" />
-        <Text style={styles.copy}>Cargando datos del turno...</Text>
-      </View>
+      <Screen style={styles.centerContainer}>
+        <Loading label="Cargando datos del turno..." />
+      </Screen>
     );
   }
 
   if (!permission) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#facc15" />
-        <Text style={styles.copy}>Verificando permisos de cámara...</Text>
-      </View>
+      <Screen style={styles.centerContainer}>
+        <Loading label="Verificando permisos de cámara..." />
+      </Screen>
     );
   }
 
   if (!permission.granted) {
     return (
-      <View style={styles.container}>
-        <View style={styles.permissionCard}>
-          <Text accessibilityRole="header" style={styles.title}>
-            Permiso de cámara necesario
-          </Text>
-          <Text style={styles.copy}>
-            Se requiere acceso a la cámara para escanear los códigos QR de los puntos de control
-            durante tu recorrido.
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Habilitar permiso de cámara"
-            onPress={() => void requestPermission()}
-            style={styles.button}
-          >
-            <Text style={styles.buttonText}>Habilitar cámara</Text>
-          </Pressable>
-          {hasNfc && (
-            <View style={styles.nfcAlternative}>
-              <Text style={styles.copy}>
-                Tu celular cuenta con lector NFC. Podés utilizarlo como alternativa.
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Registrar con NFC"
-                onPress={() =>
-                  setFeedbackMessage('El registro por NFC estará disponible en la próxima versión.')
-                }
-                style={[styles.button, styles.secondaryButton]}
-              >
-                <Text style={[styles.buttonText, styles.secondaryButtonText]}>
-                  Registrar con NFC
-                </Text>
-              </Pressable>
-            </View>
-          )}
-          {feedbackMessage !== '' && (
-            <Text accessibilityRole="alert" style={styles.alertText}>
-              {feedbackMessage}
-            </Text>
-          )}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Volver al turno"
-            onPress={goBack}
-            style={[styles.button, styles.backButton]}
-          >
-            <Text style={[styles.buttonText, styles.backButtonText]}>Volver al turno</Text>
-          </Pressable>
-        </View>
-      </View>
+      <Screen scroll style={styles.permissionContent}>
+        <Text accessibilityRole="header" variant="title">
+          Permiso de cámara necesario
+        </Text>
+        <Banner tone="info" role="text">
+          Se requiere acceso a la cámara para escanear los códigos QR de los puntos de control
+          durante tu recorrido.
+        </Banner>
+        <Button
+          label="Habilitar cámara"
+          size="lg"
+          accessibilityLabel="Habilitar permiso de cámara"
+          onPress={() => void requestPermission()}
+        />
+        {hasNfc && (
+          <Card>
+            <Text>Tu celular cuenta con lector NFC. Podés utilizarlo como alternativa.</Text>
+            <Button
+              label="Registrar con NFC"
+              variant="secondary"
+              size="lg"
+              onPress={() =>
+                setFeedbackMessage('El registro por NFC estará disponible en la próxima versión.')
+              }
+            />
+          </Card>
+        )}
+        {feedbackMessage !== '' && <Banner tone="info">{feedbackMessage}</Banner>}
+        <Button label="Volver al turno" variant="outline" size="lg" onPress={goBack} />
+      </Screen>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: cameraColors.background }]}>
       <CameraView
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { backgroundColor: cameraColors.background }]}
         facing="back"
         enableTorch={torch}
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         onBarcodeScanned={scanned ? undefined : (barcode) => void handleBarcodeScanned(barcode)}
       />
 
-      <View style={styles.overlay}>
-        {/* Top Controls */}
+      <SafeAreaView style={styles.overlay}>
         <View style={styles.topBar}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Volver al turno"
             onPress={goBack}
-            style={styles.topButton}
+            style={[styles.topButton, cameraControlStyle]}
           >
-            <Text style={styles.topButtonText}>← Volver</Text>
+            <Text style={{ color: cameraColors.foreground }}>← Volver</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={torch ? 'Apagar linterna' : 'Encender linterna'}
+            accessibilityState={{ selected: torch }}
             onPress={() => setTorch((prev) => !prev)}
-            style={[styles.topButton, torch && styles.torchActiveButton]}
+            style={[styles.topButton, cameraControlStyle]}
           >
-            <Text style={[styles.topButtonText, torch && styles.torchActiveText]}>
+            <Text style={{ color: cameraColors.foreground }}>
               {torch ? 'Linterna: ON' : 'Linterna: OFF'}
             </Text>
           </Pressable>
         </View>
 
-        {/* Reticle / Target Area */}
         <View style={styles.reticleContainer}>
-          <View style={styles.reticle} />
-          <Text style={styles.reticleHint}>Apuntá al código QR del punto</Text>
+          <View style={[styles.reticle, { borderColor: cameraColors.signal }]} />
+          <Text style={[styles.reticleHint, cameraControlStyle]}>
+            Apuntá al código QR del punto
+          </Text>
         </View>
 
-        {/* Bottom Feedback / Actions */}
         <View style={styles.bottomBar}>
           {processing && (
-            <View style={styles.processingBox}>
-              <ActivityIndicator size="small" color="#facc15" />
-              <Text style={styles.processingText}>Procesando escaneo...</Text>
+            <View style={[styles.processingBox, cameraControlStyle]}>
+              <ActivityIndicator size="small" color={cameraColors.signal} />
+              <Text style={{ color: cameraColors.foreground }}>Procesando escaneo...</Text>
             </View>
           )}
 
           {result && (
-            <View
-              style={[
-                styles.resultCard,
-                result.status === 'counted' && styles.countedCard,
-                result.status === 'out_of_window' && styles.outOfWindowCard,
-                (result.status === 'already_recorded' || result.status === 'too_soon') &&
-                  styles.warningCard,
-                (result.status === 'invalid_attempt' || result.status === 'error') &&
-                  styles.errorCard,
-              ]}
-            >
-              <Text
+            <Card>
+              <Banner
+                tone={result.status === 'counted' ? 'success' : 'danger'}
                 accessibilityLiveRegion="assertive"
-                accessibilityRole="alert"
-                style={styles.resultText}
               >
                 {result.message}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Escanear otro punto"
-                onPress={resetScanner}
-                style={[styles.button, styles.continueButton]}
-              >
-                <Text style={styles.buttonText}>Escanear otro punto</Text>
-              </Pressable>
-            </View>
+              </Banner>
+              <Button label="Escanear otro punto" size="lg" onPress={resetScanner} />
+              <Button label="Volver al turno" variant="outline" size="lg" onPress={goBack} />
+            </Card>
           )}
         </View>
-      </View>
+      </SafeAreaView>
     </View>
   );
 }
 
+// La cámara conserva la paleta oscura aunque la app use el tema claro.
+const cameraColors = palettes.dark;
+const cameraControlStyle = {
+  backgroundColor: `${cameraColors.background}D9`,
+  color: cameraColors.foreground,
+};
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#171717',
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-    backgroundColor: '#171717',
-    padding: 24,
-  },
+  container: { flex: 1 },
+  centerContainer: { justifyContent: 'center', alignItems: 'center' },
+  permissionContent: { flexGrow: 1, justifyContent: 'center' },
   overlay: {
-    ...StyleSheet.absoluteFill,
+    flex: 1,
     justifyContent: 'space-between',
-    padding: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    padding: space[5],
   },
   topBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space[3],
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 32,
   },
   topButton: {
-    minHeight: 52,
-    minWidth: 110,
-    backgroundColor: 'rgba(23, 23, 23, 0.85)',
-    borderWidth: 1,
-    borderColor: '#777',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    minHeight: touch.min,
+    minWidth: touch.min,
+    borderRadius: radius.lg,
+    paddingHorizontal: space[4],
+    paddingVertical: space[3],
     justifyContent: 'center',
     alignItems: 'center',
   },
-  topButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  torchActiveButton: {
-    backgroundColor: '#facc15',
-    borderColor: '#facc15',
-  },
-  torchActiveText: {
-    color: '#171717',
-  },
-  reticleContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  reticleContainer: { alignItems: 'center', justifyContent: 'center', flexShrink: 1 },
   reticle: {
-    width: 240,
-    height: 240,
-    borderWidth: 3,
-    borderColor: '#facc15',
-    borderRadius: 16,
-    backgroundColor: 'transparent',
+    width: '75%',
+    maxWidth: space[16] * 4,
+    aspectRatio: 1,
+    flexShrink: 1,
+    borderWidth: space[1],
+    borderRadius: radius['2xl'],
   },
   reticleHint: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 14,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
+    textAlign: 'center',
+    marginTop: space[4],
+    paddingHorizontal: space[3],
+    paddingVertical: space[2],
+    borderRadius: radius.sm,
   },
-  bottomBar: {
-    marginBottom: 20,
-    gap: 12,
-  },
+  bottomBar: { gap: space[3] },
   processingBox: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(23, 23, 23, 0.9)',
-    padding: 16,
-    borderRadius: 12,
-  },
-  processingText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  resultCard: {
-    padding: 20,
-    borderRadius: 12,
-    gap: 14,
-    alignItems: 'center',
-  },
-  countedCard: {
-    backgroundColor: '#15803d',
-  },
-  outOfWindowCard: {
-    backgroundColor: '#0369a1',
-  },
-  warningCard: {
-    backgroundColor: '#b45309',
-  },
-  errorCard: {
-    backgroundColor: '#b91c1c',
-  },
-  resultText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  continueButton: {
-    width: '100%',
-    backgroundColor: '#fff',
-  },
-  permissionCard: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-    gap: 20,
-  },
-  nfcAlternative: {
-    gap: 12,
-    marginTop: 10,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#555',
-    borderRadius: 10,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 26,
-    fontWeight: '700',
-  },
-  copy: {
-    color: '#fff',
-    fontSize: 17,
-    lineHeight: 24,
-  },
-  button: {
-    minHeight: 60,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: '#facc15',
-    padding: 16,
-  },
-  buttonText: {
-    color: '#171717',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    backgroundColor: '#3b82f6',
-  },
-  secondaryButtonText: {
-    color: '#fff',
-  },
-  backButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#777',
-    marginTop: 10,
-  },
-  backButtonText: {
-    color: '#fff',
-  },
-  alertText: {
-    color: '#facc15',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
+    gap: space[3],
+    padding: space[4],
+    borderRadius: radius.lg,
   },
 });
