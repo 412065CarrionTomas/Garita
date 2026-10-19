@@ -69,6 +69,7 @@ export type ShiftCredential = z.infer<typeof shiftCredentialSchema>;
 
 /** Body of `POST /turnos/:id/iniciar`. The event id is generated on the phone (HU-13 reuses it). */
 export const startShiftRequestSchema = z.object({
+  clock: deviceClockSchema.optional(),
   eventId: z.uuid(),
   occurredAtDevice: isoDateTime,
   location: fieldLocationSchema,

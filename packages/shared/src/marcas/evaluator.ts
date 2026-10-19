@@ -1,5 +1,37 @@
 import { haversineMeters } from './haversine';
+import { isTimeAltered, type DeviceClock } from '../field/trusted-time';
 import { FLAG_SEVERITY, type EvaluatedFlag, type EvaluateRecordFlagsInput } from './types';
+
+export function evaluateTimeFlags(
+  clock: DeviceClock | undefined,
+  receivedAt?: string | Date,
+): EvaluatedFlag[] {
+  const flags: EvaluatedFlag[] = [];
+  if (clock?.timeStatus === 'unverifiable') {
+    flags.push({
+      type: 'time_unverifiable',
+      severity: FLAG_SEVERITY.time_unverifiable,
+      reason: 'boot_without_reference',
+    });
+  }
+  if (clock?.trustedAt) {
+    const offset = Date.parse(clock.deviceTime) - Date.parse(clock.trustedAt);
+    const future =
+      receivedAt !== undefined && Date.parse(clock.trustedAt) > new Date(receivedAt).getTime();
+    if (
+      future ||
+      (clock.referenceOffsetMs !== null && isTimeAltered(offset, clock.referenceOffsetMs))
+    ) {
+      flags.push({
+        type: 'time_altered',
+        severity: FLAG_SEVERITY.time_altered,
+        reason: future ? 'trusted_time_in_future' : 'device_offset_changed',
+        details: { deviceOffsetMs: offset, referenceOffsetMs: clock.referenceOffsetMs },
+      });
+    }
+  }
+  return flags;
+}
 
 /**
  * Pure and deterministic evaluation of suspicious record flags according to HU-15.
@@ -14,7 +46,7 @@ import { FLAG_SEVERITY, type EvaluatedFlag, type EvaluateRecordFlagsInput } from
  * - indoor checkpoints: neither out_of_range nor lack of location / accuracy is flagged
  */
 export function evaluateRecordFlags(input: EvaluateRecordFlagsInput): EvaluatedFlag[] {
-  const flags: EvaluatedFlag[] = [];
+  const flags = evaluateTimeFlags(input.record.clock, input.record.receivedAt);
   const { record, checkpoint, previousRecord, site } = input;
 
   // 1. Simulated location (grave) - applies regardless of indoor/outdoor
