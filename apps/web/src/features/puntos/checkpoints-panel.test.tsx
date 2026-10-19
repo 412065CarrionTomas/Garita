@@ -43,10 +43,34 @@ describe('CheckpointsPanel', () => {
     window.confirm = jest.fn(() => true);
   });
 
+  it.each(['light', 'dark'])(
+    'conserva el alta colapsable y los tokens en tema %s',
+    async (theme) => {
+      setRole('admin');
+      const user = userEvent.setup();
+      const { container } = renderWithQueryClient(
+        <div className={theme}>
+          <CheckpointsPanel site={site} />
+        </div>,
+      );
+      expect(screen.queryByLabelText('Nombre del punto')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+      expect(screen.getByLabelText('Nombre del punto')).toBeInTheDocument();
+      expect(container.querySelector('[data-slot=card]')).toHaveClass(
+        'bg-card',
+        'text-card-foreground',
+      );
+      expect(container.innerHTML).not.toMatch(
+        /(?:bg|text|border)-(?:white|black|red|amber|gray|slate|zinc|blue|green)(?:-|\b)|#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i,
+      );
+    },
+  );
+
   it('valida el radio de tolerancia fuera del rango permitido', async () => {
     setRole('admin');
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
+    await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
     await user.type(await screen.findByLabelText('Nombre del punto'), 'Portón');
     fireEvent.change(screen.getByLabelText('Radio de tolerancia (m)'), { target: { value: '5' } });
     const form = screen.getByRole('button', { name: 'Crear punto' }).closest('form');
@@ -64,6 +88,7 @@ describe('CheckpointsPanel', () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
+    await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
     await user.type(await screen.findByLabelText('Nombre del punto'), 'Torre');
     fireEvent.change(screen.getByLabelText('Latitud'), { target: { value: '-34' } });
     fireEvent.change(screen.getByLabelText('Longitud'), { target: { value: '-58' } });
