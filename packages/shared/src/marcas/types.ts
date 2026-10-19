@@ -1,6 +1,9 @@
 import { z } from 'zod';
+import type { DeviceClock } from '../field/trusted-time';
 
 export const RECORD_FLAG_TYPES = [
+  'time_altered',
+  'time_unverifiable',
   'out_of_range',
   'simulated_location',
   'impossible_time',
@@ -16,6 +19,8 @@ export type RecordFlagSeverity = (typeof RECORD_FLAG_SEVERITIES)[number];
 export const recordFlagSeveritySchema = z.enum(RECORD_FLAG_SEVERITIES);
 
 export const FLAG_SEVERITY: Record<RecordFlagType, RecordFlagSeverity> = {
+  time_altered: 'grave',
+  time_unverifiable: 'leve',
   simulated_location: 'grave',
   impossible_time: 'grave',
   out_of_range: 'media',
@@ -73,6 +78,8 @@ export interface EvaluatedFlag {
 
 export interface EvaluateRecordFlagsInput {
   record: {
+    clock?: DeviceClock;
+    receivedAt?: string | Date;
     method: 'qr' | 'nfc';
     occurredAtDevice: string | Date;
     location: {
@@ -93,6 +100,7 @@ export interface EvaluateRecordFlagsInput {
     hasActiveNfcTag: boolean;
   };
   previousRecord?: {
+    trustedAt?: string | Date | null;
     occurredAtDevice: string | Date;
     checkpoint: {
       id: string;

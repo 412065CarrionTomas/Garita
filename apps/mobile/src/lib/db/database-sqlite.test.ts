@@ -1,4 +1,6 @@
 import type * as SQLite from 'expo-sqlite';
+import { readClock, saveTimeReference, prepareEventClocks } from '@/lib/clock/clock';
+import GaritaNative from '../../../modules/garita-native/src';
 import { createFieldRepository, ExpoFieldDatabase, migrateDatabase } from './database';
 
 interface SqliteStatement {
@@ -62,6 +64,58 @@ function createNodeSqliteExpoAdapter(): {
 }
 
 describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
+  it('HU-14: persists boot references and recalculated payload across repository reopen, preserves insertion order after wall-clock rollback', async () => {
+    const { adapter } = createNodeSqliteExpoAdapter();
+    const database = new ExpoFieldDatabase(adapter);
+    await migrateDatabase(database);
+    const repo = createFieldRepository(database);
+    jest
+      .mocked(GaritaNative.getMonotonicClock)
+      .mockResolvedValue({ elapsedMs: 1000, bootId: 'boot-a' });
+    await saveTimeReference(repo, '2026-10-19T01:00:00.000Z');
+    const reopened = createFieldRepository(new ExpoFieldDatabase(adapter));
+    expect((await readClock(reopened, '2026-10-19T04:00:00.000Z')).trustedAt).toBe(
+      '2026-10-19T01:00:00.000Z',
+    );
+    jest
+      .mocked(GaritaNative.getMonotonicClock)
+      .mockResolvedValue({ elapsedMs: 0, bootId: 'boot-b' });
+    const clock = await readClock(reopened, '2026-10-19T00:00:00.000Z');
+    expect(clock.timeStatus).toBe('pending');
+    const recordId = '00000000-0000-4000-8000-000000000001';
+    const closeId = '00000000-0000-4000-8000-000000000002';
+    await reopened.addPendingEvent({
+      id: recordId,
+      type: 'checkpoint_record',
+      payload: { clock },
+      occurredAtDevice: '2026-10-19T04:00:00.000Z',
+      createdAt: clock.deviceTime,
+    });
+    await reopened.addPendingEvent({
+      id: closeId,
+      type: 'shift_close',
+      payload: {},
+      occurredAtDevice: clock.deviceTime,
+      createdAt: clock.deviceTime,
+    });
+    await saveTimeReference(reopened, '2026-10-19T02:00:00.000Z');
+    const events = await reopened.listPendingEvents();
+    expect(events.map(({ id }) => id)).toEqual([recordId, closeId]);
+    await prepareEventClocks(reopened, events);
+    const restored = await createFieldRepository(
+      new ExpoFieldDatabase(adapter),
+    ).listPendingEvents();
+    expect(restored[0]?.payload).toMatchObject({
+      clock: {
+        timeStatus: 'recalculated',
+        trustedAt: '2026-10-19T02:00:00.000Z',
+        referenceOffsetMs: expect.any(Number),
+      },
+    });
+    jest
+      .mocked(GaritaNative.getMonotonicClock)
+      .mockResolvedValue({ elapsedMs: 1000, bootId: 'test-boot' });
+  });
   it('executes real migrations 1 to 5, creates tables, indexes, and upgrades version to 5', async () => {
     const { adapter, rawDb } = createNodeSqliteExpoAdapter();
     const db = new ExpoFieldDatabase(adapter);
@@ -132,7 +186,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     // Check EXPLAIN QUERY PLAN
     const explain = rawDb
       .prepare(
-        "EXPLAIN QUERY PLAN SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY occurred_at_device ASC, created_at ASC LIMIT 100",
+        "EXPLAIN QUERY PLAN SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY rowid ASC LIMIT 100",
       )
       .all() as { detail: string }[];
     const details = explain.map((e) => e.detail).join('; ');

@@ -43,6 +43,8 @@ const shiftData: ShiftOfflineData = {
 };
 
 const repo = {
+  getSyncMeta: jest.fn(async () => null),
+  setSyncMeta: jest.fn(async () => undefined),
   saveShiftData: jest.fn(async () => shiftData),
   getShiftData: jest.fn(async () => shiftData),
   clearShiftData: jest.fn(async () => undefined),

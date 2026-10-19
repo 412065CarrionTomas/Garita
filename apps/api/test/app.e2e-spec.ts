@@ -8,6 +8,7 @@ import {
 import {
   authMeResponseSchema,
   liveHealthResponseSchema,
+  serverTimeResponseSchema,
   startShiftResponseSchema,
   checkpointRecordResponseSchema,
   shiftRecordsResponseSchema,
@@ -550,6 +551,13 @@ describe('Aplicación (e2e)', () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
 
     expect(liveHealthResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it('HU-14: GET /api/v1/hora es público y no expone recursos de ninguna empresa', async () => {
+    const response = await request(app.getHttpServer()).get('/api/v1/hora').expect(200);
+    const body = serverTimeResponseSchema.strict().parse(response.body);
+    expect(Number.isFinite(Date.parse(body.serverTime))).toBe(true);
+    expect(response.headers['cache-control']).toBe('no-store');
   });
 
   it('crea rondas, conserva las versiones anteriores y valida los permisos', async () => {

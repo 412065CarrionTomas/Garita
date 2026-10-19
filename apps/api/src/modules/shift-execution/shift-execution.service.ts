@@ -29,6 +29,7 @@ import {
 import type { CloseShiftRequest, StartShiftRequest, ShiftOfflineData } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CLOCK, type Clock } from '../../common/clock';
+import { clockFields, clockEventResponse } from '../server-time/clock-fields';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   SHIFT_EXECUTION_EFFECTS_PORT,
@@ -156,6 +157,7 @@ export class ShiftExecutionService {
             deviceEventId: input.eventId,
             occurredAt: now,
             occurredAtDevice: new Date(input.occurredAtDevice),
+            ...clockFields(input.clock),
             receivedAt: now,
             locationStatus: input.location.status,
             latitude: input.location.latitude,
@@ -184,6 +186,7 @@ export class ShiftExecutionService {
       });
     }
     const response = startShiftResponseSchema.parse({
+      serverTime: this.clock.now().toISOString(),
       status: 'in_progress',
       startedAt: now.toISOString(),
       lateStartMinutes: late,
@@ -192,7 +195,9 @@ export class ShiftExecutionService {
     });
     await this.prisma.tenantPrisma.shiftEvent.update({
       where: { deviceEventId: input.eventId },
-      data: { response: response as Prisma.InputJsonValue },
+      data: {
+        response: { ...response, ...clockEventResponse(input.clock, now) } as Prisma.InputJsonValue,
+      },
     });
     await this.scheduleAutoCloseSafely(id, shift.siteId, shift.endsAt);
     this.logger.log({
@@ -280,9 +285,9 @@ export class ShiftExecutionService {
       throw new ForbiddenException('Turno no encontrado');
     }
     if (shift.status === 'closed' && shift.closedBy === 'admin') {
-      const occurredAt = new Date(input.occurredAtDevice);
+      const occurredAt = new Date(input.clock?.trustedAt ?? input.occurredAtDevice);
       const receivedAt = this.clock.now();
-      if (occurredAt > receivedAt || occurredAt < (shift.startedAt ?? receivedAt))
+      if (!input.clock && (occurredAt > receivedAt || occurredAt < (shift.startedAt ?? receivedAt)))
         throw new BadRequestException('La hora del cierre no es válida');
       await this.prisma.tenantPrisma.shiftEvent.create({
         data: {
@@ -292,7 +297,9 @@ export class ShiftExecutionService {
           type: 'close',
           deviceEventId: input.eventId,
           occurredAt,
-          occurredAtDevice: occurredAt,
+          occurredAtDevice: new Date(input.occurredAtDevice),
+          ...clockFields(input.clock),
+          response: clockEventResponse(input.clock, receivedAt),
           receivedAt,
           locationStatus: input.location.status,
           latitude: input.location.latitude,
@@ -315,8 +322,11 @@ export class ShiftExecutionService {
     if (shift.status !== 'in_progress')
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notInProgress });
     const receivedAt = this.clock.now();
-    const occurredAt = new Date(input.occurredAtDevice);
-    if (occurredAt < (shift.startedAt ?? assignment.startsAt) || occurredAt > receivedAt)
+    const occurredAt = new Date(input.clock?.trustedAt ?? input.occurredAtDevice);
+    if (
+      !input.clock &&
+      (occurredAt < (shift.startedAt ?? assignment.startsAt) || occurredAt > receivedAt)
+    )
       throw new BadRequestException('La hora del cierre no es válida');
     const early = isEarlyClose(shift.endsAt.toISOString(), occurredAt.toISOString());
     if (early && !input.reason)
@@ -341,7 +351,9 @@ export class ShiftExecutionService {
           type: 'close',
           deviceEventId: input.eventId,
           occurredAt,
-          occurredAtDevice: occurredAt,
+          occurredAtDevice: new Date(input.occurredAtDevice),
+          ...clockFields(input.clock),
+          response: clockEventResponse(input.clock, receivedAt),
           receivedAt,
           locationStatus: input.location.status,
           latitude: input.location.latitude,
@@ -554,8 +566,8 @@ export class ShiftExecutionService {
     assignment: { id: string },
   ) {
     const now = this.clock.now();
-    const occurredAt = new Date(input.occurredAtDevice);
-    if (occurredAt < (shift.startedAt ?? occurredAt) || occurredAt > now)
+    const occurredAt = new Date(input.clock?.trustedAt ?? input.occurredAtDevice);
+    if (!input.clock && (occurredAt < (shift.startedAt ?? occurredAt) || occurredAt > now))
       throw new BadRequestException('La hora del cierre no es válida');
     const early = isEarlyClose(shift.endsAt.toISOString(), occurredAt.toISOString());
     if (early && !input.reason)
@@ -580,7 +592,9 @@ export class ShiftExecutionService {
           type: 'close',
           deviceEventId: input.eventId,
           occurredAt,
-          occurredAtDevice: occurredAt,
+          occurredAtDevice: new Date(input.occurredAtDevice),
+          ...clockFields(input.clock),
+          response: clockEventResponse(input.clock, now),
           receivedAt: now,
           locationStatus: input.location.status,
           latitude: input.location.latitude,
@@ -622,10 +636,12 @@ export class ShiftExecutionService {
       const parsed = startShiftResponseSchema.parse(event.response);
       return {
         ...parsed,
+        serverTime: this.clock.now().toISOString(),
         credential: parsed.credential ?? credential,
       };
     }
     return startShiftResponseSchema.parse({
+      serverTime: this.clock.now().toISOString(),
       status: 'in_progress' as const,
       startedAt:
         shift.startedAt?.toISOString() ??

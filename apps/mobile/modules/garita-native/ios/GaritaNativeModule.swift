@@ -1,5 +1,6 @@
 import CoreLocation
 import ExpoModulesCore
+import Darwin
 
 private final class LocationRequest: NSObject, CLLocationManagerDelegate {
   private let manager = CLLocationManager()
@@ -85,11 +86,32 @@ private final class LocationRequest: NSObject, CLLocationManagerDelegate {
 
 public class GaritaNativeModule: Module {
   private var pendingRequests: [UUID: LocationRequest] = [:]
+  private let fallbackBootId = "process:\(UUID().uuidString)"
 
   public func definition() -> ModuleDefinition {
     Name("GaritaNative")
     AsyncFunction("getCapabilities") { () -> [String: Any] in
-      ["moduleVersion": "1.0.0", "simulationDetectionAvailable": ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15]
+      ["moduleVersion": "1.1.0", "simulationDetectionAvailable": ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15]
+    }
+    AsyncFunction("getMonotonicClock") { () -> [String: Any] in
+      var timebase = mach_timebase_info_data_t()
+      guard mach_timebase_info(&timebase) == KERN_SUCCESS, timebase.denom != 0 else {
+        throw NSError(domain: "GaritaNative", code: 1, userInfo: [NSLocalizedDescriptionKey: "Reloj interno no disponible"])
+      }
+      let elapsedMs = floor(Double(mach_continuous_time()) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000)
+      var session = [CChar](repeating: 0, count: 128)
+      var sessionSize = session.count
+      if sysctlbyname("kern.bootsessionuuid", &session, &sessionSize, nil, 0) == 0,
+         let end = session.firstIndex(of: 0), end > 0 {
+        let identifier = String(decoding: session.prefix(end).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        return ["elapsedMs": elapsedMs, "bootId": "ios-session:\(identifier)"]
+      }
+      var boot = timeval()
+      var size = MemoryLayout<timeval>.size
+      let result = sysctlbyname("kern.boottime", &boot, &size, nil, 0)
+      // shortcut: boottime can change with wall time, prefer bootsessionuuid and verify sandbox availability on iPhone.
+      let bootId = result == 0 ? "ios:\(boot.tv_sec):\(boot.tv_usec)" : self.fallbackBootId
+      return ["elapsedMs": elapsedMs, "bootId": bootId]
     }
     AsyncFunction("getCurrentLocation") { (options: [String: Any], promise: Promise) in
       let requestId = UUID()

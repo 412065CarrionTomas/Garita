@@ -1,4 +1,8 @@
 /* global jest */
+jest.mock('./modules/garita-native/src', () => ({
+  __esModule: true,
+  default: { getMonotonicClock: jest.fn(async () => ({ elapsedMs: 1000, bootId: 'test-boot' })) },
+}));
 process.env.EXPO_PUBLIC_API_URL = 'http://api.test/api/v1';
 process.env.EXPO_PUBLIC_FIREBASE_API_KEY = 'test-key';
 process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN = 'garita.test';
