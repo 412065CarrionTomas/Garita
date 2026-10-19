@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ApiError, apiGet, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { PersonalPage } from './personal-page';
 
@@ -109,6 +109,110 @@ describe('PersonalPage', () => {
     await screen.findByText(/Ana Pérez/);
     expect(screen.queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Desactivar' })).not.toBeInTheDocument();
+  });
+
+  it('abre y cancela el alta sin enviar una invitación', async () => {
+    setup();
+    expect(screen.queryByRole('form', { name: 'Agregar personal' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Agregar personal' }));
+    const dialog = screen.getByRole('dialog', { name: 'Agregar personal' });
+    expect(within(dialog).getByRole('form', { name: 'Agregar personal' })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Rol')).toHaveValue('guard');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it('edita los mismos campos dentro del diálogo y guarda el registro', async () => {
+    jest.mocked(apiPatch).mockResolvedValue(page.items[0]);
+    setup();
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar' }));
+    const dialog = screen.getByRole('dialog', { name: 'Editar personal' });
+    expect(dialog).toHaveAttribute('aria-labelledby', 'edit-title');
+    expect(dialog).toHaveAttribute('aria-describedby', expect.stringContaining('edit-description'));
+    const name = within(dialog).getByLabelText('Nombre');
+    expect(name).toHaveValue('Ana');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Ana María');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        '/usuarios/u1',
+        {
+          firstName: 'Ana María',
+          lastName: 'Pérez',
+          phone: '+5491112345678',
+          employeeNumber: '10',
+        },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('conserva las tres acciones de invitación pendiente en el menú', async () => {
+    listedStatus = 'invitation_pending';
+    setup();
+    await userEvent.click(await screen.findByRole('button', { name: 'Acciones' }));
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Editar' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Desactivar' })).toBeInTheDocument();
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Reenviar invitación' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/usuarios/u1/reenviar-invitacion',
+        {},
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
+  it.each(['light', 'dark'])('usa estados y clases semánticas en tema %s', async (theme) => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try {
+      setup();
+      expect(await screen.findByRole('table')).toBeInTheDocument();
+      expect(
+        within(screen.getByRole('table')).getByText('Activo').closest('[data-slot="badge"]'),
+      ).toHaveClass('bg-success-soft');
+      const section = screen.getByRole('region', { name: 'Personal' });
+      expect(section.querySelector('[data-slot="table-container"]')).toHaveClass('overflow-x-auto');
+      for (const element of section.querySelectorAll('[class]')) {
+        expect(element.getAttribute('class')).not.toMatch(
+          /(?:bg|text|border)-(?:red|amber|gray|white|black)(?:-|\b)/,
+        );
+      }
+    } finally {
+      document.documentElement.classList.remove('dark');
+    }
+  });
+
+  it('muestra el estado vacío y permite abrir el alta', async () => {
+    jest.mocked(apiGet).mockResolvedValueOnce({ ...page, items: [] });
+    setup();
+    expect(await screen.findByText('No hay personal para mostrar')).toBeInTheDocument();
+    await userEvent.click(
+      within(screen.getByRole('banner')).getByRole('button', { name: 'Agregar personal' }),
+    );
+    expect(screen.getByRole('dialog', { name: 'Agregar personal' })).toBeInTheDocument();
+  });
+
+  it('anuncia la carga con esqueletos y el error con una alerta', async () => {
+    jest.mocked(apiGet).mockImplementationOnce(
+      () =>
+        new Promise(() => {
+          /* Keep the request pending while checking the loading state. */
+        }),
+    );
+    const view = setup();
+    expect(screen.getByRole('status')).toHaveTextContent('Cargando personal…');
+    expect(screen.getByRole('status').querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4);
+    view.unmount();
+    jest.mocked(apiGet).mockRejectedValueOnce(new Error('Sin conexión'));
+    setup();
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo cargar el personal.');
   });
 
   it('muestra errores de validación por campo y el 409 en el formulario', async () => {
