@@ -4,8 +4,8 @@ import { useApiHealth } from './use-api-health';
 
 const STATUS = {
   pending: { label: 'Verificando conexión…', dot: 'bg-muted-foreground' },
-  success: { label: 'API conectada', dot: 'bg-emerald-500' },
-  error: { label: 'API sin conexión', dot: 'bg-destructive' },
+  success: { label: 'API conectada', dot: 'bg-success' },
+  error: { label: 'API sin conexión', dot: 'bg-danger' },
 } as const;
 
 /** Indicador del estado de conexión con la API. */

@@ -39,6 +39,7 @@ describe('ActivationPage', () => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(410, { message: 'expired' }));
     render(<ActivationPage />);
     expect(await screen.findByText(/Esta invitación venció/i)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveClass('text-destructive');
   });
 
   it('ofrece al supervisor el enlace para definir la contraseña', async () => {
@@ -57,4 +58,17 @@ describe('ActivationPage', () => {
       'https://firebase.example/reset',
     );
   });
+});
+
+it('mantiene el estado informativo mientras valida', () => {
+  jest.spyOn(globalThis, 'fetch').mockReturnValue(
+    new Promise<Response>(() => {
+      // Mantiene pendiente la validación para observar el estado inicial.
+    }),
+  );
+  window.history.replaceState({}, '', '/activar?token=valid-token');
+  render(<ActivationPage />);
+  expect(screen.getByRole('status')).toHaveTextContent('Validando invitación…');
+  expect(screen.getByRole('status')).toHaveClass('text-info');
+  jest.restoreAllMocks();
 });
