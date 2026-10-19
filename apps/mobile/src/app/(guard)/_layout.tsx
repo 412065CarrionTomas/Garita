@@ -1,10 +1,12 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { useStackOptions } from '@/ui';
 import { useAuth } from '@/features/auth/auth-context';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import { initSyncService } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 export default function GuardLayout() {
+  const screenOptions = useStackOptions();
   const { user, loading } = useAuth();
   const pathname = usePathname();
   const [permissionState, setPermissionState] = useState<FieldPermissionState | null>(null);
@@ -57,5 +59,5 @@ export default function GuardLayout() {
   if (savedShiftId && localCheckPath === pathname && !isAllowedSubroute) {
     return <Redirect href={`/turno/${savedShiftId}`} />;
   }
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return <Stack screenOptions={screenOptions} />;
 }
