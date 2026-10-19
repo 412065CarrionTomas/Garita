@@ -413,7 +413,7 @@ export function SitesPage() {
                   </p>
                   {site.status === 'active' && (
                     <span className="text-sm">
-                      {user?.role === 'supervisor' ? 'Solo lectura' : 'Administración'}
+                      {user?.role === 'supervisor' ? 'Supervisión' : 'Administración'}
                     </span>
                   )}
                   {user?.role === 'admin' && site.status === 'active' && (
