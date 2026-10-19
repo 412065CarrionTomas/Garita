@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
-import GuardLayout from './_layout';
+import GuardLayout from '@/app/(guard)/_layout';
 import { checkFieldPermissions } from '@/features/permisos/permissions';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 

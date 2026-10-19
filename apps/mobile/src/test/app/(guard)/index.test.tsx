@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import { createDefaultFieldRepository } from '@/lib/db/database';
-import GuardHome from './index';
+import GuardHome from '@/app/(guard)/index';
 
 const mockLogout = jest.fn();
 jest.mock('@/features/auth/auth-context', () => ({

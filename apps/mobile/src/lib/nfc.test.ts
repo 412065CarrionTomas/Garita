@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import NfcManager, { NfcTech } from 'react-native-nfc-manager';
+import type * as Nfc from './nfc';
 import { readFactoryUid } from './nfc';
 
 jest.mock('react-native-nfc-manager', () => ({
@@ -61,5 +62,24 @@ describe('lectura del UID NFC', () => {
     await expect(readFactoryUid()).rejects.toThrow('lectura cancelada');
 
     expect(cancelTechnologyRequest).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('sin módulo nativo de NFC (Expo Go y web)', () => {
+  afterEach(() => {
+    jest.dontMock('react-native-nfc-manager');
+    jest.resetModules();
+  });
+
+  it('informa NFC como no soportado en vez de fallar al cargar', async () => {
+    jest.resetModules();
+    jest.doMock('react-native-nfc-manager', () => {
+      throw new Error('The NfcManager native module is unavailable.');
+    });
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- hay que recargar el módulo con el mock que lanza
+    const nfc: typeof Nfc = require('./nfc');
+
+    await expect(nfc.nfcAvailability()).resolves.toBe('unsupported');
+    await expect(nfc.cancelNfcRead()).resolves.toBeUndefined();
   });
 });
