@@ -4,8 +4,17 @@ import { SHIFT_START_MARGIN_MINUTES } from '../field/shift-execution';
 export const siteConnectivitySchema = z
   .object({
     type: z.enum(['with_signal', 'without_signal']),
-    minutesToSignal: z.number().int().min(0).max(720),
-    marginMinutes: z.number().int().min(0).max(180).default(30),
+    minutesToSignal: z
+      .number()
+      .int('Ingresá minutos enteros')
+      .min(0, 'El tiempo no puede ser negativo')
+      .max(720, 'El tiempo no puede superar las 12 horas'),
+    marginMinutes: z
+      .number()
+      .int('Ingresá minutos enteros')
+      .min(0, 'El margen no puede ser negativo')
+      .max(180, 'El margen no puede superar los 180 minutos')
+      .default(30),
   })
   .superRefine((conn, ctx) => {
     if (conn.type === 'without_signal' && conn.minutesToSignal === 0)
