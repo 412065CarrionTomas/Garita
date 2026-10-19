@@ -15,6 +15,9 @@ import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -84,7 +87,6 @@ export function PersonalPage() {
   const [dialogError, setDialogError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
-  const editDialog = useRef<HTMLDialogElement>(null);
   const deactivateDialog = useRef<HTMLDialogElement>(null);
   const reasonInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -116,17 +118,6 @@ export function PersonalPage() {
     queryKey: ['personal', role, status, page],
     queryFn: () => apiGet(`/usuarios?${params.toString()}`, usersPageSchema),
   });
-  useEffect(() => {
-    const dialog = editDialog.current;
-    if (editing && dialog && !dialog.open) {
-      if (typeof dialog.showModal === 'function') dialog.showModal();
-      else dialog.setAttribute('open', '');
-    }
-    if (!editing && dialog?.open) {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
-    }
-  }, [editing]);
   useEffect(() => {
     const dialog = deactivateDialog.current;
     if (deactivating && dialog && !dialog.open) {
@@ -294,7 +285,7 @@ export function PersonalPage() {
   };
   const renderErrors = () =>
     Object.entries(errors).map(([field, message]) => (
-      <span id={`${field}-error`} className="text-sm text-red-700" key={field}>
+      <span id={`${field}-error`} className="text-sm text-danger" key={field}>
         {message}
       </span>
     ));
@@ -304,9 +295,22 @@ export function PersonalPage() {
         id="personal-title"
         title="Personal"
         description="Supervisores y vigiladores de tu empresa."
+        actions={
+          user?.role === 'admin' && (
+            <Button
+              type="button"
+              onClick={() => {
+                setCreating(!creating);
+                setFormError('');
+              }}
+            >
+              Agregar personal
+            </Button>
+          )
+        }
       />
       <div className="flex flex-wrap gap-3">
-        <label>
+        <Label>
           Rol
           <NativeSelect
             aria-label="Filtrar por rol"
@@ -321,8 +325,8 @@ export function PersonalPage() {
             <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
             <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
           </NativeSelect>
-        </label>
-        <label>
+        </Label>
+        <Label>
           Estado
           <NativeSelect
             aria-label="Filtrar por estado"
@@ -338,91 +342,91 @@ export function PersonalPage() {
             <NativeSelectOption value="active">Activo</NativeSelectOption>
             <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
           </NativeSelect>
-        </label>
+        </Label>
       </div>
-      {user?.role === 'admin' && (
-        <button
-          type="button"
-          onClick={() => {
-            setCreating(!creating);
-            setFormError('');
-          }}
-          className="rounded-md border px-3 py-2"
-        >
-          Agregar personal
-        </button>
-      )}
-      {creating && (
-        <form
-          aria-label="Agregar personal"
-          className="grid gap-3 rounded border p-4 sm:grid-cols-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const parsed = createUserRequestSchema.safeParse(
-              Object.fromEntries(new FormData(event.currentTarget)),
-            );
-            if (!parsed.success) {
-              setErrors(
-                Object.fromEntries(
-                  parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message]),
-                ),
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent className="space-y-4">
+          <DialogTitle className="text-lg font-semibold">Agregar personal</DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            Completá los datos para enviar una invitación.
+          </DialogDescription>
+          <form
+            aria-label="Agregar personal"
+            className="grid gap-4 sm:grid-cols-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const parsed = createUserRequestSchema.safeParse(
+                Object.fromEntries(new FormData(event.currentTarget)),
               );
-              return;
-            }
-            setErrors({});
-            setFormError('');
-            void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
-              .then(async () => {
-                await refresh();
-                setCreating(false);
-              })
-              .catch((error: unknown) => {
-                setFormError(
-                  error instanceof ApiError && error.status === 409
-                    ? 'Ese correo ya está en uso'
-                    : 'No se pudo crear la invitación.',
+              if (!parsed.success) {
+                setErrors(
+                  Object.fromEntries(
+                    parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message]),
+                  ),
                 );
-              });
-          }}
-        >
-          {(['firstName', 'lastName', 'email', 'phone', 'employeeNumber'] as const).map((field) => (
-            <label key={field} className="grid gap-1">
-              {
-                {
-                  firstName: 'Nombre',
-                  lastName: 'Apellido',
-                  email: 'Correo',
-                  phone: 'Teléfono celular',
-                  employeeNumber: 'Legajo',
-                }[field]
+                return;
               }
-              <input
-                name={field}
-                type={field === 'email' ? 'email' : 'text'}
-                aria-invalid={Boolean(errors[field])}
-                aria-describedby={errors[field] ? `${field}-error` : undefined}
-                className="rounded border p-2"
-              />
-              {errors[field] && (
-                <span id={`${field}-error`} className="text-sm text-red-700">
-                  {errors[field]}
-                </span>
-              )}
-            </label>
-          ))}
-          <label className="grid gap-1">
-            Rol
-            <NativeSelect name="role" className="rounded border p-2">
-              <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
-              <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
-            </NativeSelect>
-          </label>
-          <div className="sm:col-span-2">
-            {formError && <p role="alert">{formError}</p>}
-            <button className="rounded border px-3 py-2">Enviar invitación</button>
-          </div>
-        </form>
-      )}
+              setErrors({});
+              setFormError('');
+              void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
+                .then(async () => {
+                  await refresh();
+                  setCreating(false);
+                })
+                .catch((error: unknown) => {
+                  setFormError(
+                    error instanceof ApiError && error.status === 409
+                      ? 'Ese correo ya está en uso'
+                      : 'No se pudo crear la invitación.',
+                  );
+                });
+            }}
+          >
+            {(['firstName', 'lastName', 'email', 'phone', 'employeeNumber'] as const).map(
+              (field) => (
+                <Label htmlFor={`create-${field}`} key={field} className="grid gap-1">
+                  {
+                    {
+                      firstName: 'Nombre',
+                      lastName: 'Apellido',
+                      email: 'Correo',
+                      phone: 'Teléfono celular',
+                      employeeNumber: 'Legajo',
+                    }[field]
+                  }
+                  <Input
+                    id={`create-${field}`}
+                    name={field}
+                    type={field === 'email' ? 'email' : 'text'}
+                    aria-invalid={Boolean(errors[field])}
+                    aria-describedby={errors[field] ? `${field}-error` : undefined}
+                    className="w-full"
+                  />
+                  {errors[field] && (
+                    <span id={`${field}-error`} className="text-sm text-danger">
+                      {errors[field]}
+                    </span>
+                  )}
+                </Label>
+              ),
+            )}
+            <Label className="grid gap-1">
+              Rol
+              <NativeSelect name="role" className="w-full">
+                <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
+                <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
+              </NativeSelect>
+            </Label>
+            <div className="flex flex-wrap justify-end gap-3 sm:col-span-2">
+              {formError && <p role="alert">{formError}</p>}
+              <Button type="button" variant="outline" onClick={() => setCreating(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit">Enviar invitación</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
       {result.isPending ? (
         <div role="status" className="space-y-3">
           <span className="sr-only">Cargando personal…</span>
@@ -591,62 +595,74 @@ export function PersonalPage() {
         </>
       )}
       {formError && !creating && !editing && <p role="alert">{formError}</p>}
-      {editing && (
-        <dialog
-          ref={editDialog}
-          aria-labelledby="edit-title"
-          aria-describedby="edit-description"
-          onCancel={(event) => {
-            event.preventDefault();
-            setEditing(null);
-          }}
-          className="fixed inset-0 m-auto w-[min(36rem,calc(100%-2rem))] rounded-lg border p-6 shadow-xl backdrop:bg-black/50"
-        >
-          <form aria-label="Editar personal" onSubmit={(event) => void saveEdit(event)}>
-            <h2 id="edit-title" className="text-xl font-semibold">
-              Editar personal
-            </h2>
-            <p id="edit-description">Actualizá nombre, apellido, teléfono o legajo.</p>
-            {(['firstName', 'lastName', 'phone', 'employeeNumber'] as const).map((field) => (
-              <label key={field} className="mt-3 grid gap-1">
-                {
-                  {
-                    firstName: 'Nombre',
-                    lastName: 'Apellido',
-                    phone: 'Teléfono celular',
-                    employeeNumber: 'Legajo',
-                  }[field]
-                }
-                <input
-                  name={field}
-                  defaultValue={editing[field] ?? ''}
-                  aria-invalid={Boolean(errors[field])}
-                  aria-describedby={errors[field] ? `${field}-error` : undefined}
-                  className="rounded border p-2"
-                />
-                {errors[field] && (
-                  <span id={`${field}-error`} className="text-sm text-red-700">
-                    {errors[field]}
-                  </span>
-                )}
-              </label>
-            ))}
-            {formError && <p role="alert">{formError}</p>}
-            <div className="mt-4 flex gap-3">
-              <button className="rounded border px-3 py-2">Guardar cambios</button>
-              <button
-                type="button"
-                className="rounded border px-3 py-2"
-                onClick={() => {
-                  setEditing(null);
-                }}
+      <Dialog
+        open={Boolean(editing)}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+      >
+        {editing && (
+          <DialogContent
+            aria-labelledby="edit-title"
+            aria-describedby="edit-description"
+            className="space-y-4"
+          >
+            <form
+              aria-label="Editar personal"
+              className="grid gap-4 sm:grid-cols-2"
+              onSubmit={(event) => void saveEdit(event)}
+            >
+              <DialogTitle id="edit-title" className="text-lg font-semibold sm:col-span-2">
+                Editar personal
+              </DialogTitle>
+              <DialogDescription
+                id="edit-description"
+                className="text-sm text-muted-foreground sm:col-span-2"
               >
-                Cancelar
-              </button>
-            </div>
-          </form>
-        </dialog>
-      )}
+                Actualizá nombre, apellido, teléfono o legajo.
+              </DialogDescription>
+              {(['firstName', 'lastName', 'phone', 'employeeNumber'] as const).map((field) => (
+                <Label htmlFor={`edit-${field}`} key={field} className="grid gap-1">
+                  {
+                    {
+                      firstName: 'Nombre',
+                      lastName: 'Apellido',
+                      phone: 'Teléfono celular',
+                      employeeNumber: 'Legajo',
+                    }[field]
+                  }
+                  <Input
+                    id={`edit-${field}`}
+                    name={field}
+                    defaultValue={editing[field] ?? ''}
+                    aria-invalid={Boolean(errors[field])}
+                    aria-describedby={errors[field] ? `${field}-error` : undefined}
+                    className="w-full"
+                  />
+                  {errors[field] && (
+                    <span id={`${field}-error`} className="text-sm text-danger">
+                      {errors[field]}
+                    </span>
+                  )}
+                </Label>
+              ))}
+              {formError && <p role="alert">{formError}</p>}
+              <div className="flex flex-wrap justify-end gap-3 sm:col-span-2">
+                <Button type="submit">Guardar cambios</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(null);
+                  }}
+                >
+                  Cancelar
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        )}
+      </Dialog>
       {deactivating && (
         <dialog
           ref={deactivateDialog}
@@ -683,10 +699,10 @@ export function PersonalPage() {
                         </li>
                       ))}
                     </ul>
-                    <label className="grid gap-1">
+                    <Label className="grid gap-1">
                       Derivar turnos a
                       <NativeSelect
-                        className="rounded border p-2"
+                        className="w-full"
                         value={deriveToUserId}
                         onChange={(event) => {
                           setDeriveToUserId(event.target.value);
@@ -712,8 +728,8 @@ export function PersonalPage() {
                             </NativeSelectOption>
                           ))}
                       </NativeSelect>
-                    </label>
-                    <label className="flex items-start gap-2">
+                    </Label>
+                    <Label className="flex items-start gap-2">
                       <input
                         type="checkbox"
                         checked={leaveUnassigned}
@@ -723,7 +739,7 @@ export function PersonalPage() {
                         }}
                       />
                       <span>Dejar los turnos sin vigilador</span>
-                    </label>
+                    </Label>
                     {leaveUnassigned && (
                       <p role="alert">
                         Se desactivará a {deactivating.firstName} y {futureShifts.data.length}{' '}
@@ -778,7 +794,7 @@ export function PersonalPage() {
                 sin cobertura.
               </p>
               {/* HU-13: Eventos pendientes que informó el celular (pendiente de integración en HU-13) */}
-              <label htmlFor="force-deactivate-reason" className="mt-3 grid gap-1 text-gray-900">
+              <Label htmlFor="force-deactivate-reason" className="mt-3 grid gap-1 text-gray-900">
                 <span>Motivo de desactivación</span>
                 <input
                   ref={reasonInputRef}
@@ -794,44 +810,44 @@ export function PersonalPage() {
                   }}
                   aria-invalid={Boolean(forceReasonError)}
                   aria-describedby={forceReasonError ? 'force-deactivate-reason-error' : undefined}
-                  className="rounded border p-2"
+                  className="w-full"
                   placeholder="Indicá el motivo (mínimo 3 caracteres)"
                 />
                 {forceReasonError && (
                   <span
                     id="force-deactivate-reason-error"
-                    className="text-sm text-red-700"
+                    className="text-sm text-danger"
                     role="alert"
                   >
                     {forceReasonError}
                   </span>
                 )}
-              </label>
+              </Label>
             </div>
           )}
           {dialogError && (
-            <p role="alert" className="mt-3 text-sm text-red-700">
+            <p role="alert" className="mt-3 text-sm text-danger">
               {dialogError}
             </p>
           )}
           <div className="mt-4 flex gap-3">
             {inProgressShift ? (
-              <button
+              <Button
                 type="button"
                 className="rounded border bg-red-600 px-3 py-2 text-white hover:bg-red-700"
                 onClick={() => void submitForceDeactivate()}
               >
                 Desactivar igual
-              </button>
+              </Button>
             ) : (
               <>
-                <button
+                <Button
                   type="button"
                   disabled={
                     deactivating.role === 'guard' &&
                     (futureShifts.isPending || futureShifts.isError || futureShifts.data.length > 0)
                   }
-                  className="rounded border px-3 py-2"
+                  variant="outline"
                   onClick={() => {
                     const person = deactivating;
                     setDialogError('');
@@ -851,11 +867,11 @@ export function PersonalPage() {
                   }}
                 >
                   Confirmar desactivación
-                </button>
+                </Button>
                 {deactivating.role === 'guard' && deriveToUserId && (
-                  <button
+                  <Button
                     type="button"
-                    className="rounded border px-3 py-2"
+                    variant="outline"
                     onClick={() => {
                       setDialogError('');
                       void apiPost(
@@ -887,12 +903,12 @@ export function PersonalPage() {
                     }}
                   >
                     Derivar y desactivar
-                  </button>
+                  </Button>
                 )}
                 {deactivating.role === 'guard' && leaveUnassigned && futureShifts.data && (
-                  <button
+                  <Button
                     type="button"
-                    className="rounded border px-3 py-2"
+                    variant="outline"
                     onClick={() => {
                       setDialogError('');
                       void apiPost(
@@ -920,17 +936,13 @@ export function PersonalPage() {
                     }}
                   >
                     Confirmar que {futureShifts.data.length} turnos quedan sin vigilador
-                  </button>
+                  </Button>
                 )}
               </>
             )}
-            <button
-              type="button"
-              className="rounded border px-3 py-2"
-              onClick={closeDeactivateDialog}
-            >
+            <Button type="button" variant="outline" onClick={closeDeactivateDialog}>
               Cancelar
-            </button>
+            </Button>
           </div>
         </dialog>
       )}
