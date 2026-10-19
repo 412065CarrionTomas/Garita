@@ -3,18 +3,14 @@ import { AppState, StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
 import { Badge, Banner, Button, Card, Input, Screen, Text } from '@/ui';
 import { useFocusEffect, useRouter } from 'expo-router';
-import {
-  currentRoundProgress,
-  isWithinStartMargin,
-  lateStartMinutes,
-  type ShiftOfflineData,
-} from '@garita/shared';
+import { currentRoundProgress, lateStartMinutes, type ShiftOfflineData } from '@garita/shared';
 import { z } from 'zod';
 import { apiGet } from '@/lib/api-client';
 import { getSyncSnapshot, subscribeSyncState } from '@/lib/cola';
 import { createDefaultFieldRepository, type LocalCheckpointRecord } from '@/lib/db/database';
 import { beginShift, finishShift } from './actions';
 import { NfcReader } from '@/features/escaneo/nfc-reader';
+import { readClock } from '@/lib/clock/clock';
 
 const shiftsSchema = z.array(
   z.looseObject({
@@ -93,10 +89,17 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
     }, [load]),
   );
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60_000);
+    const updateNow = () => {
+      void createDefaultFieldRepository()
+        .then((repository) => readClock(repository, new Date().toISOString()))
+        .then((clock) => setNow(new Date(clock.trustedAt ?? clock.deviceTime)))
+        .catch(() => setNow(new Date()));
+    };
+    updateNow();
+    const timer = setInterval(updateNow, 60_000);
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        setNow(new Date());
+        updateNow();
         void refreshLocal();
       }
     });
@@ -152,9 +155,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const shift = data?.shift;
   const startsAt = shift?.startsAt ?? scheduled?.startsAt;
   const endsAt = shift?.endsAt ?? scheduled?.endsAt;
-  const startAllowed = scheduled
-    ? isWithinStartMargin(scheduled.startsAt, scheduled.endsAt, now.toISOString())
-    : false;
+  const startAllowed = scheduled ? now.getTime() <= Date.parse(scheduled.endsAt) : false;
   const early = shift ? now.getTime() < Date.parse(shift.endsAt) : false;
   const recordedMap = new Map<string, Set<string>>();
   for (const record of checkpointRecords) {

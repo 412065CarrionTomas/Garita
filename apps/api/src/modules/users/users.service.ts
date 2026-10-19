@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   GoneException,
   Inject,
@@ -7,8 +8,9 @@ import {
   NotFoundException,
   HttpException,
 } from '@nestjs/common';
+import { Prisma } from '../../generated/prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
-import type { CreateUserRequest, UpdateUserRequest } from '@garita/shared';
+import type { CreateClientUserRequest, CreateUserRequest, UpdateUserRequest } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { FIREBASE_IDENTITY_PROVIDER } from '../auth/auth.types';
@@ -73,7 +75,44 @@ export class UsersService {
     return this.present(user);
   }
 
-  async create(input: CreateUserRequest, adminId: string, companyId: string) {
+  async listClientUsers(clientId: string) {
+    await this.resources.findOwnedOrThrow('Client', clientId);
+    const users = await this.prisma.tenantPrisma.user.findMany({
+      where: { clientId, role: 'client' },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+    });
+    return users.map((user) => this.present(user));
+  }
+
+  async createClientUser(
+    clientId: string,
+    input: CreateClientUserRequest,
+    adminId: string,
+    companyId: string,
+  ) {
+    await this.assertActiveClient(clientId);
+    return this.create({ ...input, role: 'client', clientId }, adminId, companyId);
+  }
+
+  private async assertActiveClient(clientId: string) {
+    await this.resources.findOwnedOrThrow('Client', clientId);
+    const client = await this.prisma.tenantPrisma.client.findUniqueOrThrow({
+      where: { id: clientId },
+    });
+    if (client.status !== 'active') throw new ConflictException('El cliente está dado de baja');
+  }
+
+  async create(
+    input: CreateUserRequest | (CreateClientUserRequest & { role: 'client'; clientId: string }),
+    adminId: string,
+    companyId: string,
+  ) {
+    const clientId = 'clientId' in input ? input.clientId : null;
+    if ((input.role === 'client') !== Boolean(clientId))
+      throw new BadRequestException(
+        'El rol cliente requiere un cliente y los demás roles no lo admiten',
+      );
     // Email uniqueness spans companies, so this is a justified system-level lookup.
     if (await this.prisma.systemPrisma.user.findUnique({ where: { email: input.email } }))
       throw new ConflictException('Ese correo ya está en uso');
@@ -86,26 +125,38 @@ export class UsersService {
       throw error;
     }
     const token = randomBytes(32).toString('base64url');
-    const user = await this.prisma.tenantPrisma.user
-      .create({
-        data: {
-          firebaseUid: identity.uid,
-          email: input.email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          phone: input.phone,
-          employeeNumber: input.employeeNumber,
-          role: input.role,
-          status: 'invitation_pending',
-          companyId,
-          invitations: {
-            create: {
-              tokenHash: hash(token),
-              expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+    const user = await this.prisma.tenantPrisma
+      .$transaction(async (tx) => {
+        if (clientId) {
+          // Serializa el alta con la baja del cliente para no dejar accesos activos tras la baja.
+          const locked = await tx.client.updateMany({
+            where: { id: clientId, status: 'active' },
+            data: { status: 'active' },
+          });
+          if (!locked.count) throw new ConflictException('El cliente está dado de baja');
+        }
+        return tx.user.create({
+          data: {
+            firebaseUid: identity.uid,
+            email: input.email,
+            firstName: input.firstName,
+            lastName: input.lastName,
+            phone: 'phone' in input ? input.phone : null,
+            employeeNumber: 'employeeNumber' in input ? input.employeeNumber : null,
+            clientId,
+            position: 'position' in input ? input.position : null,
+            role: input.role,
+            status: 'invitation_pending',
+            companyId,
+            invitations: {
+              create: {
+                tokenHash: hash(token),
+                expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+              },
             },
           },
-        },
-        include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+          include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+        });
       })
       .catch(async (error: unknown) => {
         // Compensación: evita dejar un usuario huérfano en Firebase si falla la BD.
@@ -116,12 +167,15 @@ export class UsersService {
             error: cleanupError instanceof Error ? cleanupError.message : 'unknown',
           });
         });
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+          throw new ConflictException('Ese correo ya está en uso');
         throw error;
       });
     const invitation = user.invitations[0];
     if (!invitation) throw new Error('No se pudo crear la invitación del usuario');
     await this.send(invitation.id, input.firstName, input.email, token);
-    this.logger.log({ event: 'personnel_created', adminId, userId: user.id });
+    // shortcut: auditoría en logs, reemplazar por tabla de auditoría en E6.
+    this.logger.log({ event: 'personnel_created', actorUserId: adminId, userId: user.id });
     return this.detail(user.id);
   }
 
@@ -266,7 +320,7 @@ export class UsersService {
     await this.firebase.revokeRefreshTokens(user.firebaseUid);
     this.logger.log({
       event: 'personnel_deactivated',
-      adminId,
+      actorUserId: adminId,
       userId: id,
       derivedCount,
       unassignedCount,
@@ -276,9 +330,19 @@ export class UsersService {
 
   async reactivate(id: string, adminId: string) {
     const user = await this.getUser(id);
+    if (user.clientId) await this.assertActiveClient(user.clientId);
     await this.firebase.setDisabled(user.firebaseUid, false);
-    await this.prisma.tenantPrisma.user.update({ where: { id }, data: { status: 'active' } });
-    this.logger.log({ event: 'personnel_reactivated', adminId, userId: id });
+    await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      if (user.clientId) {
+        const locked = await tx.client.updateMany({
+          where: { id: user.clientId, status: 'active' },
+          data: { status: 'active' },
+        });
+        if (!locked.count) throw new ConflictException('El cliente está dado de baja');
+      }
+      await tx.user.update({ where: { id }, data: { status: 'active' } });
+    });
+    this.logger.log({ event: 'personnel_reactivated', actorUserId: adminId, userId: id });
     return { ok: true as const };
   }
 
@@ -341,7 +405,7 @@ export class UsersService {
     await this.firebase.setDisabled(invitation.user.firebaseUid, false);
     return {
       passwordSetupUrl: await this.firebase.generatePasswordResetLink(invitation.user.email),
-      role: invitation.user.role as 'supervisor' | 'guard',
+      role: invitation.user.role as 'supervisor' | 'guard' | 'client',
     };
   }
 
@@ -378,7 +442,7 @@ export class UsersService {
   private async getUser(id: string) {
     await this.resources.findOwnedOrThrow('User', id);
     const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({ where: { id } });
-    if (user.role !== 'supervisor' && user.role !== 'guard')
+    if (user.role !== 'supervisor' && user.role !== 'guard' && user.role !== 'client')
       throw new NotFoundException('Recurso no encontrado');
     return user;
   }
@@ -392,15 +456,25 @@ export class UsersService {
     employeeNumber: string | null;
     role: 'admin' | 'supervisor' | 'guard' | 'client';
     status: 'invitation_pending' | 'active' | 'deactivated';
+    clientId?: string | null;
+    position?: string | null;
+    lastLoginAt?: Date | null;
     invitations?: { sendStatus: 'pending' | 'sent' | 'failed' }[];
   }) {
-    if (user.role !== 'supervisor' && user.role !== 'guard')
+    if (user.role !== 'supervisor' && user.role !== 'guard' && user.role !== 'client')
       throw new NotFoundException('Recurso no encontrado');
     return {
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
+      ...(user.role === 'client'
+        ? {
+            clientId: user.clientId,
+            position: user.position ?? null,
+            lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+          }
+        : {}),
       phone: user.phone,
       employeeNumber: user.employeeNumber,
       role: user.role,

@@ -20,6 +20,7 @@ describe('ShiftExecutionService.autoClose', () => {
           siteId: 'site-1',
           endsAt: new Date('2026-10-13T06:00:00.000Z'),
           status: 'in_progress',
+          syncDeadlineAt: deadline,
           assignments: [{ id: 'assignment-1', guardId: 'guard-1' }],
         }),
       },
@@ -28,7 +29,10 @@ describe('ShiftExecutionService.autoClose', () => {
     const prisma = { systemPrisma, tenantPrisma: {} } as unknown as PrismaService;
     const queue = {} as Queue;
     const deadlineForSite = jest.fn((_siteId: string, _endsAt: Date) => Promise.resolve(deadline));
-    const syncDeadline: SyncDeadlinePort = { deadlineForSite };
+    const syncDeadline: SyncDeadlinePort = {
+      deadlineForSite,
+      deadlineForShift: () => Promise.resolve(deadline),
+    };
     const service = new ShiftExecutionService(
       prisma,
       { now: () => now },
@@ -47,9 +51,9 @@ describe('ShiftExecutionService.autoClose', () => {
   });
 
   it('waits for the site sync deadline when it is later than the two hour margin', async () => {
-    const { service, tx, deadlineForSite } = setup(new Date('2026-10-13T08:20:00.000Z'));
+    const { service, tx } = setup(new Date('2026-10-13T08:20:00.000Z'));
     await expect(service.autoClose('shift-1')).resolves.toBe(false);
-    expect(deadlineForSite).toHaveBeenCalledWith('site-1', new Date('2026-10-13T06:00:00.000Z'));
+
     expect(tx.shift.updateMany).not.toHaveBeenCalled();
   });
 });
@@ -58,7 +62,10 @@ describe('ShiftExecutionService auto-close scheduling', () => {
   function build(add: jest.Mock) {
     const prisma = { systemPrisma: {}, tenantPrisma: {} } as unknown as PrismaService;
     const queue = { add } as unknown as Queue;
-    const syncDeadline: SyncDeadlinePort = { deadlineForSite: () => Promise.resolve(null) };
+    const syncDeadline: SyncDeadlinePort = {
+      deadlineForShift: () => Promise.resolve(null),
+      deadlineForSite: () => Promise.resolve(null),
+    };
     return new ShiftExecutionService(
       prisma,
       { now: () => now },
@@ -140,7 +147,10 @@ describe('ShiftExecutionService.state', () => {
       { tenantPrisma, systemPrisma: {} } as unknown as PrismaService,
       { now: () => now },
       {} as Queue,
-      { deadlineForSite: () => Promise.resolve(null) },
+      {
+        deadlineForShift: () => Promise.resolve(null),
+        deadlineForSite: () => Promise.resolve(null),
+      },
       new NoopShiftExecutionEffects(),
     );
     jest.spyOn(service, 'data').mockResolvedValue(shiftData);

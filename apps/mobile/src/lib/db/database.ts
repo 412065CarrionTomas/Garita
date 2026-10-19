@@ -32,6 +32,7 @@ export interface FieldDatabase {
   replaceShift(data: ShiftOfflineData | null): Promise<void>;
   readShift(): Promise<unknown | null>;
   insertEvent(event: PendingFieldEvent): Promise<void>;
+  updateEventPayload?(id: string, payload: unknown): Promise<void>;
   markEventSent(id: string): Promise<void>;
   markEventRejected(id: string, reason: string): Promise<void>;
   countPendingEvents(): Promise<number>;
@@ -206,6 +207,13 @@ export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
   async markEventSent(id: string): Promise<void> {
     await this.db.runAsync('UPDATE pending_events SET sent = 1 WHERE id = ?', id);
   }
+  async updateEventPayload(id: string, payload: unknown): Promise<void> {
+    await this.db.runAsync(
+      'UPDATE pending_events SET payload = ? WHERE id = ? AND sent = 0 AND reject_reason IS NULL',
+      JSON.stringify(payload),
+      id,
+    );
+  }
   async markEventRejected(id: string, reason: string): Promise<void> {
     await this.db.runAsync('UPDATE pending_events SET reject_reason = ? WHERE id = ?', reason, id);
   }
@@ -218,8 +226,8 @@ export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
   async readEvents(limit?: number): Promise<unknown[]> {
     const query =
       limit !== undefined && limit > 0
-        ? `SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY occurred_at_device ASC, created_at ASC LIMIT ${Math.floor(limit)}`
-        : "SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY occurred_at_device ASC, created_at ASC";
+        ? `SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY rowid ASC LIMIT ${Math.floor(limit)}`
+        : "SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY rowid ASC";
     return (
       await this.db.getAllAsync<{
         id: string;
@@ -337,7 +345,7 @@ export async function openFieldDatabase(): Promise<FieldDatabase> {
 }
 
 export function createFieldRepository(database: FieldDatabase) {
-  return {
+  const repository = {
     async saveShiftData(input: unknown): Promise<ShiftOfflineData> {
       const data = shiftOfflineDataSchema.parse(input);
       await database.transaction(() => database.replaceShift(data));
@@ -353,6 +361,11 @@ export function createFieldRepository(database: FieldDatabase) {
     async addPendingEvent(input: unknown): Promise<void> {
       const event = pendingFieldEventSchema.parse(input);
       await database.insertEvent(event);
+    },
+    async updatePendingEventPayload(id: string, payload: unknown): Promise<void> {
+      if (!database.updateEventPayload)
+        throw new Error('La base local no permite actualizar el reloj');
+      await database.updateEventPayload(id, payload);
     },
     async listPendingEvents(options?: { limit?: number }): Promise<PendingFieldEvent[]> {
       const rows = database.readPendingEvents
@@ -413,6 +426,7 @@ export function createFieldRepository(database: FieldDatabase) {
       await database.updateCheckpointRecordServerResult(recordId, result, reason);
     },
   };
+  return repository;
 }
 
 export type FieldRepository = ReturnType<typeof createFieldRepository>;

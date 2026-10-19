@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   closeShiftRequestSchema,
   closeShiftResponseSchema,
@@ -11,8 +12,23 @@ import {
 } from '@garita/shared';
 import { ApiError, apiRequest } from '@/lib/api-client';
 
+const allowedStartSchema = z.object({
+  startFrom: z.iso.datetime({ offset: true }),
+  timezone: z.string().refine((value) => {
+    try {
+      new Intl.DateTimeFormat('es-AR', { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }),
+});
+
 export class ShiftExecutionApiError extends Error {
-  constructor(readonly code: ShiftExecutionErrorCode | undefined) {
+  constructor(
+    readonly code: ShiftExecutionErrorCode | undefined,
+    readonly allowedStart?: z.infer<typeof allowedStartSchema>,
+  ) {
     super('No se pudo completar la operación del turno.');
     this.name = 'ShiftExecutionApiError';
   }
@@ -24,10 +40,12 @@ function getExecutionError(error: unknown): ShiftExecutionApiError | null {
   if (typeof payload !== 'object' || payload === null || !('code' in payload)) return null;
   const code = payload.code;
   const knownCodes = Object.values(SHIFT_EXECUTION_ERROR_CODES);
+  const allowedStart = allowedStartSchema.safeParse(payload);
   return new ShiftExecutionApiError(
     typeof code === 'string' && knownCodes.includes(code as ShiftExecutionErrorCode)
       ? (code as ShiftExecutionErrorCode)
       : undefined,
+    allowedStart.success ? allowedStart.data : undefined,
   );
 }
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export { monotonicClockSchema, type MonotonicClock } from './trusted-time';
 
 export const nativeLocationSchema = z.object({
   latitude: z.number().gte(-90).lte(90),

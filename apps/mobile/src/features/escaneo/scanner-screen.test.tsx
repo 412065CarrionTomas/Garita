@@ -110,6 +110,14 @@ describe('<ScannerScreen />', () => {
       })),
       repository: async () =>
         ({
+          getSyncMeta: jest.fn(async () =>
+            JSON.stringify({
+              serverTime: '2026-10-14T22:30:00.000Z',
+              elapsedMs: 1000,
+              bootId: 'test-boot',
+              offsetMs: 0,
+            }),
+          ),
           saveCheckpointRecord: jest.fn(async () => undefined),
           listCheckpointRecords: jest.fn(async () => []),
           addPendingEvent: jest.fn(async () => undefined),

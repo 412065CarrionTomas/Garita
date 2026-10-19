@@ -1,7 +1,6 @@
 import {
   fieldLocationSchema,
   isEarlyClose,
-  isWithinStartMargin,
   SHIFT_EXECUTION_ERROR_CODES,
   type FieldLocation,
   type ShiftCredential,
@@ -13,6 +12,7 @@ import { ApiError } from '@/lib/api-client';
 import { deleteShiftCredential, processSyncQueue, saveShiftCredential } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { getCurrentLocation } from '@/lib/location';
+import { readClock, saveTimeReference } from '@/lib/clock/clock';
 import { closeShift, ShiftExecutionApiError, startShift } from './api';
 
 export type ShiftActionResult =
@@ -110,7 +110,7 @@ export function resetShiftActionsForTesting(): void {
 
 export async function beginShift(
   id: string,
-  scheduledStart: string,
+  _scheduledStart: string,
   scheduledEnd: string,
 ): Promise<ShiftActionResult> {
   const d = deps();
@@ -122,13 +122,14 @@ export async function beginShift(
     return { status: 'permissions', permission };
   }
   const now = d.now();
-  if (!isWithinStartMargin(scheduledStart, scheduledEnd, now.toISOString()))
+  if (now.getTime() > Date.parse(scheduledEnd))
     return {
       status: 'error',
       message: 'Todavía no podés iniciar este turno o el turno ya terminó',
     };
   const result = await d
     .start(id, {
+      clock: await readClock(await d.repository(), now.toISOString()),
       eventId: d.uuid(),
       occurredAtDevice: now.toISOString(),
       location: await d.location(),
@@ -138,8 +139,9 @@ export async function beginShift(
         const messages: Record<string, string> = {
           [SHIFT_EXECUTION_ERROR_CODES.reassigned]:
             'Tu turno fue reasignado. Consultá a tu supervisor',
-          [SHIFT_EXECUTION_ERROR_CODES.outsideStartMargin]:
-            'Todavía no podés iniciar este turno o el turno ya terminó',
+          [SHIFT_EXECUTION_ERROR_CODES.outsideStartMargin]: error.allowedStart
+            ? `Podés iniciarlo desde las ${new Date(error.allowedStart.startFrom).toLocaleTimeString('es-AR', { timeZone: error.allowedStart.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`
+            : 'Todavía no podés iniciar este turno o el turno ya terminó',
           [SHIFT_EXECUTION_ERROR_CODES.anotherInProgress]: 'Ya tenés otro turno en curso',
           [SHIFT_EXECUTION_ERROR_CODES.invitationPending]:
             'Tu invitación está pendiente. Consultá a tu supervisor',
@@ -155,6 +157,7 @@ export async function beginShift(
       };
     });
   if (result.status === 'error') return result;
+  if (result.serverTime) await saveTimeReference(await d.repository(), result.serverTime);
   if ('credential' in result && result.credential) {
     await d.saveCredential(result.credential);
   }
@@ -168,19 +171,21 @@ export async function finishShift(
 ): Promise<ShiftActionResult> {
   const d = deps();
   const now = d.now();
-  const early = isEarlyClose(data.shift.endsAt, now.toISOString());
+  const repository = await d.repository();
+  const clock = await readClock(repository, now.toISOString());
+  const early = isEarlyClose(data.shift.endsAt, clock.trustedAt ?? now.toISOString());
   const trimmedReason = reason.trim();
   if (early && trimmedReason.length < 3)
     return { status: 'error', message: 'Indicá un motivo de al menos 3 caracteres' };
   const eventId = d.uuid();
   const location = await d.location();
   const occurredAtDevice = now.toISOString();
-  const repository = await d.repository();
   await repository.addPendingEvent({
     id: eventId,
     type: 'shift_close',
     payload: {
       shiftId: data.shift.id,
+      clock,
       eventId,
       occurredAtDevice,
       location,

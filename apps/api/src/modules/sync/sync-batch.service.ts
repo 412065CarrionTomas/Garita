@@ -1,8 +1,10 @@
 import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { SyncBatchRequest, SyncBatchResponse, SyncEventResult } from '@garita/shared';
+import { computeSyncedUntil } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CLOCK, type Clock } from '../../common/clock';
+import { clockEventResponse } from '../server-time/clock-fields';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   CheckpointRecordsService,
@@ -42,6 +44,10 @@ export class SyncBatchService {
     }
 
     const receivedAt = this.clock.now();
+    const syncedUntil = computeSyncedUntil(
+      input.events.map((event) => event.payload),
+      input.syncedUntil,
+    );
 
     // systemPrisma se usa para registrar la auditoría del lote recibido
     await this.prisma.systemPrisma.syncBatch.create({
@@ -51,7 +57,7 @@ export class SyncBatchService {
         receivedAt,
         eventCount: input.events.length,
         pendingCount: input.pendingCount,
-        syncedUntil: input.syncedUntil ? new Date(input.syncedUntil) : null,
+        syncedUntil: syncedUntil ? new Date(syncedUntil) : null,
       },
     });
 
@@ -59,7 +65,7 @@ export class SyncBatchService {
       companyId: credential.companyId,
       shiftId: credential.shiftId,
       pendingCount: input.pendingCount,
-      syncedUntil: input.syncedUntil ? new Date(input.syncedUntil) : null,
+      syncedUntil: syncedUntil ? new Date(syncedUntil) : null,
       contactAt: receivedAt,
       isBatch: true,
     });
@@ -82,11 +88,11 @@ export class SyncBatchService {
         const shiftData = await this.shiftExecutionService.getShiftOfflineData(credential.shiftId);
         const dbPrevious = await this.prisma.systemPrisma.checkpointRecord.findMany({
           where: { shiftId: credential.shiftId },
-          select: { checkpointId: true, occurredAtDevice: true, countedFor: true },
+          select: { checkpointId: true, occurredAtDevice: true, trustedAt: true, countedFor: true },
         });
         const previousRecords = dbPrevious.map((r) => ({
           checkpointId: r.checkpointId,
-          occurredAtUtc: r.occurredAtDevice.toISOString(),
+          occurredAtUtc: (r.trustedAt ?? r.occurredAtDevice).toISOString(),
           countedFor: Array.isArray(r.countedFor)
             ? (r.countedFor as { roundId: string; windowIndex: number }[])
             : [],
@@ -225,6 +231,7 @@ export class SyncBatchService {
             data: {
               response: {
                 ...(outcome as Record<string, unknown>),
+                ...clockEventResponse(event.payload.clock, receivedAt),
                 requestHash: computeCloseRequestHash(event.payload),
               },
             },
@@ -264,6 +271,7 @@ export class SyncBatchService {
     return {
       results,
       receivedAt: receivedAt.toISOString(),
+      serverTime: this.clock.now().toISOString(),
     };
   }
 }

@@ -132,6 +132,23 @@ export function addSiteAssignmentFilter(
   return args;
 }
 
+export function addClientFilter(
+  model: string,
+  args: unknown,
+  user: TenantContext['user'],
+): unknown {
+  if (!isRecord(args) || user?.role !== 'client') return args;
+  if (!user.clientId) throw new ForbiddenException('El usuario no tiene cliente asociado');
+  const where = isRecord(args.where) ? args.where : {};
+  const site = { clientId: user.clientId, status: 'active', client: { status: 'active' } };
+  if (model === 'Site') return { ...args, where: { ...where, AND: [where, site] } };
+  if (model === 'User') return { ...args, where: { ...where, id: user.userId } };
+  if (model === 'Invitation') return { ...args, where: { ...where, userId: user.userId } };
+  // HU-28 habilitará otros modelos del portal con su filtro explícito.
+  if (model !== 'Company') throw new ForbiddenException('Modelo no habilitado para el portal');
+  return args;
+}
+
 function setTenantOnData(model: string, data: unknown, companyId: string): unknown {
   if (Array.isArray(data))
     return data.map((item: unknown) => setTenantOnData(model, item, companyId));
@@ -275,7 +292,13 @@ export function createTenantPrismaClient(systemPrisma: PrismaClient, context: Te
               user.companyId,
             );
           const tenantArgs = scopeArgs(model, operation, args, user.companyId);
-          return query(addSiteAssignmentFilter(model, tenantArgs, user) as typeof args);
+          return query(
+            addClientFilter(
+              model,
+              addSiteAssignmentFilter(model, tenantArgs, user),
+              user,
+            ) as typeof args,
+          );
         },
       },
     },

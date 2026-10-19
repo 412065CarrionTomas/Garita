@@ -96,10 +96,10 @@ export class SitesController {
   }
 
   @Get('predios')
-  @Roles('admin', 'supervisor')
-  listSites(@Query() query: unknown) {
+  @Roles('admin', 'supervisor', 'client')
+  listSites(@Query() query: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = parse(siteListQuerySchema, query);
-    return this.sites.listSites(parsed.cliente, parsed.estado);
+    return this.sites.listSites(parsed.cliente, parsed.estado, user);
   }
   @Get('predios/supervisores-disponibles')
   @Roles('admin')

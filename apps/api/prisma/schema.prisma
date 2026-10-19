@@ -43,40 +43,45 @@ enum NfcTagStatus {
 }
 
 model Company {
-  id        String   @id @default(cuid())
-  name      String
-  timezone  String   @default("America/Argentina/Buenos_Aires")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  users     User[]
-  clients   Client[]
-  sites     Site[]
-  rounds    Round[]
-  shifts    Shift[]
+  id          String       @id @default(cuid())
+  name        String
+  timezone    String       @default("America/Argentina/Buenos_Aires")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  users       User[]
+  clients     Client[]
+  sites       Site[]
+  rounds      Round[]
+  shifts      Shift[]
   recordFlags RecordFlag[]
 }
 
 model User {
-  id              String           @id @default(cuid())
-  companyId       String
-  firebaseUid     String           @unique
-  email           String           @unique
-  firstName       String
-  lastName        String
-  phone           String?
-  employeeNumber  String?
-  role            UserRole
-  status          UserStatus       @default(invitation_pending)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  invitations     Invitation[]
-  siteAssignments SiteSupervisor[]
-  createdShifts Shift[] @relation("ShiftCreator")
+  id               String            @id @default(cuid())
+  companyId        String
+  firebaseUid      String            @unique
+  email            String            @unique
+  firstName        String
+  lastName         String
+  phone            String?
+  employeeNumber   String?
+  clientId         String?
+  position         String?
+  lastLoginAt      DateTime?
+  client           Client?           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  role             UserRole
+  status           UserStatus        @default(invitation_pending)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invitations      Invitation[]
+  siteAssignments  SiteSupervisor[]
+  createdShifts    Shift[]           @relation("ShiftCreator")
   shiftAssignments ShiftAssignment[]
   shiftCredentials ShiftCredential[]
 
   @@index([companyId])
+  @@index([clientId])
 }
 
 model Client {
@@ -92,9 +97,15 @@ model Client {
   updatedAt   DateTime     @updatedAt
   company     Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
   sites       Site[]
+  users       User[]
 
   @@unique([companyId, name])
   @@index([companyId, status])
+}
+
+enum ConnectivityType {
+  with_signal
+  without_signal
 }
 
 model Site {
@@ -110,6 +121,9 @@ model Site {
   status             RecordStatus     @default(active)
   maxSpeedProfile    SpeedProfile     @default(walking)
   maxSpeedKmh        Int              @default(10)
+  connectivityType   ConnectivityType @default(with_signal)
+  minutesToSignal    Int              @default(0)
+  marginMinutes      Int              @default(30)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   company            Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -139,20 +153,20 @@ model SiteSupervisor {
 }
 
 model Checkpoint {
-  id                    String       @id @default(cuid())
+  id                    String                   @id @default(cuid())
   companyId             String
   siteId                String
   name                  String
-  latitude              Decimal      @db.Decimal(9, 6)
-  longitude             Decimal      @db.Decimal(10, 6)
-  toleranceRadiusMeters Int          @default(30)
+  latitude              Decimal                  @db.Decimal(9, 6)
+  longitude             Decimal                  @db.Decimal(10, 6)
+  toleranceRadiusMeters Int                      @default(30)
   stickerLocation       String?
-  isIndoor              Boolean      @default(false)
-  qrVersion             Int          @default(1)
-  status                RecordStatus @default(active)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
-  site                  Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  isIndoor              Boolean                  @default(false)
+  qrVersion             Int                      @default(1)
+  status                RecordStatus             @default(active)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  site                  Site                     @relation(fields: [siteId], references: [id], onDelete: Restrict)
   nfcTags               NfcTag[]
   roundVersions         RoundVersionCheckpoint[]
   records               CheckpointRecord[]
@@ -181,19 +195,19 @@ model NfcTag {
 }
 
 model Round {
-  id              String       @id @default(cuid())
-  companyId       String
-  siteId          String
-  name            String
-  status          RecordStatus @default(active)
-  currentVersionId String?     @unique
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  company         Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  site            Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
-  versions        RoundVersion[]
-  currentVersion  RoundVersion? @relation("CurrentRoundVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
-  shifts          ShiftRound[]
+  id               String         @id @default(cuid())
+  companyId        String
+  siteId           String
+  name             String
+  status           RecordStatus   @default(active)
+  currentVersionId String?        @unique
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  company          Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site             Site           @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  versions         RoundVersion[]
+  currentVersion   RoundVersion?  @relation("CurrentRoundVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  shifts           ShiftRound[]
 
   @@unique([siteId, name])
   @@index([companyId, status])
@@ -201,7 +215,7 @@ model Round {
 }
 
 model RoundVersion {
-  id               String                    @id @default(cuid())
+  id               String                   @id @default(cuid())
   roundId          String
   versionNumber    Int
   frequencyMinutes Int
@@ -209,9 +223,9 @@ model RoundVersion {
   windowEndLocal   String
   graceMinutes     Int
   createdById      String
-  createdAt        DateTime                  @default(now())
-  round            Round                     @relation(fields: [roundId], references: [id], onDelete: Restrict)
-  currentFor       Round?                    @relation("CurrentRoundVersion")
+  createdAt        DateTime                 @default(now())
+  round            Round                    @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  currentFor       Round?                   @relation("CurrentRoundVersion")
   checkpoints      RoundVersionCheckpoint[]
   shifts           ShiftRound[]
 
@@ -283,40 +297,44 @@ enum ShiftClosedBy {
 }
 
 model Shift {
-  id                 String            @id @default(cuid())
-  companyId          String
-  siteId             String
-  startsAt           DateTime          @db.Timestamptz(3)
-  endsAt             DateTime          @db.Timestamptz(3)
-  serviceDate        DateTime          @db.Date
-  status             ShiftStatus       @default(scheduled)
-  createdById        String
-  cancelledAt        DateTime?         @db.Timestamptz(3)
-  cancelledById      String?
-  cancellationReason String?
-  startedAt          DateTime?         @db.Timestamptz(3)
-  lateStartMinutes   Int?
-  closedAt           DateTime?         @db.Timestamptz(3)
-  closedEarly        Boolean           @default(false)
-  closeReason        String?
-  closedBy           ShiftClosedBy?
-  closedByUserId     String?
-  autoClosedAt       DateTime?         @db.Timestamptz(3)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  company            Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  site               Site              @relation(fields: [siteId], references: [id], onDelete: Restrict)
-  createdBy          User              @relation("ShiftCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  assignments        ShiftAssignment[]
-  rounds             ShiftRound[]
-  events             ShiftEvent[]
-  checkpointRecords  CheckpointRecord[]
+  id                  String               @id @default(cuid())
+  companyId           String
+  siteId              String
+  startsAt            DateTime             @db.Timestamptz(3)
+  endsAt              DateTime             @db.Timestamptz(3)
+  serviceDate         DateTime             @db.Date
+  status              ShiftStatus          @default(scheduled)
+  createdById         String
+  cancelledAt         DateTime?            @db.Timestamptz(3)
+  cancelledById       String?
+  cancellationReason  String?
+  startedAt           DateTime?            @db.Timestamptz(3)
+  lateStartMinutes    Int?
+  connectivityType    ConnectivityType?
+  minutesToSignal     Int?
+  marginMinutes       Int?
+  syncDeadlineAt      DateTime?            @db.Timestamptz(3)
+  closedAt            DateTime?            @db.Timestamptz(3)
+  closedEarly         Boolean              @default(false)
+  closeReason         String?
+  closedBy            ShiftClosedBy?
+  closedByUserId      String?
+  autoClosedAt        DateTime?            @db.Timestamptz(3)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site                Site                 @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  createdBy           User                 @relation("ShiftCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments         ShiftAssignment[]
+  rounds              ShiftRound[]
+  events              ShiftEvent[]
+  checkpointRecords   CheckpointRecord[]
   invalidScanAttempts InvalidScanAttempt[]
-  recordFlags        RecordFlag[]
-  credentials        ShiftCredential[]
-  syncBatches        SyncBatch[]
-  connectionNotices  ConnectionNotice[]
-  syncState          ShiftSyncState?
+  recordFlags         RecordFlag[]
+  credentials         ShiftCredential[]
+  syncBatches         SyncBatch[]
+  connectionNotices   ConnectionNotice[]
+  syncState           ShiftSyncState?
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
@@ -324,6 +342,11 @@ model Shift {
 }
 
 model ShiftEvent {
+  trustedAt           DateTime?                 @db.Timestamptz(3)
+  elapsedMs           Float?
+  bootId              String?
+  timeStatus          TimeStatus?
+  deviceOffsetMs      Float?
   id                  String                    @id @default(cuid())
   companyId           String
   shiftId             String
@@ -351,22 +374,22 @@ model ShiftEvent {
 }
 
 model ShiftAssignment {
-  id           String   @id @default(cuid())
-  shiftId      String
-  guardId      String?
-  startsAt     DateTime @db.Timestamptz(3)
-  endsAt       DateTime @db.Timestamptz(3)
-  isCurrent    Boolean  @default(true)
-  active       Boolean  @default(true)
-  result       String?
-  assignedById String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  shift        Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  events       ShiftEvent[]
-  checkpointRecords CheckpointRecord[]
+  id                  String               @id @default(cuid())
+  shiftId             String
+  guardId             String?
+  startsAt            DateTime             @db.Timestamptz(3)
+  endsAt              DateTime             @db.Timestamptz(3)
+  isCurrent           Boolean              @default(true)
+  active              Boolean              @default(true)
+  result              String?
+  assignedById        String
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  shift               Shift                @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  events              ShiftEvent[]
+  checkpointRecords   CheckpointRecord[]
   invalidScanAttempts InvalidScanAttempt[]
-  guard        User?    @relation(fields: [guardId], references: [id], onDelete: Restrict)
+  guard               User?                @relation(fields: [guardId], references: [id], onDelete: Restrict)
 
   @@index([shiftId, isCurrent])
   @@index([guardId, startsAt, endsAt])
@@ -376,8 +399,8 @@ model ShiftRound {
   shiftId        String
   roundId        String
   roundVersionId String?
-  shift          Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  round          Round        @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  shift          Shift         @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  round          Round         @relation(fields: [roundId], references: [id], onDelete: Restrict)
   roundVersion   RoundVersion? @relation(fields: [roundVersionId], references: [id], onDelete: Restrict)
 
   @@id([shiftId, roundId])
@@ -406,29 +429,34 @@ enum InvalidScanReason {
 }
 
 model CheckpointRecord {
-  id                  String                    @id @default(cuid())
+  trustedAt           DateTime?                @db.Timestamptz(3)
+  elapsedMs           Float?
+  bootId              String?
+  timeStatus          TimeStatus?
+  deviceOffsetMs      Float?
+  id                  String                   @id @default(cuid())
   companyId           String
   shiftId             String
   assignmentId        String
   checkpointId        String
-  recordId            String                    @unique @db.Uuid
+  recordId            String                   @unique @db.Uuid
   method              CheckpointRecordMethod
-  occurredAtDevice    DateTime                  @db.Timestamptz(3)
-  receivedAt          DateTime                  @default(now()) @db.Timestamptz(3)
+  occurredAtDevice    DateTime                 @db.Timestamptz(3)
+  receivedAt          DateTime                 @default(now()) @db.Timestamptz(3)
   locationStatus      ShiftEventLocationStatus
-  latitude            Decimal?                  @db.Decimal(9, 6)
-  longitude           Decimal?                  @db.Decimal(10, 6)
-  accuracyMeters      Decimal?                  @db.Decimal(10, 2)
+  latitude            Decimal?                 @db.Decimal(9, 6)
+  longitude           Decimal?                 @db.Decimal(10, 6)
+  accuracyMeters      Decimal?                 @db.Decimal(10, 2)
   simulation          ShiftEventSimulation
   phoneNfc            PhoneNfcState
   countedFor          Json
-  outOfWindow         Boolean                   @default(false)
-  countsForCompliance Boolean                   @default(true)
+  outOfWindow         Boolean                  @default(false)
+  countsForCompliance Boolean                  @default(true)
   requestHash         String
-  createdAt           DateTime                  @default(now())
-  shift               Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  assignment          ShiftAssignment           @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
-  checkpoint          Checkpoint                @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+  createdAt           DateTime                 @default(now())
+  shift               Shift                    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment          ShiftAssignment          @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  checkpoint          Checkpoint               @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
   flags               RecordFlag[]
 
   @@index([companyId, shiftId, occurredAtDevice])
@@ -437,26 +465,26 @@ model CheckpointRecord {
 }
 
 model InvalidScanAttempt {
-  id               String                    @id @default(cuid())
+  id               String                   @id @default(cuid())
   companyId        String
   shiftId          String
   assignmentId     String
-  recordId         String                    @unique @db.Uuid
+  recordId         String                   @unique @db.Uuid
   method           CheckpointRecordMethod
   reason           InvalidScanReason
-  scannedValue     String                    @db.VarChar(512)
-  occurredAtDevice DateTime                  @db.Timestamptz(3)
-  receivedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  scannedValue     String                   @db.VarChar(512)
+  occurredAtDevice DateTime                 @db.Timestamptz(3)
+  receivedAt       DateTime                 @default(now()) @db.Timestamptz(3)
   locationStatus   ShiftEventLocationStatus
-  latitude         Decimal?                  @db.Decimal(9, 6)
-  longitude        Decimal?                  @db.Decimal(10, 6)
-  accuracyMeters   Decimal?                  @db.Decimal(10, 2)
+  latitude         Decimal?                 @db.Decimal(9, 6)
+  longitude        Decimal?                 @db.Decimal(10, 6)
+  accuracyMeters   Decimal?                 @db.Decimal(10, 2)
   simulation       ShiftEventSimulation
-  highlighted      Boolean                   @default(false)
+  highlighted      Boolean                  @default(false)
   requestHash      String
-  createdAt        DateTime                  @default(now())
-  shift            Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  assignment       ShiftAssignment           @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  createdAt        DateTime                 @default(now())
+  shift            Shift                    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment       ShiftAssignment          @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
@@ -470,6 +498,8 @@ enum SpeedProfile {
 }
 
 enum RecordFlagType {
+  time_altered
+  time_unverifiable
   out_of_range
   simulated_location
   impossible_time
@@ -566,3 +596,9 @@ model ShiftSyncState {
   @@index([companyId, shiftId])
 }
 
+enum TimeStatus {
+  verified
+  recalculated
+  pending
+  unverifiable
+}

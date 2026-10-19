@@ -6,6 +6,16 @@ import type {
 } from '@garita/shared';
 import type { LocalCheckpointRecord } from '@/lib/db/database';
 import { processScan, resetScanActionsForTesting, setScanActionsForTesting } from './scan-action';
+jest.mock('@/lib/clock/clock', () => ({
+  readClock: jest.fn(async (_repository: unknown, deviceTime: string) => ({
+    deviceTime,
+    trustedAt: deviceTime,
+    elapsedMs: 1000,
+    bootId: 'test-boot',
+    referenceOffsetMs: 0,
+    timeStatus: 'verified',
+  })),
+}));
 
 jest.mock('@/lib/nfc', () => ({
   nfcAvailability: jest.fn(async () => 'ready'),

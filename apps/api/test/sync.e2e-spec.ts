@@ -55,7 +55,7 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       .useValue({
         verifyIdToken: (token: string) => {
           if (token === 'token-admin') return Promise.resolve({ uid: 'seed-norte-admin' });
-          if (token === 'token-guard') return Promise.resolve({ uid: 'seed-norte-guard' });
+          if (token === 'token-guard') return Promise.resolve({ uid: 'sync-e2e-guard' });
           return Promise.reject(new Error('Token inválido'));
         },
         setDisabled: jest.fn(() => Promise.resolve()),
@@ -89,8 +89,19 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
     });
     northAdminId = northAdmin.id;
 
-    const northGuard = await prisma.user.findUniqueOrThrow({
-      where: { firebaseUid: 'seed-norte-guard' },
+    // Own guard: the seed's guard already has an in_progress shift that blocks starting another one.
+    const northGuard = await prisma.user.upsert({
+      where: { firebaseUid: 'sync-e2e-guard' },
+      update: { status: 'active' },
+      create: {
+        companyId: 'norte-company',
+        firebaseUid: 'sync-e2e-guard',
+        email: 'sync-e2e-guard@garita.test',
+        firstName: 'Vigilador',
+        lastName: 'Sync E2E',
+        role: 'guard',
+        status: 'active',
+      },
     });
     northGuardId = northGuard.id;
 

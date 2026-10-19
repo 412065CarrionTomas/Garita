@@ -5,6 +5,7 @@ import {
   type RecordFlagSeverity,
   type ShiftRecordsResponse,
   type UpdateSiteSpeedInput,
+  type DeviceClock,
 } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +13,9 @@ import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 export interface EvaluateRecordInput {
+  clock?: DeviceClock;
+  trustedAt?: Date | null;
+  receivedAt?: Date;
   id: string;
   recordId: string;
   shiftId: string;
@@ -73,26 +77,43 @@ export class MarcasService {
       }
 
       // 2. Load previous record of the same shift (if any)
-      const previousRecord = await this.prisma.tenantPrisma.checkpointRecord.findFirst({
-        where: {
-          shiftId: record.shiftId,
-          id: { not: record.id },
-          occurredAtDevice: { lte: record.occurredAtDevice },
-        },
-        orderBy: [{ occurredAtDevice: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
-        select: {
-          occurredAtDevice: true,
-          checkpoint: {
-            select: { id: true, latitude: true, longitude: true },
-          },
-        },
-      });
+      const effectiveAt = record.trustedAt ?? record.occurredAtDevice;
+      const candidates = await Promise.all(
+        [true, false].map((trusted) =>
+          this.prisma.tenantPrisma.checkpointRecord.findFirst({
+            where: {
+              shiftId: record.shiftId,
+              id: { not: record.id },
+              ...(trusted
+                ? { trustedAt: { lte: effectiveAt } }
+                : { trustedAt: null, occurredAtDevice: { lte: effectiveAt } }),
+            },
+            orderBy: trusted
+              ? [{ trustedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+              : [{ occurredAtDevice: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+            select: {
+              occurredAtDevice: true,
+              trustedAt: true,
+              checkpoint: { select: { id: true, latitude: true, longitude: true } },
+            },
+          }),
+        ),
+      );
+      const previousRecord = candidates
+        .filter((candidate) => candidate !== null)
+        .sort(
+          (a, b) =>
+            (b.trustedAt ?? b.occurredAtDevice).getTime() -
+            (a.trustedAt ?? a.occurredAtDevice).getTime(),
+        )[0];
 
       // 3. Evaluate flags deterministically
       const flags = evaluateRecordFlags({
         record: {
           method: record.method,
-          occurredAtDevice: record.occurredAtDevice.toISOString(),
+          occurredAtDevice: (record.trustedAt ?? record.occurredAtDevice).toISOString(),
+          clock: record.clock,
+          receivedAt: record.receivedAt,
           location: {
             status: record.locationStatus,
             latitude: record.latitude !== null ? Number(record.latitude) : null,
@@ -112,7 +133,9 @@ export class MarcasService {
         },
         previousRecord: previousRecord
           ? {
-              occurredAtDevice: previousRecord.occurredAtDevice.toISOString(),
+              occurredAtDevice: (
+                previousRecord.trustedAt ?? previousRecord.occurredAtDevice
+              ).toISOString(),
               checkpoint: {
                 id: previousRecord.checkpoint.id,
                 latitude: Number(previousRecord.checkpoint.latitude),

@@ -18,6 +18,7 @@ import { QrService } from '../checkpoints/qr.service';
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 import { MarcasService } from '../marcas/marcas.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { clockFields } from '../server-time/clock-fields';
 
 export function computeRequestHash(request: CheckpointRecordRequest): string {
   const canonical = {
@@ -35,6 +36,7 @@ export function computeRequestHash(request: CheckpointRecordRequest): string {
       takenAt: request.location.takenAt,
     },
     phoneNfc: request.phoneNfc,
+    ...(request.clock ? { clock: request.clock } : {}),
   };
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
@@ -139,7 +141,7 @@ export class CheckpointRecordsService {
       throw new ConflictException({ code: CHECKPOINT_RECORD_ERROR_CODES.shiftNotInProgress });
     }
 
-    const occurredAt = new Date(input.occurredAtDevice);
+    const occurredAt = new Date(input.clock?.trustedAt ?? input.occurredAtDevice);
     const receivedAt = this.clock.now();
 
     // Counts for compliance is false if the event occurred after an administrative close
@@ -280,12 +282,13 @@ export class CheckpointRecordsService {
         select: {
           checkpointId: true,
           occurredAtDevice: true,
+          trustedAt: true,
           countedFor: true,
         },
       });
       previousRecords = dbPreviousRecords.map((r) => ({
         checkpointId: r.checkpointId,
-        occurredAtUtc: r.occurredAtDevice.toISOString(),
+        occurredAtUtc: (r.trustedAt ?? r.occurredAtDevice).toISOString(),
         countedFor: Array.isArray(r.countedFor)
           ? (r.countedFor as { roundId: string; windowIndex: number }[])
           : [],
@@ -296,7 +299,7 @@ export class CheckpointRecordsService {
       rounds: shiftData.rounds,
       windows: shiftData.windows,
       checkpointId,
-      occurredAtUtc: input.occurredAtDevice,
+      occurredAtUtc: occurredAt.toISOString(),
       previousRecords,
       assignment: {
         startsAtUtc: assignment.startsAt.toISOString(),
@@ -308,7 +311,7 @@ export class CheckpointRecordsService {
       let createdRecord;
       context?.previousRecords?.push({
         checkpointId,
-        occurredAtUtc: input.occurredAtDevice,
+        occurredAtUtc: occurredAt.toISOString(),
         countedFor: imputation.countedFor,
       });
       try {
@@ -320,7 +323,8 @@ export class CheckpointRecordsService {
             checkpointId,
             recordId: input.recordId,
             method: input.method,
-            occurredAtDevice: occurredAt,
+            occurredAtDevice: new Date(input.occurredAtDevice),
+            ...clockFields(input.clock),
             receivedAt,
             locationStatus: input.location.status,
             latitude: input.location.latitude,
@@ -354,7 +358,7 @@ export class CheckpointRecordsService {
       }
 
       try {
-        await this.marcas.evaluateRecord(createdRecord);
+        await this.marcas.evaluateRecord({ ...createdRecord, clock: input.clock });
       } catch (error) {
         this.logger.error({
           event: 'checkpoint_record.marcas_evaluation_failed',
@@ -393,7 +397,8 @@ export class CheckpointRecordsService {
             checkpointId,
             recordId: input.recordId,
             method: input.method,
-            occurredAtDevice: occurredAt,
+            occurredAtDevice: new Date(input.occurredAtDevice),
+            ...clockFields(input.clock),
             receivedAt,
             locationStatus: input.location.status,
             latitude: input.location.latitude,
@@ -427,7 +432,7 @@ export class CheckpointRecordsService {
       }
 
       try {
-        await this.marcas.evaluateRecord(createdRecord);
+        await this.marcas.evaluateRecord({ ...createdRecord, clock: input.clock });
       } catch (error) {
         this.logger.error({
           event: 'checkpoint_record.marcas_evaluation_failed',

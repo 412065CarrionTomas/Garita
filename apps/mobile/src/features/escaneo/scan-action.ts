@@ -20,6 +20,7 @@ import {
   type LocalCheckpointRecord,
 } from '@/lib/db/database';
 import { getCurrentLocation, LocationError } from '@/lib/location';
+import { readClock } from '@/lib/clock/clock';
 import { nfcAvailability } from '@/lib/nfc';
 import { sendCheckpointRecord } from './api';
 import { playSuccessFeedback } from './feedback';
@@ -189,6 +190,8 @@ export async function processScan(
 ): Promise<ScanActionResult> {
   const d = deps();
   const now = d.now();
+  const clockRepository = await d.repository();
+  const clock = await readClock(clockRepository, now.toISOString());
   let uid: string | null = null;
   if (method === 'nfc') {
     try {
@@ -223,6 +226,7 @@ export async function processScan(
       recordId,
       shiftId: shiftData.shift.id,
       method,
+      clock,
       scannedValue,
       occurredAtDevice,
       location,
@@ -246,7 +250,7 @@ export async function processScan(
     };
     onSaved?.(attempt);
 
-    if (await d.online()) {
+    if (clock.timeStatus !== 'pending' && (await d.online())) {
       try {
         const response = await d.send(requestPayload);
         await repository.markPendingEventSent(recordId);
@@ -279,7 +283,7 @@ export async function processScan(
     rounds: shiftData.rounds,
     windows: shiftData.windows,
     checkpointId: checkpoint.id,
-    occurredAtUtc: now.toISOString(),
+    occurredAtUtc: clock.trustedAt ?? now.toISOString(),
     previousRecords: validPreviousRecords.map((r) => ({
       checkpointId: r.checkpointId,
       occurredAtUtc: r.occurredAtUtc,
@@ -329,7 +333,7 @@ export async function processScan(
     shiftId: shiftData.shift.id,
     checkpointId: checkpoint.id,
     checkpointName: checkpoint.name,
-    occurredAtUtc: occurredAtDevice,
+    occurredAtUtc: clock.trustedAt ?? occurredAtDevice,
     countedFor: isCounted ? imputation.countedFor : [],
     outOfWindow: !isCounted,
     serverResult: null,
@@ -343,6 +347,7 @@ export async function processScan(
     recordId,
     shiftId: shiftData.shift.id,
     method,
+    clock,
     scannedValue,
     occurredAtDevice,
     location,
@@ -376,7 +381,7 @@ export async function processScan(
   if (method === 'nfc') await d.feedback();
   onSaved?.(saved);
 
-  if (await d.online()) {
+  if (clock.timeStatus !== 'pending' && (await d.online())) {
     try {
       const response = await d.send(requestPayload);
       await repository.markPendingEventSent(recordId);

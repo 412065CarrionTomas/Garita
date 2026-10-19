@@ -75,7 +75,11 @@ export class SitesService {
       where: { clientId: id },
       select: { id: true },
     });
-    return this.deactivationImpact(sites.map((site) => site.id));
+    const impact = await this.deactivationImpact(sites.map((site) => site.id));
+    const usersToDeactivate = await this.prisma.tenantPrisma.user.count({
+      where: { clientId: id, status: { not: 'deactivated' } },
+    });
+    return { ...impact, usersToDeactivate };
   }
 
   async deactivateClient(id: string, confirm: boolean, adminId: string) {
@@ -91,6 +95,25 @@ export class SitesService {
       await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
       await this.weeklySchedules.terminateForSites(tx, siteIds);
       await this.inProgress.closeForSites(tx, siteIds, adminId);
+      // La actualización del cliente bloquea altas concurrentes hasta terminar la cascada.
+      await tx.client.update({ where: { id }, data: { status: 'inactive' } });
+      const users = await tx.user.findMany({
+        where: { clientId: id, status: { not: 'deactivated' } },
+        select: { id: true },
+      });
+      await tx.user.updateMany({ where: { clientId: id }, data: { status: 'deactivated' } });
+      await tx.invitation.updateMany({
+        where: { user: { clientId: id }, usedAt: null, replacedAt: null },
+        data: { replacedAt: this.clock.now() },
+      });
+      // shortcut: auditoría en logs, reemplazar por tabla de auditoría en E6.
+      for (const user of users)
+        this.logger.log({
+          event: 'client_user_deactivated',
+          actorUserId: adminId,
+          userId: user.id,
+          clientId: id,
+        });
       await tx.siteSupervisor.deleteMany({ where: { site: { clientId: id } } });
       await tx.site.updateMany({ where: { clientId: id }, data: { status: 'inactive' } });
       return tx.client.update({ where: { id }, data: { status: 'inactive' } });
@@ -118,10 +141,11 @@ export class SitesService {
       : client;
   }
 
-  async listSites(clientId?: string, status?: 'active' | 'inactive') {
+  async listSites(clientId?: string, status?: 'active' | 'inactive', user?: AuthenticatedUser) {
     const sites = await this.prisma.tenantPrisma.site.findMany({
       where: { ...(clientId ? { clientId } : {}), ...(status ? { status } : {}) },
-      take: 200,
+      // shortcut: lista completa del cliente, agregar paginación al implementar el portal HU-28.
+      take: user?.role === 'client' ? undefined : 200,
       orderBy: { name: 'asc' },
       include: {
         client: true,
@@ -223,11 +247,16 @@ export class SitesService {
   }
 
   private requireConfirmation(
-    impact: Awaited<ReturnType<SitesService['deactivationImpact']>>,
+    impact: Awaited<ReturnType<SitesService['deactivationImpact']>> & {
+      usersToDeactivate?: number;
+    },
     confirm: boolean,
   ) {
     const affected =
-      impact.shiftsToCancel + impact.weeklySchedulesToEnd + impact.inProgressShiftsToClose;
+      impact.shiftsToCancel +
+      impact.weeklySchedulesToEnd +
+      impact.inProgressShiftsToClose +
+      (impact.usersToDeactivate ?? 0);
     if (affected > 0 && !confirm)
       throw new ConflictException({ code: 'DEACTIVATION_CONFIRMATION_REQUIRED', ...impact });
   }

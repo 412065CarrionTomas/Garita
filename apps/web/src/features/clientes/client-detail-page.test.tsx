@@ -1,10 +1,19 @@
 import { screen } from '@testing-library/react';
 import { apiGet } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
+import { useAuth } from '../auth/auth-context';
 import { ClientDetailPage } from './clients-page';
 
+jest.mock('../auth/auth-context', () => ({
+  useAuth: jest.fn(() => ({ user: { role: 'admin' } })),
+}));
 jest.mock('react-router', () => ({ useParams: () => ({ id: 'client-1' }) }));
-jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn(), apiPost: jest.fn() }));
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.mocked(apiGet).mockResolvedValue([]);
+  jest.mocked(useAuth).mockReturnValue({ user: { role: 'admin' } } as ReturnType<typeof useAuth>);
+});
 
 const client = {
   id: 'client-1',
@@ -48,7 +57,8 @@ describe('ClientDetailPage', () => {
     );
     expect(screen.getByRole('cell', { name: 'Predio activo' })).toBeInTheDocument();
     expect(screen.queryByText('Predio inactivo')).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('El mapa no está configurado');
+    expect(screen.getByText(/El mapa no está configurado/)).toHaveAttribute('role', 'status');
+    expect(screen.getByRole('heading', { name: 'Usuarios del portal' })).toBeInTheDocument();
   });
 
   it('explica el estado vacío cuando el cliente no tiene predios activos', async () => {
@@ -56,5 +66,20 @@ describe('ClientDetailPage', () => {
     renderWithQueryClient(<ClientDetailPage />);
     expect(await screen.findByText('Este cliente no tiene predios activos.')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+  it('oculta la gestion del portal a los supervisores', async () => {
+    jest
+      .mocked(useAuth)
+      .mockReturnValue({ user: { role: 'supervisor' } } as ReturnType<typeof useAuth>);
+
+    jest.mocked(apiGet).mockResolvedValueOnce(client);
+
+    renderWithQueryClient(<ClientDetailPage />);
+
+    await screen.findByRole('heading', { name: 'Cliente Norte' });
+
+    expect(screen.queryByRole('heading', { name: 'Usuarios del portal' })).not.toBeInTheDocument();
+
+    expect(apiGet).toHaveBeenCalledTimes(1);
   });
 });

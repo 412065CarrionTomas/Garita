@@ -92,7 +92,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('supervisor'));
     renderWithQueryClient(<SitesPage />);
     expect(await screen.findByText('Sede')).toBeInTheDocument();
-    expect(screen.getByText('Solo lectura')).toBeInTheDocument();
+    expect(screen.getByText('Supervisión')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Guardar predio' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Supervisores de Sede')).not.toBeInTheDocument();
   });

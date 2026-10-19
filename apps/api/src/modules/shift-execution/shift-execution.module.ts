@@ -8,8 +8,8 @@ import {
   ShiftExecutionService,
   SHIFT_AUTO_CLOSE_QUEUE,
   SYNC_DEADLINE_PORT,
-  NoopSyncDeadline,
 } from './shift-execution.service';
+import { PrismaSyncDeadline } from './prisma-sync-deadline';
 import { ShiftAutoCloseProcessor } from './shift-auto-close.processor';
 import {
   NoopShiftExecutionEffects,
@@ -28,8 +28,8 @@ import {
     ShiftExecutionService,
     ShiftAutoCloseProcessor,
     { provide: SHIFT_EXECUTION_EFFECTS_PORT, useClass: NoopShiftExecutionEffects },
-    { provide: SYNC_DEADLINE_PORT, useClass: NoopSyncDeadline },
+    { provide: SYNC_DEADLINE_PORT, useClass: PrismaSyncDeadline },
   ],
-  exports: [ShiftExecutionService],
+  exports: [ShiftExecutionService, SYNC_DEADLINE_PORT],
 })
 export class ShiftExecutionModule {}

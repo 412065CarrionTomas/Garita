@@ -10,6 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
+import java.util.UUID
 import androidx.core.content.ContextCompat
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -21,10 +24,21 @@ import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicBoolean
 
 class GaritaNativeModule : Module() {
+  private val fallbackBootId = "process:" + UUID.randomUUID().toString()
   override fun definition() = ModuleDefinition {
     Name("GaritaNative")
     AsyncFunction("getCapabilities") {
-      mapOf("moduleVersion" to "1.0.0", "simulationDetectionAvailable" to true)
+      mapOf("moduleVersion" to "1.1.0", "simulationDetectionAvailable" to true)
+    }
+    AsyncFunction("getMonotonicClock") {
+      val bootId = try {
+        val context = appContext.reactContext ?: error("Contexto no disponible")
+        "android:" + Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT)
+      } catch (_: Exception) {
+        // shortcut: without BOOT_COUNT each process is a new boot, upgrade when the device exposes a stable boot identifier.
+        fallbackBootId
+      }
+      mapOf("elapsedMs" to SystemClock.elapsedRealtime().toDouble(), "bootId" to bootId)
     }
     AsyncFunction("getCurrentLocation") { options: Map<String, Any>, promise: Promise ->
       val timeoutMs = (options["timeoutMs"] as? Number)?.toLong() ?: 5000L

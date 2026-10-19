@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { deviceClockSchema } from './trusted-time';
 import { shiftOfflineDataSchema, type ShiftOfflineData } from './shift-offline-data';
 
 /**
@@ -68,6 +69,7 @@ export type ShiftCredential = z.infer<typeof shiftCredentialSchema>;
 
 /** Body of `POST /turnos/:id/iniciar`. The event id is generated on the phone (HU-13 reuses it). */
 export const startShiftRequestSchema = z.object({
+  clock: deviceClockSchema.optional(),
   eventId: z.uuid(),
   occurredAtDevice: isoDateTime,
   location: fieldLocationSchema,
@@ -76,6 +78,7 @@ export type StartShiftRequest = z.infer<typeof startShiftRequestSchema>;
 
 /** Response of `POST /turnos/:id/iniciar` (also returned when the same eventId is sent again). */
 export const startShiftResponseSchema = z.object({
+  serverTime: isoDateTime.optional(),
   status: z.literal('in_progress'),
   startedAt: isoDateTime,
   /** Minutes late against the assignment start; `null` when it started on time. */
@@ -89,6 +92,7 @@ export type StartShiftResponse = z.infer<typeof startShiftResponseSchema>;
 
 /** Body of `POST /turnos/:id/cerrar`. `reason` is required when closing before the scheduled end. */
 export const closeShiftRequestSchema = z.object({
+  clock: deviceClockSchema.optional(),
   eventId: z.uuid(),
   occurredAtDevice: isoDateTime,
   location: fieldLocationSchema,
@@ -127,19 +131,6 @@ export type ShiftStateResponse = z.infer<typeof shiftStateResponseSchema>;
 /** `true` when closing at `closingAt` happens before the scheduled end, so a reason is required. */
 export function isEarlyClose(scheduledEndUtc: string, closingAtUtc: string): boolean {
   return Date.parse(closingAtUtc) < Date.parse(scheduledEndUtc);
-}
-
-/** `true` when `nowUtc` is inside the start margin of a shift (from 30 min before start until its end). */
-export function isWithinStartMargin(
-  startsAtUtc: string,
-  endsAtUtc: string,
-  nowUtc: string,
-): boolean {
-  const now = Date.parse(nowUtc);
-  return (
-    now >= Date.parse(startsAtUtc) - SHIFT_START_MARGIN_MINUTES * 60_000 &&
-    now <= Date.parse(endsAtUtc)
-  );
 }
 
 /** Minutes late against the assignment start, or `null` when on time. */

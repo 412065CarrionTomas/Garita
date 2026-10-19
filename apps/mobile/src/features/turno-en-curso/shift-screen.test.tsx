@@ -5,6 +5,7 @@ import type { PendingFieldEvent, ShiftOfflineData } from '@garita/shared';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { apiGet } from '@/lib/api-client';
 import { ShiftScreen } from './shift-screen';
+import { beginShift } from './actions';
 
 jest.mock('@/lib/db/database', () => ({ createDefaultFieldRepository: jest.fn() }));
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
@@ -71,6 +72,31 @@ describe('<ShiftScreen />', () => {
     repository.getShiftData.mockResolvedValue(data);
     repository.listPendingEvents.mockResolvedValue([]);
     jest.mocked(createDefaultFieldRepository).mockResolvedValue(repository as never);
+  });
+
+  it('HU-34: enables an early start and displays the permitted server time', async () => {
+    repository.getShiftData.mockResolvedValue(null as never);
+    jest.mocked(apiGet).mockResolvedValue([
+      {
+        id: 'shift-1',
+        startsAt: new Date(Date.now() + 4 * 60 * 60_000).toISOString(),
+        endsAt: new Date(Date.now() + 6 * 60 * 60_000).toISOString(),
+        site: { name: 'Campo' },
+      },
+    ]);
+    jest
+      .mocked(beginShift)
+      .mockResolvedValue({ status: 'error', message: 'Podés iniciarlo desde las 09:40' });
+    await act(async () => {
+      await render(<ShiftScreen shiftId="shift-1" />);
+    });
+    const button = await screen.findByRole('button', { name: 'Iniciar turno' });
+    expect(button).toBeEnabled();
+    await act(async () => {
+      await fireEvent.press(button);
+    });
+    expect(await screen.findByText('Podés iniciarlo desde las 09:40')).toBeOnTheScreen();
+    expect(beginShift).toHaveBeenCalledTimes(1);
   });
 
   it('reopens from local data without API and shows pending checkpoints in round order', async () => {

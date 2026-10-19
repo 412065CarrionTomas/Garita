@@ -57,6 +57,10 @@ async function main(): Promise<void> {
       },
       update: {},
     });
+    await prisma.user.update({
+      where: { firebaseUid: `seed-${prefix}-client` },
+      data: { clientId: client.id },
+    });
     for (const [index, name] of ['Predio A', 'Predio B'].entries()) {
       const site = await prisma.site.upsert({
         where: { clientId_name: { clientId: client.id, name } },
@@ -94,6 +98,21 @@ async function main(): Promise<void> {
   }
   const northClient = await prisma.client.findUniqueOrThrow({
     where: { companyId_name: { companyId: north, name: 'Cliente norte' } },
+  });
+  await prisma.site.upsert({
+    where: { clientId_name: { clientId: northClient.id, name: 'Campo Los Álamos' } },
+    create: {
+      companyId: north,
+      clientId: northClient.id,
+      name: 'Campo Los Álamos',
+      address: 'Zona rural',
+      latitude: -34.6,
+      longitude: -58.4,
+      connectivityType: 'without_signal',
+      minutesToSignal: 180,
+      marginMinutes: 20,
+    },
+    update: {},
   });
   const northSite = await prisma.site.findUniqueOrThrow({
     where: { clientId_name: { clientId: northClient.id, name: 'Predio A' } },
