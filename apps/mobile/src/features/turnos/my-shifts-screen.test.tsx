@@ -28,11 +28,12 @@ describe('<MyShiftsScreen />', () => {
           resolveRequests.push(() => resolve(shifts as never));
         }),
     );
-    render(<MyShiftsScreen />);
+    await render(<MyShiftsScreen />);
     await waitFor(() => expect(resolveRequests).toHaveLength(1));
     await act(async () => resolveRequests[0]?.());
-    expect(await screen.findByText('Predio A')).toBeOnTheScreen();
+    expect(await screen.findByText(/^Predio A/)).toBeOnTheScreen();
     expect(screen.getByText(/Perimetral/)).toBeOnTheScreen();
+    expect(screen.getByText('Programado')).toBeOnTheScreen();
     await act(async () => {
       fireEvent.press(screen.getByRole('button', { name: 'Ver turno en Predio A' }));
     });
@@ -53,11 +54,43 @@ describe('<MyShiftsScreen />', () => {
           rejectInitial = () => reject(new Error('sin conexión'));
         }),
     );
-    render(<MyShiftsScreen />);
+    await render(<MyShiftsScreen />);
     await waitFor(() => expect(rejectInitial).toBeDefined());
     await act(async () => {
       rejectInitial?.();
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(/No se pudieron cargar los turnos/);
   });
+});
+
+it('distingue un turno en curso y conserva sus datos', async () => {
+  fetchShifts.mockResolvedValue([
+    {
+      id: 'ongoing',
+      status: 'in_progress',
+      startsAt: '2030-10-14T23:00:00.000Z',
+      endsAt: '2030-10-15T11:00:00.000Z',
+      serviceDate: '2030-10-14',
+      site: { name: 'Predio B', company: { timezone: 'America/Argentina/Buenos_Aires' } },
+      rounds: [],
+    },
+  ] as never);
+  await render(<MyShiftsScreen />);
+  expect(await screen.findByText('En curso')).toBeOnTheScreen();
+  expect(screen.getByText('20:00–08:00')).toBeOnTheScreen();
+  expect(screen.getByText(/Día del turno:/)).toBeOnTheScreen();
+});
+
+it('conserva los estados de carga y vacío', async () => {
+  let resolveRequest: ((value: never) => void) | undefined;
+  fetchShifts.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+  );
+  await render(<MyShiftsScreen />);
+  expect(screen.getByRole('progressbar')).toHaveTextContent('Cargando turnos…');
+  await act(async () => resolveRequest?.([] as never));
+  expect(await screen.findByText('No tenés turnos próximos.')).toBeOnTheScreen();
 });
