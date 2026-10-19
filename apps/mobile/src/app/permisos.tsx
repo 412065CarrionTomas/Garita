@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { space } from '@garita/tokens';
+import { Banner, Button, Card, Screen, Text } from '@/ui';
 import {
   requestFieldPermissions,
   type FieldPermissionState,
@@ -28,69 +30,53 @@ export default function PermissionsScreen() {
     }
   };
   return (
-    <View style={styles.container}>
-      <Text accessibilityRole="header" style={styles.title}>
+    <Screen scroll style={styles.container}>
+      <Text variant="title" accessibilityRole="header">
         Permisos para trabajar
       </Text>
-      <Text style={styles.copy}>
-        La ubicación precisa se usa únicamente al iniciar y cerrar el turno y al registrar un punto.
-        Se utiliza para verificar el recorrido informado, conforme a la finalidad comunicada bajo la
-        Ley 25.326.
-      </Text>
-      <Text style={styles.copy}>
-        La cámara se usa para leer los códigos QR de los puntos de control. Las notificaciones se
-        configurarán más adelante.
-      </Text>
-      <Pressable
-        accessibilityRole="button"
+      <Card>
+        <Text variant="heading">Ubicación precisa</Text>
+        <Text>
+          La ubicación precisa se usa únicamente al iniciar y cerrar el turno y al registrar un
+          punto. Se utiliza para verificar el recorrido informado, conforme a la finalidad
+          comunicada bajo la Ley 25.326.
+        </Text>
+      </Card>
+      <Card>
+        <Text variant="heading">Cámara</Text>
+        <Text>
+          La cámara se usa para leer los códigos QR de los puntos de control. Las notificaciones se
+          configurarán más adelante.
+        </Text>
+      </Card>
+      <Button
+        size="lg"
+        label="Configurar permisos"
         accessibilityLabel="Permitir ubicación precisa y cámara"
         onPress={request}
-        disabled={loading}
-        style={styles.button}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Configurar permisos</Text>
-        )}
-      </Pressable>
+        loading={loading}
+      />
       {state === 'ok' && (
-        <Pressable
-          accessibilityRole="button"
+        <Button
+          variant="outline"
+          label="Continuar"
           accessibilityLabel="Continuar a mis turnos"
           onPress={() => router.replace('/(guard)')}
-          style={styles.button}
-        >
-          <Text style={styles.buttonText}>Continuar</Text>
-        </Pressable>
+        />
       )}
       {state && (
-        <Text accessibilityLiveRegion="polite" style={styles.status}>
+        <Banner
+          tone={state === 'ok' ? 'success' : 'danger'}
+          role="text"
+          accessibilityLiveRegion="polite"
+        >
           {messages[state]}
-        </Text>
+        </Banner>
       )}
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 24,
-    justifyContent: 'center',
-    gap: 20,
-    backgroundColor: '#171717',
-  },
-  title: { color: '#fff', fontSize: 28, fontWeight: '700' },
-  copy: { color: '#fff', fontSize: 18, lineHeight: 27 },
-  button: {
-    minHeight: 64,
-    backgroundColor: '#facc15',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  buttonText: { color: '#171717', fontSize: 19, fontWeight: '700' },
-  status: { color: '#fff', fontSize: 18 },
+  container: { flexGrow: 1, justifyContent: 'center', gap: space[5] },
 });

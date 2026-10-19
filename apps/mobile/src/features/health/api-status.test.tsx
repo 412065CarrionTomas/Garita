@@ -17,6 +17,17 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('<ApiStatus />', () => {
+  it('anuncia que está verificando la conexión mientras espera la API', async () => {
+    fetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+    await render(<ApiStatus />);
+    expect(screen.getByText('Verificando conexión…')).toBeOnTheScreen();
+    expect(
+      screen
+        .getAllByRole('text')
+        .some((element) => element.props.accessibilityLiveRegion === 'polite'),
+    ).toBe(true);
+  });
+
   it('muestra que la API está conectada cuando responde correctamente', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ status: 'ok', timestamp: new Date().toISOString() }),
@@ -25,6 +36,11 @@ describe('<ApiStatus />', () => {
     await render(<ApiStatus />);
 
     expect(await screen.findByText('API conectada')).toBeOnTheScreen();
+    expect(
+      screen
+        .getAllByRole('text')
+        .some((element) => element.props.accessibilityLiveRegion === 'polite'),
+    ).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       'http://api.test/api/v1/health/live',
       expect.objectContaining({ headers: expect.any(Headers) as Headers }),

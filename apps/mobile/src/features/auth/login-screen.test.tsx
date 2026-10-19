@@ -10,6 +10,20 @@ jest.mock('./auth-context', () => ({
 const useAuthMock = jest.mocked(useAuth);
 
 describe('LoginScreen', () => {
+  it('anuncia la verificación de sesión sin mostrar el formulario', async () => {
+    useAuthMock.mockReturnValue({
+      user: null,
+      loading: true,
+      login: jest.fn(),
+      logout: jest.fn(),
+      recover: jest.fn(),
+      error: '',
+    });
+    const view = await render(<LoginScreen />);
+    expect(view.getByRole('progressbar', { name: 'Verificando sesión…' })).toBeTruthy();
+    expect(view.queryByLabelText('Correo electrónico')).toBeNull();
+  });
+
   it('valida antes de enviar', async () => {
     const login = jest.fn();
     useAuthMock.mockReturnValue({
@@ -21,6 +35,11 @@ describe('LoginScreen', () => {
       error: '',
     });
     const view = await render(<LoginScreen />);
+    expect(view.getByLabelText('Contraseña')).toHaveProp('secureTextEntry', true);
+    await fireEvent.press(view.getByLabelText('Mostrar contraseña'));
+    expect(view.getByLabelText('Contraseña')).toHaveProp('secureTextEntry', false);
+    await fireEvent.press(view.getByLabelText('Ocultar contraseña'));
+    expect(view.getByLabelText('Contraseña')).toHaveProp('secureTextEntry', true);
     await fireEvent.press(view.getByLabelText('Ingresar'));
     expect(await view.findByText('Ingresá un correo válido')).toBeTruthy();
     expect(login).not.toHaveBeenCalled();
