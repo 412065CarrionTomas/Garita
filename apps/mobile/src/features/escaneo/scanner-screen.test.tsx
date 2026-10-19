@@ -1,7 +1,9 @@
-import { act, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { colors, touch } from '@garita/tokens';
 import { useCameraPermissions } from 'expo-camera';
 import type { ShiftOfflineData } from '@garita/shared';
 import { nfcAvailability } from '@/lib/nfc';
+import { ThemeProvider, ThemeSwitch } from '@/ui';
 import { setScanActionsForTesting } from './scan-action';
 import { ScannerScreen } from './scanner-screen';
 
@@ -197,6 +199,9 @@ describe('<ScannerScreen />', () => {
     expect(elapsed).toBeLessThan(5000);
 
     expect(screen.getByText('Portón trasero registrado')).toBeOnTheScreen();
+    expect(screen.getByRole('alert')).toHaveTextContent('Portón trasero registrado');
+    expect(screen.getByRole('alert')).toHaveProp('accessibilityLiveRegion', 'assertive');
+    expect(screen.getByRole('alert')).toHaveStyle({ backgroundColor: colors.light.successSoft });
     expect(onComplete).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'counted',
@@ -210,5 +215,100 @@ describe('<ScannerScreen />', () => {
       continueButton.props.onClick?.() ?? continueButton.props.onPress?.();
     });
     expect(screen.queryByText('Portón trasero registrado')).toBeNull();
+  });
+
+  it.each(['Claro', 'Oscuro'])(
+    'keeps camera controls dark and touchable in %s mode',
+    async (mode) => {
+      await render(
+        <ThemeProvider>
+          <ThemeSwitch />
+          <ScannerScreen shiftData={shiftData} />
+        </ThemeProvider>,
+      );
+      await fireEvent.press(screen.getByLabelText(mode));
+
+      expect(screen.getByTestId('camera-view')).toHaveStyle({
+        backgroundColor: colors.dark.background,
+      });
+      expect(screen.getByText('Apuntá al código QR del punto')).toHaveStyle({
+        color: colors.dark.foreground,
+        backgroundColor: `${colors.dark.background}D9`,
+      });
+      for (const name of ['Volver al turno', 'Encender linterna']) {
+        expect(screen.getByRole('button', { name })).toHaveStyle({
+          minHeight: touch.min,
+          backgroundColor: `${colors.dark.background}D9`,
+        });
+      }
+      expect(screen.getByText('← Volver')).toHaveStyle({ color: colors.dark.foreground });
+      await fireEvent.press(screen.getByLabelText('Encender linterna'));
+      expect(screen.getByText('Linterna: ON')).toHaveStyle({ color: colors.dark.foreground });
+    },
+  );
+
+  it.each(['light', 'dark'] as const)(
+    'announces a rejected scan and offers both recovery actions in %s mode',
+    async (scheme) => {
+      await render(
+        <ThemeProvider>
+          <ThemeSwitch />
+          <ScannerScreen shiftData={shiftData} />
+        </ThemeProvider>,
+      );
+      await fireEvent.press(screen.getByLabelText(scheme === 'light' ? 'Claro' : 'Oscuro'));
+      await act(async () => {
+        screen
+          .getByTestId('camera-view')
+          .props.onBarcodeScanned({ type: 'qr', data: 'invalid-qr' });
+      });
+      expect(screen.getByRole('alert')).toHaveProp('accessibilityLiveRegion', 'assertive');
+      expect(screen.getByRole('alert')).toHaveStyle({ backgroundColor: colors[scheme].dangerSoft });
+      expect(screen.getByRole('button', { name: 'Escanear otro punto' })).toBeOnTheScreen();
+      expect(screen.getAllByRole('button', { name: 'Volver al turno' })).toHaveLength(2);
+    },
+  );
+
+  it('shows the existing loading messages without mounting the camera', async () => {
+    const view = await render(<ScannerScreen shiftData={null} />);
+    expect(
+      screen.getByRole('progressbar', { name: 'Cargando datos del turno...' }),
+    ).toBeOnTheScreen();
+    expect(screen.queryByTestId('camera-view')).toBeNull();
+
+    jest
+      .mocked(useCameraPermissions)
+      .mockReturnValue([null, requestPermissionMock, jest.fn() as never]);
+    await view.unmount();
+    await render(<ScannerScreen shiftData={shiftData} />);
+    expect(
+      screen.getByRole('progressbar', { name: 'Verificando permisos de cámara...' }),
+    ).toBeOnTheScreen();
+    expect(screen.queryByTestId('camera-view')).toBeNull();
+  });
+
+  it('keeps processing feedback light on the dark camera surface', async () => {
+    let finishFeedback = () => {};
+    setScanActionsForTesting({
+      feedback: () =>
+        new Promise<void>((resolve) => {
+          finishFeedback = resolve;
+        }),
+    });
+    await render(<ScannerScreen shiftData={shiftData} />);
+    await act(async () => {
+      screen.getByTestId('camera-view').props.onBarcodeScanned({
+        type: 'qr',
+        data: 'GQR1.cp-porton.1.signature123456789012345678901234567890',
+      });
+    });
+    expect(screen.getByText('Procesando escaneo...')).toHaveStyle({
+      color: colors.dark.foreground,
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => {
+      finishFeedback();
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Portón trasero registrado');
   });
 });
