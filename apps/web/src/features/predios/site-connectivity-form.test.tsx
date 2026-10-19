@@ -61,6 +61,30 @@ describe('Conectividad', () => {
     expect(screen.getByRole('button', { name: 'Guardar conectividad' })).toBeEnabled();
   });
 
+  it('ignores hidden travel fields when switching back to signal', async () => {
+    jest.mocked(apiPut).mockResolvedValue(initial);
+    const user = userEvent.setup();
+    renderWithQueryClient(
+      <SiteConnectivityForm
+        siteId="site"
+        initial={{ ...initial, type: 'without_signal', minutesToSignal: 180 }}
+        onSaved={jest.fn()}
+      />,
+    );
+    await user.clear(screen.getByLabelText('Horas'));
+    await user.type(screen.getByLabelText('Horas'), '-1');
+    await user.selectOptions(screen.getByLabelText('Tipo de conectividad'), 'with_signal');
+    await user.click(screen.getByRole('button', { name: 'Guardar conectividad' }));
+    await waitFor(() => {
+      expect(apiPut).toHaveBeenCalledWith(
+        '/predios/site/conectividad',
+        initial,
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
   it('is operable by keyboard and identifies deadlines on the following day', async () => {
     jest
       .mocked(apiPut)

@@ -34,11 +34,12 @@ export function SiteConnectivityForm({
     marginMinutes: margin,
   });
   const travelError =
-    hours < 0 ||
-    !Number.isInteger(hours) ||
-    minutes < 0 ||
-    minutes > 59 ||
-    !Number.isInteger(minutes)
+    type === 'without_signal' &&
+    (hours < 0 ||
+      !Number.isInteger(hours) ||
+      minutes < 0 ||
+      minutes > 59 ||
+      !Number.isInteger(minutes))
       ? 'Ingresá horas enteras y minutos entre 0 y 59'
       : parsed.error?.issues.find((issue) => issue.path[0] === 'minutesToSignal')?.message;
   const marginError = parsed.error?.issues.find(
