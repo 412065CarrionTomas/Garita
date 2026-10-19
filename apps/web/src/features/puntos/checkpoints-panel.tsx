@@ -337,7 +337,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
                           Regenerar QR
                         </Button>
                         <Button
-                          variant="ghost"
+                          variant="ghostDestructive"
                           size="sm"
                           onClick={() => {
                             setPendingAction(() => async () => {

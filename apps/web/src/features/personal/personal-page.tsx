@@ -507,7 +507,7 @@ export function PersonalPage() {
                         ) : (
                           <Button
                             type="button"
-                            variant="ghost"
+                            variant="ghostDestructive"
                             size="sm"
                             onClick={() => {
                               setDeactivating(person);
