@@ -62,6 +62,6 @@ it('buildCss emite :root y .dark con todas las variables', () => {
   const css = buildCss();
   expect(css).toContain(':root {');
   expect(css).toContain('.dark {');
-  expect(css).toContain('--sidebar-accent-foreground: #FFFFFF;');
+  expect(css).toContain('--sidebar-accent-foreground: #09090B;');
   expect(css.match(/--primary:/g)).toHaveLength(2);
 });
