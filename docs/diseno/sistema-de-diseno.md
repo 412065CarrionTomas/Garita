@@ -5,7 +5,7 @@ Fuente de verdad visual del panel web y de la app del vigilador. Los **valores**
 ## 1. Principios
 
 1. **Es una herramienta de trabajo, no una landing.** El panel es denso y legible (tablas, filtros, formularios claros). La app se usa de noche, con guantes, con una mano y bajo el sol: contraste alto y objetivos grandes.
-2. **El color informa, no decora.** La marca es un azul de uniforme (`primary`). El ámbar de seguridad vial (`signal`) se usa **solo** para lo que pide atención ahora: el turno en curso, el punto que falta escanear, la acción principal del vigilador, el ítem activo del menú. Si todo es ámbar, nada lo es.
+2. **El color informa, no decora.** La marca es neutra (`primary`: casi negro en claro, casi blanco en oscuro) y el único acento de color es el ámbar. El ámbar de seguridad vial (`signal`) se usa **solo** para lo que pide atención ahora: el turno en curso, el punto que falta escanear, la acción principal del vigilador, el ítem activo del menú. Si todo es ámbar, nada lo es.
 3. **El estado nunca va solo en color.** Todo estado es punto + texto (`StatusBadge` en web, `Badge` en la app). Los errores dicen qué pasó y cómo seguir.
 4. **Modo claro y oscuro son de primera clase.** Nada se diseña con un solo tema: cada pantalla se revisa en los dos.
 5. **Una acción principal por pantalla.** Un solo botón `default`/`primary` (o `signal` en la app); el resto, `outline`, `secondary` o `ghost`.
@@ -29,7 +29,7 @@ Se consumen por nombre semántico; **nunca hex, rgb ni `oklch` sueltos en pantal
 | `ring`                                                           | Foco visible                                                                                      |
 | `signal` / `signalForeground`                                    | Atención inmediata (ver principio 2)                                                              |
 | `success`, `warning`, `danger`, `info` + `*Soft` + `*Foreground` | Estados. Texto en el color pleno sobre su `*Soft`; `*Foreground` es el texto sobre el color pleno |
-| `sidebar*`                                                       | Menú lateral del panel (siempre azul oscuro, también en modo claro)                               |
+| `sidebar*`                                                       | Menú lateral del panel (neutro, un escalón por encima o por debajo del fondo)                     |
 
 `packages/tokens/src/tokens.test.ts` verifica que cada par de texto cumpla WCAG AA (4.5:1) en los dos temas. **Si cambiás un valor, corré ese test.**
 
