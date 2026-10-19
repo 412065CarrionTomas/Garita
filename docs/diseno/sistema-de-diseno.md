@@ -9,7 +9,7 @@ Fuente de verdad visual del panel web y de la app del vigilador. Los **valores**
 3. **El estado nunca va solo en color.** Todo estado es punto + texto (`StatusBadge` en web, `Badge` en la app). Los errores dicen qué pasó y cómo seguir.
 4. **Modo claro y oscuro son de primera clase.** Nada se diseña con un solo tema: cada pantalla se revisa en los dos.
 5. **Una acción principal por pantalla.** Un solo botón `default`/`primary` (o `signal` en la app); el resto, `outline`, `secondary` o `ghost`.
-6. **Bordes antes que sombras.** Las superficies se separan con borde y fondo (`card` sobre `background`). Sombra solo en lo flotante (menús, diálogos), que ya la trae shadcn.
+6. **Bordes antes que sombras.** Las superficies se separan con borde y fondo (`card` sobre `background`). Sombra solo en lo flotante (menús, diálogos), que ya la trae shadcn. Detrás de diálogos, confirmaciones y el menú móvil, el fondo se oscurece y se difumina (`bg-black/70 backdrop-blur-md`, ya en `dialog`, `alert-dialog` y `sheet`) para que la tarea no se confunda con la pantalla de atrás; no se redefine por pantalla.
 7. **Español rioplatense, voseo y oraciones en minúscula** ("Guardar cambios", no "Enviar"; "Ingresá", no "Ingrese"). Un botón dice lo que hace y mantiene su nombre en todo el flujo.
 
 ## 2. Tokens
@@ -73,6 +73,7 @@ Números, horas y patentes: `tabular-nums` en web. Sin MAYÚSCULAS para etiqueta
 
 `src/components/ui/`: `alert`, `alert-dialog`, `badge`, `button`, `card`, `checkbox`, `dialog`, `dropdown-menu`, `input`, `label`, `native-select`, `select`, `separator`, `sheet`, `skeleton`, `switch`, `table`, `tabs`, `textarea`.
 `src/components/`: `AppShell` (ya aplicado en `RoleLayout`), `PageHeader`, `EmptyState`, `StatusBadge`, `ThemeToggle`.
+`AppShell` permite ocultar el menú lateral en pantallas de 1024 px o más (botón "Ocultar menú" / "Mostrar menú"); la elección se guarda en el navegador (`garita-sidebar-collapsed`). En pantallas chicas el menú ya es un panel lateral.
 Íconos: `lucide-react`, siempre con `aria-hidden="true"` y acompañados de texto, salvo botones de ícono con `aria-label`.
 
 **Reglas de uso**
