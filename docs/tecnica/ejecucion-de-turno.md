@@ -8,6 +8,8 @@ El inicio usa `CLOCK` del servidor como `startedAt`; `occurredAtDevice` se conse
 
 ## Cierre y automatización
 
+HU-34 calcula la ventana anticipada según la [conectividad del predio](conectividad-de-predios.md). Al iniciar congela tipo, tiempo hasta señal, margen y `syncDeadlineAt` en el turno; tanto el job como el barrido usan ese snapshot. El cierre automático ocurre en `max(endsAt + 120 minutos, syncDeadlineAt)`, por lo que no cierra un predio sin señal antes de su plazo. `data.shift.syncDeadlineAt` es un agregado opcional al contrato offline.
+
 El cierre del vigilador usa la hora del dispositivo, que debe estar entre el inicio del turno y la recepción. Si ocurre antes del fin programado, el motivo es obligatorio y `closedEarly` queda verdadero. El cierre automático de BullMQ se programa para el más tardío entre `endsAt + 120 minutos` y el plazo de sincronización del predio; un barrido periódico recupera jobs vencidos. Ambos caminos usan `CLOCK` y verifican el estado para tolerar reintentos.
 
 El cierre automático deja un evento `auto_close` y el turno en `auto_closed`. Un cierre real recibido después reemplaza `closedAt` y el estado a `closed`, preservando `autoClosedAt` y el evento automático en el historial. El cierre automático no declara completas las ventanas.

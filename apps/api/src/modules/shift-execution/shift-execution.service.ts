@@ -18,7 +18,9 @@ import {
   currentRoundProgress,
   lateStartMinutes,
   isEarlyClose,
-  isWithinStartMargin,
+  computeStartWindow,
+  computeSyncDeadline,
+  siteConnectivitySchema,
   SHIFT_AUTO_CLOSE_AFTER_MINUTES,
   SHIFT_EXECUTION_ERROR_CODES,
   startShiftResponseSchema,
@@ -40,8 +42,12 @@ export const SHIFT_AUTO_CLOSE_JOB = 'close-shift';
 export const SYNC_DEADLINE_PORT = Symbol('SYNC_DEADLINE_PORT');
 export interface SyncDeadlinePort {
   deadlineForSite(siteId: string, endsAt: Date): Promise<Date | null>;
+  deadlineForShift(id: string): Promise<Date | null>;
 }
 export class NoopSyncDeadline implements SyncDeadlinePort {
+  deadlineForShift(): Promise<null> {
+    return Promise.resolve(null);
+  }
   deadlineForSite(): Promise<null> {
     return Promise.resolve(null);
   }
@@ -93,15 +99,17 @@ export class ShiftExecutionService {
     if (guard.status === 'invitation_pending')
       throw new ForbiddenException({ code: SHIFT_EXECUTION_ERROR_CODES.invitationPending });
     const now = this.clock.now();
-    if (
-      !isWithinStartMargin(
-        assignment.startsAt.toISOString(),
-        assignment.endsAt.toISOString(),
-        now.toISOString(),
-      )
-    )
+    const connectivity = siteConnectivitySchema.parse({
+      type: shift.site.connectivityType,
+      minutesToSignal: shift.site.minutesToSignal,
+      marginMinutes: shift.site.marginMinutes,
+    });
+    const startFrom = computeStartWindow(assignment.startsAt, connectivity);
+    if (now < startFrom || now > assignment.endsAt)
       throw new UnprocessableEntityException({
         code: SHIFT_EXECUTION_ERROR_CODES.outsideStartMargin,
+        startFrom: startFrom.toISOString(),
+        timezone: shift.site.company.timezone,
       });
     const another = await this.prisma.tenantPrisma.shift.findFirst({
       where: {
@@ -129,7 +137,15 @@ export class ShiftExecutionService {
         }
         await tx.shift.update({
           where: { id },
-          data: { status: 'in_progress', startedAt: now, lateStartMinutes: late },
+          data: {
+            status: 'in_progress',
+            startedAt: now,
+            lateStartMinutes: late,
+            connectivityType: connectivity.type,
+            minutesToSignal: connectivity.minutesToSignal,
+            marginMinutes: connectivity.marginMinutes,
+            syncDeadlineAt: computeSyncDeadline(shift.endsAt, connectivity),
+          },
         });
         await tx.shiftEvent.create({
           data: {
@@ -363,8 +379,17 @@ export class ShiftExecutionService {
       shift.endsAt.getTime() + SHIFT_AUTO_CLOSE_AFTER_MINUTES * 60_000 > this.clock.now().getTime()
     )
       return false;
-    const deadline = await this.syncDeadline.deadlineForSite(shift.siteId, shift.endsAt);
-    if (deadline && deadline > this.clock.now()) return false;
+    const deadline =
+      shift.syncDeadlineAt ??
+      computeSyncDeadline(
+        shift.endsAt,
+        siteConnectivitySchema.parse({
+          type: shift.connectivityType ?? 'with_signal',
+          minutesToSignal: shift.minutesToSignal ?? 0,
+          marginMinutes: shift.marginMinutes ?? 30,
+        }),
+      );
+    if (deadline > this.clock.now()) return false;
     const assignment = shift.assignments[0];
     if (!assignment) return false;
     const now = this.clock.now();
@@ -702,6 +727,7 @@ export class ShiftExecutionService {
         endsAt: shift.endsAt.toISOString(),
         timezone: shift.site.company.timezone,
         assignmentId: assignment.id,
+        syncDeadlineAt: (await this.syncDeadline.deadlineForShift(id))?.toISOString(),
       },
       rounds: rounds.map(({ version: _version, ...round }) => round),
       windows: selected.map(({ roundId, startUtc, endUtc, label }) => ({
@@ -746,7 +772,7 @@ export class ShiftExecutionService {
 
   private async scheduleAutoClose(id: string, siteId: string, endsAt: Date) {
     const defaultTime = endsAt.getTime() + SHIFT_AUTO_CLOSE_AFTER_MINUTES * 60_000;
-    const siteDeadline = await this.syncDeadline.deadlineForSite(siteId, endsAt);
+    const siteDeadline = await this.syncDeadline.deadlineForShift(id);
     const delay = Math.max(
       0,
       Math.max(defaultTime, siteDeadline?.getTime() ?? defaultTime) - this.clock.now().getTime(),

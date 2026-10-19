@@ -103,6 +103,11 @@ model Client {
   @@index([companyId, status])
 }
 
+enum ConnectivityType {
+  with_signal
+  without_signal
+}
+
 model Site {
   id                 String           @id @default(cuid())
   companyId          String
@@ -116,6 +121,9 @@ model Site {
   status             RecordStatus     @default(active)
   maxSpeedProfile    SpeedProfile     @default(walking)
   maxSpeedKmh        Int              @default(10)
+  connectivityType ConnectivityType @default(with_signal)
+  minutesToSignal Int @default(0)
+  marginMinutes Int @default(30)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   company            Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -302,6 +310,10 @@ model Shift {
   cancellationReason String?
   startedAt          DateTime?         @db.Timestamptz(3)
   lateStartMinutes   Int?
+  connectivityType ConnectivityType?
+  minutesToSignal Int?
+  marginMinutes Int?
+  syncDeadlineAt DateTime? @db.Timestamptz(3)
   closedAt           DateTime?         @db.Timestamptz(3)
   closedEarly        Boolean           @default(false)
   closeReason        String?
