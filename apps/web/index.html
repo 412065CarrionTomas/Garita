@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Control de rondas para empresas de seguridad privada" />
     <title>Garita</title>
+    <script>
+      // Aplica el tema guardado antes del primer pintado, para que no haya destello.
+      try {
+        var mode = localStorage.getItem('garita-theme');
+        if (
+          mode === 'dark' ||
+          (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        ) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -16,6 +16,7 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
     "@garita/shared": "workspace:*",
+    "@garita/tokens": "workspace:*",
     "@tanstack/react-query": "^5.104.1",
     "@vis.gl/react-google-maps": "^1.10.1",
     "class-variance-authority": "^0.7.1",
