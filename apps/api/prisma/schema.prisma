@@ -490,13 +490,6 @@ enum RecordFlagType {
   location_unverifiable
 }
 
-enum TimeStatus {
-  verified
-  recalculated
-  pending
-  unverifiable
-}
-
 enum RecordFlagSeverity {
   grave
   media
@@ -583,4 +576,11 @@ model ShiftSyncState {
   shift            Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   @@index([companyId, shiftId])
+}
+
+enum TimeStatus {
+  verified
+  recalculated
+  pending
+  unverifiable
 }
