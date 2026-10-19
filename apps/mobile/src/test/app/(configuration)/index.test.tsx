@@ -1,4 +1,5 @@
 import { Alert } from 'react-native';
+import { ThemeProvider } from '@/ui';
 import { render, userEvent, waitFor } from '@testing-library/react-native';
 import type { AuthMeResponse } from '@garita/shared';
 import { useAuth } from '@/features/auth/auth-context';
@@ -66,10 +67,16 @@ function setUser(role: 'admin' | 'supervisor' = 'supervisor') {
   });
 }
 
-async function mount(points = [point]) {
+async function mount(
+  points: { id: string; name: string; etiquetaNfc: { status: string } | null }[] = [point],
+) {
   getMock.mockImplementation(((path: string) =>
     Promise.resolve(path.includes('configuracion') ? [site] : points)) as never);
-  return await render(<ConfigurationHome />);
+  return await render(
+    <ThemeProvider>
+      <ConfigurationHome />
+    </ThemeProvider>,
+  );
 }
 
 beforeEach(() => {
@@ -167,4 +174,27 @@ it('mantiene disponible cerrar sesión en el modo de configuración', async () =
   await waitFor(() => expect(view.getByText('Modo de configuración')).toBeTruthy());
   expect(view.getByLabelText('Cerrar sesión')).toBeTruthy();
   expect(deleteMock).not.toHaveBeenCalled();
+});
+
+it('muestra el predio seleccionado y permite cambiar la apariencia', async () => {
+  const user = userEvent.setup();
+  const view = await mount();
+  expect(await view.findByText('Seleccionado')).toBeOnTheScreen();
+  expect(
+    view.getByRole('button', { name: 'Seleccionar predio Predio A', selected: true }),
+  ).toBeOnTheScreen();
+  await user.press(view.getByRole('radio', { name: 'Oscuro' }));
+  expect(view.getByRole('radio', { name: 'Oscuro' })).toBeChecked();
+  await user.press(view.getByRole('radio', { name: 'Claro' }));
+  expect(view.getByRole('radio', { name: 'Claro' })).toBeChecked();
+});
+
+it('conserva el estado y las acciones de una etiqueta asociada', async () => {
+  const user = userEvent.setup();
+  const view = await mount([{ ...point, etiquetaNfc: { status: 'active' } }]);
+  expect(await view.findByText('Etiqueta NFC asociada')).toBeOnTheScreen();
+  expect(view.getByLabelText('Reemplazar etiqueta NFC a Portón trasero')).toBeOnTheScreen();
+  await user.press(view.getByLabelText('Quitar etiqueta NFC de Portón trasero'));
+  expect(deleteMock).toHaveBeenCalledWith('/puntos/point-a/etiqueta-nfc', expect.anything());
+  expect(await view.findByText('Etiqueta quitada de Portón trasero')).toBeOnTheScreen();
 });
