@@ -1,26 +1,24 @@
-import { Test } from '@nestjs/testing';
-
-import type { NotificationsPort } from './notifications.port';
-import { NOTIFICATIONS_PORT } from './notifications.port';
-import { PortsModule } from './ports.module';
-import type { RealtimePort } from './realtime.port';
-import { REALTIME_PORT } from './realtime.port';
+import { NoopRealtime } from './realtime.port';
+import { NotificationsService } from '../../modules/notifications/notifications.service';
 
 describe('PortsModule', () => {
-  it('resuelve los puertos noop sin error', async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [PortsModule] }).compile();
-    const notifications = moduleRef.get<NotificationsPort>(NOTIFICATIONS_PORT);
-    const realtime = moduleRef.get<RealtimePort>(REALTIME_PORT);
-    const payload = { kind: 'incident_new' as const, link: '/incidentes/1' };
-
+  it('encola una notificación del puerto sin bloquear el emisor', async () => {
+    const queue = { add: jest.fn().mockResolvedValue(undefined) };
+    const prisma = {
+      systemPrisma: { user: { findMany: jest.fn().mockResolvedValue([{ id: 'u' }]) } },
+    };
+    const notifications = new NotificationsService(prisma as never, queue as never);
     await expect(
-      notifications.notifySiteStaff({ companyId: 'c', siteId: 's', kind: 'incident_new', payload }),
+      notifications.notifyUsers({
+        companyId: 'c',
+        userIds: ['u'],
+        kind: 'incident_new',
+        payload: { kind: 'incident_new', link: '/incidentes/1' },
+      }),
     ).resolves.toBeUndefined();
-    await expect(
-      notifications.notifyUsers({ companyId: 'c', userIds: ['u'], kind: 'incident_new', payload }),
-    ).resolves.toBeUndefined();
+    expect(queue.add).toHaveBeenCalledTimes(1);
     expect(() => {
-      realtime.emitToSite('c', 's', 'incidente.nuevo', { incidentId: 'i', siteId: 's' });
+      new NoopRealtime().emitToSite();
     }).not.toThrow();
   });
 });

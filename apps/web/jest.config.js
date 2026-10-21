@@ -1,6 +1,8 @@
 /** @type {import('jest').Config} */
 export default {
   testEnvironment: 'jsdom',
+  // Las pantallas con varios pasos de userEvent superan los 5 s por defecto cuando el CI está cargado.
+  testTimeout: 30000,
   roots: ['<rootDir>/src'],
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
   transform: {

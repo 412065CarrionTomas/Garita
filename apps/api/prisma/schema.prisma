@@ -98,9 +98,36 @@ model User {
   shiftAssignments ShiftAssignment[]
   shiftCredentials ShiftCredential[]
   incidents        Incident[]
+  notificationDevices NotificationDevice[]
 
   @@index([companyId])
   @@index([clientId])
+}
+
+enum NotificationDeviceKind {
+  web
+  app
+}
+
+enum NotificationDevicePlatform {
+  android
+  ios
+  web
+}
+
+model NotificationDevice {
+  id         String                     @id @default(cuid())
+  companyId  String
+  userId     String
+  kind       NotificationDeviceKind
+  platform   NotificationDevicePlatform
+  token      String                     @unique
+  label      String?
+  createdAt  DateTime                   @default(now())
+  lastSeenAt DateTime                   @updatedAt
+  user       User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, userId])
 }
 
 model Client {

@@ -17,7 +17,7 @@ export class ApiError extends Error {
   }
 }
 
-type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'PUT';
+type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
 /** Llama a Garita con el token Firebase vigente y valida toda respuesta con Zod. */
 export async function apiRequest<TSchema extends z.ZodType>(
@@ -142,3 +142,11 @@ export const apiPut = <TResponse extends z.ZodType>(
 ): Promise<z.infer<TResponse>> => {
   return apiWrite('PUT', path, body, requestSchema, responseSchema, init);
 };
+
+export async function apiDelete<TResponse extends z.ZodType>(
+  path: string,
+  responseSchema: TResponse,
+  init?: RequestInit,
+): Promise<z.infer<TResponse>> {
+  return apiRequest('DELETE', path, responseSchema, undefined, init);
+}
