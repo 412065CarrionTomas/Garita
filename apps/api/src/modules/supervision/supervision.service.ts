@@ -208,6 +208,7 @@ export class SupervisionService {
         closeReason: shift.closeReason,
         closedBy: shift.closedBy,
       },
+      phoneWithoutNfc: records.phoneWithoutNfc,
       assignments: shift.assignments,
       rounds: shift.rounds.map((round) => ({ id: round.roundId, name: round.round.name })),
       windows: shift.roundWindowStates,

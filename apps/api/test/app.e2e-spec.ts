@@ -3738,6 +3738,11 @@ describe('Aplicación (e2e)', () => {
       shiftId: shift.id,
       phoneWithoutNfc: true,
     });
+    const detail = await client
+      .get(`/api/v1/turnos/${shift.id}/detalle`)
+      .set(supervisorAuth)
+      .expect(200);
+    expect(detail.body).toMatchObject({ id: shift.id, phoneWithoutNfc: true });
     expect(shiftRecords.records).toHaveLength(4);
     const recordForId = (recordId: string) => {
       const record = shiftRecords.records.find((candidate) => candidate.recordId === recordId);
