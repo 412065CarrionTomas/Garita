@@ -1074,7 +1074,7 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
         'norte-company',
         shift.siteId,
         'incidente.nuevo',
-        { incidentId, siteId: shift.siteId },
+        { incidentId: saved.id, siteId: shift.siteId },
       );
 
       await client
