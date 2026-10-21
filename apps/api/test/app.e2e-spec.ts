@@ -809,6 +809,10 @@ describe('Aplicación (e2e)', () => {
     await expect(
       prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } }),
     ).resolves.toMatchObject({ status: 'complete', recordedCount: 1 });
+    await prisma.shiftAssignment.updateMany({
+      where: { shiftId: shift.id },
+      data: { active: false, isCurrent: false },
+    });
   });
 
   it('autentica Socket.IO y entrega eventos solo en rooms de predios asignados', async () => {
