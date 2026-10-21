@@ -1150,9 +1150,17 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       expect(authorizationBody.type).toBe('authenticated');
       expect(authorizationBody.maxBytes).toBe(3 * 1024 * 1024);
       expect(photoStorage.authorizeUpload).toHaveBeenCalledTimes(1);
+      const registered = await client
+        .post(`/api/v1/incidentes/${incidentId}/fotos`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ publicId: authorizationBody.publicId })
+        .expect(201);
+      expect(z.object({ id: z.string() }).parse(registered.body).id).toBeTruthy();
+      expect(await prisma.incidentPhoto.count({ where: { incidentId: saved.id } })).toBe(1);
+      expect(photoStorage.inspectUpload).toHaveBeenCalledWith(authorizationBody.publicId);
 
       await prisma.incidentPhoto.createMany({
-        data: Array.from({ length: 5 }, (_, index) => ({
+        data: Array.from({ length: 4 }, (_, index) => ({
           incidentId: saved.id,
           cloudinaryPublicId: `fixture/${incidentId}/${index}`,
           width: 10,
