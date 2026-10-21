@@ -23,6 +23,7 @@ export const COMPANY_ID_MODELS = [
   'SyncBatch',
   'ConnectionNotice',
   'ShiftSyncState',
+  'NotificationDevice',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
@@ -106,6 +107,7 @@ export function addSiteAssignmentFilter(
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'ShiftSyncState')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'NotificationDevice') return { ...args, where: { ...where, userId: user.userId } };
   if (model === 'Client') {
     const siteFilter = { supervisors: { some: { userId: user.userId } } };
     const constrainSites = (selection: unknown): unknown => {
@@ -144,6 +146,7 @@ export function addClientFilter(
   if (model === 'Site') return { ...args, where: { ...where, AND: [where, site] } };
   if (model === 'User') return { ...args, where: { ...where, id: user.userId } };
   if (model === 'Invitation') return { ...args, where: { ...where, userId: user.userId } };
+  if (model === 'NotificationDevice') return { ...args, where: { ...where, userId: user.userId } };
   // HU-28 habilitará otros modelos del portal con su filtro explícito.
   if (model !== 'Company') throw new ForbiddenException('Modelo no habilitado para el portal');
   return args;
