@@ -1069,7 +1069,13 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       expect(Number(saved.latitude)).toBeCloseTo(-34.6037);
       expect(saved.locationStatus).toBe('ok');
       expect(notificationPort.notifySiteStaff).toHaveBeenCalledTimes(1);
-      expect(realtimePort.emitToSite).toHaveBeenCalledTimes(1);
+      expect(realtimePort.emitToSite).toHaveBeenCalledTimes(3);
+      expect(realtimePort.emitToSite).toHaveBeenCalledWith(
+        'norte-company',
+        shift.siteId,
+        'incidente.nuevo',
+        { incidentId, siteId: shift.siteId },
+      );
 
       await client
         .post('/api/v1/sincronizacion/eventos')
