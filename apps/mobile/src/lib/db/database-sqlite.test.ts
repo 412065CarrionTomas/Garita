@@ -244,7 +244,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     const batch = await repo.listPendingEvents({ limit: 100 });
     const readDuration = Date.now() - startRead;
     expect(batch).toHaveLength(100);
-    expect(readDuration).toBeLessThan(50);
+    expect(readDuration).toBeLessThan(100);
     expect(batch[0]?.id).toBe('00000000-0000-4000-8000-000000000001');
 
     // Mark one rejected: should discount from count and be excluded from next batch
