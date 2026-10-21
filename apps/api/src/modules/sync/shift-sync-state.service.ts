@@ -1,7 +1,9 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { ConnectionNoticeRequest, ConnectionNoticeResponse } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CLOCK, type Clock } from '../../common/clock';
+import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
+import { RoundWindowStateService } from '../supervision/round-window-state.service';
 
 @Injectable()
 export class ShiftSyncStateService {
@@ -10,6 +12,8 @@ export class ShiftSyncStateService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Optional() private readonly windowStates?: RoundWindowStateService,
+    @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
   ) {}
 
   async updateSyncState(params: {
@@ -49,6 +53,16 @@ export class ShiftSyncStateService {
       },
       update: data,
     });
+    await this.windowStates?.recalculate(params.shiftId);
+    const shift = await this.prisma.systemPrisma.shift.findUnique({
+      where: { id: params.shiftId },
+      select: { siteId: true },
+    });
+    if (shift)
+      this.realtime?.emitToSite(params.companyId, shift.siteId, 'turno.actualizado', {
+        shiftId: params.shiftId,
+        siteId: shift.siteId,
+      });
   }
 
   async recordNotice(

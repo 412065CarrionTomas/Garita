@@ -15,6 +15,7 @@ import {
   shiftRecordsResponseSchema,
   siteResponseSchema,
   USER_ROLES,
+  SOCKET_NAMESPACE,
 } from '@garita/shared';
 import {
   Controller,
@@ -31,20 +32,35 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
+import type { Server as HttpServer } from 'node:http';
 import { PrismaModule } from '../src/modules/prisma/prisma.module';
 import { QrService } from '../src/modules/checkpoints/qr.service';
 import { CheckpointsModule } from '../src/modules/checkpoints/checkpoints.module';
 import { Roles } from '../src/modules/auth/auth.decorators';
 import { TenantResourceService } from '../src/modules/auth/tenant-resource.service';
+import { TenantContext } from '../src/modules/auth/tenant-context';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 import { ShiftExecutionService } from '../src/modules/shift-execution/shift-execution.service';
 import { MarcasService } from '../src/modules/marcas/marcas.service';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { z } from 'zod';
+import { io, type Socket as ClientSocket } from 'socket.io-client';
+import { REALTIME_PORT, type RealtimePort } from '../src/common/ports/realtime.port';
+import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
+import { RoundWindowStateService } from '../src/modules/supervision/round-window-state.service';
 
 function isLogEntry(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isHttpServer(value: unknown): value is HttpServer {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'listening' in value &&
+    typeof value.listening === 'boolean'
+  );
 }
 
 @Controller('test-only/users')
@@ -556,6 +572,333 @@ describe('Aplicación (e2e)', () => {
     expect(liveHealthResponseSchema.safeParse(response.body).success).toBe(true);
   });
 
+  it('protege los endpoints de supervisión y oculta turnos inexistentes', async () => {
+    await request(app.getHttpServer()).get('/api/v1/supervision/turnos').expect(401);
+    await request(app.getHttpServer())
+      .get('/api/v1/supervision/turnos')
+      .set('Authorization', 'Bearer token-guard')
+      .expect(403);
+    await request(app.getHttpServer()).get('/api/v1/turnos/turno-inexistente/detalle').expect(401);
+    await request(app.getHttpServer())
+      .get('/api/v1/turnos/turno-inexistente/detalle')
+      .set('Authorization', 'Bearer token-client')
+      .expect(403);
+    await request(app.getHttpServer())
+      .get('/api/v1/turnos/turno-inexistente/detalle')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get('/api/v1/turnos/turno-inexistente/detalle')
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(404);
+    const prisma = app.get(PrismaService).systemPrisma;
+    const northAdmin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const southAdmin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-sur-admin' },
+    });
+    const foreignShifts = [
+      {
+        id: randomUUID(),
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        createdById: northAdmin.id,
+      },
+      {
+        id: randomUUID(),
+        companyId: 'sur-company',
+        siteId: southSiteId,
+        createdById: southAdmin.id,
+      },
+    ];
+    await prisma.shift.createMany({
+      data: foreignShifts.map((shift) => ({
+        ...shift,
+        startsAt: new Date('2026-10-13T10:00:00Z'),
+        endsAt: new Date('2026-10-13T13:00:00Z'),
+        serviceDate: new Date('2026-10-13T00:00:00Z'),
+      })),
+    });
+    createdShiftIds.push(...foreignShifts.map(({ id }) => id));
+    for (const shift of foreignShifts) {
+      await request(app.getHttpServer())
+        .get(`/api/v1/turnos/${shift.id}/detalle`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(404);
+    }
+    await request(app.getHttpServer())
+      .get('/api/v1/supervision/turnos')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+  });
+
+  it('mantiene la vista general bajo 300 ms con 100 turnos del mismo predio', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const shiftIds = Array.from({ length: 100 }, () => randomUUID());
+    await prisma.shift.createMany({
+      data: shiftIds.map((id) => ({
+        id,
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-13T10:00:00Z'),
+        endsAt: new Date('2026-10-13T13:00:00Z'),
+        serviceDate: new Date('2026-10-13T00:00:00Z'),
+        createdById: admin.id,
+      })),
+    });
+    createdShiftIds.push(...shiftIds);
+    const auth = { Authorization: 'Bearer token-admin' };
+    const startedAt = performance.now();
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/supervision/turnos?fecha=2026-10-13&predio=${northAssignedSiteId}`)
+      .set(auth)
+      .expect(200);
+    const elapsedMs = performance.now() - startedAt;
+    const actualShifts = z.array(z.object({ id: z.string() })).parse(response.body);
+    process.stdout.write(`Supervision 100 turnos: ${elapsedMs.toFixed(2)} ms\n`);
+    expect(actualShifts).toHaveLength(100);
+    expect(elapsedMs).toBeLessThan(300);
+  });
+
+  it('marca idempotentemente como no presentado un turno vencido sin inicio', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const id = randomUUID();
+    const shift = await prisma.shift.create({
+      data: {
+        id,
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2020-10-13T08:00:00Z'),
+        endsAt: new Date('2020-10-13T11:00:00Z'),
+        serviceDate: new Date('2020-10-13T00:00:00Z'),
+        createdById: admin.id,
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2020-10-13T08:00:00Z'),
+            endsAt: new Date('2020-10-13T11:00:00Z'),
+            assignedById: admin.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const execution = app.get(ShiftExecutionService);
+    await expect(execution.markNoShow(id)).resolves.toBe(true);
+    await expect(execution.markNoShow(id)).resolves.toBe(false);
+    const updated = await prisma.shift.findUniqueOrThrow({ where: { id } });
+    expect(updated.status).toBe('no_show');
+    expect(await prisma.shiftEvent.count({ where: { shiftId: id } })).toBe(0);
+  });
+
+  it('recalcula la ventana al registrar un punto contado', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const now = testNow;
+    const checkpoint = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Punto supervisión ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdCheckpointIds.push(checkpoint.id);
+    const roundName = `Ronda supervisión ${randomUUID()}`;
+    createdRoundNames.push(roundName);
+    const round = await prisma.round.create({
+      data: { companyId: 'norte-company', siteId: northAssignedSiteId, name: roundName },
+    });
+    const version = await prisma.roundVersion.create({
+      data: {
+        roundId: round.id,
+        versionNumber: 1,
+        frequencyMinutes: 60,
+        windowStartLocal: '00:00',
+        windowEndLocal: '23:00',
+        graceMinutes: 15,
+        createdById: admin.id,
+      },
+    });
+    await prisma.round.update({ where: { id: round.id }, data: { currentVersionId: version.id } });
+    await prisma.roundVersionCheckpoint.create({
+      data: {
+        companyId: 'norte-company',
+        roundVersionId: version.id,
+        checkpointId: checkpoint.id,
+        position: 0,
+      },
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date(now.getTime() - 60 * 60_000),
+        endsAt: new Date(now.getTime() + 60 * 60_000),
+        serviceDate: new Date('2026-10-13T00:00:00Z'),
+        createdById: admin.id,
+        rounds: { create: { roundId: round.id, roundVersionId: version.id } },
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date(now.getTime() - 60 * 60_000),
+            endsAt: new Date(now.getTime() + 60 * 60_000),
+            assignedById: admin.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+      where: { shiftId: shift.id },
+    });
+    const window = await prisma.roundWindowState.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: shift.id,
+        roundId: round.id,
+        windowIndex: 0,
+        startsAt: new Date(now.getTime() - 30 * 60_000),
+        endsAt: new Date(now.getTime() + 30 * 60_000),
+        graceEndsAt: new Date(now.getTime() + 45 * 60_000),
+        expectedCount: 1,
+      },
+    });
+    await prisma.checkpointRecord.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        checkpointId: checkpoint.id,
+        recordId: randomUUID(),
+        method: 'qr',
+        occurredAtDevice: now,
+        locationStatus: 'ok',
+        simulation: 'not_simulated',
+        phoneNfc: 'on',
+        countedFor: [{ roundId: round.id, windowIndex: 0 }],
+        requestHash: 'supervision-e2e-record',
+      },
+    });
+    const tenantContext = app.get(TenantContext);
+    await tenantContext.run(
+      {
+        correlationId: randomUUID(),
+        user: {
+          userId: admin.id,
+          companyId: 'norte-company',
+          role: 'admin',
+          status: 'active',
+        },
+      },
+      () =>
+        app
+          .get(RoundWindowStateService)
+          .recalculate(shift.id, [{ roundId: round.id, windowIndex: 0 }]),
+    );
+    await expect(
+      prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } }),
+    ).resolves.toMatchObject({ status: 'complete', recordedCount: 1 });
+    await prisma.shiftAssignment.updateMany({
+      where: { shiftId: shift.id },
+      data: { active: false, isCurrent: false },
+    });
+  });
+
+  it('autentica Socket.IO y entrega eventos solo en rooms de predios asignados', async () => {
+    const server: unknown = app.getHttpServer();
+    if (!isHttpServer(server)) throw new Error('No se abrió el servidor e2e');
+    if (!server.listening) await app.listen(0, '127.0.0.1');
+    const url = `${await app.getUrl()}${SOCKET_NAMESPACE}`;
+    const supervisor = io(url, { auth: { token: 'token-supervisor' }, transports: ['websocket'] });
+    const noToken = io(url, { transports: ['websocket'], reconnection: false, autoConnect: false });
+    const sockets: ClientSocket[] = [supervisor, noToken];
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('El supervisor no conectó'));
+        }, 4000);
+        supervisor.once('connect', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        supervisor.once('connect_error', (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          clearInterval(interval);
+          reject(new Error('El supervisor no ingresó a la room asignada'));
+        }, 1000);
+        const interval = setInterval(() => {
+          const socket = app.get(RealtimeGateway).server.sockets.get(supervisor.id ?? '');
+          if (socket?.rooms.has(`site:${northAssignedSiteId}`)) {
+            clearTimeout(timeout);
+            clearInterval(interval);
+            resolve();
+          }
+        }, 10);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Socket sin token siguió conectado'));
+        }, 2000);
+        noToken.once('disconnect', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        noToken.once('connect_error', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        noToken.connect();
+      });
+      let foreignEventReceived = false;
+      supervisor.on('registro.nuevo', () => {
+        foreignEventReceived = true;
+      });
+      const realtime = app.get<RealtimePort>(REALTIME_PORT);
+      realtime.emitToSite('sur-company', southSiteId, 'registro.nuevo', {
+        shiftId: 'foreign-shift',
+        siteId: southSiteId,
+        checkpointId: 'foreign-point',
+        recordId: randomUUID(),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(foreignEventReceived).toBe(false);
+      const event = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('No llegó registro.nuevo dentro de 5 segundos'));
+        }, 4500);
+        supervisor.once('registro.nuevo', (payload: unknown) => {
+          clearTimeout(timeout);
+          resolve(payload);
+        });
+      });
+      realtime.emitToSite('norte-company', northAssignedSiteId, 'registro.nuevo', {
+        shiftId: 'north-shift',
+        siteId: northAssignedSiteId,
+        checkpointId: 'north-point',
+        recordId: randomUUID(),
+      });
+      await expect(event).resolves.toMatchObject({ siteId: northAssignedSiteId });
+    } finally {
+      for (const socket of sockets) socket.disconnect();
+    }
+  });
+
   it('HU-18: registra, lista y elimina solo los dispositivos propios', async () => {
     const northAuth = { Authorization: 'Bearer token-admin' };
     const southAuth = { Authorization: 'Bearer token-south-admin' };
@@ -623,6 +966,8 @@ describe('Aplicación (e2e)', () => {
         '/api/v1/turnos',
         '/api/v1/turnos/{id}',
         '/api/v1/turnos/{id}/cancelar',
+        '/api/v1/supervision/turnos',
+        '/api/v1/turnos/{id}/detalle',
         '/api/v1/mis-turnos',
         '/api/v1/usuarios/{id}/turnos-futuros',
         '/api/v1/usuarios/{id}/desactivar',
@@ -3393,6 +3738,11 @@ describe('Aplicación (e2e)', () => {
       shiftId: shift.id,
       phoneWithoutNfc: true,
     });
+    const detail = await client
+      .get(`/api/v1/turnos/${shift.id}/detalle`)
+      .set(supervisorAuth)
+      .expect(200);
+    expect(detail.body).toMatchObject({ id: shift.id, phoneWithoutNfc: true });
     expect(shiftRecords.records).toHaveLength(4);
     const recordForId = (recordId: string) => {
       const record = shiftRecords.records.find((candidate) => candidate.recordId === recordId);

@@ -69,6 +69,7 @@ describe('ShiftSyncStateService', () => {
             return Promise.resolve({ id: 'notice-1', ...args.data });
           }),
         },
+        shift: { findUnique: jest.fn().mockResolvedValue(null) },
       },
     } as unknown as PrismaService;
 

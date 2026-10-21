@@ -20,6 +20,7 @@ import { CheckpointRecordsModule } from './modules/checkpoint-records/checkpoint
 import { MarcasModule } from './modules/marcas/marcas.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { ServerTimeModule } from './modules/server-time/server-time.module';
+import { SupervisionModule } from './modules/supervision/supervision.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { ServerTimeModule } from './modules/server-time/server-time.module';
     MarcasModule,
     SyncModule,
     ServerTimeModule,
+    SupervisionModule,
   ],
 })
 export class AppModule {}

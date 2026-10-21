@@ -24,6 +24,7 @@ export const COMPANY_ID_MODELS = [
   'SyncBatch',
   'ConnectionNotice',
   'ShiftSyncState',
+  'RoundWindowState',
   'NotificationDevice',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
@@ -94,6 +95,8 @@ export function addSiteAssignmentFilter(
   if (model === 'RoundVersionCheckpoint')
     return { ...args, where: { AND: [where, { roundVersion: { round: { site: assignment } } }] } };
   if (model === 'Shift') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'RoundWindowState')
+    return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'ShiftAssignment')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'ShiftRound')

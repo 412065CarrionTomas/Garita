@@ -1,5 +1,12 @@
 import * as crypto from 'node:crypto';
-import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import {
   CHECKPOINT_RECORD_ERROR_CODES,
   checkpointRecordResponseSchema,
@@ -19,6 +26,8 @@ import { ShiftExecutionService } from '../shift-execution/shift-execution.servic
 import { MarcasService } from '../marcas/marcas.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { clockFields } from '../server-time/clock-fields';
+import { RoundWindowStateService } from '../supervision/round-window-state.service';
+import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 
 export function computeRequestHash(request: CheckpointRecordRequest): string {
   const canonical = {
@@ -74,6 +83,8 @@ export class CheckpointRecordsService {
     private readonly qrService: QrService,
     private readonly shiftExecution: ShiftExecutionService,
     private readonly marcas: MarcasService,
+    @Optional() private readonly windowStates?: RoundWindowStateService,
+    @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
   ) {}
 
   async processRecord(
@@ -366,6 +377,14 @@ export class CheckpointRecordsService {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+
+      await this.windowStates?.recalculate(shift.id, imputation.countedFor);
+      this.realtime?.emitToSite(shift.companyId, shift.siteId, 'registro.nuevo', {
+        shiftId: shift.id,
+        siteId: shift.siteId,
+        checkpointId,
+        recordId: input.recordId,
+      });
 
       this.logger.log({
         event: 'checkpoint_record.recorded',
