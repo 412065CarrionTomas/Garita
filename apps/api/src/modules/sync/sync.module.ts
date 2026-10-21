@@ -11,6 +11,7 @@ import { SyncBatchService } from './sync-batch.service';
 import { SyncBatchController } from './sync-batch.controller';
 import { ConnectionNoticesController } from './connection-notices.controller';
 import { SupervisionModule } from '../supervision/supervision.module';
+import { IncidentsModule } from '../incidents/incidents.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { SupervisionModule } from '../supervision/supervision.module';
     ShiftExecutionModule,
     CheckpointRecordsModule,
     SupervisionModule,
+    IncidentsModule,
   ],
   controllers: [SyncBatchController, ConnectionNoticesController],
   providers: [

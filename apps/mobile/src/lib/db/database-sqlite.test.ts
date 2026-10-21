@@ -116,13 +116,13 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
       .mocked(GaritaNative.getMonotonicClock)
       .mockResolvedValue({ elapsedMs: 1000, bootId: 'test-boot' });
   });
-  it('executes real migrations 1 to 5, creates tables, indexes, and upgrades version to 5', async () => {
+  it('executes real migrations 1 to 6, creates tables, indexes, and upgrades version to 6', async () => {
     const { adapter, rawDb } = createNodeSqliteExpoAdapter();
     const db = new ExpoFieldDatabase(adapter);
 
     expect(await db.getVersion()).toBe(0);
     await migrateDatabase(db);
-    expect(await db.getVersion()).toBe(5);
+    expect(await db.getVersion()).toBe(6);
 
     // Verify tables exist in SQLite
     const tables = rawDb
@@ -138,6 +138,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     expect(tableNames).toContain('pending_events');
     expect(tableNames).toContain('checkpoint_records');
     expect(tableNames).toContain('sync_state');
+    expect(tableNames).toContain('incident_photos');
 
     // Verify index exists
     const indexes = rawDb.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as {
@@ -148,6 +149,26 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     // Verify column reject_reason in pending_events
     const cols = rawDb.prepare('PRAGMA table_info(pending_events)').all() as { name: string }[];
     expect(cols.map((c) => c.name)).toContain('reject_reason');
+
+    const repo = createFieldRepository(db);
+    const incidentId = '0199c2c6-958d-7a4a-9f4f-f2ca1b852044';
+    await repo.addPendingEvent({
+      id: incidentId,
+      type: 'incident',
+      payload: {},
+      occurredAtDevice: '2026-10-13T10:00:00.000Z',
+      createdAt: '2026-10-13T10:00:00.000Z',
+    });
+    await repo.addIncidentPhoto({
+      photoId: '0199c2c6-958d-7a4a-9f4f-f2ca1b852043',
+      incidentId,
+      uri: 'file:///incident/photo.jpg',
+      attempts: 0,
+      nextAttemptAt: null,
+    });
+    await expect(repo.listIncidentPhotos()).resolves.toEqual([]);
+    await repo.markPendingEventSent(incidentId);
+    await expect(repo.listIncidentPhotos()).resolves.toMatchObject([{ incidentId }]);
   });
 
   it('migration 5 converts existing invalid_scan_attempt to checkpoint_record in real SQLite', async () => {
@@ -167,7 +188,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     // Reset user_version to 4 to test step 5
     rawDb.exec('PRAGMA user_version = 4');
     await migrateDatabase(db);
-    expect(await db.getVersion()).toBe(5);
+    expect(await db.getVersion()).toBe(6);
 
     const row = rawDb
       .prepare("SELECT type FROM pending_events WHERE id = '00000000-0000-4000-8000-000000000001'")
@@ -186,7 +207,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     // Check EXPLAIN QUERY PLAN
     const explain = rawDb
       .prepare(
-        "EXPLAIN QUERY PLAN SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY rowid ASC LIMIT 100",
+        "EXPLAIN QUERY PLAN SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close', 'incident') ORDER BY rowid ASC LIMIT 100",
       )
       .all() as { detail: string }[];
     const details = explain.map((e) => e.detail).join('; ');

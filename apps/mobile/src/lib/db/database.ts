@@ -27,6 +27,15 @@ export const localCheckpointRecordSchema = z.object({
 });
 export type LocalCheckpointRecord = z.infer<typeof localCheckpointRecordSchema>;
 
+export const localIncidentPhotoSchema = z.object({
+  photoId: z.string().uuid(),
+  incidentId: z.string().uuid(),
+  uri: z.string().min(1),
+  attempts: z.number().int().nonnegative(),
+  nextAttemptAt: z.string().nullable(),
+});
+export type LocalIncidentPhoto = z.infer<typeof localIncidentPhotoSchema>;
+
 export interface FieldDatabase {
   transaction<T>(work: () => Promise<T>): Promise<T>;
   replaceShift(data: ShiftOfflineData | null): Promise<void>;
@@ -49,6 +58,14 @@ export interface FieldDatabase {
     result: 'recorded' | 'rejected',
     reason?: string | null,
   ): Promise<void>;
+  insertIncidentPhoto?(photo: LocalIncidentPhoto): Promise<void>;
+  readIncidentPhotos?(): Promise<unknown[]>;
+  updateIncidentPhotoRetry?(
+    photoId: string,
+    attempts: number,
+    nextAttemptAt: string,
+  ): Promise<void>;
+  deleteIncidentPhoto?(photoId: string): Promise<void>;
 }
 
 export interface MigrationDatabase {
@@ -115,6 +132,17 @@ export async function migrateDatabase(database: MigrationDatabase): Promise<void
         "UPDATE pending_events SET type = 'checkpoint_record' WHERE type = 'invalid_scan_attempt' AND sent = 0 AND reject_reason IS NULL",
       );
       await database.setVersion(5);
+    });
+  }
+  if (version < 6) {
+    await database.transaction(async () => {
+      await database.exec(
+        'CREATE TABLE IF NOT EXISTS incident_photos (photo_id TEXT PRIMARY KEY, incident_id TEXT NOT NULL, uri TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT)',
+      );
+      await database.exec(
+        'CREATE INDEX IF NOT EXISTS idx_incident_photos_retry ON incident_photos (next_attempt_at)',
+      );
+      await database.setVersion(6);
     });
   }
 }
@@ -219,15 +247,15 @@ export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
   }
   async countPendingEvents(): Promise<number> {
     const row = await this.db.getFirstAsync<{ count: number }>(
-      "SELECT COUNT(*) as count FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close')",
+      "SELECT COUNT(*) as count FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close', 'incident')",
     );
     return row?.count ?? 0;
   }
   async readEvents(limit?: number): Promise<unknown[]> {
     const query =
       limit !== undefined && limit > 0
-        ? `SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY rowid ASC LIMIT ${Math.floor(limit)}`
-        : "SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close') ORDER BY rowid ASC";
+        ? `SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close', 'incident') ORDER BY rowid ASC LIMIT ${Math.floor(limit)}`
+        : "SELECT id, type, payload, occurred_at_device, created_at FROM pending_events WHERE sent = 0 AND reject_reason IS NULL AND type IN ('checkpoint_record', 'shift_close', 'incident') ORDER BY rowid ASC";
     return (
       await this.db.getAllAsync<{
         id: string;
@@ -332,6 +360,37 @@ export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
       recordId,
     );
   }
+
+  async insertIncidentPhoto(photo: LocalIncidentPhoto): Promise<void> {
+    await this.db.runAsync(
+      'INSERT OR IGNORE INTO incident_photos (photo_id, incident_id, uri, attempts, next_attempt_at) VALUES (?, ?, ?, ?, ?)',
+      photo.photoId,
+      photo.incidentId,
+      photo.uri,
+      photo.attempts,
+      photo.nextAttemptAt,
+    );
+  }
+  async readIncidentPhotos(): Promise<unknown[]> {
+    return this.db.getAllAsync(
+      'SELECT p.photo_id AS photoId, p.incident_id AS incidentId, p.uri, p.attempts, p.next_attempt_at AS nextAttemptAt FROM incident_photos p JOIN pending_events e ON e.id = p.incident_id WHERE e.sent = 1 ORDER BY p.rowid ASC',
+    );
+  }
+  async updateIncidentPhotoRetry(
+    photoId: string,
+    attempts: number,
+    nextAttemptAt: string,
+  ): Promise<void> {
+    await this.db.runAsync(
+      'UPDATE incident_photos SET attempts = ?, next_attempt_at = ? WHERE photo_id = ?',
+      attempts,
+      nextAttemptAt,
+      photoId,
+    );
+  }
+  async deleteIncidentPhoto(photoId: string): Promise<void> {
+    await this.db.runAsync('DELETE FROM incident_photos WHERE photo_id = ?', photoId);
+  }
 }
 
 let databasePromise: Promise<ExpoFieldDatabase> | undefined;
@@ -424,6 +483,28 @@ export function createFieldRepository(database: FieldDatabase) {
       reason?: string | null,
     ): Promise<void> {
       await database.updateCheckpointRecordServerResult(recordId, result, reason);
+    },
+    async addIncidentPhoto(input: unknown): Promise<void> {
+      const photo = localIncidentPhotoSchema.parse(input);
+      if (!database.insertIncidentPhoto)
+        throw new Error('La base local no admite la cola de fotos');
+      await database.insertIncidentPhoto(photo);
+    },
+    async listIncidentPhotos(): Promise<LocalIncidentPhoto[]> {
+      if (!database.readIncidentPhotos) return [];
+      return (await database.readIncidentPhotos()).map((photo) =>
+        localIncidentPhotoSchema.parse(photo),
+      );
+    },
+    async retryIncidentPhoto(
+      photoId: string,
+      attempts: number,
+      nextAttemptAt: string,
+    ): Promise<void> {
+      await database.updateIncidentPhotoRetry?.(photoId, attempts, nextAttemptAt);
+    },
+    async removeIncidentPhoto(photoId: string): Promise<void> {
+      await database.deleteIncidentPhoto?.(photoId);
     },
   };
   return repository;

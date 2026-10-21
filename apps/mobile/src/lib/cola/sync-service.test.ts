@@ -19,6 +19,8 @@ import {
   setSyncServiceForTesting,
 } from './sync-service';
 
+jest.mock('@/lib/fotos/photo-queue', () => ({ processIncidentPhotos: jest.fn() }));
+
 class MockMemoryDatabase implements FieldDatabase, MigrationDatabase {
   version = 4;
   shift: unknown | null = null;

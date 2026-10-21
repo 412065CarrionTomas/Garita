@@ -42,6 +42,23 @@ enum NfcTagStatus {
   removed
 }
 
+enum IncidentType {
+  intrusion
+  suspicious_person
+  suspicious_vehicle
+  property_damage
+  open_or_forced_access
+  utility_failure
+  accident
+  other
+}
+
+enum IncidentClassificationStatus {
+  pending
+  client_visible
+  internal
+}
+
 model Company {
   id                String             @id @default(cuid())
   name              String
@@ -55,6 +72,7 @@ model Company {
   shifts            Shift[]
   recordFlags       RecordFlag[]
   roundWindowStates RoundWindowState[]
+  incidents   Incident[]
 }
 
 model User {
@@ -80,6 +98,7 @@ model User {
   createdShifts    Shift[]           @relation("ShiftCreator")
   shiftAssignments ShiftAssignment[]
   shiftCredentials ShiftCredential[]
+  incidents        Incident[]
   notificationDevices NotificationDevice[]
 
   @@index([companyId])
@@ -160,6 +179,7 @@ model Site {
   checkpoints        Checkpoint[]
   rounds             Round[]
   shifts             Shift[]
+  incidents          Incident[]
 
   @@unique([clientId, name])
   @@index([companyId, status])
@@ -408,6 +428,7 @@ model Shift {
   connectionNotices   ConnectionNotice[]
   syncState           ShiftSyncState?
   roundWindowStates   RoundWindowState[]
+  incidents           Incident[]
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
@@ -462,6 +483,7 @@ model ShiftAssignment {
   events              ShiftEvent[]
   checkpointRecords   CheckpointRecord[]
   invalidScanAttempts InvalidScanAttempt[]
+  incidents           Incident[]
   guard               User?                @relation(fields: [guardId], references: [id], onDelete: Restrict)
 
   @@index([shiftId, isCurrent])
@@ -561,6 +583,68 @@ model InvalidScanAttempt {
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
+}
+
+model Incident {
+  id                   String                      @id @default(cuid())
+  companyId            String
+  siteId               String
+  shiftId              String
+  assignmentId         String
+  guardId              String
+  incidentId           String                      @unique @db.Uuid
+  type                 IncidentType
+  description          String?                     @db.VarChar(1000)
+  occurredAtDevice     DateTime                    @db.Timestamptz(3)
+  receivedAt           DateTime                    @default(now()) @db.Timestamptz(3)
+  trustedAt            DateTime?                   @db.Timestamptz(3)
+  elapsedMs            Float?
+  bootId               String?
+  timeStatus           TimeStatus?
+  deviceOffsetMs       Float?
+  locationStatus       ShiftEventLocationStatus
+  latitude             Decimal?                    @db.Decimal(9, 6)
+  longitude            Decimal?                    @db.Decimal(10, 6)
+  accuracyMeters       Decimal?                    @db.Decimal(10, 2)
+  simulation           ShiftEventSimulation
+  countsForCompliance  Boolean                     @default(true)
+  classificationStatus IncidentClassificationStatus @default(pending)
+  createdAt            DateTime                    @default(now())
+  company              Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site                 Site                        @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  shift                Shift                       @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment           ShiftAssignment             @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  guard                User                        @relation(fields: [guardId], references: [id], onDelete: Restrict)
+  photos               IncidentPhoto[]
+  photoAuthorizations  IncidentPhotoAuthorization[]
+
+  @@index([companyId, siteId, createdAt])
+  @@index([shiftId, occurredAtDevice])
+  @@index([assignmentId])
+}
+
+model IncidentPhoto {
+  id                String   @id @default(cuid())
+  incidentId        String
+  cloudinaryPublicId String  @unique
+  width             Int
+  height            Int
+  bytes             Int
+  uploadedAt        DateTime @default(now()) @db.Timestamptz(3)
+  incident          Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, uploadedAt])
+}
+
+model IncidentPhotoAuthorization {
+  id                 String   @id @default(cuid())
+  incidentId         String
+  cloudinaryPublicId String   @unique
+  expiresAt          DateTime @db.Timestamptz(3)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  incident           Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, expiresAt])
 }
 
 enum SpeedProfile {
