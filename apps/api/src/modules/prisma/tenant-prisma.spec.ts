@@ -94,6 +94,8 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('CheckpointRecord');
     expect(COMPANY_ID_MODELS).toContain('InvalidScanAttempt');
     expect(COMPANY_ID_MODELS).toContain('RecordFlag');
+    expect(COMPANY_ID_MODELS).toContain('Incident');
+    expect(INDIRECT_TENANT_MODELS).toHaveProperty('IncidentPhoto');
     const user = {
       userId: 'supervisor-1',
       companyId: 'norte',

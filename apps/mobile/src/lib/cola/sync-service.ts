@@ -15,6 +15,7 @@ import { prepareEventClocks, saveTimeReference } from '@/lib/clock/clock';
 import { sendConnectionNotice, sendSyncBatch } from './api';
 import { computeSyncBackoff } from './backoff';
 import { deleteShiftCredential, getShiftCredentialToken } from './credential';
+import { processIncidentPhotos } from '@/lib/fotos/photo-queue';
 
 export interface SyncStateSnapshot {
   isSyncing: boolean;
@@ -187,9 +188,9 @@ export async function processSyncQueue(): Promise<{
 
       // Read pending events in order (occurredAtDevice / createdAt)
       const allPending = await repo.listPendingEvents({ limit: SYNC_BATCH_MAX_EVENTS });
-      // Only checkpoint_record and shift_close travel through this sync queue
+      // Photo bytes use their own queue; incident metadata travels through batch sync.
       const syncableEvents = allPending.filter(
-        (e) => e.type === 'checkpoint_record' || e.type === 'shift_close',
+        (e) => e.type === 'checkpoint_record' || e.type === 'shift_close' || e.type === 'incident',
       );
 
       if (syncableEvents.length === 0) {
@@ -204,7 +205,7 @@ export async function processSyncQueue(): Promise<{
             // Check if shift close was sent in the past
             // If shift_close was processed, we clear shift data and credentials
             const wasShiftClosed = await repo.getSyncMeta('shift_closed_done');
-            if (wasShiftClosed === 'true') {
+            if (wasShiftClosed === 'true' && (await repo.listIncidentPhotos()).length === 0) {
               await repo.clearShiftData();
               await d.deleteCredential();
               await repo.setSyncMeta('shift_closed_done', 'false');
@@ -245,7 +246,7 @@ export async function processSyncQueue(): Promise<{
       const batchRequest: SyncBatchRequest = {
         shiftId: shiftId ?? '',
         events: batchSlice.map((e) => ({
-          type: e.type as 'checkpoint_record' | 'shift_close',
+          type: e.type as 'checkpoint_record' | 'shift_close' | 'incident',
           payload: e.payload as never,
         })),
         pendingCount: remainingCount,
@@ -291,7 +292,11 @@ export async function processSyncQueue(): Promise<{
           if (matchingEvent?.type === 'shift_close') {
             await repo.setSyncMeta('shift_closed_done', 'true');
           }
-          if ('outcome' in result && result.outcome) {
+          if (
+            matchingEvent?.type === 'checkpoint_record' &&
+            'outcome' in result &&
+            result.outcome
+          ) {
             const outcome = result.outcome as { result?: string; reason?: string };
             if (outcome.result === 'recorded') {
               await repo.updateCheckpointRecordServerResult(result.eventId, 'recorded');
@@ -309,12 +314,18 @@ export async function processSyncQueue(): Promise<{
           if (matchingEvent?.type === 'shift_close') {
             await repo.setSyncMeta('shift_closed_done', 'true');
           }
-          await repo.updateCheckpointRecordServerResult(result.eventId, 'recorded');
+          if (matchingEvent?.type === 'checkpoint_record')
+            await repo.updateCheckpointRecordServerResult(result.eventId, 'recorded');
         } else if (result.status === 'rejected') {
           receivedEventIds.add(result.eventId);
           // Keep on phone for diagnosis, record reason, and continue with the rest
           await repo.markPendingEventRejected(result.eventId, result.reason);
-          await repo.updateCheckpointRecordServerResult(result.eventId, 'rejected', result.reason);
+          if (matchingEvent?.type === 'checkpoint_record')
+            await repo.updateCheckpointRecordServerResult(
+              result.eventId,
+              'rejected',
+              result.reason,
+            );
         }
       }
 
@@ -336,7 +347,7 @@ export async function processSyncQueue(): Promise<{
       // If a shift close was confirmed and queue is now empty, clear shift and credential
       const remainingTotal = await repo.countPendingEvents();
       const isShiftClosed = (await repo.getSyncMeta('shift_closed_done')) === 'true';
-      if (isShiftClosed && remainingTotal === 0) {
+      if (isShiftClosed && remainingTotal === 0 && (await repo.listIncidentPhotos()).length === 0) {
         await repo.clearShiftData();
         await d.deleteCredential();
         await repo.setSyncMeta('shift_closed_done', 'false');
@@ -353,6 +364,8 @@ export async function processSyncQueue(): Promise<{
     isSyncing = false;
     notify();
   }
+
+  void processIncidentPhotos();
 
   return { processed: totalProcessed, batchesSent, success: overallSuccess };
 }

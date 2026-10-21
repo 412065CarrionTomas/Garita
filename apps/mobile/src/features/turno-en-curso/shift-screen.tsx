@@ -245,6 +245,14 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           {!pendingClose && (
             <>
               <NfcReader shiftData={data} onQr={() => router.push('/escaneo')} />
+              <Button
+                label="Reportar incidente"
+                variant="signal"
+                size="lg"
+                onPress={() =>
+                  router.push({ pathname: '/turno/[id]/incidente', params: { id: shiftId } })
+                }
+              />
               {rejectedRecords.length > 0 && (
                 <Banner tone="danger" title="Registros observados por el servidor">
                   {rejectedRecords.map((r) => (

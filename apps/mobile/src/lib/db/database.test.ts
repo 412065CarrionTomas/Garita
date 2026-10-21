@@ -4,6 +4,7 @@ import {
   migrateDatabase,
   type FieldDatabase,
   type LocalCheckpointRecord,
+  type LocalIncidentPhoto,
   type MigrationDatabase,
 } from './database';
 
@@ -14,6 +15,7 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
   sent = new Set<string>();
   rejected = new Map<string, string>();
   records: LocalCheckpointRecord[] = [];
+  photos: LocalIncidentPhoto[] = [];
   tables: string[] = [];
   meta = new Map<string, string>();
   async getVersion() {
@@ -49,7 +51,7 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
       ({ id, type }) =>
         !this.sent.has(id) &&
         !this.rejected.has(id) &&
-        (type === 'checkpoint_record' || type === 'shift_close'),
+        (type === 'checkpoint_record' || type === 'shift_close' || type === 'incident'),
     ).length;
   }
   async readEvents(limit?: number) {
@@ -58,7 +60,7 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
         ({ id, type }) =>
           !this.sent.has(id) &&
           !this.rejected.has(id) &&
-          (type === 'checkpoint_record' || type === 'shift_close'),
+          (type === 'checkpoint_record' || type === 'shift_close' || type === 'incident'),
       )
       .sort((a, b) => {
         const timeDiff = Date.parse(a.occurredAtDevice) - Date.parse(b.occurredAtDevice);
@@ -100,6 +102,19 @@ class MemoryDatabase implements FieldDatabase, MigrationDatabase {
       record.serverReason = reason ?? null;
     }
   }
+  async insertIncidentPhoto(photo: LocalIncidentPhoto) {
+    if (!this.photos.some(({ photoId }) => photoId === photo.photoId)) this.photos.push(photo);
+  }
+  async readIncidentPhotos() {
+    return this.photos;
+  }
+  async updateIncidentPhotoRetry(photoId: string, attempts: number, nextAttemptAt: string) {
+    const photo = this.photos.find((item) => item.photoId === photoId);
+    if (photo) Object.assign(photo, { attempts, nextAttemptAt });
+  }
+  async deleteIncidentPhoto(photoId: string) {
+    this.photos = this.photos.filter((photo) => photo.photoId !== photoId);
+  }
 }
 const shift = {
   shift: {
@@ -121,14 +136,14 @@ describe('field database', () => {
   it('migrates an empty database and upgrades the previous version', async () => {
     const fresh = new MemoryDatabase();
     await migrateDatabase(fresh);
-    expect(fresh.version).toBe(5);
-    expect(fresh.tables).toHaveLength(12);
+    expect(fresh.version).toBe(6);
+    expect(fresh.tables).toHaveLength(14);
     const prior = new MemoryDatabase();
     prior.version = 0;
     await migrateDatabase(prior);
-    expect(prior.version).toBe(5);
+    expect(prior.version).toBe(6);
     await migrateDatabase(prior);
-    expect(prior.tables).toHaveLength(12);
+    expect(prior.tables).toHaveLength(14);
   });
   it('saves, reopens, replaces, clears, and validates pending events and checkpoint records', async () => {
     const disk = new MemoryDatabase();
@@ -148,6 +163,19 @@ describe('field database', () => {
     };
     await reopenedApp.addPendingEvent(event);
     await expect(reopenedApp.listPendingEvents()).resolves.toEqual([event]);
+    const photo = {
+      photoId: '0199c2c6-958d-7a4a-9f4f-f2ca1b852043',
+      incidentId: '0199c2c6-958d-7a4a-9f4f-f2ca1b852044',
+      uri: 'file:///incident/photo.jpg',
+      attempts: 0,
+      nextAttemptAt: null,
+    };
+    await reopenedApp.addIncidentPhoto(photo);
+    await expect(reopenedApp.listIncidentPhotos()).resolves.toEqual([photo]);
+    await reopenedApp.retryIncidentPhoto(photo.photoId, 1, '2026-10-13T10:01:00.000Z');
+    await expect(reopenedApp.listIncidentPhotos()).resolves.toMatchObject([{ attempts: 1 }]);
+    await reopenedApp.removeIncidentPhoto(photo.photoId);
+    await expect(reopenedApp.listIncidentPhotos()).resolves.toEqual([]);
     expect(await reopenedApp.countPendingEvents()).toBe(1);
 
     // Event rejection test
@@ -208,7 +236,7 @@ describe('field database', () => {
     const db = new MemoryDatabase();
     db.version = 4;
     await migrateDatabase(db);
-    expect(db.version).toBe(5);
+    expect(db.version).toBe(6);
     expect(
       db.tables.some((sql) => sql.includes("UPDATE pending_events SET type = 'checkpoint_record'")),
     ).toBe(true);

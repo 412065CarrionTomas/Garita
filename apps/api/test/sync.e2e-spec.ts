@@ -8,6 +8,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { App } from 'supertest/types';
+import { z } from 'zod';
 import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
@@ -15,12 +16,34 @@ import { CLOCK } from '../src/common/clock';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 import { QrService } from '../src/modules/checkpoints/qr.service';
 import { ShiftCredentialService } from '../src/modules/sync/shift-credential.service';
+import { NOTIFICATIONS_PORT } from '../src/common/ports/notifications.port';
+import { REALTIME_PORT } from '../src/common/ports/realtime.port';
+import { PHOTO_STORAGE_PORT } from '../src/modules/incidents/photo-storage.port';
 
 describe('Sincronización sin señal HU-13 (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService['systemPrisma'];
   let qrService: QrService;
   let shiftCredentialService: ShiftCredentialService;
+  const notificationPort = {
+    notifySiteStaff: jest.fn(() => Promise.resolve()),
+    notifyUsers: jest.fn(() => Promise.resolve()),
+  };
+  const realtimePort = { emitToSite: jest.fn() };
+  const photoStorage = {
+    authorizeUpload: jest.fn((companyId: string, incidentId: string) =>
+      Promise.resolve({
+        cloudName: 'test-cloud',
+        apiKey: 'test-key',
+        publicId: `incidentes/${companyId}/${incidentId}/${randomUUID()}`,
+        timestamp: 1,
+        signature: 'test-signature',
+        type: 'authenticated' as const,
+        uploadUrl: 'https://api.cloudinary.com/v1_1/test-cloud/image/upload',
+      }),
+    ),
+    inspectUpload: jest.fn(() => Promise.resolve({ width: 640, height: 480, bytes: 120_000 })),
+  };
 
   let northSiteId: string;
   let northAdminId: string;
@@ -66,6 +89,12 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       })
       .overrideProvider(CLOCK)
       .useValue({ now: () => testNow })
+      .overrideProvider(NOTIFICATIONS_PORT)
+      .useValue(notificationPort)
+      .overrideProvider(REALTIME_PORT)
+      .useValue(realtimePort)
+      .overrideProvider(PHOTO_STORAGE_PORT)
+      .useValue(photoStorage)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -174,6 +203,7 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
     });
 
     if (createdShiftIds.length > 0) {
+      await prisma.incident.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
       await prisma.connectionNotice.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
       await prisma.syncBatch.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
       await prisma.shiftSyncState.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
@@ -965,6 +995,184 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       });
       expect(record).not.toBeNull();
       expect(record?.countsForCompliance).toBe(false);
+    });
+  });
+
+  describe('ID-245 a ID-247 — incidentes y fotos privadas', () => {
+    it('guarda hora confiable y ubicación una vez, rechaza un turno sin iniciar y limita la autorización a cinco fotos', async () => {
+      const client = request(app.getHttpServer());
+      notificationPort.notifySiteStaff.mockClear();
+      realtimePort.emitToSite.mockClear();
+      const shift = await createTestShift({ status: 'in_progress' });
+      const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+        where: { shiftId: shift.id, isCurrent: true },
+      });
+      const { token } = await shiftCredentialService.issueCredential({
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        userId: northGuardId,
+        companyId: 'norte-company',
+        scheduledEnd: shift.endsAt,
+      });
+      const incidentId = randomUUID();
+      const occurredAtDevice = new Date(shift.startsAt.getTime() + 10 * 60_000).toISOString();
+      const event = {
+        type: 'incident' as const,
+        payload: {
+          incidentId,
+          shiftId: shift.id,
+          type: 'open_or_forced_access' as const,
+          description: 'Candado del portón cortado',
+          occurredAtDevice,
+          clock: {
+            elapsedMs: 1000,
+            bootId: 'e2e-boot',
+            deviceTime: occurredAtDevice,
+            trustedAt: occurredAtDevice,
+            timeStatus: 'verified' as const,
+            referenceOffsetMs: 0,
+          },
+          location: { ...defaultLocation, takenAt: occurredAtDevice },
+          photoCount: 1,
+        },
+      };
+      const batch = { shiftId: shift.id, pendingCount: 0, syncedUntil: null, events: [event] };
+      const first = await client
+        .post('/api/v1/sincronizacion/eventos')
+        .set('Authorization', `Bearer ${token}`)
+        .send(batch)
+        .expect(200);
+      expect(syncBatchResponseSchema.parse(first.body).results[0]).toMatchObject({
+        status: 'accepted',
+        eventId: incidentId,
+        outcome: { classificationStatus: 'pending' },
+      });
+      await client
+        .post('/api/v1/sincronizacion/eventos')
+        .set('Authorization', `Bearer ${token}`)
+        .send(batch)
+        .expect(200)
+        .then((res) => {
+          expect(syncBatchResponseSchema.parse(res.body).results[0]).toMatchObject({
+            status: 'duplicate',
+            eventId: incidentId,
+          });
+        });
+      const saved = await prisma.incident.findUniqueOrThrow({ where: { incidentId } });
+      expect(saved).toMatchObject({
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        guardId: northGuardId,
+        classificationStatus: 'pending',
+        trustedAt: new Date(occurredAtDevice),
+      });
+      expect(Number(saved.latitude)).toBeCloseTo(-34.6037);
+      expect(saved.locationStatus).toBe('ok');
+      expect(notificationPort.notifySiteStaff).toHaveBeenCalledTimes(1);
+      expect(realtimePort.emitToSite).toHaveBeenCalledTimes(1);
+
+      await client
+        .post('/api/v1/sincronizacion/eventos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ...batch,
+          events: [
+            {
+              ...event,
+              payload: {
+                ...event.payload,
+                incidentId: randomUUID(),
+                type: 'other',
+                description: undefined,
+              },
+            },
+          ],
+        })
+        .expect(400);
+
+      const scheduled = await createTestShift();
+      const scheduledAssignment = await prisma.shiftAssignment.findFirstOrThrow({
+        where: { shiftId: scheduled.id, isCurrent: true },
+      });
+      const scheduledCredential = await shiftCredentialService.issueCredential({
+        shiftId: scheduled.id,
+        assignmentId: scheduledAssignment.id,
+        userId: northGuardId,
+        companyId: 'norte-company',
+        scheduledEnd: scheduled.endsAt,
+      });
+      const rejectedEvent = {
+        ...event,
+        payload: { ...event.payload, incidentId: randomUUID(), shiftId: scheduled.id },
+      };
+      const rejectedBatch = await client
+        .post('/api/v1/sincronizacion/eventos')
+        .set('Authorization', `Bearer ${scheduledCredential.token}`)
+        .send({ ...batch, shiftId: scheduled.id, events: [rejectedEvent] })
+        .expect(200);
+      expect(syncBatchResponseSchema.parse(rejectedBatch.body).results[0]).toMatchObject({
+        status: 'rejected',
+        reason: 'not_in_credential_shift',
+      });
+
+      const unauthenticated = await client
+        .post(`/api/v1/incidentes/${incidentId}/fotos/autorizacion`)
+        .send({})
+        .expect(401);
+      expect(z.object({ code: z.string() }).parse(unauthenticated.body).code).toBe(
+        'INVALID_SHIFT_CREDENTIAL',
+      );
+      const otherShift = await createTestShift({ status: 'in_progress' });
+      const otherAssignment = await prisma.shiftAssignment.findFirstOrThrow({
+        where: { shiftId: otherShift.id, isCurrent: true },
+      });
+      const otherCredential = await shiftCredentialService.issueCredential({
+        shiftId: otherShift.id,
+        assignmentId: otherAssignment.id,
+        userId: northGuardId,
+        companyId: 'norte-company',
+        scheduledEnd: otherShift.endsAt,
+      });
+      await client
+        .post(`/api/v1/incidentes/${incidentId}/fotos/autorizacion`)
+        .set('Authorization', `Bearer ${otherCredential.token}`)
+        .send({})
+        .expect(404);
+      const authorized = await client
+        .post(`/api/v1/incidentes/${incidentId}/fotos/autorizacion`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({})
+        .expect(201);
+      const authorizationBody = z
+        .object({ publicId: z.string(), type: z.string(), maxBytes: z.number() })
+        .parse(authorized.body);
+      expect(authorizationBody.publicId).toContain(incidentId);
+      expect(authorizationBody.type).toBe('authenticated');
+      expect(authorizationBody.maxBytes).toBe(3 * 1024 * 1024);
+      expect(photoStorage.authorizeUpload).toHaveBeenCalledTimes(1);
+      const registered = await client
+        .post(`/api/v1/incidentes/${incidentId}/fotos`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ publicId: authorizationBody.publicId })
+        .expect(201);
+      expect(z.object({ id: z.string() }).parse(registered.body).id).toBeTruthy();
+      expect(await prisma.incidentPhoto.count({ where: { incidentId: saved.id } })).toBe(1);
+      expect(photoStorage.inspectUpload).toHaveBeenCalledWith(authorizationBody.publicId);
+
+      await prisma.incidentPhoto.createMany({
+        data: Array.from({ length: 4 }, (_, index) => ({
+          incidentId: saved.id,
+          cloudinaryPublicId: `fixture/${incidentId}/${index}`,
+          width: 10,
+          height: 10,
+          bytes: 100,
+        })),
+      });
+      await client
+        .post(`/api/v1/incidentes/${incidentId}/fotos/autorizacion`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({})
+        .expect(409);
     });
   });
 
