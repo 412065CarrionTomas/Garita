@@ -13,6 +13,7 @@ import type { AuthMeResponse } from '@garita/shared';
 
 import { ApiError, apiGet } from '@/lib/api-client';
 import { auth } from '@/lib/firebase';
+import { unregisterCurrentDevice } from '@/features/notificaciones/notifications';
 
 export const DISABLED_MESSAGE =
   'Tu usuario no está habilitado. Si recibiste una invitación, activala desde el enlace del correo; si no, contactá a tu administrador';
@@ -121,6 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    await unregisterCurrentDevice().catch(() => undefined);
     await signOut(auth);
     setUser(null);
   }, []);

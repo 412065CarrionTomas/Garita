@@ -139,10 +139,21 @@ describe('Flujos de gestión de personal (e2e)', () => {
   it('desactivar deniega el siguiente request y deshabilita y revoca Firebase', async () => {
     const { user } = await create('deactivate');
     const uid = user.firebaseUid;
+    const userAuth = { Authorization: `Bearer user:${uid}` };
+    const deviceToken = `deactivate-device-${suffix}`;
+    await request(app.getHttpServer()).get('/api/v1/auth/me').set(userAuth).expect(200);
+    await request(app.getHttpServer())
+      .post('/api/v1/dispositivos')
+      .set(userAuth)
+      .send({ token: deviceToken, kind: 'app', platform: 'android' })
+      .expect(201);
     await request(app.getHttpServer())
       .post(`/api/v1/usuarios/${user.id}/desactivar`)
       .set(admin)
       .expect(201);
+    await expect(
+      prisma.notificationDevice.findUnique({ where: { token: deviceToken } }),
+    ).resolves.toBeNull();
     await request(app.getHttpServer())
       .get('/api/v1/auth/me')
       .set({ Authorization: `Bearer user:${uid}` })

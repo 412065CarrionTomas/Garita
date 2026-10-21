@@ -23,6 +23,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { NotificationControl } from '@/features/notificaciones/notification-control';
 import { cn } from '@/lib/utils';
 
 export interface NavSection {
@@ -124,6 +125,7 @@ function SidebarContent({
           <p className="text-xs text-sidebar-foreground">{roleLabel}</p>
         </div>
         <ThemeToggle />
+        <NotificationControl />
         <Button
           type="button"
           variant="ghost"

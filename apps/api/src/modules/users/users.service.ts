@@ -273,6 +273,7 @@ export class UsersService {
         }
         await this.weeklySchedules.deriveForGuard(tx, id, target.id);
         await tx.user.update({ where: { id }, data: { status: 'deactivated' } });
+        await tx.notificationDevice.deleteMany({ where: { userId: id } });
         await tx.invitation.updateMany({
           where: { userId: id, usedAt: null, replacedAt: null },
           data: { replacedAt: this.clock.now() },
@@ -308,6 +309,7 @@ export class UsersService {
         }
         await this.weeklySchedules.deriveForGuard(tx, id, null);
         await tx.user.update({ where: { id }, data: { status: 'deactivated' } });
+        await tx.notificationDevice.deleteMany({ where: { userId: id } });
         await tx.invitation.updateMany({
           where: { userId: id, usedAt: null, replacedAt: null },
           data: { replacedAt: this.clock.now() },
