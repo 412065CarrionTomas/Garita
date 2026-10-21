@@ -14,6 +14,7 @@ import {
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 import { ShiftSyncStateService } from './shift-sync-state.service';
 import type { ShiftCredentialPayload } from './shift-credential.service';
+import { IncidentsService } from '../incidents/incidents.service';
 
 function computeCloseRequestHash(payload: object): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -29,6 +30,7 @@ export class SyncBatchService {
     private readonly checkpointRecordsService: CheckpointRecordsService,
     private readonly shiftExecutionService: ShiftExecutionService,
     private readonly syncStateService: ShiftSyncStateService,
+    private readonly incidentsService: IncidentsService,
   ) {}
 
   async processBatch(
@@ -191,7 +193,7 @@ export class SyncBatchService {
             message: errorMessage,
           });
         }
-      } else {
+      } else if (event.type === 'shift_close') {
         const eventId = event.payload.eventId;
 
         // Chequeo de idempotencia sobre ShiftEvent
@@ -254,6 +256,37 @@ export class SyncBatchService {
             eventId,
             reason: 'invalid_data',
             message: errorMessage,
+          });
+        }
+      } else {
+        const incidentId = event.payload.incidentId;
+        try {
+          const outcome = await this.incidentsService.receive(event.payload, credential);
+          if (!outcome) {
+            results.push({
+              status: 'rejected',
+              eventId: incidentId,
+              reason: 'not_in_credential_shift',
+              message: 'El incidente no pertenece a un turno en curso de la credencial',
+            });
+          } else if ('result' in outcome) {
+            results.push({ status: 'accepted', eventId: incidentId, outcome: outcome.result });
+          } else if (!outcome.same) {
+            results.push({
+              status: 'rejected',
+              eventId: incidentId,
+              reason: 'event_id_conflict',
+              message: 'El identificador de incidente ya fue utilizado por otro turno',
+            });
+          } else {
+            results.push({ status: 'duplicate', eventId: incidentId });
+          }
+        } catch (error: unknown) {
+          results.push({
+            status: 'rejected',
+            eventId: incidentId,
+            reason: 'invalid_data',
+            message: error instanceof Error ? error.message : 'No se pudo guardar el incidente',
           });
         }
       }

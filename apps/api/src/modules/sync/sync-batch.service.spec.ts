@@ -8,6 +8,7 @@ import type { ShiftExecutionService } from '../shift-execution/shift-execution.s
 import type { ShiftSyncStateService } from './shift-sync-state.service';
 import type { ShiftCredentialPayload } from './shift-credential.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import type { IncidentsService } from '../incidents/incidents.service';
 import type { CheckpointRecordRequest, ShiftOfflineData, SyncBatchRequest } from '@garita/shared';
 
 interface SyncBatchRecord {
@@ -47,6 +48,7 @@ describe('SyncBatchService', () => {
   let checkpointRecordsService: CheckpointRecordsService;
   let shiftExecutionService: ShiftExecutionService;
   let syncStateService: ShiftSyncStateService;
+  let incidentsService: IncidentsService;
   let updateSyncStateMock: jest.Mock;
   let service: SyncBatchService;
 
@@ -179,6 +181,7 @@ describe('SyncBatchService', () => {
     syncStateService = {
       updateSyncState: updateSyncStateMock,
     } as unknown as ShiftSyncStateService;
+    incidentsService = { receive: jest.fn() } as unknown as IncidentsService;
 
     service = new SyncBatchService(
       prisma,
@@ -186,6 +189,7 @@ describe('SyncBatchService', () => {
       checkpointRecordsService,
       shiftExecutionService,
       syncStateService,
+      incidentsService,
     );
   });
 
