@@ -6,6 +6,7 @@ import {
   syncEventId,
   syncEventSchema,
 } from './sync-contract';
+import { incidentReportSchema } from '../incidents';
 
 const location = {
   status: 'ok' as const,
@@ -45,6 +46,26 @@ describe('sync contract', () => {
 
   it('rejects the shift start and unknown event types', () => {
     expect(syncEventSchema.safeParse({ type: 'shift_start', payload: {} }).success).toBe(false);
+  });
+
+  it('validates the incident event and requires text for Otro', () => {
+    const payload = {
+      incidentId: '023e7c9e-5358-4a6a-b326-5d78a3d49cbc',
+      shiftId: 'shift-1',
+      type: 'other',
+      occurredAtDevice: '2026-10-14T03:10:00.000Z',
+      location,
+      photoCount: 0,
+    };
+    expect(incidentReportSchema.safeParse(payload).success).toBe(false);
+    expect(
+      incidentReportSchema.safeParse({ ...payload, description: 'Relevo demorado' }).success,
+    ).toBe(true);
+    expect(
+      syncEventId(
+        syncEventSchema.parse({ type: 'incident', payload: { ...payload, type: 'accident' } }),
+      ),
+    ).toBe(payload.incidentId);
   });
 
   it('limits a batch to 100 events and requires at least one', () => {

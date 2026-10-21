@@ -19,6 +19,7 @@ export const COMPANY_ID_MODELS = [
   'CheckpointRecord',
   'InvalidScanAttempt',
   'RecordFlag',
+  'Incident',
   'ShiftCredential',
   'SyncBatch',
   'ConnectionNotice',
@@ -30,6 +31,12 @@ export const INDIRECT_TENANT_MODELS = {
   RoundVersion: { relation: 'round', foreignKey: 'roundId', relatedModel: 'Round' },
   ShiftAssignment: { relation: 'shift', foreignKey: 'shiftId', relatedModel: 'Shift' },
   ShiftRound: { relation: 'shift', foreignKey: 'shiftId', relatedModel: 'Shift' },
+  IncidentPhoto: { relation: 'incident', foreignKey: 'incidentId', relatedModel: 'Incident' },
+  IncidentPhotoAuthorization: {
+    relation: 'incident',
+    foreignKey: 'incidentId',
+    relatedModel: 'Incident',
+  },
 } as const;
 export const TENANT_MODELS = [
   ...COMPANY_ID_MODELS,
@@ -98,6 +105,11 @@ export function addSiteAssignmentFilter(
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'RecordFlag')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'Incident') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'IncidentPhotoAuthorization')
+    return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
+  if (model === 'IncidentPhoto')
+    return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
   if (model === 'ShiftCredential')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'SyncBatch')

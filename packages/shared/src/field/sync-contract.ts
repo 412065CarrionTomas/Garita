@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { checkpointRecordRequestSchema, checkpointRecordResponseSchema } from './checkpoint-record';
 import { closeShiftRequestSchema, closeShiftResponseSchema } from './shift-execution';
+import { incidentReportSchema, incidentResponseSchema } from '../incidents';
 
 /**
  * HU-13 contract between the guard app and the API for working without signal: the shift credential
@@ -27,12 +28,17 @@ export const SHIFT_CREDENTIAL_VALID_DAYS_AFTER_END = 7;
 export const syncEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('checkpoint_record'), payload: checkpointRecordRequestSchema }),
   z.object({ type: z.literal('shift_close'), payload: closeShiftRequestSchema }),
+  z.object({ type: z.literal('incident'), payload: incidentReportSchema }),
 ]);
 export type SyncEvent = z.infer<typeof syncEventSchema>;
 
 /** Id of an event: the one the phone generated inside its payload. */
 export function syncEventId(event: SyncEvent): string {
-  return event.type === 'checkpoint_record' ? event.payload.recordId : event.payload.eventId;
+  return event.type === 'checkpoint_record'
+    ? event.payload.recordId
+    : event.type === 'shift_close'
+      ? event.payload.eventId
+      : event.payload.incidentId;
 }
 
 /** Body of `POST /sincronizacion/eventos`: up to `SYNC_BATCH_MAX_EVENTS` events of one shift, oldest first. */
@@ -61,7 +67,11 @@ export const syncEventResultSchema = z.discriminatedUnion('status', [
     status: z.literal('accepted'),
     eventId: z.uuid(),
     /** Same body that the single-event endpoint returns (`POST /registros-puntos` or `POST /turnos/:id/cerrar`). */
-    outcome: z.union([checkpointRecordResponseSchema, closeShiftResponseSchema]),
+    outcome: z.union([
+      checkpointRecordResponseSchema,
+      closeShiftResponseSchema,
+      incidentResponseSchema,
+    ]),
   }),
   z.object({ status: z.literal('duplicate'), eventId: z.uuid() }),
   z.object({
