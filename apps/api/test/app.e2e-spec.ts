@@ -11,6 +11,7 @@ import {
   serverTimeResponseSchema,
   startShiftResponseSchema,
   checkpointRecordResponseSchema,
+  deviceSchema,
   shiftRecordsResponseSchema,
   siteResponseSchema,
   USER_ROLES,
@@ -196,6 +197,7 @@ describe('Aplicación (e2e)', () => {
   const createdSiteIds: string[] = [];
   let testNow = new Date('2026-10-13T12:00:00.000Z');
   const createdNfcCheckpointIds: string[] = [];
+  const notificationTokens: string[] = [];
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -296,6 +298,7 @@ describe('Aplicación (e2e)', () => {
 
   afterAll(async () => {
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.notificationDevice.deleteMany({ where: { token: { in: notificationTokens } } });
     await prisma.recordFlag.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
     await prisma.checkpointRecord.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
     await prisma.shift.deleteMany({ where: { id: { in: createdShiftIds } } });
@@ -551,6 +554,48 @@ describe('Aplicación (e2e)', () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
 
     expect(liveHealthResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it('HU-18: registra, lista y elimina solo los dispositivos propios', async () => {
+    const northAuth = { Authorization: 'Bearer token-admin' };
+    const southAuth = { Authorization: 'Bearer token-south-admin' };
+    const northToken = `e2e-web-${randomUUID()}`;
+    const southToken = `e2e-web-${randomUUID()}`;
+    notificationTokens.push(northToken, southToken);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/dispositivos')
+      .set(northAuth)
+      .send({ token: northToken, kind: 'web', platform: 'web' })
+      .expect(201);
+    const device = deviceSchema.strict().parse(created.body);
+    await request(app.getHttpServer())
+      .post('/api/v1/dispositivos')
+      .send({ token: `e2e-web-unauth-${randomUUID()}`, kind: 'web', platform: 'web' })
+      .expect(401);
+    const own = await request(app.getHttpServer())
+      .get('/api/v1/dispositivos')
+      .set(northAuth)
+      .expect(200);
+    expect(own.body).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: device.id, platform: 'web' })]),
+    );
+    await request(app.getHttpServer()).get('/api/v1/dispositivos').expect(401);
+    await request(app.getHttpServer()).delete(`/api/v1/dispositivos/${device.id}`).expect(401);
+
+    const south = await request(app.getHttpServer())
+      .post('/api/v1/dispositivos')
+      .set(southAuth)
+      .send({ token: southToken, kind: 'web', platform: 'web' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .delete(`/api/v1/dispositivos/${z.object({ id: z.string() }).parse(south.body).id}`)
+      .set(northAuth)
+      .expect(404);
+    await request(app.getHttpServer())
+      .delete(`/api/v1/dispositivos/${device.id}`)
+      .set(northAuth)
+      .expect(200);
   });
 
   it('HU-14: GET /api/v1/hora es público y no expone recursos de ninguna empresa', async () => {
