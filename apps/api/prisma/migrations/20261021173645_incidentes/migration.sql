@@ -47,6 +47,17 @@ CREATE TABLE "IncidentPhoto" (
     CONSTRAINT "IncidentPhoto_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "IncidentPhotoAuthorization" (
+    "id" TEXT NOT NULL,
+    "incidentId" TEXT NOT NULL,
+    "cloudinaryPublicId" TEXT NOT NULL,
+    "expiresAt" TIMESTAMPTZ(3) NOT NULL,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "IncidentPhotoAuthorization_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Incident_incidentId_key" ON "Incident"("incidentId");
 
@@ -65,6 +76,12 @@ CREATE UNIQUE INDEX "IncidentPhoto_cloudinaryPublicId_key" ON "IncidentPhoto"("c
 -- CreateIndex
 CREATE INDEX "IncidentPhoto_incidentId_uploadedAt_idx" ON "IncidentPhoto"("incidentId", "uploadedAt");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "IncidentPhotoAuthorization_cloudinaryPublicId_key" ON "IncidentPhotoAuthorization"("cloudinaryPublicId");
+
+-- CreateIndex
+CREATE INDEX "IncidentPhotoAuthorization_incidentId_expiresAt_idx" ON "IncidentPhotoAuthorization"("incidentId", "expiresAt");
+
 -- AddForeignKey
 ALTER TABLE "Incident" ADD CONSTRAINT "Incident_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -82,3 +99,6 @@ ALTER TABLE "Incident" ADD CONSTRAINT "Incident_guardId_fkey" FOREIGN KEY ("guar
 
 -- AddForeignKey
 ALTER TABLE "IncidentPhoto" ADD CONSTRAINT "IncidentPhoto_incidentId_fkey" FOREIGN KEY ("incidentId") REFERENCES "Incident"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "IncidentPhotoAuthorization" ADD CONSTRAINT "IncidentPhotoAuthorization_incidentId_fkey" FOREIGN KEY ("incidentId") REFERENCES "Incident"("id") ON DELETE CASCADE ON UPDATE CASCADE;
