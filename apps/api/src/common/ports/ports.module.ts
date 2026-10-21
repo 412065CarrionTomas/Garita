@@ -1,13 +1,16 @@
 import { Global, Module } from '@nestjs/common';
 
 import { NOTIFICATIONS_PORT, NoopNotifications } from './notifications.port';
-import { NoopRealtime, REALTIME_PORT } from './realtime.port';
+import { REALTIME_PORT } from './realtime.port';
+import { RealtimeModule } from '../../modules/realtime/realtime.module';
+import { SocketRealtimeService } from '../../modules/realtime/socket-realtime.service';
 
 @Global()
 @Module({
+  imports: [RealtimeModule],
   providers: [
     { provide: NOTIFICATIONS_PORT, useClass: NoopNotifications },
-    { provide: REALTIME_PORT, useClass: NoopRealtime },
+    { provide: REALTIME_PORT, useExisting: SocketRealtimeService },
   ],
   exports: [NOTIFICATIONS_PORT, REALTIME_PORT],
 })

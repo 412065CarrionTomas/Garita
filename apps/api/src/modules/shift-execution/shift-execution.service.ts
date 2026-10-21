@@ -37,6 +37,8 @@ import {
 } from './shift-execution-effects.port';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
+import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
+import { RoundWindowStateService } from '../supervision/round-window-state.service';
 
 export const SHIFT_AUTO_CLOSE_QUEUE = 'shift-auto-close';
 export const SHIFT_AUTO_CLOSE_JOB = 'close-shift';
@@ -67,6 +69,8 @@ export class ShiftExecutionService {
     @Optional()
     @Inject(forwardRef(() => ShiftCredentialService))
     private readonly shiftCredentialService?: ShiftCredentialService,
+    @Optional() private readonly windowStates?: RoundWindowStateService,
+    @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
   ) {}
 
   async start(id: string, input: StartShiftRequest, user: AuthenticatedUser) {
@@ -175,6 +179,11 @@ export class ShiftExecutionService {
       throw error;
     }
     const data = await this.buildData(id);
+    await this.windowStates?.createForShift(data);
+    this.realtime?.emitToSite(shift.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId: id,
+      siteId: shift.siteId,
+    });
     let credential: { token: string; expiresAt: string } | undefined;
     if (this.shiftCredentialService) {
       credential = await this.shiftCredentialService.issueCredential({
@@ -376,6 +385,10 @@ export class ShiftExecutionService {
       result: 'closed',
       closedEarly: early,
     });
+    this.realtime?.emitToSite(shift.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId: id,
+      siteId: shift.siteId,
+    });
     return { status: 'closed' as const, closedAt: occurredAt.toISOString(), closedEarly: early };
   }
 
@@ -425,6 +438,10 @@ export class ShiftExecutionService {
       return true;
     });
     if (!changed) return false;
+    this.realtime?.emitToSite(shift.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId: id,
+      siteId: shift.siteId,
+    });
     this.logger.log({
       event: 'shift.auto_closed',
       shiftId: id,
@@ -529,6 +546,10 @@ export class ShiftExecutionService {
       reason,
       result: 'closed',
     });
+    this.realtime?.emitToSite(shift.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId: shift.id,
+      siteId: shift.siteId,
+    });
     return shift.id;
   }
 
@@ -555,7 +576,73 @@ export class ShiftExecutionService {
       select: { id: true },
     });
     for (const shift of shifts) await this.autoClose(shift.id);
-    return shifts.length;
+    const noShows = await this.prisma.systemPrisma.shift.findMany({
+      where: {
+        status: 'scheduled',
+        endsAt: { lte: now },
+        assignments: { some: { isCurrent: true, active: true, guard: { status: 'active' } } },
+      },
+      select: { id: true, companyId: true, siteId: true },
+    });
+    let noShowCount = 0;
+    for (const shift of noShows) {
+      noShowCount += await this.setNoShow(shift, now);
+    }
+    await this.windowStates?.recalculateExpired();
+    return shifts.length + noShowCount;
+  }
+
+  async markNoShow(id: string): Promise<boolean> {
+    const now = this.clock.now();
+    // systemPrisma runs the idempotent no-show transition from the scheduled worker without request scope.
+    this.logger.debug({ event: 'shift.no_show_system_lookup', shiftId: id });
+    const shift = await this.prisma.systemPrisma.shift.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        companyId: true,
+        siteId: true,
+        status: true,
+        endsAt: true,
+        assignments: {
+          where: { isCurrent: true, active: true, guard: { status: 'active' } },
+          take: 1,
+          select: { id: true },
+        },
+      },
+    });
+    if (shift?.status !== 'scheduled' || shift.endsAt > now || shift.assignments.length === 0)
+      return false;
+    return (await this.setNoShow(shift, now)) > 0;
+  }
+
+  private async setNoShow(
+    shift: { id: string; companyId: string; siteId: string },
+    now: Date,
+  ): Promise<number> {
+    const changed = await this.prisma.systemPrisma.$transaction(async (tx) => {
+      const result = await tx.shift.updateMany({
+        where: {
+          id: shift.id,
+          status: 'scheduled',
+          endsAt: { lte: now },
+          assignments: { some: { isCurrent: true, active: true, guard: { status: 'active' } } },
+        },
+        data: { status: 'no_show' },
+      });
+      if (result.count)
+        await tx.shiftAssignment.updateMany({
+          where: { shiftId: shift.id, isCurrent: true },
+          data: { active: false },
+        });
+      return result.count;
+    });
+    if (changed)
+      this.realtime?.emitToSite(shift.companyId, shift.siteId, 'turno.actualizado', {
+        shiftId: shift.id,
+        siteId: shift.siteId,
+      });
+    return changed;
   }
 
   private async realCloseAfterAuto(
@@ -640,6 +727,8 @@ export class ShiftExecutionService {
         credential: parsed.credential ?? credential,
       };
     }
+    const data = await this.buildData(id);
+    await this.windowStates?.createForShift(data);
     return startShiftResponseSchema.parse({
       serverTime: this.clock.now().toISOString(),
       status: 'in_progress' as const,
@@ -648,7 +737,7 @@ export class ShiftExecutionService {
         event?.occurredAt.toISOString() ??
         this.clock.now().toISOString(),
       lateStartMinutes: shift.lateStartMinutes,
-      data: await this.buildData(id),
+      data,
       ...(credential ? { credential } : {}),
     });
   }

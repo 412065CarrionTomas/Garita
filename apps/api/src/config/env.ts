@@ -17,6 +17,10 @@ export const envSchema = z
       .pipe(z.array(z.url())),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     REDIS_URL: z.url({ protocol: /^rediss?$/ }),
+    SOCKET_REDIS_ADAPTER_ENABLED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
     WEB_APP_URL: z.url().default('http://localhost:5173'),
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM: z.string().optional(),

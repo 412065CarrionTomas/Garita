@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ClockModule } from '../../common/clock';
 import { ShiftCredentialModule } from '../sync/shift-credential.module';
+import { SupervisionModule } from '../supervision/supervision.module';
 import { ShiftExecutionController } from './shift-execution.controller';
 import {
   ShiftExecutionService,
@@ -22,6 +23,7 @@ import {
     ClockModule,
     BullModule.registerQueue({ name: SHIFT_AUTO_CLOSE_QUEUE }),
     ShiftCredentialModule,
+    SupervisionModule,
   ],
   controllers: [ShiftExecutionController],
   providers: [

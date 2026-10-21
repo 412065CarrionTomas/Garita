@@ -10,6 +10,7 @@ import { ShiftSyncStateService } from './shift-sync-state.service';
 import { SyncBatchService } from './sync-batch.service';
 import { SyncBatchController } from './sync-batch.controller';
 import { ConnectionNoticesController } from './connection-notices.controller';
+import { SupervisionModule } from '../supervision/supervision.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ConnectionNoticesController } from './connection-notices.controller';
     ShiftCredentialModule,
     ShiftExecutionModule,
     CheckpointRecordsModule,
+    SupervisionModule,
   ],
   controllers: [SyncBatchController, ConnectionNoticesController],
   providers: [
