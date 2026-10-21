@@ -171,6 +171,19 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('SyncBatch');
     expect(COMPANY_ID_MODELS).toContain('ConnectionNotice');
     expect(COMPANY_ID_MODELS).toContain('ShiftSyncState');
+    expect(COMPANY_ID_MODELS).toContain('NotificationDevice');
+    expect(
+      addSiteAssignmentFilter(
+        'NotificationDevice',
+        { where: { kind: 'web' } },
+        {
+          userId: 'supervisor-1',
+          companyId: 'norte',
+          role: 'supervisor',
+          status: 'active',
+        },
+      ),
+    ).toEqual({ where: { kind: 'web', userId: 'supervisor-1' } });
     expect(addSiteAssignmentFilter('ShiftCredential', { where: { shiftId: 's-1' } }, user)).toEqual(
       {
         where: {
