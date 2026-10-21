@@ -33,6 +33,6 @@ export function computeRoundWindowStatus(input: RoundWindowStatusInput): RoundWi
   if (input.pendingSync && input.now >= input.endsAt) return 'pending_sync';
   if (input.now < input.endsAt) return 'in_progress';
   if (input.now < input.graceEndsAt) return 'late';
-  if (input.shiftEndedWithoutCoverage || input.recordedCount === 0) return 'not_done';
+  if (input.recordedCount === 0) return 'not_done';
   return 'incomplete';
 }

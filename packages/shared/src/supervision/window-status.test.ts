@@ -37,5 +37,14 @@ describe('computeRoundWindowStatus', () => {
     expect(
       computeRoundWindowStatus({ ...base, now: graceEndsAt, shiftEndedWithoutCoverage: true }),
     ).toBe('not_done');
+    expect(
+      computeRoundWindowStatus({
+        ...base,
+        now: graceEndsAt,
+        expectedCount: 4,
+        recordedCount: 2,
+        shiftEndedWithoutCoverage: true,
+      }),
+    ).toBe('incomplete');
   });
 });
