@@ -43,17 +43,18 @@ enum NfcTagStatus {
 }
 
 model Company {
-  id          String       @id @default(cuid())
-  name        String
-  timezone    String       @default("America/Argentina/Buenos_Aires")
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  users       User[]
-  clients     Client[]
-  sites       Site[]
-  rounds      Round[]
-  shifts      Shift[]
-  recordFlags RecordFlag[]
+  id                String             @id @default(cuid())
+  name              String
+  timezone          String             @default("America/Argentina/Buenos_Aires")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  users             User[]
+  clients           Client[]
+  sites             Site[]
+  rounds            Round[]
+  shifts            Shift[]
+  recordFlags       RecordFlag[]
+  roundWindowStates RoundWindowState[]
 }
 
 model User {
@@ -195,19 +196,20 @@ model NfcTag {
 }
 
 model Round {
-  id               String         @id @default(cuid())
-  companyId        String
-  siteId           String
-  name             String
-  status           RecordStatus   @default(active)
-  currentVersionId String?        @unique
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  company          Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  site             Site           @relation(fields: [siteId], references: [id], onDelete: Restrict)
-  versions         RoundVersion[]
-  currentVersion   RoundVersion?  @relation("CurrentRoundVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
-  shifts           ShiftRound[]
+  id                String             @id @default(cuid())
+  companyId         String
+  siteId            String
+  name              String
+  status            RecordStatus       @default(active)
+  currentVersionId  String?            @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site              Site               @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  versions          RoundVersion[]
+  currentVersion    RoundVersion?      @relation("CurrentRoundVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  shifts            ShiftRound[]
+  roundWindowStates RoundWindowState[]
 
   @@unique([siteId, name])
   @@index([companyId, status])
@@ -265,10 +267,53 @@ model Invitation {
 enum ShiftStatus {
   scheduled
   unassigned
+  uncovered
+  no_show
   cancelled
   in_progress
   closed
   auto_closed
+}
+
+enum RoundWindowStatus {
+  pending
+  in_progress
+  late
+  complete
+  complete_late
+  incomplete
+  not_done
+  pending_sync
+  in_review
+}
+
+enum RoundWindowSeverityLevel {
+  grave
+  media
+  leve
+}
+
+model RoundWindowState {
+  id            String                    @id @default(cuid())
+  companyId     String
+  shiftId       String
+  roundId       String
+  windowIndex   Int
+  startsAt      DateTime                  @db.Timestamptz(3)
+  endsAt        DateTime                  @db.Timestamptz(3)
+  graceEndsAt   DateTime                  @db.Timestamptz(3)
+  status        RoundWindowStatus         @default(pending)
+  severityLevel RoundWindowSeverityLevel?
+  recordedCount Int                       @default(0)
+  expectedCount Int
+  updatedAt     DateTime                  @updatedAt
+  company       Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  shift         Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  round         Round                     @relation(fields: [roundId], references: [id], onDelete: Restrict)
+
+  @@unique([shiftId, roundId, windowIndex])
+  @@index([companyId, shiftId, startsAt])
+  @@index([shiftId, status, endsAt])
 }
 
 enum ShiftEventType {
@@ -335,6 +380,7 @@ model Shift {
   syncBatches         SyncBatch[]
   connectionNotices   ConnectionNotice[]
   syncState           ShiftSyncState?
+  roundWindowStates   RoundWindowState[]
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
