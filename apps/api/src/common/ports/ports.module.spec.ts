@@ -10,17 +10,19 @@ describe('RealtimePort provider', () => {
       providers: [SocketRealtimeService],
     }).compile();
     const realtime: RealtimePort = moduleRef.get(SocketRealtimeService);
-    expect(() =>
+    expect(() => {
       realtime.emitToSite('company', 'site', 'turno.actualizado', {
         shiftId: 'shift',
         siteId: 'site',
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
     await moduleRef.close();
   });
 
   it('keeps the noop realtime implementation harmless', () => {
-    expect(() => new NoopRealtime().emitToSite()).not.toThrow();
+    expect(() => {
+      new NoopRealtime().emitToSite();
+    }).not.toThrow();
   });
 });
 
