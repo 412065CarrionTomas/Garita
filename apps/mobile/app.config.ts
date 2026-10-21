@@ -17,7 +17,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSLocationWhenInUseUsageDescription:
         'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',
       NSCameraUsageDescription:
-        'Garita usa la cámara para leer los códigos QR de los puntos de control.',
+        'Garita usa la cámara para leer códigos QR y tomar fotos de incidentes.',
     },
   },
   android: {
@@ -60,6 +60,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         cameraPermission: 'Garita usa la cámara para leer los códigos QR de los puntos de control.',
         recordAudioAndroid: false,
+      },
+    ],
+    [
+      'expo-image-picker',
+      {
+        cameraPermission: 'Garita usa la cámara para adjuntar fotos a reportes de incidentes.',
+        photosPermission:
+          'Garita accede a tus fotos solo cuando adjuntás evidencia a un incidente.',
+        microphonePermission: false,
       },
     ],
     [
