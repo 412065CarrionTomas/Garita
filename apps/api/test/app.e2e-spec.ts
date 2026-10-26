@@ -34,6 +34,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { aesCbc, aesCmac, deriveTagKey, truncateMac } from '../src/modules/nfc-tags/secure/crypto';
 import { FACTORY_KEY, sessionKeys } from '../src/modules/nfc-tags/secure/ev2';
+import { ShiftCredentialService } from '../src/modules/sync/shift-credential.service';
 import type { Server as HttpServer } from 'node:http';
 import { PrismaModule } from '../src/modules/prisma/prisma.module';
 import { QrService } from '../src/modules/checkpoints/qr.service';
@@ -2247,6 +2248,58 @@ describe('Aplicación (e2e)', () => {
         expect.objectContaining({ type: 'replayed_read', severity: 'grave' }),
       ]),
     );
+    const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+      where: { shiftId: shift.id, guardId: northGuardId },
+    });
+    const credentialService = app.get(ShiftCredentialService);
+    const { token: credToken } = await credentialService.issueCredential({
+      shiftId: shift.id,
+      assignmentId: assignment.id,
+      userId: northGuardId,
+      companyId: 'norte-company',
+    });
+    const batchRecordId = randomUUID();
+    await client
+      .post('/api/v1/sincronizacion/eventos')
+      .set('Authorization', `Bearer ${credToken}`)
+      .send({
+        shiftId: shift.id,
+        pendingCount: 0,
+        syncedUntil: null,
+        events: [
+          {
+            type: 'checkpoint_record',
+            payload: {
+              recordId: batchRecordId,
+              shiftId: shift.id,
+              method: 'nfc',
+              scannedValue: uid,
+              sdmMessage: makeSun(5),
+              occurredAtDevice: '2028-01-10T12:05:00.000Z',
+              location: {
+                status: 'ok',
+                latitude: -34.6,
+                longitude: -58.4,
+                accuracyMeters: 5,
+                simulation: 'not_simulated',
+                takenAt: '2028-01-10T12:05:00.000Z',
+              },
+              phoneNfc: 'on',
+            },
+          },
+        ],
+      })
+      .expect(200);
+    const batchSaved = await prisma.checkpointRecord.findUniqueOrThrow({
+      where: { recordId: batchRecordId },
+      include: { flags: true },
+    });
+    expect(batchSaved.sdmResult).toBe('valid');
+    expect(
+      batchSaved.flags.some(
+        (flag) => flag.type === 'tag_not_authentic' || flag.type === 'replayed_read',
+      ),
+    ).toBe(false);
     const interruptedUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
     await client.post(path).set(auth).send({ uid: interruptedUid, version }).expect(201);
     expect(await prisma.nfcTag.findFirstOrThrow({ where: { uid: interruptedUid } })).toMatchObject({
