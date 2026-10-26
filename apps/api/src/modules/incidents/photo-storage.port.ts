@@ -8,6 +8,7 @@ export const PHOTO_STORAGE_PORT = Symbol('PHOTO_STORAGE_PORT');
 export const INCIDENT_PHOTO_MAX_BYTES = 3 * 1024 * 1024;
 
 export interface PhotoStoragePort {
+  signedUrl(publicId: string, size: 'thumbnail' | 'full'): string;
   authorizeUpload(
     companyId: string,
     incidentId: string,
@@ -34,6 +35,32 @@ const uploadedAssetSchema = z.object({
 @Injectable()
 export class CloudinaryPhotoStorage implements PhotoStoragePort {
   constructor(private readonly config: ConfigService<Env, true>) {}
+
+  signedUrl(publicId: string, size: 'thumbnail' | 'full'): string {
+    const { cloudName, apiKey, apiSecret } = this.credentials();
+    const params: Record<string, string> = {
+      attachment: 'false',
+      expires_at: String(Math.floor(Date.now() / 1000) + 300),
+      format: 'jpg',
+      public_id: publicId,
+      timestamp: String(Math.floor(Date.now() / 1000)),
+      type: 'authenticated',
+    };
+    if (size === 'thumbnail') params.transformation = 'c_limit,h_320,w_320';
+    const signature = createHash('sha1')
+      .update(
+        `${Object.entries(params)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => `${key}=${value}`)
+          .join('&')}${apiSecret}`,
+      )
+      .digest('hex');
+    const url = new URL(`https://api.cloudinary.com/v1_1/${cloudName}/image/download`);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    url.searchParams.set('api_key', apiKey);
+    url.searchParams.set('signature', signature);
+    return url.toString();
+  }
 
   private credentials() {
     const cloudName = this.config.get('CLOUDINARY_CLOUD_NAME', { infer: true });
