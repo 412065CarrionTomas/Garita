@@ -35,6 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { aesCbc, aesCmac, deriveTagKey, truncateMac } from '../src/modules/nfc-tags/secure/crypto';
 import { FACTORY_KEY, sessionKeys } from '../src/modules/nfc-tags/secure/ev2';
 import { ShiftCredentialService } from '../src/modules/sync/shift-credential.service';
+import { ConfigService } from '@nestjs/config';
 import type { Server as HttpServer } from 'node:http';
 import { PrismaModule } from '../src/modules/prisma/prisma.module';
 import { QrService } from '../src/modules/checkpoints/qr.service';
@@ -2136,7 +2137,10 @@ describe('Aplicación (e2e)', () => {
         .parse((await client.post(commandPath).set(auth).send({ response }).expect(201)).body);
     }
     expect(step).toEqual({ apdu: null, complete: true });
-    const master = Buffer.from('00112233445566778899AABBCCDDEEFF', 'hex');
+    const masterHex =
+      (app.get(ConfigService).get('NFC_MASTER_KEY') as string | undefined) ??
+      '00112233445566778899AABBCCDDEEFF';
+    const master = Buffer.from(masterHex, 'hex');
     const uidBytes = Buffer.from(uid, 'hex');
     const counter = Buffer.from('010000', 'hex');
     const picc = Buffer.concat([Buffer.from([0xc7]), uidBytes, counter, Buffer.alloc(5)]);
