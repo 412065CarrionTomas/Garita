@@ -43,7 +43,9 @@ export function NotificationNavigation() {
         void Notifications.clearLastNotificationResponseAsync();
       }
     });
-    return () => subscription.remove();
+    return () => {
+      subscription.remove();
+    };
   }, [router, user?.role]);
   return null;
 }
