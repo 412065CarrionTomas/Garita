@@ -45,3 +45,25 @@ export const incidentResponseSchema = z.object({
   incidentId: z.uuid(),
   classificationStatus: z.literal('pending'),
 });
+
+export const INCIDENT_CLASSIFICATIONS = ['client_visible', 'internal'] as const;
+export const incidentClassificationSchema = z
+  .object({
+    classification: z.enum(INCIDENT_CLASSIFICATIONS),
+    internalComment: z.string().trim().min(5).max(1000),
+    clientNote: z.string().trim().max(500).optional(),
+  })
+  .strict();
+export const incidentReclassificationSchema = incidentClassificationSchema.extend({
+  reason: z.string().trim().min(5).max(500),
+});
+export const incidentListQuerySchema = z
+  .object({
+    predio: z.string().min(1).optional(),
+    desde: z.iso.date().optional(),
+    hasta: z.iso.date().optional(),
+    tipo: z.enum(INCIDENT_TYPES).optional(),
+    clasificacion: z.enum(['pending', ...INCIDENT_CLASSIFICATIONS]).optional(),
+    pagina: z.coerce.number().int().min(1).default(1),
+  })
+  .strict();

@@ -362,6 +362,186 @@ describe('Aplicación (e2e)', () => {
     await app.close();
   });
 
+  it('clasifica, reclasifica y filtra incidentes sin exponerlos al cliente ni a otros predios', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2020-10-20T08:00:00Z'),
+        endsAt: new Date('2020-10-20T11:00:00Z'),
+        serviceDate: new Date('2020-10-20T00:00:00Z'),
+        createdById: admin.id,
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            assignedById: admin.id,
+            startsAt: new Date('2020-10-20T08:00:00Z'),
+            endsAt: new Date('2020-10-20T11:00:00Z'),
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+      where: { shiftId: shift.id },
+    });
+    const incident = await prisma.incident.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        guardId: northGuardId,
+        incidentId: randomUUID(),
+        type: 'intrusion',
+        occurredAtDevice: new Date('2020-10-20T09:00:00Z'),
+        locationStatus: 'ok',
+        simulation: 'not_simulated',
+      },
+    });
+    const client = request(app.getHttpServer());
+    const queuePath = '/api/v1/incidentes/cola';
+    await client.get(queuePath).expect(401);
+    await client.get(queuePath).set('Authorization', 'Bearer token-guard').expect(403);
+    await client.get(queuePath).set('Authorization', 'Bearer token-client').expect(403);
+    const queue = await client
+      .get(queuePath)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(
+      z
+        .array(z.looseObject({ id: z.string() }))
+        .parse(queue.body)
+        .some((row) => row.id === incident.id),
+    ).toBe(true);
+    const count = await client
+      .get(`${queuePath}/cantidad`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(z.object({ count: z.number() }).parse(count.body).count).toBeGreaterThan(0);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/clasificar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ classification: 'internal', internalComment: '' })
+      .expect(400);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/clasificar`)
+      .set('Authorization', 'Bearer token-client')
+      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .expect(403);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/clasificar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .expect(201);
+    expect(
+      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+        .body,
+    ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: incident.id })]));
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ classification: 'client_visible', internalComment: 'Segundo comentario', reason: '' })
+      .expect(400);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({
+        classification: 'client_visible',
+        internalComment: 'Segundo comentario',
+        clientNote: 'Nota pública',
+        reason: 'El cliente pidió detalles',
+      })
+      .expect(201);
+    const detail = await client
+      .get(`/api/v1/incidentes/${incident.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(
+      z
+        .object({
+          classificationStatus: z.literal('client_visible'),
+          classifications: z.array(
+            z.looseObject({ decidedById: z.string(), decidedAt: z.string() }),
+          ),
+        })
+        .loose()
+        .parse(detail.body).classifications,
+    ).toHaveLength(2);
+    const filtered = await client
+      .get(
+        `/api/v1/incidentes?predio=${northAssignedSiteId}&tipo=intrusion&clasificacion=client_visible&desde=2020-10-20&hasta=2030-10-20&pagina=1`,
+      )
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(
+      z
+        .object({ items: z.array(z.looseObject({ id: z.string() })) })
+        .parse(filtered.body)
+        .items.some((row) => row.id === incident.id),
+    ).toBe(true);
+    const unassignedShift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        startsAt: new Date('2020-10-21T08:00:00Z'),
+        endsAt: new Date('2020-10-21T11:00:00Z'),
+        serviceDate: new Date('2020-10-21T00:00:00Z'),
+        createdById: admin.id,
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            assignedById: admin.id,
+            startsAt: new Date('2020-10-21T08:00:00Z'),
+            endsAt: new Date('2020-10-21T11:00:00Z'),
+          },
+        },
+      },
+    });
+    createdShiftIds.push(unassignedShift.id);
+    const unassignedAssignment = await prisma.shiftAssignment.findFirstOrThrow({
+      where: { shiftId: unassignedShift.id },
+    });
+    const fallbackIncident = await prisma.incident.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        shiftId: unassignedShift.id,
+        assignmentId: unassignedAssignment.id,
+        guardId: northGuardId,
+        incidentId: randomUUID(),
+        type: 'other',
+        description: 'Sin supervisor activo',
+        occurredAtDevice: new Date('2020-10-21T09:00:00Z'),
+        locationStatus: 'ok',
+        simulation: 'not_simulated',
+      },
+    });
+    expect(
+      (await client.get(queuePath).set('Authorization', 'Bearer token-admin').expect(200)).body,
+    ).toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
+    expect(
+      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+        .body,
+    ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
+    await client
+      .get(`/api/v1/incidentes/${fallbackIncident.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(404);
+    await client
+      .get(`/api/v1/incidentes/${incident.id}`)
+      .set('Authorization', 'Bearer token-client')
+      .expect(403);
+    await client
+      .get(`/api/v1/incidentes/${incident.id}`)
+      .set('Authorization', 'Bearer token-south-admin')
+      .expect(404);
+  });
+
   it('administra puntos, valida ubicaciones, firma QRs y genera stickers PDF', async () => {
     const auth = { Authorization: 'Bearer token-admin' };
     const otherSiteAuth = { Authorization: 'Bearer token-south-admin' };
