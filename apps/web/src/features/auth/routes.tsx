@@ -14,6 +14,12 @@ import { ActivationPage } from '../activacion/activation-page';
 import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
 import { SitesPage } from '../predios/sites-page';
 import { ShiftsPanel } from '../turnos/shifts-panel';
+import {
+  IncidentsListPage,
+  IncidentsQueuePage,
+  IncidentDetailPage,
+  useIncidentPendingCount,
+} from '../incidentes/incidents-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -35,11 +41,13 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
     { path: '/personal', title: 'Personal' },
     { path: '/clientes', title: 'Clientes' },
     { path: '/predios', title: 'Predios' },
+    { path: '/incidentes', title: 'Incidentes' },
   ],
   supervisor: [
     { path: '/turnos', title: 'Turnos' },
     { path: '/personal', title: 'Personal' },
     { path: '/predios', title: 'Predios' },
+    { path: '/incidentes', title: 'Incidentes' },
   ],
   client: [{ path: '/reportes', title: 'Reportes' }],
   guard: [{ path: '/mis-turnos', title: 'Mis turnos' }],
@@ -47,11 +55,22 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
 
 function RoleLayout() {
   const { user, logout } = useAuth();
+  const pending = useIncidentPendingCount(user?.role === 'admin' || user?.role === 'supervisor');
   if (!user) return null;
   return (
     <AppShell
       homePath={homePathForRole(user.role)}
-      sections={SECTIONS[user.role]}
+      sections={
+        user.role === 'admin' || user.role === 'supervisor'
+          ? [
+              ...SECTIONS[user.role],
+              {
+                path: '/incidentes/cola',
+                title: `Cola de clasificación (${pending.data?.count ?? 0})`,
+              },
+            ]
+          : SECTIONS[user.role]
+      }
       userName={`${user.firstName} ${user.lastName}`}
       roleLabel={USER_ROLE_LABELS[user.role]}
       companyName={user.company.name}
@@ -138,6 +157,30 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <SitesPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/incidentes/cola"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <IncidentsQueuePage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/incidentes"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <IncidentsListPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/incidentes/:id"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <IncidentDetailPage />
             </Protected>
           }
         />
