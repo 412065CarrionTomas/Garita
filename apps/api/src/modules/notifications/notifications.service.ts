@@ -125,7 +125,7 @@ export class NotificationsService implements NotificationsPort {
     if (!userIds.length) return;
     await this.queue.add(
       NOTIFICATION_SEND_JOB,
-      { companyId, userIds, payload },
+      { companyId, userIds, payload, priority },
       { priority: priority === 'high' ? 1 : 10 },
     );
   }

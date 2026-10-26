@@ -21,6 +21,7 @@ export const COMPANY_ID_MODELS = [
   'InvalidScanAttempt',
   'RecordFlag',
   'Incident',
+  'IncidentClassification',
   'ShiftCredential',
   'SyncBatch',
   'ConnectionNotice',
@@ -113,6 +114,8 @@ export function addSiteAssignmentFilter(
   if (model === 'RecordFlag')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'Incident') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'IncidentClassification')
+    return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
   if (model === 'IncidentPhotoAuthorization')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
   if (model === 'IncidentPhoto')

@@ -19,3 +19,13 @@ Los datos incluyen identidad del vigilador, ubicación y evidencia visual; deben
 Variables opcionales: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`. Sin ellas, el texto del incidente sigue sincronizando y la carga de fotos informa indisponibilidad.
 
 Referencias: [Expo ImagePicker SDK 57](https://docs.expo.dev/versions/v57.0.0/sdk/imagepicker/), [Expo ImageManipulator SDK 57](https://docs.expo.dev/versions/v57.0.0/sdk/imagemanipulator/), [Cloudinary Upload API](https://cloudinary.com/documentation/image_upload_api_reference) y [delivery types](https://cloudinary.com/documentation/ts_how_to_view_resource_type_and_delivery_type).
+
+## Clasificación
+
+Los incidentes nuevos quedan `pending` hasta que alguien los clasifique. El supervisor abre **Cola de clasificación** en el panel: ve primero el más antiguo, con un aviso textual si lleva más de 24 horas. Puede elegir **Visible para el cliente** o **Interno** y debe escribir un comentario interno de 5 a 1.000 caracteres. La nota al cliente, de hasta 500 caracteres, es opcional para los visibles. El administrador atiende la cola de los predios sin supervisores activos; la asignación se calcula al consultar, de modo que una baja o cambio de supervisor traslada los pendientes sin mover datos. El contador del menú se actualiza al consultar y después de clasificar.
+
+En **Incidentes**, el supervisor o administrador filtra por predio, fecha, tipo y estado; abre el detalle para consultar fotos, ubicación e historial. Para cambiar una decisión usa **Reclasificar** e indica un motivo de 5 a 500 caracteres. Cada entrada de `IncidentClassification` conserva clasificación, comentario interno, nota, motivo, autor y hora. La última decisión rige en `Incident.classificationStatus`; ambos se escriben en la misma transacción. El vigilador desactivado se muestra con la indicación «(desactivado)».
+
+Las rutas Firebase `GET /api/v1/incidentes/cola`, `/cola/cantidad`, `/incidentes`, `/incidentes/:id` y `POST /incidentes/:id/clasificar|reclasificar` admiten solo administrador y supervisor asignado; los recursos ajenos responden 404. Las fotos se entregan mediante URL de descarga autenticada de Cloudinary firmada por cinco minutos, con transformación de miniatura o archivo completo. El portal del cliente (HU-28) aún no expone una ruta: `ClientIncidentsReader` prepara exclusivamente incidentes `client_visible` de sus predios activos, con la última nota y sin comentarios internos. Los endpoints actuales responden 403 al cliente.
+
+El listado pagina de 25 en 25 y usa índices por empresa, predio, estado y fecha de creación. La cola usa los mismos índices y las asignaciones vigentes del predio.

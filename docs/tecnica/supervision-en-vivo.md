@@ -40,3 +40,9 @@ Los eventos solo llevan identificadores; la interfaz consulta el endpoint de det
 ## Límites de esta entrega
 
 `canCover` permanece en `false` hasta HU-44. La reasignación dinámica de rooms se actualiza en un ciclo de hasta 60 segundos. El cierre sin datos y cancelación por suspensión quedan reservados a HU-17 y HU-43 respectivamente.
+
+## Panel
+
+La ruta `/supervision` muestra los turnos del día para administradores y supervisores. Consulta `GET /supervision/turnos` con TanStack Query y aplica los filtros de estado y predio sobre los datos recibidos. El detalle está en `/supervision/turnos/:id` y consulta `GET /turnos/:id/detalle`. Sus secciones de ventanas, recorrido y registros son independientes para que HU-39 incorpore acciones de revisión sin rehacer la ficha. El filtro de marcas actúa sobre la lista de registros en el cliente para que el recorrido completo siga visible.
+
+`apps/web/src/lib/realtime.ts` conecta con el token Firebase al namespace `/tiempo-real`. Los eventos `turno.actualizado`, `registro.nuevo` y `aviso.nuevo` invalidan las consultas de supervisión; el panel vuelve a pedir el estado completo al reconectar. `incidente.nuevo` muestra un aviso dentro del panel. El estado de conexión se ve en el layout y los cambios se anuncian con `aria-live`. El mapa usa Google Maps cuando hay clave; la lista ordenada del recorrido, con hora y distancia al punto configurado, queda siempre disponible.

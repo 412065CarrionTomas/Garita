@@ -14,6 +14,15 @@ import { ActivationPage } from '../activacion/activation-page';
 import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
 import { SitesPage } from '../predios/sites-page';
 import { ShiftsPanel } from '../turnos/shifts-panel';
+import {
+  IncidentsListPage,
+  IncidentsQueuePage,
+  IncidentDetailPage,
+  useIncidentPendingCount,
+} from '../incidentes/incidents-page';
+import { SupervisionPage } from '../supervision/supervision-page';
+import { ShiftDetailPage } from '../supervision/shift-detail-page';
+import { useRealtime } from '@/lib/realtime';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -31,15 +40,19 @@ function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode
 const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
   admin: [
     { path: '/resumen', title: 'Resumen' },
+    { path: '/supervision', title: 'En vivo' },
     { path: '/turnos', title: 'Turnos' },
     { path: '/personal', title: 'Personal' },
     { path: '/clientes', title: 'Clientes' },
     { path: '/predios', title: 'Predios' },
+    { path: '/incidentes', title: 'Incidentes' },
   ],
   supervisor: [
+    { path: '/supervision', title: 'En vivo' },
     { path: '/turnos', title: 'Turnos' },
     { path: '/personal', title: 'Personal' },
     { path: '/predios', title: 'Predios' },
+    { path: '/incidentes', title: 'Incidentes' },
   ],
   client: [{ path: '/reportes', title: 'Reportes' }],
   guard: [{ path: '/mis-turnos', title: 'Mis turnos' }],
@@ -47,16 +60,44 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
 
 function RoleLayout() {
   const { user, logout } = useAuth();
+  const pending = useIncidentPendingCount(user?.role === 'admin' || user?.role === 'supervisor');
+  const realtime = useRealtime(user?.role === 'admin' || user?.role === 'supervisor');
   if (!user) return null;
   return (
     <AppShell
       homePath={homePathForRole(user.role)}
-      sections={SECTIONS[user.role]}
+      sections={
+        user.role === 'admin' || user.role === 'supervisor'
+          ? [
+              ...SECTIONS[user.role],
+              {
+                path: '/incidentes/cola',
+                title: `Cola de clasificación (${pending.data?.count ?? 0})`,
+              },
+            ]
+          : SECTIONS[user.role]
+      }
       userName={`${user.firstName} ${user.lastName}`}
       roleLabel={USER_ROLE_LABELS[user.role]}
       companyName={user.company.name}
       onLogout={() => void logout()}
     >
+      {(user.role === 'admin' || user.role === 'supervisor') && (
+        <p role="status" className="text-sm text-muted-foreground">
+          ● {realtime.connected ? 'Conectado' : 'Reconectando…'}
+        </p>
+      )}
+      <p aria-live="polite" className="sr-only">
+        {realtime.announcement}
+      </p>
+      {realtime.incident && (
+        <div role="status" className="rounded-lg border border-info bg-info-soft p-3 text-sm">
+          <span>{realtime.incident}</span>{' '}
+          <button type="button" className="underline" onClick={realtime.dismissIncident}>
+            Cerrar
+          </button>
+        </div>
+      )}
       <Outlet />
     </AppShell>
   );
@@ -85,6 +126,22 @@ export function AppRoutes() {
           </Protected>
         }
       >
+        <Route
+          path="/supervision"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <SupervisionPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/supervision/turnos/:id"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <ShiftDetailPage />
+            </Protected>
+          }
+        />
         <Route
           path="/personal"
           element={
@@ -138,6 +195,30 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <SitesPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/incidentes/cola"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <IncidentsQueuePage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/incidentes"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <IncidentsListPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/incidentes/:id"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <IncidentDetailPage />
             </Protected>
           }
         />

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { space } from '@garita/tokens';
 import { Badge, Banner, Button, Card, ListItem, Loading, Text, useTheme } from '@/ui';
 import { z } from 'zod';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { apiGet } from '@/lib/api-client';
 
 const shiftsSchema = z.array(
@@ -36,26 +36,28 @@ export function MyShiftsScreen() {
       setRefreshing(false);
     }
   }, []);
-  useEffect(() => {
-    let mounted = true;
-    void apiGet('/mis-turnos', shiftsSchema)
-      .then((data) => {
-        if (mounted) {
-          setShifts(data);
-          setError(false);
-          setRefreshing(false);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setError(true);
-          setRefreshing(false);
-        }
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      void apiGet('/mis-turnos', shiftsSchema)
+        .then((data) => {
+          if (mounted) {
+            setShifts(data);
+            setError(false);
+            setRefreshing(false);
+          }
+        })
+        .catch(() => {
+          if (mounted) {
+            setError(true);
+            setRefreshing(false);
+          }
+        });
+      return () => {
+        mounted = false;
+      };
+    }, []),
+  );
 
   return (
     <ScrollView

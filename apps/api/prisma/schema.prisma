@@ -91,6 +91,7 @@ model Company {
   recordFlags       RecordFlag[]
   roundWindowStates RoundWindowState[]
   incidents   Incident[]
+  incidentClassifications IncidentClassification[]
 }
 
 model User {
@@ -117,6 +118,7 @@ model User {
   shiftAssignments ShiftAssignment[]
   shiftCredentials ShiftCredential[]
   incidents        Incident[]
+  incidentClassifications IncidentClassification[] @relation("IncidentDecider")
   notificationDevices NotificationDevice[]
 
   @@index([companyId])
@@ -657,10 +659,30 @@ model Incident {
   guard                User                        @relation(fields: [guardId], references: [id], onDelete: Restrict)
   photos               IncidentPhoto[]
   photoAuthorizations  IncidentPhotoAuthorization[]
+  classifications      IncidentClassification[]
 
   @@index([companyId, siteId, createdAt])
+  @@index([companyId, classificationStatus, createdAt])
+  @@index([companyId, siteId, classificationStatus, createdAt])
   @@index([shiftId, occurredAtDevice])
   @@index([assignmentId])
+}
+
+model IncidentClassification {
+  id              String                       @id @default(cuid())
+  companyId       String
+  incidentId      String
+  classification  IncidentClassificationStatus
+  internalComment String                       @db.VarChar(1000)
+  clientNote      String?                      @db.VarChar(500)
+  reason          String?                      @db.VarChar(500)
+  decidedById     String
+  decidedAt       DateTime                     @default(now()) @db.Timestamptz(3)
+  company         Company                      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  incident        Incident                     @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  decidedBy       User                         @relation("IncidentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([companyId, incidentId, decidedAt])
 }
 
 model IncidentPhoto {

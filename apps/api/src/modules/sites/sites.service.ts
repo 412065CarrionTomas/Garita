@@ -12,6 +12,7 @@ import type {
   InProgressShiftClosurePort,
   WeeklyScheduleTerminationPort,
 } from './deactivation-ports';
+import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 
 /** Datos mínimos de un supervisor visibles en las respuestas de predios. */
 const SUPERVISOR_FIELDS = { id: true, firstName: true, lastName: true, status: true } as const;
@@ -27,6 +28,7 @@ export class SitesService {
     private readonly weeklySchedules: WeeklyScheduleTerminationPort,
     @Inject(IN_PROGRESS_SHIFT_CLOSURE_PORT)
     private readonly inProgress: InProgressShiftClosurePort,
+    private readonly shiftExecution: ShiftExecutionService,
   ) {}
 
   async listClients(status?: 'active' | 'inactive', page = 1, user?: AuthenticatedUser) {
@@ -91,7 +93,8 @@ export class SitesService {
         select: { id: true },
       })
     ).map((site) => site.id);
-    return this.prisma.tenantPrisma.$transaction(async (tx) => {
+    const guardsToNotify = await this.guardsInProgress(siteIds);
+    const client = await this.prisma.tenantPrisma.$transaction(async (tx) => {
       await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
       await this.weeklySchedules.terminateForSites(tx, siteIds);
       await this.inProgress.closeForSites(tx, siteIds, adminId);
@@ -118,6 +121,8 @@ export class SitesService {
       await tx.site.updateMany({ where: { clientId: id }, data: { status: 'inactive' } });
       return tx.client.update({ where: { id }, data: { status: 'inactive' } });
     });
+    await this.notifyClosedGuards(guardsToNotify);
+    return client;
   }
 
   async getClient(id: string, user: AuthenticatedUser) {
@@ -208,13 +213,34 @@ export class SitesService {
   async deactivateSite(id: string, confirm: boolean, adminId: string) {
     const impact = await this.impactSiteDeactivation(id);
     this.requireConfirmation(impact, confirm);
-    return this.prisma.tenantPrisma.$transaction(async (tx) => {
+    const guardsToNotify = await this.guardsInProgress([id]);
+    const site = await this.prisma.tenantPrisma.$transaction(async (tx) => {
       await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
       await this.weeklySchedules.terminateForSites(tx, [id]);
       await this.inProgress.closeForSites(tx, [id], adminId);
       await tx.siteSupervisor.deleteMany({ where: { siteId: id } });
       return tx.site.update({ where: { id }, data: { status: 'inactive' } });
     });
+    await this.notifyClosedGuards(guardsToNotify);
+    return site;
+  }
+
+  private async guardsInProgress(siteIds: string[]) {
+    return this.prisma.tenantPrisma.shift.findMany({
+      where: { siteId: { in: siteIds }, status: 'in_progress' },
+      select: {
+        id: true,
+        assignments: { where: { isCurrent: true }, select: { guardId: true }, take: 1 },
+      },
+    });
+  }
+
+  private async notifyClosedGuards(shifts: Awaited<ReturnType<SitesService['guardsInProgress']>>) {
+    for (const shift of shifts)
+      await this.shiftExecution.notifyGuardToLeaveAfterCommit(
+        shift.id,
+        shift.assignments[0]?.guardId ?? null,
+      );
   }
 
   private async deactivationImpact(siteIds: string[]) {

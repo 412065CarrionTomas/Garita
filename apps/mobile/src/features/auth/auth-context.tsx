@@ -10,8 +10,10 @@ import {
 import type { User as FirebaseUser } from 'firebase/auth';
 import { authMeResponseSchema } from '@garita/shared';
 import type { AuthMeResponse } from '@garita/shared';
+import { Alert } from 'react-native';
 import { ApiError, apiGet } from '@/lib/api-client';
 import { auth } from '@/lib/firebase';
+import { registerGuardDevice, unregisterGuardDevice } from '@/features/notificaciones/guard-device';
 
 export const DISABLED_MESSAGE =
   'Tu usuario no está habilitado. Si recibiste una invitación, activala desde el enlace del correo; si no, contactá a tu administrador';
@@ -40,6 +42,13 @@ type AuthContextValue = {
 };
 const AuthContext = createContext<AuthContextValue | null>(null);
 const profileKey = (uid: string) => `garita:auth-profile:${uid}`;
+let registeredUid: string | null = null;
+
+function registerForUser(uid: string) {
+  if (registeredUid === uid) return;
+  registeredUid = uid;
+  void registerGuardDevice();
+}
 
 async function profileFor(user: FirebaseUser) {
   await user.getIdToken();
@@ -83,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           await AsyncStorage.setItem(profileKey(firebaseUser.uid), JSON.stringify(profile));
           setUser(profile);
+          if (profile.role === 'guard') registerForUser(firebaseUser.uid);
         } catch (reason) {
           if (reason instanceof ApiError && (reason.status === 401 || reason.status === 403)) {
             setError(firebaseErrorMessage(reason));
@@ -106,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       await AsyncStorage.setItem(profileKey(credential.user.uid), JSON.stringify(profile));
       setUser(profile);
+      if (profile.role === 'guard') registerForUser(credential.user.uid);
       return profile;
     } catch (reason) {
       if (reason instanceof AuthFlowError) throw reason;
@@ -117,7 +128,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
   const logout = useCallback(async () => {
     const uid = auth.currentUser?.uid;
+    try {
+      await unregisterGuardDevice();
+    } catch {
+      Alert.alert(
+        'No se pudo cerrar sesión',
+        'Conectate a internet para dar de baja las notificaciones de este celular y volvé a intentarlo.',
+      );
+      return;
+    }
     await signOut(auth);
+    registeredUid = null;
     if (uid) await AsyncStorage.removeItem(profileKey(uid));
     setUser(null);
   }, []);
