@@ -46,6 +46,7 @@ import { TenantContext } from '../src/modules/auth/tenant-context';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 import { ShiftExecutionService } from '../src/modules/shift-execution/shift-execution.service';
 import { MarcasService } from '../src/modules/marcas/marcas.service';
+import { NfcTagsService } from '../src/modules/nfc-tags/nfc-tags.service';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { z } from 'zod';
@@ -211,7 +212,9 @@ describe('Aplicación (e2e)', () => {
   let northAssignedSiteId: string;
   let northUnassignedSiteId: string;
   let southSiteId: string;
+  let northClientId: string;
   let northSupervisorId: string;
+  let otherSupervisorId: string;
   let northGuardId: string;
   const createdRoundNames: string[] = [];
   const createdCheckpointIds: string[] = [];
@@ -240,6 +243,8 @@ describe('Aplicación (e2e)', () => {
           if (token === 'token-guard') return Promise.resolve({ uid: 'seed-norte-guard' });
           if (token === 'token-supervisor')
             return Promise.resolve({ uid: 'seed-norte-supervisor' });
+          if (token === 'token-other-supervisor')
+            return Promise.resolve({ uid: 'seed-norte-other-supervisor' });
           if (token === 'token-client') return Promise.resolve({ uid: 'seed-norte-client' });
           if (token === 'token-south-admin') return Promise.resolve({ uid: 'seed-sur-admin' });
           return Promise.reject(new Error('Token inválido'));
@@ -271,6 +276,7 @@ describe('Aplicación (e2e)', () => {
     const southClient = await prisma.client.findUniqueOrThrow({
       where: { companyId_name: { companyId: 'sur-company', name: 'Cliente sur' } },
     });
+    northClientId = northClient.id;
     northAssignedSiteId = (
       await prisma.site.findUniqueOrThrow({
         where: { clientId_name: { clientId: northClient.id, name: 'Predio A' } },
@@ -281,6 +287,9 @@ describe('Aplicación (e2e)', () => {
         where: { clientId_name: { clientId: northClient.id, name: 'Predio B' } },
       })
     ).id;
+    await prisma.siteSupervisor.deleteMany({
+      where: { siteId: northUnassignedSiteId },
+    });
     southSiteId = (
       await prisma.site.findUniqueOrThrow({
         where: { clientId_name: { clientId: southClient.id, name: 'Predio A' } },
@@ -319,6 +328,20 @@ describe('Aplicación (e2e)', () => {
       update: { userId: southUser.id },
     });
     southInvitationId = southInvitation.id;
+    const otherSupervisor = await prisma.user.upsert({
+      where: { firebaseUid: 'seed-norte-other-supervisor' },
+      create: {
+        companyId: 'norte-company',
+        email: 'other-supervisor@norte.com',
+        firstName: 'Otro',
+        lastName: 'Supervisor',
+        role: 'supervisor',
+        status: 'active',
+        firebaseUid: 'seed-norte-other-supervisor',
+      },
+      update: { status: 'active' },
+    });
+    otherSupervisorId = otherSupervisor.id;
   });
 
   afterAll(async () => {
@@ -369,6 +392,14 @@ describe('Aplicación (e2e)', () => {
       where: { firebaseUid: 'seed-norte-client' },
       data: { status: 'active' },
     });
+    if (otherSupervisorId) {
+      await prisma.siteSupervisor.deleteMany({
+        where: { userId: otherSupervisorId },
+      });
+      await prisma.user.deleteMany({
+        where: { firebaseUid: 'seed-norte-other-supervisor' },
+      });
+    }
     await app.close();
   });
 
@@ -2569,6 +2600,234 @@ describe('Aplicación (e2e)', () => {
     expect(z.object({ message: z.string() }).parse(foreignResponse.body).message).toBe(
       'Etiqueta no disponible',
     );
+  });
+
+  it('permite a un supervisor de predio asignado relevar APDU y confirmar, aísla supervisores de otro predio y evalúa lecturas sin 500', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const point = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Supervisor Secure Point ${randomUUID()}`,
+        latitude: -34.6037,
+        longitude: -58.3816,
+      },
+    });
+    createdNfcCheckpointIds.push(point.id);
+    const otherSite = await prisma.site.create({
+      data: {
+        companyId: 'norte-company',
+        clientId: northClientId,
+        name: `Predio Supervisor B ${randomUUID()}`,
+        address: 'Calle Test 123',
+        latitude: -34.6037,
+        longitude: -58.3816,
+      },
+    });
+    createdSiteIds.push(otherSite.id);
+    await prisma.siteSupervisor.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: otherSite.id,
+        userId: otherSupervisorId,
+      },
+    });
+    const uid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    const client = request(app.getHttpServer());
+
+    // (a.1) Sesión de relevo iniciada por el supervisor asignado al predio
+    const session = await prisma.secureTagSession.create({
+      data: {
+        id: randomUUID(),
+        companyId: 'norte-company',
+        tagUid: uid,
+        checkpointId: point.id,
+        step: 'auth_1',
+        state: { authKind: 'factory' },
+        expiresAt: new Date(Date.now() + 2 * 60_000),
+        createdById: northSupervisorId,
+      },
+    });
+    const sessionId = session.id;
+    await prisma.nfcTag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointId: point.id,
+        uid,
+        associatedById: northSupervisorId,
+        status: 'removed',
+        configurationStatus: 'incomplete',
+        masterKeyVersion: 1,
+      },
+    });
+
+    const commandPath = `/api/v1/etiquetas-seguras/configuracion/${sessionId}/comando`;
+    const confirmPath = `/api/v1/etiquetas-seguras/configuracion/${sessionId}/confirmar`;
+
+    // (b) Supervisor de otro predio recibe 404 en comando y confirmar
+    await client
+      .post(commandPath)
+      .set('Authorization', 'Bearer token-other-supervisor')
+      .send({ response: '9100' })
+      .expect(404);
+
+    await client
+      .post(confirmPath)
+      .set('Authorization', 'Bearer token-other-supervisor')
+      .send({ sdmMessage: 'garita:nfc?dummy=1' })
+      .expect(404);
+
+    // (a.2) Supervisor asignado al predio envía comandos de relevo APDU sin 500
+    const rndB = Buffer.from('B9E2FC789B64BF237CCCAA20EC7E6E48', 'hex');
+    const firstResponse = Buffer.concat([
+      aesCbc(FACTORY_KEY, Buffer.alloc(16), rndB),
+      Buffer.from('91AF', 'hex'),
+    ]);
+    const first = await client
+      .post(commandPath)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ response: firstResponse.toString('hex') })
+      .expect(201);
+    const firstBody = z.object({ apdu: z.string() }).parse(first.body);
+    const challenge = aesCbc(
+      FACTORY_KEY,
+      Buffer.alloc(16),
+      Buffer.from(firstBody.apdu.slice(10, -2), 'hex'),
+      true,
+    );
+    const rndA = challenge.subarray(0, 16);
+    const ti = Buffer.from('9D00C4DF', 'hex');
+    const rotated = Buffer.concat([rndA.subarray(1), rndA.subarray(0, 1)]);
+    const secondResponse = Buffer.concat([
+      aesCbc(FACTORY_KEY, Buffer.alloc(16), Buffer.concat([ti, rotated, Buffer.alloc(12)])),
+      Buffer.from('9100', 'hex'),
+    ]);
+    let step = z.object({ apdu: z.string().nullable(), complete: z.boolean() }).parse(
+      (
+        await client
+          .post(commandPath)
+          .set('Authorization', 'Bearer token-supervisor')
+          .send({ response: secondResponse.toString('hex') })
+          .expect(201)
+      ).body,
+    );
+    const keys = sessionKeys(FACTORY_KEY, {
+      rndA: rndA.toString('hex'),
+      rndB: rndB.toString('hex'),
+      ti: ti.toString('hex'),
+    });
+    for (let counter = 0; counter < 7; counter++) {
+      expect(step.apdu).not.toBeNull();
+      const ctr = Buffer.alloc(2);
+      ctr.writeUInt16LE(counter + 1);
+      const response =
+        counter === 6
+          ? '9100'
+          : Buffer.concat([
+              truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),
+              Buffer.from('9100', 'hex'),
+            ]).toString('hex');
+      step = z
+        .object({ apdu: z.string().nullable(), complete: z.boolean() })
+        .parse(
+          (
+            await client
+              .post(commandPath)
+              .set('Authorization', 'Bearer token-supervisor')
+              .send({ response })
+              .expect(201)
+          ).body,
+        );
+    }
+    expect(step).toEqual({ apdu: null, complete: true });
+
+    // (a.3) Supervisor asignado al predio confirma configuración sin 500
+    const masterHex =
+      app.get(ConfigService).get<string>('NFC_MASTER_KEY') ??
+      Buffer.alloc(16, 0x11).toString('hex');
+    const master = Buffer.from(masterHex, 'hex');
+    const uidBytes = Buffer.from(uid, 'hex');
+    const counter = Buffer.from('010000', 'hex');
+    const picc = Buffer.concat([Buffer.from([0xc7]), uidBytes, counter, Buffer.alloc(5)]);
+    const encrypted = aesCbc(deriveTagKey(master, uidBytes, 2, 1), Buffer.alloc(16), picc);
+    const sessionKey = aesCmac(
+      deriveTagKey(master, uidBytes, 1, 1),
+      Buffer.concat([Buffer.from('3CC300010080', 'hex'), uidBytes, counter]),
+    );
+    const proof = `garita:nfc?e=${encrypted.toString('hex')}&c=${truncateMac(aesCmac(sessionKey, Buffer.alloc(0))).toString('hex')}`;
+
+    await client
+      .post(confirmPath)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ sdmMessage: proof })
+      .expect(201);
+
+    const tag = await prisma.nfcTag.findFirstOrThrow({ where: { uid } });
+    expect(tag).toMatchObject({
+      status: 'active',
+      kind: 'secure',
+      configurationStatus: 'configured',
+      lastCounter: 1,
+    });
+
+    // (c) Verificación de lectura segura con credenciales de supervisor evalúa marcas sin 500
+    const makeSun = (readCounter: number) => {
+      const count = Buffer.alloc(3);
+      count.writeUIntLE(readCounter, 0, 3);
+      const encryptedPicc = aesCbc(
+        deriveTagKey(master, uidBytes, 2, 1),
+        Buffer.alloc(16),
+        Buffer.concat([Buffer.from([0xc7]), uidBytes, count, Buffer.alloc(5)]),
+      );
+      const macKey = aesCmac(
+        deriveTagKey(master, uidBytes, 1, 1),
+        Buffer.concat([Buffer.from('3CC300010080', 'hex'), uidBytes, count]),
+      );
+      return `garita:nfc?e=${encryptedPicc.toString('hex')}&c=${truncateMac(aesCmac(macKey, Buffer.alloc(0))).toString('hex')}`;
+    };
+
+    const nfcService = app.get(NfcTagsService);
+    const tenantContext = app.get(TenantContext);
+    const supervisorContext = {
+      correlationId: randomUUID(),
+      user: {
+        userId: northSupervisorId,
+        companyId: 'norte-company',
+        role: 'supervisor' as const,
+        status: 'active' as const,
+      },
+    };
+
+    const validResult = await tenantContext.run(supervisorContext, () =>
+      nfcService.verifyRead(tag.id, uid, makeSun(2)),
+    );
+    expect(validResult).toBe('valid');
+
+    const replayedResult = await tenantContext.run(supervisorContext, () =>
+      nfcService.verifyRead(tag.id, uid, makeSun(2)),
+    );
+    expect(replayedResult).toBe('replayed');
+
+    const invalidSun = makeSun(3);
+    const badSun = invalidSun.slice(0, -1) + (invalidSun.endsWith('0') ? '1' : '0');
+    const badResult = await tenantContext.run(supervisorContext, () =>
+      nfcService.verifyRead(tag.id, uid, badSun),
+    );
+    expect(badResult).toBe('invalid_signature');
+
+    const otherSupervisorContext = {
+      correlationId: randomUUID(),
+      user: {
+        userId: otherSupervisorId,
+        companyId: 'norte-company',
+        role: 'supervisor' as const,
+        status: 'active' as const,
+      },
+    };
+    const missingResult = await tenantContext.run(otherSupervisorContext, () =>
+      nfcService.verifyRead(tag.id, uid, makeSun(4)),
+    );
+    expect(missingResult).toBe('missing');
   });
 
   it('la base limita las etiquetas activas por punto y por UID global', async () => {

@@ -144,7 +144,7 @@ export class SecureTagsService {
   }
 
   private async session(id: string, user: AuthenticatedUser) {
-    const session = await this.prisma.tenantPrisma.secureTagSession.findUnique({ where: { id } });
+    const session = await this.prisma.tenantPrisma.secureTagSession.findFirst({ where: { id } });
     if (!session) throw new NotFoundException('Sesión no encontrada');
     if (session.createdById !== user.userId) throw new NotFoundException('Sesión no encontrada');
     if (session.expiresAt <= new Date())
@@ -209,7 +209,7 @@ export class SecureTagsService {
         'La etiqueta no respondió correctamente. Volvé a acercar el celular',
       );
     }
-    await this.prisma.tenantPrisma.secureTagSession.update({
+    await this.prisma.tenantPrisma.secureTagSession.updateMany({
       where: { id },
       data: { step, state: state as Prisma.InputJsonValue },
     });
@@ -253,7 +253,7 @@ export class SecureTagsService {
         where: { checkpointId: session.checkpointId, status: 'active' },
       });
       if (previous && previous.uid !== session.tagUid) {
-        await tx.nfcTag.update({
+        await tx.nfcTag.updateMany({
           where: { id: previous.id },
           data: { status: 'replaced', endedAt: new Date(), endedById: user.userId },
         });
@@ -263,7 +263,7 @@ export class SecureTagsService {
         orderBy: { createdAt: 'desc' },
       });
       if (!candidate) throw new NotFoundException('Etiqueta no encontrada');
-      const updated = await tx.nfcTag.update({
+      await tx.nfcTag.updateMany({
         where: { id: candidate.id },
         data: {
           checkpointId: session.checkpointId,
@@ -278,10 +278,10 @@ export class SecureTagsService {
           endedById: null,
         },
       });
-      await tx.secureTagSession.delete({ where: { id } });
-      return updated;
+      await tx.secureTagSession.deleteMany({ where: { id } });
+      return candidate;
     });
-    return { id: tag.id, status: tag.status, kind: tag.kind };
+    return { id: tag.id, status: 'active', kind: 'secure' };
   }
 
   async reset(id: string) {
