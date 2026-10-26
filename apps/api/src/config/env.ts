@@ -28,6 +28,11 @@ export const envSchema = z
     FIREBASE_CLIENT_EMAIL: z.email().optional(),
     FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
     QR_SIGNING_SECRET: z.string().min(32).optional(),
+    NFC_MASTER_KEY: z
+      .string()
+      .regex(/^[0-9a-fA-F]{32}$/)
+      .optional(),
+    NFC_MASTER_KEY_VERSION: z.coerce.number().int().min(0).max(255).optional(),
     SHIFT_CREDENTIAL_SECRET: z.string().min(32).optional(),
     CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
     CLOUDINARY_API_KEY: z.string().min(1).optional(),

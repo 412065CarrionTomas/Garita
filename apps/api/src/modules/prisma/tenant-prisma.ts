@@ -12,6 +12,7 @@ export const COMPANY_ID_MODELS = [
   'SiteSupervisor',
   'Checkpoint',
   'NfcTag',
+  'SecureTagSession',
   'Round',
   'RoundVersionCheckpoint',
   'Shift',
@@ -88,6 +89,8 @@ export function addSiteAssignmentFilter(
   if (model === 'SiteSupervisor') return { ...args, where: { ...where, userId: user.userId } };
   if (model === 'Checkpoint') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'NfcTag')
+    return { ...args, where: { AND: [where, { checkpoint: { site: assignment } }] } };
+  if (model === 'SecureTagSession')
     return { ...args, where: { AND: [where, { checkpoint: { site: assignment } }] } };
   if (model === 'Round') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'RoundVersion')
