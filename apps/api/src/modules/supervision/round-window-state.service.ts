@@ -1,7 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { computeRoundWindowStatus, windowCompletion, type ShiftOfflineData } from '@garita/shared';
+import {
+  computeRoundWindowStatus,
+  windowCompletion,
+  windowSeverity,
+  type ShiftOfflineData,
+} from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CLOCK, type Clock } from '../../common/clock';
+import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
+import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 
 @Injectable()
 export class RoundWindowStateService {
@@ -9,6 +16,8 @@ export class RoundWindowStateService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(NOTIFICATIONS_PORT) private readonly notifications: NotificationsPort,
+    @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
   ) {}
 
   async createForShift(data: ShiftOfflineData): Promise<void> {
@@ -49,6 +58,8 @@ export class RoundWindowStateService {
         where: { id: shiftId },
         select: {
           status: true,
+          companyId: true,
+          siteId: true,
           endsAt: true,
           closedEarly: true,
           connectivityType: true,
@@ -65,7 +76,12 @@ export class RoundWindowStateService {
       }),
       this.prisma.tenantPrisma.checkpointRecord.findMany({
         where: { shiftId, countsForCompliance: true },
-        select: { checkpointId: true, countedFor: true },
+        select: {
+          checkpointId: true,
+          countedFor: true,
+          invalidatedAt: true,
+          flags: { select: { type: true } },
+        },
       }),
       this.prisma.tenantPrisma.shiftSyncState.findUnique({ where: { shiftId } }),
       this.prisma.tenantPrisma.shiftRound.findMany({
@@ -101,7 +117,15 @@ export class RoundWindowStateService {
               entry.windowIndex === window.windowIndex,
           ),
       );
-      const recordedCount = new Set(matching.map((record) => record.checkpointId)).size;
+      const valid = matching.filter((record) => !record.invalidatedAt);
+      const recordedCount = new Set(valid.map((record) => record.checkpointId)).size;
+      const severityLevel = windowSeverity(
+        matching.map((record) => ({
+          flags: record.flags.map((flag) => flag.type),
+          invalidated: Boolean(record.invalidatedAt),
+        })),
+        window.expectedCount,
+      );
       const now = this.clock.now();
       const finished = now >= window.endsAt;
       const status = computeRoundWindowStatus({
@@ -129,21 +153,51 @@ export class RoundWindowStateService {
           checkpointIds: checkpointsByRound.get(window.roundId) ?? [],
         },
         { roundId: window.roundId, index: window.windowIndex },
-        matching.map((record) => ({
+        valid.map((record) => ({
           checkpointId: record.checkpointId,
           countedFor: Array.isArray(record.countedFor)
             ? (record.countedFor as { roundId: string; windowIndex: number; late?: boolean }[])
             : [],
         })),
       );
+      const completeStatus =
+        completion === 'complete_late' && status === 'complete' ? 'complete_late' : status;
+      const validated =
+        window.status === 'complete' &&
+        (await this.prisma.tenantPrisma.roundReviewDecision.findFirst({
+          where: { windowStateId: window.id, kind: 'validate' },
+          select: { id: true },
+        }));
+      const nextStatus =
+        (completeStatus === 'complete' || completeStatus === 'complete_late') &&
+        severityLevel === 'grave' &&
+        !validated
+          ? 'in_review'
+          : completeStatus;
       await this.prisma.tenantPrisma.roundWindowState.update({
         where: { id: window.id },
         data: {
-          status:
-            completion === 'complete_late' && status === 'complete' ? 'complete_late' : status,
+          status: nextStatus,
+          severityLevel,
           recordedCount,
+          inReviewSince: nextStatus === 'in_review' ? (window.inReviewSince ?? now) : null,
         },
       });
+      if (nextStatus !== window.status || severityLevel !== window.severityLevel) {
+        this.realtime.emitToSite(shift.companyId, shift.siteId, 'turno.actualizado', {
+          shiftId,
+          siteId: shift.siteId,
+        });
+      }
+      if (nextStatus === 'in_review' && window.status !== 'in_review') {
+        await this.notifications.notifySiteStaff({
+          companyId: shift.companyId,
+          siteId: shift.siteId,
+          kind: 'round_in_review',
+          payload: { kind: 'round_in_review', link: `/revision/${window.id}` },
+          priority: 'high',
+        });
+      }
     }
   }
 
@@ -158,7 +212,12 @@ export class RoundWindowStateService {
       const [records, shift, syncState, shiftRounds] = await Promise.all([
         this.prisma.systemPrisma.checkpointRecord.findMany({
           where: { shiftId: window.shiftId, countsForCompliance: true },
-          select: { checkpointId: true, countedFor: true },
+          select: {
+            checkpointId: true,
+            countedFor: true,
+            invalidatedAt: true,
+            flags: { select: { type: true } },
+          },
         }),
         this.prisma.systemPrisma.shift.findUnique({
           where: { id: window.shiftId },
@@ -192,7 +251,15 @@ export class RoundWindowStateService {
               item.windowIndex === window.windowIndex,
           ),
       );
-      const recordedCount = new Set(matching.map((record) => record.checkpointId)).size;
+      const valid = matching.filter((record) => !record.invalidatedAt);
+      const recordedCount = new Set(valid.map((record) => record.checkpointId)).size;
+      const severityLevel = windowSeverity(
+        matching.map((record) => ({
+          flags: record.flags.map((flag) => flag.type),
+          invalidated: Boolean(record.invalidatedAt),
+        })),
+        window.expectedCount,
+      );
       const pendingSync =
         shift.status === 'in_progress' &&
         (!syncState ||
@@ -220,21 +287,54 @@ export class RoundWindowStateService {
           checkpointIds: checkpoints.map(({ checkpointId }) => checkpointId),
         },
         { roundId: window.roundId, index: window.windowIndex },
-        matching.map((record) => ({
+        valid.map((record) => ({
           checkpointId: record.checkpointId,
           countedFor: Array.isArray(record.countedFor)
             ? (record.countedFor as { roundId: string; windowIndex: number; late?: boolean }[])
             : [],
         })),
       );
+      const completeStatus =
+        completion === 'complete_late' && status === 'complete' ? 'complete_late' : status;
+      const validated =
+        window.status === 'complete' &&
+        (await this.prisma.systemPrisma.roundReviewDecision.findFirst({
+          where: { windowStateId: window.id, kind: 'validate' },
+          select: { id: true },
+        }));
+      const nextStatus =
+        (completeStatus === 'complete' || completeStatus === 'complete_late') &&
+        severityLevel === 'grave' &&
+        !validated
+          ? 'in_review'
+          : completeStatus;
       await this.prisma.systemPrisma.roundWindowState.update({
         where: { id: window.id },
         data: {
-          status:
-            completion === 'complete_late' && status === 'complete' ? 'complete_late' : status,
+          status: nextStatus,
+          severityLevel,
           recordedCount,
+          inReviewSince: nextStatus === 'in_review' ? (window.inReviewSince ?? now) : null,
         },
       });
+      if (nextStatus !== window.status) {
+        const site = await this.prisma.systemPrisma.shift.findUniqueOrThrow({
+          where: { id: window.shiftId },
+          select: { siteId: true },
+        });
+        this.realtime.emitToSite(window.companyId, site.siteId, 'turno.actualizado', {
+          shiftId: window.shiftId,
+          siteId: site.siteId,
+        });
+        if (nextStatus === 'in_review')
+          await this.notifications.notifySiteStaff({
+            companyId: window.companyId,
+            siteId: site.siteId,
+            kind: 'round_in_review',
+            payload: { kind: 'round_in_review', link: `/revision/${window.id}` },
+            priority: 'high',
+          });
+      }
     }
   }
 }

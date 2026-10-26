@@ -7,6 +7,7 @@ import { NotificationsService } from '../../modules/notifications/notifications.
 import { RealtimeModule } from '../../modules/realtime/realtime.module';
 import { SocketRealtimeService } from '../../modules/realtime/socket-realtime.service';
 import { NoopSms, SMS_PORT } from './sms.port';
+import { NoopReportRecalculation, REPORT_RECALCULATION_PORT } from './report-recalculation.port';
 
 @Global()
 @Module({
@@ -15,7 +16,8 @@ import { NoopSms, SMS_PORT } from './sms.port';
     { provide: NOTIFICATIONS_PORT, useExisting: NotificationsService },
     { provide: REALTIME_PORT, useExisting: SocketRealtimeService },
     { provide: SMS_PORT, useClass: NoopSms },
+    { provide: REPORT_RECALCULATION_PORT, useClass: NoopReportRecalculation },
   ],
-  exports: [NOTIFICATIONS_PORT, REALTIME_PORT, SMS_PORT],
+  exports: [NOTIFICATIONS_PORT, REALTIME_PORT, SMS_PORT, REPORT_RECALCULATION_PORT],
 })
 export class PortsModule {}
