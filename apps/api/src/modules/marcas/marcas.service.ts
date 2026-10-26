@@ -11,6 +11,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { NfcTagsService } from '../nfc-tags/nfc-tags.service';
 
 export interface EvaluateRecordInput {
   clock?: DeviceClock;
@@ -29,6 +30,7 @@ export interface EvaluateRecordInput {
   accuracyMeters: Prisma.Decimal | number | null;
   simulation: 'simulated' | 'not_simulated' | 'unavailable';
   phoneNfc: 'on' | 'off' | 'unsupported';
+  sdmMessage?: string | null;
 }
 
 @Injectable()
@@ -38,6 +40,7 @@ export class MarcasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
+    private readonly nfcTags: NfcTagsService,
   ) {}
 
   /**
@@ -62,7 +65,7 @@ export class MarcasService {
           nfcTags: {
             where: { status: 'active' },
             take: 1,
-            select: { id: true },
+            select: { id: true, uid: true, kind: true },
           },
         },
       });
@@ -147,6 +150,27 @@ export class MarcasService {
           maxSpeedKmh: checkpoint.site.maxSpeedKmh,
         },
       });
+
+      const secureTag = checkpoint.nfcTags[0];
+      if (record.method === 'nfc' && secureTag?.kind === 'secure') {
+        const result = await this.nfcTags.verifyRead(
+          secureTag.id,
+          secureTag.uid,
+          record.sdmMessage ?? null,
+        );
+        await this.prisma.tenantPrisma.checkpointRecord.update({
+          where: { id: record.id },
+          data: { sdmResult: result },
+        });
+        if (result !== 'valid') {
+          const replayed = result === 'replayed';
+          flags.push({
+            type: replayed ? 'replayed_read' : 'tag_not_authentic',
+            severity: 'grave',
+            reason: replayed ? 'counter_repeated' : result,
+          });
+        }
+      }
 
       // 4. Save flags idempotently
       if (flags.length > 0) {

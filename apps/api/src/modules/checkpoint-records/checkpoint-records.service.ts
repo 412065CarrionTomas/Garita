@@ -45,6 +45,7 @@ export function computeRequestHash(request: CheckpointRecordRequest): string {
       takenAt: request.location.takenAt,
     },
     phoneNfc: request.phoneNfc,
+    ...(request.sdmMessage ? { sdmMessage: request.sdmMessage } : {}),
     ...(request.clock ? { clock: request.clock } : {}),
   };
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
@@ -163,6 +164,7 @@ export class CheckpointRecordsService {
     // 3. Scan verification (QR / NFC)
     let checkpointId: string | null = null;
     let invalidReason: InvalidScanReason | null = null;
+    let secureTag = false;
 
     if (input.method === 'qr') {
       const qrResult = await this.qrService.verifyQrPayload(input.scannedValue);
@@ -214,6 +216,7 @@ export class CheckpointRecordsService {
         invalidReason = 'tag_not_associated';
       } else {
         checkpointId = tag.checkpoint.id;
+        secureTag = tag.kind === 'secure';
       }
     }
 
@@ -334,6 +337,7 @@ export class CheckpointRecordsService {
             checkpointId,
             recordId: input.recordId,
             method: input.method,
+            sdmMessage: input.sdmMessage,
             occurredAtDevice: new Date(input.occurredAtDevice),
             ...clockFields(input.clock),
             receivedAt,
@@ -405,7 +409,7 @@ export class CheckpointRecordsService {
       });
     }
 
-    if (imputation.kind === 'out_of_window') {
+    if (imputation.kind === 'out_of_window' || secureTag) {
       let createdRecord;
       try {
         createdRecord = await this.prisma.tenantPrisma.checkpointRecord.create({
@@ -416,6 +420,7 @@ export class CheckpointRecordsService {
             checkpointId,
             recordId: input.recordId,
             method: input.method,
+            sdmMessage: input.sdmMessage,
             occurredAtDevice: new Date(input.occurredAtDevice),
             ...clockFields(input.clock),
             receivedAt,

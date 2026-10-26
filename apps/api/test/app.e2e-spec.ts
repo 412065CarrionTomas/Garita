@@ -32,6 +32,8 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
+import { aesCbc, aesCmac, deriveTagKey, truncateMac } from '../src/modules/nfc-tags/secure/crypto';
+import { FACTORY_KEY, sessionKeys } from '../src/modules/nfc-tags/secure/ev2';
 import type { Server as HttpServer } from 'node:http';
 import { PrismaModule } from '../src/modules/prisma/prisma.module';
 import { QrService } from '../src/modules/checkpoints/qr.service';
@@ -216,6 +218,8 @@ describe('Aplicación (e2e)', () => {
   const notificationTokens: string[] = [];
 
   beforeAll(async () => {
+    process.env.NFC_MASTER_KEY = '00112233445566778899AABBCCDDEEFF';
+    process.env.NFC_MASTER_KEY_VERSION = '1';
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule, TestOnlyModule],
     })
@@ -314,6 +318,9 @@ describe('Aplicación (e2e)', () => {
 
   afterAll(async () => {
     const prisma = app.get(PrismaService).systemPrisma;
+    await prisma.secureTagSession.deleteMany({
+      where: { checkpointId: { in: [...createdNfcCheckpointIds, ...createdCheckpointIds] } },
+    });
     await prisma.notificationDevice.deleteMany({ where: { token: { in: notificationTokens } } });
     await prisma.recordFlag.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
     await prisma.checkpointRecord.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
@@ -2008,6 +2015,275 @@ describe('Aplicación (e2e)', () => {
       .set('Authorization', 'Bearer token-supervisor')
       .send({ uid: 'A1B2C3D4' })
       .expect(404);
+  });
+
+  it('configura por APDU una etiqueta simulada, exige prueba SUN y aísla sesiones', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const point = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Secure NFC ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdNfcCheckpointIds.push(point.id);
+    const uid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    const version = `0404083000110504040201011105${uid}00000000000000`;
+    const path = `/api/v1/puntos/${point.id}/etiqueta-segura/configuracion`;
+    const client = request(app.getHttpServer());
+    await client.post(path).send({ uid, version }).expect(401);
+    await client
+      .post(path)
+      .set('Authorization', 'Bearer token-guard')
+      .send({ uid, version })
+      .expect(403);
+    await client
+      .post(path)
+      .set('Authorization', 'Bearer token-client')
+      .send({ uid, version })
+      .expect(403);
+    await client
+      .post(path)
+      .set('Authorization', 'Bearer token-south-admin')
+      .send({ uid, version })
+      .expect(404);
+    const otherPoint = await prisma.checkpoint.findFirstOrThrow({
+      where: { siteId: northUnassignedSiteId },
+    });
+    await client
+      .post(`/api/v1/puntos/${otherPoint.id}/etiqueta-segura/configuracion`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ uid, version })
+      .expect(404);
+    const auth = { Authorization: 'Bearer token-admin' };
+    const start = await client.post(path).set(auth).send({ uid, version }).expect(201);
+    const startBody = z.object({ sessionId: z.string(), apdu: z.string() }).parse(start.body);
+    expect(startBody.apdu).toBe('9071000002000000');
+    expect(await prisma.nfcTag.findFirstOrThrow({ where: { uid } })).toMatchObject({
+      status: 'removed',
+      configurationStatus: 'incomplete',
+      kind: 'basic',
+    });
+    const commandPath = `/api/v1/etiquetas-seguras/configuracion/${startBody.sessionId}/comando`;
+    await client.post(commandPath).send({ response: '9100' }).expect(401);
+    await client
+      .post(commandPath)
+      .set('Authorization', 'Bearer token-guard')
+      .send({ response: '9100' })
+      .expect(403);
+    await client
+      .post(commandPath)
+      .set('Authorization', 'Bearer token-south-admin')
+      .send({ response: '9100' })
+      .expect(404);
+    const rndB = Buffer.from('B9E2FC789B64BF237CCCAA20EC7E6E48', 'hex');
+    const firstResponse = Buffer.concat([
+      aesCbc(FACTORY_KEY, Buffer.alloc(16), rndB),
+      Buffer.from('91AF', 'hex'),
+    ]);
+    const first = await client
+      .post(commandPath)
+      .set(auth)
+      .send({ response: firstResponse.toString('hex') })
+      .expect(201);
+    const firstBody = z.object({ apdu: z.string() }).parse(first.body);
+    const challenge = aesCbc(
+      FACTORY_KEY,
+      Buffer.alloc(16),
+      Buffer.from(firstBody.apdu.slice(10, -2), 'hex'),
+      true,
+    );
+    const rndA = challenge.subarray(0, 16);
+    const ti = Buffer.from('9D00C4DF', 'hex');
+    const rotated = Buffer.concat([rndA.subarray(1), rndA.subarray(0, 1)]);
+    const secondResponse = Buffer.concat([
+      aesCbc(FACTORY_KEY, Buffer.alloc(16), Buffer.concat([ti, rotated, Buffer.alloc(12)])),
+      Buffer.from('9100', 'hex'),
+    ]);
+    let step = z.object({ apdu: z.string().nullable(), complete: z.boolean() }).parse(
+      (
+        await client
+          .post(commandPath)
+          .set(auth)
+          .send({ response: secondResponse.toString('hex') })
+          .expect(201)
+      ).body,
+    );
+    const keys = sessionKeys(FACTORY_KEY, {
+      rndA: rndA.toString('hex'),
+      rndB: rndB.toString('hex'),
+      ti: ti.toString('hex'),
+    });
+    for (let counter = 0; counter < 7; counter++) {
+      expect(step.apdu).not.toBeNull();
+      const ctr = Buffer.alloc(2);
+      ctr.writeUInt16LE(counter + 1);
+      const response =
+        counter === 6
+          ? '9100'
+          : Buffer.concat([
+              truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),
+              Buffer.from('9100', 'hex'),
+            ]).toString('hex');
+      step = z
+        .object({ apdu: z.string().nullable(), complete: z.boolean() })
+        .parse((await client.post(commandPath).set(auth).send({ response }).expect(201)).body);
+    }
+    expect(step).toEqual({ apdu: null, complete: true });
+    const master = Buffer.from('00112233445566778899AABBCCDDEEFF', 'hex');
+    const uidBytes = Buffer.from(uid, 'hex');
+    const counter = Buffer.from('010000', 'hex');
+    const picc = Buffer.concat([Buffer.from([0xc7]), uidBytes, counter, Buffer.alloc(5)]);
+    const encrypted = aesCbc(deriveTagKey(master, uidBytes, 2, 1), Buffer.alloc(16), picc);
+    const sessionKey = aesCmac(
+      deriveTagKey(master, uidBytes, 1, 1),
+      Buffer.concat([Buffer.from('3CC300010080', 'hex'), uidBytes, counter]),
+    );
+    const proof = `garita:nfc?e=${encrypted.toString('hex')}&c=${truncateMac(aesCmac(sessionKey, Buffer.alloc(0))).toString('hex')}`;
+    const confirmPath = `/api/v1/etiquetas-seguras/configuracion/${startBody.sessionId}/confirmar`;
+    await client.post(confirmPath).set(auth).send({ sdmMessage: proof }).expect(201);
+    expect(await prisma.nfcTag.findFirstOrThrow({ where: { uid } })).toMatchObject({
+      status: 'active',
+      kind: 'secure',
+      configurationStatus: 'configured',
+      lastCounter: 1,
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2028-01-10T10:00:00.000Z'),
+        endsAt: new Date('2028-01-10T18:00:00.000Z'),
+        serviceDate: new Date('2028-01-10T00:00:00.000Z'),
+        createdById: actor.id,
+        status: 'in_progress',
+        startedAt: new Date('2028-01-10T10:00:00.000Z'),
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2028-01-10T10:00:00.000Z'),
+            endsAt: new Date('2028-01-10T18:00:00.000Z'),
+            assignedById: actor.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const makeSun = (readCounter: number) => {
+      const count = Buffer.alloc(3);
+      count.writeUIntLE(readCounter, 0, 3);
+      const encryptedPicc = aesCbc(
+        deriveTagKey(master, uidBytes, 2, 1),
+        Buffer.alloc(16),
+        Buffer.concat([Buffer.from([0xc7]), uidBytes, count, Buffer.alloc(5)]),
+      );
+      const macKey = aesCmac(
+        deriveTagKey(master, uidBytes, 1, 1),
+        Buffer.concat([Buffer.from('3CC300010080', 'hex'), uidBytes, count]),
+      );
+      return `garita:nfc?e=${encryptedPicc.toString('hex')}&c=${truncateMac(aesCmac(macKey, Buffer.alloc(0))).toString('hex')}`;
+    };
+    const postRead = async (sdmMessage?: string) => {
+      const recordId = randomUUID();
+      await client
+        .post('/api/v1/registros-puntos')
+        .set('Authorization', 'Bearer token-guard')
+        .send({
+          recordId,
+          shiftId: shift.id,
+          method: 'nfc',
+          scannedValue: uid,
+          ...(sdmMessage ? { sdmMessage } : {}),
+          occurredAtDevice: '2028-01-10T12:00:00.000Z',
+          location: {
+            status: 'ok',
+            latitude: -34.6,
+            longitude: -58.4,
+            accuracyMeters: 5,
+            simulation: 'not_simulated',
+            takenAt: '2028-01-10T12:00:00.000Z',
+          },
+          phoneNfc: 'on',
+        })
+        .expect(200);
+      return prisma.checkpointRecord.findUniqueOrThrow({
+        where: { recordId },
+        include: { flags: true },
+      });
+    };
+    for (const count of [2, 3]) {
+      const valid = await postRead(makeSun(count));
+      expect(valid.sdmResult).toBe('valid');
+      expect(
+        valid.flags.some(
+          (flag) => flag.type === 'tag_not_authentic' || flag.type === 'replayed_read',
+        ),
+      ).toBe(false);
+    }
+    const invalidSun = makeSun(4);
+    const bad = await postRead(invalidSun.slice(0, -1) + (invalidSun.endsWith('0') ? '1' : '0'));
+    expect(bad.sdmResult).toBe('invalid_signature');
+    expect(bad.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'tag_not_authentic', severity: 'grave' }),
+      ]),
+    );
+    const missing = await postRead();
+    expect(missing.sdmResult).toBe('missing');
+    expect(missing.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'tag_not_authentic', severity: 'grave' }),
+      ]),
+    );
+    const replay = await postRead(makeSun(3));
+    expect(replay.sdmResult).toBe('replayed');
+    expect(replay.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'replayed_read', severity: 'grave' }),
+      ]),
+    );
+    const interruptedUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    await client.post(path).set(auth).send({ uid: interruptedUid, version }).expect(201);
+    expect(await prisma.nfcTag.findFirstOrThrow({ where: { uid: interruptedUid } })).toMatchObject({
+      status: 'removed',
+      configurationStatus: 'incomplete',
+    });
+    const southPoint = await prisma.checkpoint.create({
+      data: {
+        companyId: 'sur-company',
+        siteId: southSiteId,
+        name: `Secure sur ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdNfcCheckpointIds.push(southPoint.id);
+    await prisma.nfcTag.create({
+      data: {
+        companyId: 'sur-company',
+        checkpointId: southPoint.id,
+        uid: `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`,
+        associatedById: actor.id,
+        kind: 'secure',
+        status: 'removed',
+      },
+    });
+    const foreign = await prisma.nfcTag.findFirstOrThrow({
+      where: { checkpointId: southPoint.id },
+    });
+    const foreignResponse = await client
+      .post(path)
+      .set(auth)
+      .send({ uid: foreign.uid, version })
+      .expect(422);
+    expect(z.object({ message: z.string() }).parse(foreignResponse.body).message).toBe(
+      'Etiqueta no disponible',
+    );
   });
 
   it('la base limita las etiquetas activas por punto y por UID global', async () => {
