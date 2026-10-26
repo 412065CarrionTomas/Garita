@@ -155,6 +155,25 @@ export function addSiteAssignmentFilter(
   return args;
 }
 
+const UNIQUE_WHERE_OPERATIONS = ['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert'];
+
+// Aplica el filtro de predios del supervisor según la operación: `create` no lleva `where`
+// (el servicio valida antes el padre con una lectura filtrada), y las operaciones por clave
+// única necesitan la clave arriba del `AND` porque Prisma rechaza un `where` sin ella.
+export function applySiteAssignmentFilter(
+  model: string,
+  operation: string,
+  args: unknown,
+  user: TenantContext['user'],
+): unknown {
+  if (['create', 'createMany', 'createManyAndReturn'].includes(operation)) return args;
+  const filtered = addSiteAssignmentFilter(model, args, user);
+  if (!UNIQUE_WHERE_OPERATIONS.includes(operation) || !isRecord(args) || !isRecord(filtered))
+    return filtered;
+  const where = isRecord(args.where) ? args.where : {};
+  return { ...filtered, where: { ...where, ...(filtered.where as object) } };
+}
+
 export function addClientFilter(
   model: string,
   args: unknown,
@@ -319,7 +338,7 @@ export function createTenantPrismaClient(systemPrisma: PrismaClient, context: Te
           return query(
             addClientFilter(
               model,
-              addSiteAssignmentFilter(model, tenantArgs, user),
+              applySiteAssignmentFilter(model, operation, tenantArgs, user),
               user,
             ) as typeof args,
           );
