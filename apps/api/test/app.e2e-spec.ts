@@ -2602,7 +2602,7 @@ describe('Aplicación (e2e)', () => {
     );
   });
 
-  it('permite a un supervisor de predio asignado relevar APDU y confirmar, aísla supervisores de otro predio y evalúa lecturas sin 500', async () => {
+  it('permite a un supervisor de predio asignado iniciar, relevar APDU, confirmar y restablecer, aísla supervisores de otro predio y evalúa lecturas sin 500', async () => {
     const prisma = app.get(PrismaService).systemPrisma;
     const point = await prisma.checkpoint.create({
       data: {
@@ -2635,31 +2635,18 @@ describe('Aplicación (e2e)', () => {
     const uid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
     const client = request(app.getHttpServer());
 
-    // (a.1) Sesión de relevo iniciada por el supervisor asignado al predio
-    const session = await prisma.secureTagSession.create({
-      data: {
-        id: randomUUID(),
-        companyId: 'norte-company',
-        tagUid: uid,
-        checkpointId: point.id,
-        step: 'auth_1',
-        state: { authKind: 'factory' },
-        expiresAt: new Date(Date.now() + 2 * 60_000),
-        createdById: northSupervisorId,
-      },
-    });
-    const sessionId = session.id;
-    await prisma.nfcTag.create({
-      data: {
-        companyId: 'norte-company',
-        checkpointId: point.id,
-        uid,
-        associatedById: northSupervisorId,
-        status: 'removed',
-        configurationStatus: 'incomplete',
-        masterKeyVersion: 1,
-      },
-    });
+    // (a.1) Sesión de relevo iniciada por el supervisor asignado al predio vía HTTP
+    const startPath = `/api/v1/puntos/${point.id}/etiqueta-segura/configuracion`;
+    const version = `0404083000110504040201011105${uid}00000000000000`;
+    const start = await client
+      .post(startPath)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ uid, version })
+      .expect(201);
+    const { sessionId, apdu } = z
+      .object({ sessionId: z.string(), apdu: z.string() })
+      .parse(start.body);
+    expect(apdu).toBe('9071000002000000');
 
     const commandPath = `/api/v1/etiquetas-seguras/configuracion/${sessionId}/comando`;
     const confirmPath = `/api/v1/etiquetas-seguras/configuracion/${sessionId}/confirmar`;
@@ -2828,6 +2815,24 @@ describe('Aplicación (e2e)', () => {
       nfcService.verifyRead(tag.id, uid, makeSun(4)),
     );
     expect(missingResult).toBe('missing');
+
+    // (d) Restablecimiento de etiqueta segura por supervisor
+    await prisma.nfcTag.update({
+      where: { id: tag.id },
+      data: { status: 'removed' },
+    });
+
+    const resetPath = `/api/v1/etiquetas-seguras/${tag.id}/restablecer`;
+    await client.post(resetPath).set('Authorization', 'Bearer token-other-supervisor').expect(404);
+
+    const resetResponse = await client
+      .post(resetPath)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(201);
+    expect(resetResponse.body).toEqual({ id: tag.id, configurationStatus: 'incomplete' });
+
+    const resetTag = await prisma.nfcTag.findUniqueOrThrow({ where: { id: tag.id } });
+    expect(resetTag.configurationStatus).toBe('incomplete');
   });
 
   it('la base limita las etiquetas activas por punto y por UID global', async () => {
