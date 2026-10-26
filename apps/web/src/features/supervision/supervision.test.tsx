@@ -221,3 +221,21 @@ it('actualiza el punto y la ventana al llegar un registro sin recargar la págin
   });
   expect(screen.getAllByText('Registrado')).toHaveLength(2);
 });
+
+it('soporta 100 turnos simultáneos y filtra por predio', async () => {
+  const hundredRows = Array.from({ length: 100 }, (_, index) => ({
+    ...row,
+    id: `s-${index}`,
+    site: { id: `p-${index % 5}`, name: `Predio ${index % 5}` },
+  }));
+  jest.mocked(apiGet).mockResolvedValue(hundredRows as never);
+  renderWithQueryClient(
+    <MemoryRouter>
+      <SupervisionPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findAllByRole('heading', { level: 2 })).toHaveLength(100);
+  const siteSelect = screen.getByLabelText('Predio');
+  await userEvent.selectOptions(siteSelect, 'p-0');
+  expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(20);
+});

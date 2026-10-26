@@ -11,7 +11,7 @@ import {
 } from '@garita/shared';
 import { auth } from '@/lib/firebase';
 import { env } from '@/config/env';
-import type { ShiftRow } from '@/features/supervision/contracts';
+import type { ShiftDetail, ShiftRow } from '@/features/supervision/contracts';
 
 export function useRealtime(enabled: boolean) {
   const queryClient = useQueryClient();
@@ -61,8 +61,17 @@ export function useRealtime(enabled: boolean) {
       const event = incidentNewEventSchema.safeParse(raw);
       if (!event.success) return;
       const rows = queryClient.getQueryData<ShiftRow[]>(['supervision', 'turnos']);
-      const site = rows?.find((row) => row.site.id === event.data.siteId)?.site.name;
-      setIncident(`Incidente nuevo en ${site ?? 'un predio'}`);
+      let site = rows?.find((row) => row.site.id === event.data.siteId)?.site.name;
+      if (!site) {
+        const details = queryClient.getQueriesData<ShiftDetail>({
+          queryKey: ['supervision', 'detalle'],
+        });
+        const match = details.find(([, data]) => data?.site.id === event.data.siteId);
+        site = match?.[1]?.site.name;
+      }
+      const message = `Incidente nuevo en ${site ?? 'un predio'}`;
+      setIncident(message);
+      setAnnouncement(message);
     });
     socket.connect();
     return () => {

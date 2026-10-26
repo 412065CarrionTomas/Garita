@@ -19,12 +19,19 @@ jest.mock('@/lib/firebase', () => ({
 }));
 jest.mock('@/config/env', () => ({ env: { VITE_API_URL: 'http://localhost:3000/api/v1' } }));
 
-function Probe() {
+function Probe({ onRender }: { onRender?: (rt: ReturnType<typeof useRealtime>) => void }) {
   const realtime = useRealtime(true);
+  onRender?.(realtime);
   return (
     <>
       <p>{realtime.connected ? 'Conectado' : 'Reconectando…'}</p>
       <p>{realtime.incident}</p>
+      <p>{realtime.announcement}</p>
+      {realtime.incident && (
+        <button type="button" onClick={realtime.dismissIncident}>
+          Cerrar
+        </button>
+      )}
     </>
   );
 }
@@ -57,4 +64,30 @@ it('invalida las consultas por registro y recarga todo al reconectar', async () 
   expect(screen.getByText('Reconectando…')).toBeInTheDocument();
   act(() => mockListeners.get('connect')?.());
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ['supervision'] });
+});
+
+it('muestra aviso de incidente con predio, anuncia y permite cerrarlo', async () => {
+  const client = new QueryClient();
+  client.setQueryData(['supervision', 'turnos'], [
+    { site: { id: 'p1', name: 'Depósito Central' } },
+  ]);
+  render(
+    <QueryClientProvider client={client}>
+      <Probe />
+    </QueryClientProvider>,
+  );
+  await act(async () => {
+    await Promise.resolve();
+  });
+  act(() => {
+    mockListeners.get('incidente.nuevo')?.({
+      incidentId: 'i-1',
+      siteId: 'p1',
+    });
+  });
+  expect(screen.getByText('Incidente nuevo en Depósito Central')).toBeInTheDocument();
+  act(() => {
+    screen.getByRole('button', { name: 'Cerrar' }).click();
+  });
+  expect(screen.queryByText('Incidente nuevo en Depósito Central')).not.toBeInTheDocument();
 });
