@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import type * as ReactRouter from 'react-router';
 import { MemoryRouter } from 'react-router';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
@@ -6,7 +7,7 @@ import { IncidentDetailPage, IncidentsListPage, IncidentsQueuePage } from './inc
 
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn(), apiPost: jest.fn() }));
 jest.mock('react-router', () => {
-  const actual = jest.requireActual<typeof import('react-router')>('react-router');
+  const actual = jest.requireActual<typeof ReactRouter>('react-router');
   return {
     ...actual,
     useParams: () => ({ id: 'incident-1' }),
