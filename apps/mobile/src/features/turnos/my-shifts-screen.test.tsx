@@ -9,7 +9,10 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
   useFocusEffect: (callback: () => void) => {
     mockFocus = callback;
-    require('react').useEffect(callback, [callback]);
+    const mockReact = jest.requireActual('react') as {
+      useEffect: (cb: () => void, deps?: readonly unknown[]) => void;
+    };
+    mockReact.useEffect(callback, [callback]);
   },
 }));
 
