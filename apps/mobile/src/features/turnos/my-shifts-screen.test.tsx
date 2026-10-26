@@ -4,7 +4,14 @@ import { apiGet } from '@/lib/api-client';
 
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
 const mockPush = jest.fn();
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
+let mockFocus: (() => void) | undefined;
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: mockPush }),
+  useFocusEffect: (callback: () => void) => {
+    mockFocus = callback;
+    require('react').useEffect(callback, [callback]);
+  },
+}));
 
 const fetchShifts = jest.mocked(apiGet);
 
@@ -60,6 +67,16 @@ describe('<MyShiftsScreen />', () => {
       rejectInitial?.();
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(/No se pudieron cargar los turnos/);
+  });
+
+  it('recarga al volver a Mis turnos desde una notificación', async () => {
+    fetchShifts.mockResolvedValue([]);
+    await render(<MyShiftsScreen />);
+    await waitFor(() => expect(fetchShifts).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      mockFocus?.();
+    });
+    await waitFor(() => expect(fetchShifts).toHaveBeenCalledTimes(2));
   });
 });
 
