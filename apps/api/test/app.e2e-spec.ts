@@ -220,8 +220,9 @@ describe('Aplicación (e2e)', () => {
   const notificationTokens: string[] = [];
 
   beforeAll(async () => {
-    process.env.NFC_MASTER_KEY = '00112233445566778899AABBCCDDEEFF';
-    process.env.NFC_MASTER_KEY_VERSION = '1';
+    process.env.NFC_MASTER_KEY =
+      process.env.NFC_MASTER_KEY ?? Buffer.alloc(16, 0x11).toString('hex');
+    process.env.NFC_MASTER_KEY_VERSION = process.env.NFC_MASTER_KEY_VERSION ?? '1';
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule, TestOnlyModule],
     })
@@ -2138,8 +2139,8 @@ describe('Aplicación (e2e)', () => {
     }
     expect(step).toEqual({ apdu: null, complete: true });
     const masterHex =
-      (app.get(ConfigService).get('NFC_MASTER_KEY') as string | undefined) ??
-      '00112233445566778899AABBCCDDEEFF';
+      app.get(ConfigService).get<string>('NFC_MASTER_KEY') ??
+      Buffer.alloc(16, 0x11).toString('hex');
     const master = Buffer.from(masterHex, 'hex');
     const uidBytes = Buffer.from(uid, 'hex');
     const counter = Buffer.from('010000', 'hex');

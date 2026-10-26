@@ -58,8 +58,16 @@ export class SecureTagsService {
 
   private keys() {
     const secret = this.config.get('NFC_MASTER_KEY', { infer: true });
-    const version = this.config.get('NFC_MASTER_KEY_VERSION', { infer: true });
-    if (!secret || version === undefined)
+    const rawVersion: unknown = this.config.get('NFC_MASTER_KEY_VERSION', { infer: true });
+    if (!secret || rawVersion === undefined)
+      throw new ServiceUnavailableException('La configuración segura no está disponible');
+    const version =
+      typeof rawVersion === 'number'
+        ? rawVersion
+        : typeof rawVersion === 'string'
+          ? parseInt(rawVersion, 10)
+          : Number.NaN;
+    if (Number.isNaN(version))
       throw new ServiceUnavailableException('La configuración segura no está disponible');
     return { master: Buffer.from(secret, 'hex'), version };
   }

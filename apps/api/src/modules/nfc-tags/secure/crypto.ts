@@ -20,7 +20,7 @@ function double(block: Buffer): Buffer {
   const shifted = Buffer.alloc(16);
   let carry = 0;
   for (let i = 15; i >= 0; i--) {
-    const byte = block[i]!;
+    const byte = block[i] ?? 0;
     shifted[i] = ((byte << 1) & 0xff) | carry;
     carry = byte >>> 7;
   }
