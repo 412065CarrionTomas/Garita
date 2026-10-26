@@ -1,10 +1,17 @@
 import { fireEvent, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter } from 'react-router';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
 import { IncidentDetailPage, IncidentsListPage, IncidentsQueuePage } from './incidents-page';
 
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn(), apiPost: jest.fn() }));
+jest.mock('react-router', () => {
+  const actual = jest.requireActual<typeof import('react-router')>('react-router');
+  return {
+    ...actual,
+    useParams: () => ({ id: 'incident-1' }),
+  };
+});
 
 const incident = {
   id: 'incident-1',
@@ -94,10 +101,8 @@ it('muestra el detalle del incidente y valida el diálogo de clasificación', as
   });
 
   renderWithQueryClient(
-    <MemoryRouter initialEntries={['/incidentes/incident-1']}>
-      <Routes>
-        <Route path="/incidentes/:id" element={<IncidentDetailPage />} />
-      </Routes>
+    <MemoryRouter>
+      <IncidentDetailPage />
     </MemoryRouter>,
   );
 
@@ -160,10 +165,8 @@ it('permite reclasificar un incidente indicando motivo obligatorio', async () =>
   });
 
   renderWithQueryClient(
-    <MemoryRouter initialEntries={['/incidentes/incident-1']}>
-      <Routes>
-        <Route path="/incidentes/:id" element={<IncidentDetailPage />} />
-      </Routes>
+    <MemoryRouter>
+      <IncidentDetailPage />
     </MemoryRouter>,
   );
 
