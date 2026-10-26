@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type * as ReactType from 'react';
 import { AppState, Platform } from 'react-native';
-import { cancelNfcRead, nfcAvailability, openNfcSettings, readFactoryUid } from '@/lib/nfc';
+import { cancelNfcRead, nfcAvailability, openNfcSettings, readNfcTag } from '@/lib/nfc';
 import type { ShiftOfflineData } from '@garita/shared';
 import { processScan } from './scan-action';
 import { NfcReader } from './nfc-reader';
@@ -10,7 +10,7 @@ jest.mock('@/lib/nfc', () => ({
   nfcAvailability: jest.fn(),
   cancelNfcRead: jest.fn(async () => undefined),
   openNfcSettings: jest.fn(async () => undefined),
-  readFactoryUid: jest.fn(),
+  readNfcTag: jest.fn(),
 }));
 jest.mock('./scan-action', () => ({ processScan: jest.fn() }));
 jest.mock('expo-router', () => ({
@@ -41,12 +41,20 @@ afterAll(() => {
 
 it('CA1 / BDD1: Android escucha sin botón y cancela al salir', async () => {
   const view = await render(<NfcReader shiftData={data} />);
-  await waitFor(() => expect(readFactoryUid).toHaveBeenCalledWith(expect.any(Function)));
+  await waitFor(() => expect(readNfcTag).toHaveBeenCalledWith(expect.any(Function)));
   const callback = (
-    jest.mocked(readFactoryUid).mock.calls[0] as unknown as [(uid: string) => void]
+    jest.mocked(readNfcTag).mock.calls[0] as unknown as [
+      (tag: { uid: string; sdmMessage?: string }) => void,
+    ]
   )[0];
-  await act(async () => callback('04AABBCC'));
-  expect(processScan).toHaveBeenCalledWith('04AABBCC', data, 'nfc', expect.any(Function));
+  await act(async () => callback({ uid: '04AABBCC', sdmMessage: 'garita:nfc?e=aa&c=bb' }));
+  expect(processScan).toHaveBeenCalledWith(
+    '04AABBCC',
+    data,
+    'nfc',
+    expect.any(Function),
+    'garita:nfc?e=aa&c=bb',
+  );
   expect(screen.getByRole('alert')).toHaveTextContent('Etiqueta no válida. Intento guardado.');
   expect(screen.queryByRole('button', { name: 'Leer etiqueta' })).toBeNull();
   await view.unmount();
@@ -55,12 +63,12 @@ it('CA1 / BDD1: Android escucha sin botón y cancela al salir', async () => {
 
 it('CA2 / BDD2: iPhone lee solamente al tocar Leer etiqueta', async () => {
   Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
-  jest.mocked(readFactoryUid).mockResolvedValue('04AABBCC');
+  jest.mocked(readNfcTag).mockResolvedValue({ uid: '04AABBCC' });
   await render(<NfcReader shiftData={data} />);
   const button = await screen.findByRole('button', { name: 'Leer etiqueta' });
-  expect(readFactoryUid).not.toHaveBeenCalled();
+  expect(readNfcTag).not.toHaveBeenCalled();
   await fireEvent.press(button);
-  expect(readFactoryUid).toHaveBeenCalledWith();
+  expect(readNfcTag).toHaveBeenCalledWith();
   expect(processScan).toHaveBeenCalled();
 });
 
@@ -70,7 +78,7 @@ it('BDD4: apagado informa y abre ajustes', async () => {
   expect(await screen.findByText('El NFC está apagado')).toBeOnTheScreen();
   await fireEvent.press(screen.getByRole('button', { name: 'Abrir ajustes' }));
   expect(openNfcSettings).toHaveBeenCalled();
-  expect(readFactoryUid).not.toHaveBeenCalled();
+  expect(readNfcTag).not.toHaveBeenCalled();
 });
 
 it('CA4: sin NFC no muestra ninguna mención ni acción NFC', async () => {
@@ -83,7 +91,7 @@ it('CA4: sin NFC no muestra ninguna mención ni acción NFC', async () => {
 
 it('BDD3: muestra el motivo de etiqueta reemplazada validado por el servidor', async () => {
   Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
-  jest.mocked(readFactoryUid).mockResolvedValue('04AABBCC');
+  jest.mocked(readNfcTag).mockResolvedValue({ uid: '04AABBCC' });
   jest.mocked(processScan).mockResolvedValue({
     status: 'invalid_attempt',
     reason: 'tag_replaced',

@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import NfcManager, { NfcTech, NfcEvents } from 'react-native-nfc-manager';
 import type * as Nfc from './nfc';
-import { readFactoryUid, cancelNfcRead, nfcAvailability, openNfcSettings } from './nfc';
+import { readFactoryUid, readNfcTag, cancelNfcRead, nfcAvailability, openNfcSettings } from './nfc';
 
 jest.mock('react-native-nfc-manager', () => ({
   __esModule: true,
@@ -19,10 +19,18 @@ jest.mock('react-native-nfc-manager', () => ({
   },
   NfcEvents: { DiscoverTag: 'discover' },
   NfcTech: {
+    Ndef: 'ndef',
     NfcA: 'NfcA',
     NfcV: 'NfcV',
     MifareIOS: 'mifare',
     Iso15693IOS: 'iso15693',
+  },
+  Ndef: {
+    uri: {
+      decodePayload: jest.fn((bytes: Uint8Array) => {
+        return new TextDecoder().decode(bytes.subarray(1));
+      }),
+    },
   },
 }));
 
@@ -43,24 +51,43 @@ describe('lectura del UID NFC', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatform });
   });
 
-  it('usa una sesión de etiquetas iOS para MIFARE e ISO 15693 y la libera', async () => {
+  it('usa una sesión de etiquetas iOS para NDEF, MIFARE e ISO 15693 y la libera', async () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
 
     await expect(readFactoryUid()).resolves.toBe('E004015012345678');
 
-    expect(requestTechnology).toHaveBeenCalledWith([NfcTech.MifareIOS, NfcTech.Iso15693IOS], {
-      alertMessage: 'Acercá la etiqueta NFC al iPhone.',
-    });
+    expect(requestTechnology).toHaveBeenCalledWith(
+      [NfcTech.Ndef, NfcTech.MifareIOS, NfcTech.Iso15693IOS],
+      {
+        alertMessage: 'Acercá la etiqueta NFC al iPhone.',
+      },
+    );
     expect(cancelTechnologyRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('usa NFC-A e NFC-V en Android', async () => {
+  it('usa NDEF, NFC-A e NFC-V en Android', async () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
 
     await expect(readFactoryUid()).resolves.toBe('E004015012345678');
 
-    expect(requestTechnology).toHaveBeenCalledWith([NfcTech.NfcA, NfcTech.NfcV], {});
+    expect(requestTechnology).toHaveBeenCalledWith([NfcTech.Ndef, NfcTech.NfcA, NfcTech.NfcV], {});
     expect(cancelTechnologyRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('extrae el mensaje dinámico SUN si la etiqueta tiene NDEF URI', async () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    const sunUri = 'garita:nfc?e=EF963FF7828658A599F3041510671E88&c=94EED9EE65337086';
+    const payloadBytes = [0x00, ...Array.from(new TextEncoder().encode(sunUri))];
+    getTag.mockResolvedValueOnce({
+      id: '04DE5F1EACC040',
+      ndefMessage: [{ type: 'U', payload: payloadBytes }],
+    } as never);
+
+    const result = await readNfcTag();
+    expect(result).toEqual({
+      uid: '04DE5F1EACC040',
+      sdmMessage: sunUri,
+    });
   });
 
   it('detecta NFC apagado y ofrece los ajustes del adaptador en Android', async () => {

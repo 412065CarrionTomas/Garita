@@ -42,6 +42,24 @@ enum NfcTagStatus {
   removed
 }
 
+enum NfcTagKind {
+  basic
+  secure
+}
+
+enum NfcTagConfigurationStatus {
+  none
+  incomplete
+  configured
+}
+
+enum SdmResult {
+  valid
+  invalid_signature
+  missing
+  replayed
+}
+
 enum IncidentType {
   intrusion
   suspicious_person
@@ -218,6 +236,7 @@ model Checkpoint {
   updatedAt             DateTime                 @updatedAt
   site                  Site                     @relation(fields: [siteId], references: [id], onDelete: Restrict)
   nfcTags               NfcTag[]
+  secureTagSessions     SecureTagSession[]
   roundVersions         RoundVersionCheckpoint[]
   records               CheckpointRecord[]
 
@@ -232,6 +251,10 @@ model NfcTag {
   checkpointId   String
   uid            String
   status         NfcTagStatus @default(active)
+  kind           NfcTagKind @default(basic)
+  configurationStatus NfcTagConfigurationStatus @default(none)
+  masterKeyVersion Int?
+  lastCounter    Int?
   associatedById String
   associatedAt   DateTime     @default(now())
   endedAt        DateTime?
@@ -242,6 +265,21 @@ model NfcTag {
 
   @@index([companyId, checkpointId, status])
   @@index([uid, status])
+}
+
+model SecureTagSession {
+  id String @id @default(cuid())
+  companyId String
+  tagUid String
+  checkpointId String
+  step String
+  state Json?
+  expiresAt DateTime @db.Timestamptz(3)
+  createdById String
+  createdAt DateTime @default(now())
+  checkpoint Checkpoint @relation(fields: [checkpointId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, checkpointId, expiresAt])
 }
 
 model Round {
@@ -538,6 +576,8 @@ model CheckpointRecord {
   checkpointId        String
   recordId            String                   @unique @db.Uuid
   method              CheckpointRecordMethod
+  sdmMessage          String?
+  sdmResult           SdmResult?
   occurredAtDevice    DateTime                 @db.Timestamptz(3)
   receivedAt          DateTime                 @default(now()) @db.Timestamptz(3)
   locationStatus      ShiftEventLocationStatus
@@ -685,6 +725,8 @@ enum RecordFlagType {
   location_disabled
   qr_on_tagged_point
   location_unverifiable
+  tag_not_authentic
+  replayed_read
 }
 
 enum RecordFlagSeverity {

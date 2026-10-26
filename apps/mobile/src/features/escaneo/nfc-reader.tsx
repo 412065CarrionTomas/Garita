@@ -3,7 +3,13 @@ import { AppState, Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import type { ShiftOfflineData } from '@garita/shared';
 import { Banner, Button, Card, Text } from '@/ui';
-import { cancelNfcRead, nfcAvailability, openNfcSettings, readFactoryUid } from '@/lib/nfc';
+import {
+  cancelNfcRead,
+  nfcAvailability,
+  openNfcSettings,
+  readNfcTag,
+  type NfcRead,
+} from '@/lib/nfc';
 import { processScan } from './scan-action';
 
 export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; onQr?: () => void }) {
@@ -16,19 +22,25 @@ export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; on
   const reading = useRef(false);
   const latestScan = useRef(0);
   const scan = useCallback(
-    async (uid: string) => {
+    async (tag: NfcRead) => {
       if (!active.current || processing.current) return;
       processing.current = true;
       const scanId = ++latestScan.current;
       setBusy(true);
       try {
-        const result = await processScan(uid, shiftData, 'nfc', (saved) => {
-          processing.current = false;
-          if (active.current) {
-            setMessage(saved.message);
-            setBusy(false);
-          }
-        });
+        const result = await processScan(
+          tag.uid,
+          shiftData,
+          'nfc',
+          (saved) => {
+            processing.current = false;
+            if (active.current) {
+              setMessage(saved.message);
+              setBusy(false);
+            }
+          },
+          tag.sdmMessage,
+        );
         if (active.current && scanId === latestScan.current) setMessage(result.message);
       } catch {
         if (active.current && scanId === latestScan.current)
@@ -59,7 +71,7 @@ export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; on
             active.current = true;
             setAvailability(state);
             if (state === 'ready' && Platform.OS === 'android')
-              await readFactoryUid((uid) => void scan(uid));
+              await readNfcTag((tag) => void scan(tag));
           })
           .catch(() => {
             if (!disposed) setMessage('No pudimos iniciar la lectura. Volvé a abrir la pantalla.');
@@ -81,7 +93,7 @@ export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; on
     reading.current = true;
     setBusy(true);
     try {
-      await scan(await readFactoryUid());
+      await scan(await readNfcTag());
     } catch {
       if (active.current) setMessage('Lectura cancelada o etiqueta no legible. Volvé a intentar.');
     } finally {

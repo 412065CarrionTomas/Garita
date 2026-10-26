@@ -24,6 +24,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: false,
     entitlements: { 'aps-environment': 'development' },
     infoPlist: {
+      'com.apple.developer.nfc.readersession.iso7816.select-identifiers': ['D2760000850101'],
       UIBackgroundModes: ['remote-notification'],
       NSLocationWhenInUseUsageDescription:
         'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',

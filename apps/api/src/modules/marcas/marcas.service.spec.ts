@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { MarcasService, type EvaluateRecordInput } from './marcas.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
+import type { NfcTagsService } from '../nfc-tags/nfc-tags.service';
 
 describe('MarcasService', () => {
   interface CreatedFlag {
@@ -48,11 +49,16 @@ describe('MarcasService', () => {
     findOwnedOrThrow,
   } as unknown as TenantResourceService;
 
+  const verifyRead = jest.fn();
+  const nfcTags = {
+    verifyRead,
+  } as unknown as NfcTagsService;
+
   let service: MarcasService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new MarcasService(prisma, resources);
+    service = new MarcasService(prisma, resources, nfcTags);
   });
 
   const baseInput: EvaluateRecordInput = {

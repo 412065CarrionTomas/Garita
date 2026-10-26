@@ -6,6 +6,9 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env';
+import { deriveTagKey, verifySun } from './secure/crypto';
 import type { AssociateNfcTag } from '@garita/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { TenantResourceService } from '../auth/tenant-resource.service';
@@ -14,10 +17,65 @@ import { PrismaService } from '../prisma/prisma.service';
 @Injectable()
 export class NfcTagsService {
   private readonly logger = new Logger(NfcTagsService.name);
+  private warnedMissingKey = false;
   constructor(
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
+
+  async verifyRead(
+    tagId: string,
+    uid: string,
+    message: string | null,
+  ): Promise<'valid' | 'invalid_signature' | 'missing' | 'replayed'> {
+    const tag = await this.prisma.tenantPrisma.nfcTag.findFirst({ where: { id: tagId } });
+    if (tag?.kind !== 'secure') return 'missing';
+    const masterHex = this.config.get('NFC_MASTER_KEY', { infer: true });
+    const rawVersion: unknown = this.config.get('NFC_MASTER_KEY_VERSION', { infer: true });
+    const currentVersion =
+      typeof rawVersion === 'number'
+        ? rawVersion
+        : typeof rawVersion === 'string'
+          ? parseInt(rawVersion, 10)
+          : Number.NaN;
+    if (
+      !masterHex ||
+      Number.isNaN(currentVersion) ||
+      tag.masterKeyVersion === null ||
+      currentVersion !== tag.masterKeyVersion
+    ) {
+      if (!this.warnedMissingKey) {
+        this.logger.warn(
+          'NFC_MASTER_KEY ausente o versión distinta: verificación segura no disponible',
+        );
+        this.warnedMissingKey = true;
+      }
+      return 'missing';
+    }
+    try {
+      const master = Buffer.from(masterHex, 'hex');
+      const uidBytes = Buffer.from(uid, 'hex');
+      const result = verifySun(
+        message ?? undefined,
+        uid,
+        deriveTagKey(master, uidBytes, 2, currentVersion),
+        deriveTagKey(master, uidBytes, 1, currentVersion),
+        tag.lastCounter,
+      );
+      if (result.result !== 'valid') return result.result;
+      const updated = await this.prisma.tenantPrisma.nfcTag.updateMany({
+        where: {
+          id: tagId,
+          OR: [{ lastCounter: null }, { lastCounter: { lt: result.counter } }],
+        },
+        data: { lastCounter: result.counter },
+      });
+      return updated.count === 1 ? 'valid' : 'replayed';
+    } catch {
+      return 'invalid_signature';
+    }
+  }
 
   async configurationSites(_user: AuthenticatedUser) {
     const sites = await this.prisma.tenantPrisma.site.findMany({
@@ -36,10 +94,10 @@ export class NfcTagsService {
     if (!checkpoint) throw new NotFoundException('Recurso no encontrado');
     // systemPrisma is intentionally used to enforce global UID uniqueness across tenants; the audit log below records the cross-company probe without exposing the owner.
     const globalTag = await this.prisma.systemPrisma.nfcTag.findFirst({
-      where: { uid: input.uid, status: 'active' },
+      where: { uid: input.uid, OR: [{ status: 'active' }, { kind: 'secure' }] },
       include: { checkpoint: { include: { site: true } } },
     });
-    if (globalTag && globalTag.companyId !== user.companyId) {
+    if (globalTag && (globalTag.companyId !== user.companyId || globalTag.kind === 'secure')) {
       this.logger.warn({
         action: 'nfc_tag.cross_company_uid_rejected',
         userId: user.userId,

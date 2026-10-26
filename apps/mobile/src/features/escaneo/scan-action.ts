@@ -187,6 +187,7 @@ export async function processScan(
   shiftData: ShiftOfflineData,
   method: CheckpointRecordMethod = 'qr',
   onSaved?: (result: ScanActionResult) => void,
+  sdmMessage?: string,
 ): Promise<ScanActionResult> {
   const d = deps();
   const now = d.now();
@@ -228,6 +229,7 @@ export async function processScan(
       method,
       clock,
       scannedValue,
+      ...(sdmMessage ? { sdmMessage } : {}),
       occurredAtDevice,
       location,
       phoneNfc,
@@ -349,6 +351,7 @@ export async function processScan(
     method,
     clock,
     scannedValue,
+    ...(sdmMessage ? { sdmMessage } : {}),
     occurredAtDevice,
     location,
     phoneNfc,

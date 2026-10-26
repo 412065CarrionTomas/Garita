@@ -4,7 +4,8 @@ import { render, userEvent, waitFor } from '@testing-library/react-native';
 import type { AuthMeResponse } from '@garita/shared';
 import { useAuth } from '@/features/auth/auth-context';
 import { ApiError, apiDelete, apiGet, apiRequest } from '@/lib/api-client';
-import { nfcAvailability, openNfcSettings, readFactoryUid } from '@/lib/nfc';
+import { nfcAvailability, openNfcSettings, readFactoryUid, readNfcTag } from '@/lib/nfc';
+import { NotSecureNfcTag, withSecureNfcTag } from '@/lib/nfc-secure';
 import * as Network from 'expo-network';
 import ConfigurationHome from '@/app/(configuration)/index';
 
@@ -27,8 +28,18 @@ jest.mock('@/lib/nfc', () => ({
   nfcAvailability: jest.fn(),
   openNfcSettings: jest.fn(),
   readFactoryUid: jest.fn(),
+  readNfcTag: jest.fn(),
   cancelNfcRead: jest.fn(),
 }));
+jest.mock('@/lib/nfc-secure', () => {
+  const actual = jest.requireActual<{ NotSecureNfcTag: new (uid: string) => Error }>(
+    '@/lib/nfc-secure',
+  );
+  return {
+    NotSecureNfcTag: actual.NotSecureNfcTag,
+    withSecureNfcTag: jest.fn(),
+  };
+});
 jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({ play: jest.fn(), seekTo: jest.fn() }) }));
 jest.mock('expo-haptics', () => ({
   notificationAsync: jest.fn(),
@@ -42,6 +53,7 @@ const putMock = jest.mocked(apiRequest);
 const deleteMock = jest.mocked(apiDelete);
 const availabilityMock = jest.mocked(nfcAvailability);
 const readMock = jest.mocked(readFactoryUid);
+const secureMock = jest.mocked(withSecureNfcTag);
 const networkMock = jest.mocked(Network.getNetworkStateAsync);
 const site = { id: 'site-a', name: 'Predio A' };
 const point = { id: 'point-a', name: 'Portón trasero', etiquetaNfc: null };
@@ -87,6 +99,9 @@ beforeEach(() => {
     isConnected: true,
     isInternetReachable: true,
   } as Network.NetworkState);
+  secureMock.mockImplementation(async () => {
+    throw new NotSecureNfcTag('04A1B2C3');
+  });
   readMock.mockResolvedValue('04A1B2C3');
   putMock.mockResolvedValue({ id: 'tag-a', status: 'active' } as never);
 });
@@ -197,4 +212,27 @@ it('conserva el estado y las acciones de una etiqueta asociada', async () => {
   await user.press(view.getByLabelText('Quitar etiqueta NFC de Portón trasero'));
   expect(deleteMock).toHaveBeenCalledWith('/puntos/point-a/etiqueta-nfc', expect.anything());
   expect(await view.findByText('Etiqueta quitada de Portón trasero')).toBeOnTheScreen();
+});
+
+it('configura una etiqueta NTAG 424 DNA mediante relevo y lectura de prueba', async () => {
+  secureMock.mockResolvedValueOnce('session-1');
+  jest.mocked(readNfcTag).mockResolvedValueOnce({
+    uid: '04DE5F1EACC040',
+    sdmMessage: 'garita:nfc?e=EF963FF7828658A599F3041510671E88&c=94EED9EE65337086',
+  });
+  putMock.mockResolvedValueOnce({ id: 'tag-sec', status: 'active', kind: 'secure' } as never);
+  const user = userEvent.setup();
+  const view = await mount();
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  expect(await view.findByText('Etiqueta segura asociada a Portón trasero')).toBeTruthy();
+});
+
+it('muestra advertencia cuando la configuración se interrumpe', async () => {
+  secureMock.mockRejectedValueOnce(new Error('Tag disconnected'));
+  const user = userEvent.setup();
+  const view = await mount();
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  expect(
+    await view.findByText('La configuración no se completó. Volvé a acercar el celular'),
+  ).toBeTruthy();
 });

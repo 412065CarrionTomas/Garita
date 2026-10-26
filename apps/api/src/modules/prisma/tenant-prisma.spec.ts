@@ -45,6 +45,26 @@ describe('registro del aislamiento tenant', () => {
 
   it('registra etiquetas NFC y las limita por el predio de su punto', () => {
     expect(COMPANY_ID_MODELS).toContain('NfcTag');
+    expect(COMPANY_ID_MODELS).toContain('SecureTagSession');
+    expect(
+      scopeArgs('SecureTagSession', 'findMany', { where: { step: 'started' } }, 'norte'),
+    ).toEqual({
+      where: { step: 'started', companyId: 'norte' },
+    });
+    expect(
+      addSiteAssignmentFilter(
+        'SecureTagSession',
+        { where: { step: 'started' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { step: 'started' },
+          { checkpoint: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
     expect(scopeArgs('NfcTag', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
       where: { status: 'active', companyId: 'norte' },
     });

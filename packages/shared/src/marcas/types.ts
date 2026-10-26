@@ -10,6 +10,8 @@ export const RECORD_FLAG_TYPES = [
   'location_disabled',
   'qr_on_tagged_point',
   'location_unverifiable',
+  'tag_not_authentic',
+  'replayed_read',
 ] as const;
 export type RecordFlagType = (typeof RECORD_FLAG_TYPES)[number];
 export const recordFlagTypeSchema = z.enum(RECORD_FLAG_TYPES);
@@ -27,6 +29,8 @@ export const FLAG_SEVERITY: Record<RecordFlagType, RecordFlagSeverity> = {
   location_disabled: 'media',
   qr_on_tagged_point: 'media',
   location_unverifiable: 'leve',
+  tag_not_authentic: 'grave',
+  replayed_read: 'grave',
 };
 
 export const SPEED_PROFILES = ['walking', 'bicycle', 'vehicle', 'custom'] as const;
