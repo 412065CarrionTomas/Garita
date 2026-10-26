@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Link } from 'react-router';
 import { APIProvider, Map as GoogleMap, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { haversineMeters } from '@garita/shared';
 import { env } from '@/config/env';
@@ -45,7 +46,17 @@ export function WindowsSection({ detail }: { detail: ShiftDetail }) {
                 {time(window.startsAt)}–{time(window.endsAt)} · {window.recordedCount} de{' '}
                 {window.expectedCount} puntos registrados
               </p>
-              {window.severityLevel && <p className="text-sm">Gravedad: {window.severityLevel}</p>}
+              {window.severityLevel && (
+                <p className="text-sm">⚠ Gravedad: {window.severityLevel}</p>
+              )}
+              {(window.status === 'in_review' || window.severityLevel) && (
+                <Link
+                  to={`/revision/${window.id}`}
+                  className="text-sm text-primary underline focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Revisar ventana
+                </Link>
+              )}
             </div>
           ))
         )}

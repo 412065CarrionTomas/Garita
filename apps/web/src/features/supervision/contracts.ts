@@ -1,5 +1,6 @@
 import { ROUND_WINDOW_STATUSES } from '@garita/shared';
 import { z } from 'zod';
+import type { StatusTone } from '@/components/status-badge';
 
 export const shiftStatusSchema = z.enum([
   'scheduled',
@@ -125,6 +126,18 @@ export const shiftLabels: Record<z.infer<typeof shiftStatusSchema>, string> = {
   unassigned: 'Sin vigilador',
   cancelled: 'Cancelado',
   cancelled_by_suspension: 'Cancelado por suspensión',
+};
+export const shiftTones: Record<keyof typeof shiftLabels, StatusTone> = {
+  scheduled: 'info',
+  in_progress: 'signal',
+  uncovered: 'danger',
+  closed: 'success',
+  auto_closed: 'warning',
+  no_show: 'warning',
+  without_guard: 'warning',
+  unassigned: 'warning',
+  cancelled: 'neutral',
+  cancelled_by_suspension: 'neutral',
 };
 export const windowLabels: Record<(typeof ROUND_WINDOW_STATUSES)[number], string> = {
   pending: 'Pendiente',
