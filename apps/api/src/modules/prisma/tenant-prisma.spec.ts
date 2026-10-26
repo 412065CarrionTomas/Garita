@@ -5,6 +5,7 @@ import {
   COMPANY_ID_MODELS,
   addSiteAssignmentFilter,
   addClientFilter,
+  applySiteAssignmentFilter,
   createTenantPrismaClient,
   INDIRECT_TENANT_MODELS,
   scopeArgs,
@@ -236,6 +237,28 @@ describe('registro del aislamiento tenant', () => {
           { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
         ],
       },
+    });
+  });
+
+  it('aplica el filtro del supervisor sin romper create ni las operaciones por clave única', () => {
+    const user = {
+      userId: 'supervisor-1',
+      companyId: 'norte',
+      role: 'supervisor' as const,
+      status: 'active' as const,
+    };
+    const site = { site: { supervisors: { some: { userId: 'supervisor-1' } } } };
+    const create = { data: { companyId: 'norte', siteId: 'site-1' } };
+    expect(applySiteAssignmentFilter('Checkpoint', 'create', create, user)).toBe(create);
+    for (const operation of ['findUnique', 'update', 'delete', 'upsert'])
+      expect(
+        applySiteAssignmentFilter('Checkpoint', operation, { where: { id: 'cp-1' } }, user),
+      ).toEqual({ where: { id: 'cp-1', AND: [{ id: 'cp-1' }, site] } });
+    expect(
+      applySiteAssignmentFilter('Checkpoint', 'findMany', { where: { status: 'active' } }, user),
+    ).toEqual({ where: { AND: [{ status: 'active' }, site] } });
+    expect(applySiteAssignmentFilter('Checkpoint', 'count', {}, user)).toEqual({
+      where: { AND: [{}, site] },
     });
   });
 
