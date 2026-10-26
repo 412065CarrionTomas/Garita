@@ -1,5 +1,7 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
-import { existsSync } from 'node:fs';
+
+declare const require: (name: string) => { existsSync: (path: string) => boolean };
+const { existsSync } = require('node:fs');
 
 const googleServicesFile = process.env.GOOGLE_SERVICES_JSON ?? './google-services.json';
 if (!existsSync(googleServicesFile))
