@@ -354,7 +354,11 @@ function DecisionDialog({
         <DialogDescription>
           La decisión y su autor quedarán registrados en el historial.
         </DialogDescription>
-        <form onSubmit={submit} className="space-y-4">
+        <form
+          onSubmit={submit}
+          aria-label={reclassify ? 'Reclasificar incidente' : 'Clasificar incidente'}
+          className="space-y-4"
+        >
           <div>
             <Label htmlFor="decision">Clasificación</Label>
             <NativeSelect

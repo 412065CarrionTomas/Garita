@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
@@ -11,6 +11,10 @@ jest.mock('react-router', () => {
     ...actual,
     useParams: () => ({ id: 'incident-1' }),
   };
+});
+
+beforeEach(() => {
+  jest.clearAllMocks();
 });
 
 const incident = {
@@ -94,8 +98,11 @@ it('envía los filtros del listado a la consulta y conserva etiquetas accesibles
 });
 
 it('muestra el detalle del incidente y valida el diálogo de clasificación', async () => {
-  jest.mocked(apiGet).mockResolvedValueOnce(detailIncident);
-  jest.mocked(apiPost).mockResolvedValueOnce({
+  jest.mocked(apiGet).mockImplementation((path: string) => {
+    if (path === '/incidentes/incident-1') return Promise.resolve(detailIncident);
+    return Promise.resolve([]);
+  });
+  jest.mocked(apiPost).mockResolvedValue({
     classificationStatus: 'client_visible',
     decidedAt: '2026-10-20T01:00:00.000Z',
   });
@@ -115,10 +122,11 @@ it('muestra el detalle del incidente y valida el diálogo de clasificación', as
   // Abrir diálogo de clasificación
   fireEvent.click(screen.getByRole('button', { name: 'Clasificar' }));
   expect(screen.getByRole('heading', { name: 'Clasificar incidente' })).toBeInTheDocument();
+  const classifyForm = screen.getByRole('form', { name: 'Clasificar incidente' });
 
   // Enviar vacío produce error de validación
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar clasificación' }));
-  expect(await screen.findByText(/String must contain at least 5 character/)).toBeInTheDocument();
+  fireEvent.submit(classifyForm);
+  expect(await screen.findByText(/>=5 characters/)).toBeInTheDocument();
 
   // Completar comentario y nota
   fireEvent.change(screen.getByLabelText('Comentario interno'), {
@@ -128,17 +136,19 @@ it('muestra el detalle del incidente y valida el diálogo de clasificación', as
     target: { value: 'Portón asegurado por el equipo de seguridad.' },
   });
 
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar clasificación' }));
-  expect(jest.mocked(apiPost)).toHaveBeenCalledWith(
-    '/incidentes/incident-1/clasificar',
-    {
-      classification: 'client_visible',
-      internalComment: 'Candado cortado, se procedió a asegurar el portón.',
-      clientNote: 'Portón asegurado por el equipo de seguridad.',
-    },
-    expect.anything(),
-    expect.anything(),
-  );
+  fireEvent.submit(classifyForm);
+  await waitFor(() => {
+    expect(jest.mocked(apiPost)).toHaveBeenCalledWith(
+      '/incidentes/incident-1/clasificar',
+      {
+        classification: 'client_visible',
+        internalComment: 'Candado cortado, se procedió a asegurar el portón.',
+        clientNote: 'Portón asegurado por el equipo de seguridad.',
+      },
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 });
 
 it('permite reclasificar un incidente indicando motivo obligatorio', async () => {
@@ -158,8 +168,11 @@ it('permite reclasificar un incidente indicando motivo obligatorio', async () =>
     ],
   };
 
-  jest.mocked(apiGet).mockResolvedValueOnce(classifiedIncident);
-  jest.mocked(apiPost).mockResolvedValueOnce({
+  jest.mocked(apiGet).mockImplementation((path: string) => {
+    if (path === '/incidentes/incident-1') return Promise.resolve(classifiedIncident);
+    return Promise.resolve([]);
+  });
+  jest.mocked(apiPost).mockResolvedValue({
     classificationStatus: 'client_visible',
     decidedAt: '2026-10-20T01:30:00.000Z',
   });
@@ -177,28 +190,31 @@ it('permite reclasificar un incidente indicando motivo obligatorio', async () =>
 
   fireEvent.click(screen.getByRole('button', { name: 'Reclasificar' }));
   expect(screen.getByRole('heading', { name: 'Reclasificar incidente' })).toBeInTheDocument();
+  const reclassifyForm = screen.getByRole('form', { name: 'Reclasificar incidente' });
 
   // Intento de envío sin motivo falla
   fireEvent.change(screen.getByLabelText('Comentario interno'), {
     target: { value: 'Se reclasifica a visible tras confirmar rotura.' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar clasificación' }));
-  expect(await screen.findByText(/String must contain at least 5 character/)).toBeInTheDocument();
+  fireEvent.submit(reclassifyForm);
+  expect(await screen.findByText(/>=5 characters/)).toBeInTheDocument();
 
   // Completar motivo válido
   fireEvent.change(screen.getByLabelText('Motivo del cambio'), {
     target: { value: 'El cliente solicitó el informe de la incidencia.' },
   });
 
-  fireEvent.click(screen.getByRole('button', { name: 'Guardar clasificación' }));
-  expect(jest.mocked(apiPost)).toHaveBeenCalledWith(
-    '/incidentes/incident-1/reclasificar',
-    {
-      classification: 'client_visible',
-      internalComment: 'Se reclasifica a visible tras confirmar rotura.',
-      reason: 'El cliente solicitó el informe de la incidencia.',
-    },
-    expect.anything(),
-    expect.anything(),
-  );
+  fireEvent.submit(reclassifyForm);
+  await waitFor(() => {
+    expect(jest.mocked(apiPost)).toHaveBeenCalledWith(
+      '/incidentes/incident-1/reclasificar',
+      {
+        classification: 'client_visible',
+        internalComment: 'Se reclasifica a visible tras confirmar rotura.',
+        reason: 'El cliente solicitó el informe de la incidencia.',
+      },
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 });
