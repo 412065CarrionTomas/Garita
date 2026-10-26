@@ -12,6 +12,7 @@ import {
   computeRoundWindows,
   findUncoveredWindows,
   windowsForShift,
+  buildShiftNotification,
   type ShiftInput,
 } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +20,7 @@ import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
 import { isShiftOverlapViolation } from './shift-overlap-error';
+import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
 
 interface ShiftListQuery {
   predio?: string;
@@ -35,6 +37,7 @@ export class ShiftsService {
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(NOTIFICATIONS_PORT) private readonly notifications: NotificationsPort,
   ) {}
 
   async list(query: ShiftListQuery) {
@@ -99,10 +102,8 @@ export class ShiftsService {
         message: 'El vigilador ya tiene un turno superpuesto',
         shift: conflict,
       });
-    const serviceDate = localDate(
-      new Date(input.startsAt),
-      (await this.site(input.siteId)).company.timezone,
-    );
+    const timezone = (await this.site(input.siteId)).company.timezone;
+    const serviceDate = localDate(new Date(input.startsAt), timezone);
     const status = input.guardId ? 'scheduled' : 'unassigned';
     try {
       const shift = await this.prisma.tenantPrisma.shift.create({
@@ -127,6 +128,15 @@ export class ShiftsService {
         include: this.shiftInclude(),
       });
       this.logger.log({ action: 'shift.created', shiftId: shift.id, userId: user.userId });
+      if (input.guardId)
+        await this.notifyGuard(
+          user.companyId,
+          input.guardId,
+          'shift_assigned',
+          shift.id,
+          shift.startsAt,
+          timezone,
+        );
       return await this.withWarnings(shift, validation);
     } catch (error) {
       await this.throwOverlapOrRethrow(error, input.guardId, input.startsAt, input.endsAt);
@@ -136,6 +146,10 @@ export class ShiftsService {
   async update(id: string, input: ShiftInput, user: AuthenticatedUser) {
     await this.resources.findOwnedOrThrow('Shift', id);
     const shift = await this.prisma.tenantPrisma.shift.findUniqueOrThrow({ where: { id } });
+    const previousAssignment = await this.prisma.tenantPrisma.shiftAssignment.findFirst({
+      where: { shiftId: id, isCurrent: true },
+      select: { guardId: true },
+    });
     if (shift.status === 'cancelled') throw new ConflictException('El turno está cancelado');
     if (shift.startsAt <= this.clock.now())
       throw new ConflictException({
@@ -152,10 +166,8 @@ export class ShiftsService {
         message: 'El vigilador ya tiene un turno superpuesto',
         shift: conflict,
       });
-    const serviceDate = localDate(
-      new Date(input.startsAt),
-      (await this.site(input.siteId)).company.timezone,
-    );
+    const timezone = (await this.site(input.siteId)).company.timezone;
+    const serviceDate = localDate(new Date(input.startsAt), timezone);
     try {
       const updated = await this.prisma.tenantPrisma.$transaction(async (tx) => {
         await tx.shiftAssignment.updateMany({
@@ -185,6 +197,38 @@ export class ShiftsService {
         });
       });
       this.logger.log({ action: 'shift.updated', shiftId: id, userId: user.userId });
+      if (previousAssignment?.guardId && previousAssignment.guardId !== input.guardId)
+        await this.notifyGuard(
+          user.companyId,
+          previousAssignment.guardId,
+          'shift_removed',
+          id,
+          shift.startsAt,
+          timezone,
+        );
+      if (input.guardId && input.guardId !== previousAssignment?.guardId)
+        await this.notifyGuard(
+          user.companyId,
+          input.guardId,
+          'shift_assigned',
+          id,
+          updated.startsAt,
+          timezone,
+        );
+      else if (
+        input.guardId &&
+        (shift.startsAt.getTime() !== updated.startsAt.getTime() ||
+          shift.endsAt.getTime() !== updated.endsAt.getTime())
+      )
+        await this.notifyGuard(
+          user.companyId,
+          input.guardId,
+          'shift_changed',
+          id,
+          updated.startsAt,
+          timezone,
+        );
+      // TODO(HU-44): use the reassignment event when the dedicated flow is introduced.
       return await this.withWarnings(updated, validation);
     } catch (error) {
       await this.throwOverlapOrRethrow(error, input.guardId, input.startsAt, input.endsAt);
@@ -194,6 +238,10 @@ export class ShiftsService {
   async cancel(id: string, user: AuthenticatedUser) {
     await this.resources.findOwnedOrThrow('Shift', id);
     const shift = await this.prisma.tenantPrisma.shift.findUniqueOrThrow({ where: { id } });
+    const assignment = await this.prisma.tenantPrisma.shiftAssignment.findFirst({
+      where: { shiftId: id, isCurrent: true },
+      select: { guardId: true },
+    });
     if (shift.status === 'cancelled') throw new ConflictException('El turno ya está cancelado');
     if (shift.startsAt <= this.clock.now())
       throw new ConflictException({
@@ -216,6 +264,17 @@ export class ShiftsService {
       });
     });
     this.logger.log({ action: 'shift.cancelled', shiftId: id, userId: user.userId });
+    if (assignment?.guardId) {
+      const timezone = (await this.site(shift.siteId)).company.timezone;
+      await this.notifyGuard(
+        user.companyId,
+        assignment.guardId,
+        'shift_cancelled',
+        id,
+        shift.startsAt,
+        timezone,
+      );
+    }
     return result;
   }
 
@@ -419,6 +478,29 @@ export class ShiftsService {
       });
     }
     throw error;
+  }
+
+  private async notifyGuard(
+    companyId: string,
+    guardId: string,
+    kind: 'shift_assigned' | 'shift_changed' | 'shift_removed' | 'shift_cancelled',
+    shiftId: string,
+    startsAt: Date,
+    timezone: string,
+  ) {
+    const notification = buildShiftNotification({ kind, shiftId, startsAt, timezone });
+    try {
+      await this.notifications.notifyUsers({
+        companyId,
+        userIds: [guardId],
+        kind,
+        payload: notification.payload,
+        priority: notification.priority,
+      });
+      this.logger.log({ event: 'shift_notification_enqueued', shiftId, guardId, kind });
+    } catch (error) {
+      this.logger.error({ event: 'shift_notification_failed', shiftId, guardId, kind, error });
+    }
   }
 }
 
