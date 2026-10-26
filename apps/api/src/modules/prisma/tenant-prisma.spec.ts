@@ -96,6 +96,21 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('InvalidScanAttempt');
     expect(COMPANY_ID_MODELS).toContain('RecordFlag');
     expect(COMPANY_ID_MODELS).toContain('Incident');
+    expect(COMPANY_ID_MODELS).toContain('IncidentClassification');
+    expect(
+      addSiteAssignmentFilter(
+        'IncidentClassification',
+        { where: { incidentId: 'incident-1' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { incidentId: 'incident-1' },
+          { incident: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('IncidentPhoto');
     const user = {
       userId: 'supervisor-1',
