@@ -7,7 +7,7 @@ describe('CloudinaryPhotoStorage', () => {
   const createConfig = (vars: Partial<Env> = {}) =>
     ({
       get: jest.fn((key: string) => {
-        const envs: Record<string, string | undefined> = {
+        const envs: Record<string, unknown> = {
           CLOUDINARY_CLOUD_NAME: 'test-cloud',
           CLOUDINARY_API_KEY: 'test-api-key',
           CLOUDINARY_API_SECRET: 'test-api-secret',
