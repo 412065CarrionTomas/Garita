@@ -10,7 +10,7 @@ describe('ShiftGuardLeaveEffects', () => {
       tenantPrisma: { shift: { findUnique: findShift }, user: { findUnique: findGuard } },
     } as never,
     { notifyUsers } as never,
-    { sendShiftClosed } as never,
+    { sendShiftClosed },
   );
 
   beforeEach(() => {

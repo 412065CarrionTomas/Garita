@@ -17,12 +17,12 @@ export class ShiftGuardLeaveEffects extends NoopShiftExecutionEffects {
     super();
   }
 
-  async notifyGuardToLeave(
-    _transaction: unknown,
-    shiftId: string,
-    guardId: string | null,
+  override async notifyGuardToLeave(
+    _transaction?: unknown,
+    shiftId?: string,
+    guardId?: string | null,
   ): Promise<void> {
-    if (!guardId) return;
+    if (!shiftId || !guardId) return;
     const shift = await this.prisma.tenantPrisma.shift.findUnique({
       where: { id: shiftId },
       select: {
