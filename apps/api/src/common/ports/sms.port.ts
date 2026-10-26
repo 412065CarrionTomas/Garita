@@ -15,7 +15,7 @@ export interface SmsPort {
 export class NoopSms implements SmsPort {
   private readonly logger = new Logger(NoopSms.name);
 
-  async sendShiftClosed(input: {
+  sendShiftClosed(input: {
     phone: string;
     shiftId: string;
     guardId: string;
@@ -27,5 +27,6 @@ export class NoopSms implements SmsPort {
       shiftId: input.shiftId,
       guardId: input.guardId,
     });
+    return Promise.resolve();
   }
 }
