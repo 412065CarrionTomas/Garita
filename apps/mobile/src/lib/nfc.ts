@@ -47,8 +47,12 @@ function readTag(tag: unknown, nfc: typeof NfcModule): NfcRead {
   );
   let sdmMessage: string | undefined;
   if (uri) {
-    const decoded = nfc.Ndef.uri.decodePayload(new Uint8Array(uri.payload));
-    if (decoded.startsWith('garita:nfc?') && decoded.length <= 512) sdmMessage = decoded;
+    try {
+      const decoded = nfc.Ndef.uri.decodePayload(new Uint8Array(uri.payload));
+      if (decoded.startsWith('garita:nfc?') && decoded.length <= 512) sdmMessage = decoded;
+    } catch {
+      // Ignora payload no legible como URI
+    }
   }
   return { uid: parsed.id, sdmMessage };
 }
