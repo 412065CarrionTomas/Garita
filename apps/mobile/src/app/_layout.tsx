@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '@/features/auth/auth-context';
+import { NotificationNavigation } from '@/features/notificaciones/notification-navigation';
 import { ThemeProvider, useAppFonts, useStackOptions, useTheme } from '@/ui';
 
 void SplashScreen.preventAutoHideAsync();
@@ -27,6 +28,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <NotificationNavigation />
         <ThemedStack />
       </AuthProvider>
     </ThemeProvider>

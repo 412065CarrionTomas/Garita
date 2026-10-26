@@ -12,10 +12,8 @@ import {
 } from './shift-execution.service';
 import { PrismaSyncDeadline } from './prisma-sync-deadline';
 import { ShiftAutoCloseProcessor } from './shift-auto-close.processor';
-import {
-  NoopShiftExecutionEffects,
-  SHIFT_EXECUTION_EFFECTS_PORT,
-} from './shift-execution-effects.port';
+import { SHIFT_EXECUTION_EFFECTS_PORT } from './shift-execution-effects.port';
+import { ShiftGuardLeaveEffects } from './shift-guard-leave.effects';
 
 @Module({
   imports: [
@@ -29,7 +27,7 @@ import {
   providers: [
     ShiftExecutionService,
     ShiftAutoCloseProcessor,
-    { provide: SHIFT_EXECUTION_EFFECTS_PORT, useClass: NoopShiftExecutionEffects },
+    { provide: SHIFT_EXECUTION_EFFECTS_PORT, useClass: ShiftGuardLeaveEffects },
     { provide: SYNC_DEADLINE_PORT, useClass: PrismaSyncDeadline },
   ],
   exports: [ShiftExecutionService, SYNC_DEADLINE_PORT],
