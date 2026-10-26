@@ -1,4 +1,11 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
+import { existsSync } from 'node:fs';
+
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON ?? './google-services.json';
+if (!existsSync(googleServicesFile))
+  process.emitWarning(
+    'No se encontró google-services.json: el prebuild continúa sin FCM en Android.',
+  );
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -13,7 +20,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     bundleIdentifier: 'com.garita.app',
     supportsTablet: false,
+    entitlements: { 'aps-environment': 'development' },
     infoPlist: {
+      UIBackgroundModes: ['remote-notification'],
       NSLocationWhenInUseUsageDescription:
         'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',
       NSCameraUsageDescription:
@@ -22,6 +31,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: 'com.garita.app',
+    ...(existsSync(googleServicesFile) ? { googleServicesFile } : {}),
     adaptiveIcon: {
       backgroundColor: '#0F2347',
       foregroundImage: './assets/images/android-icon-foreground.png',
@@ -41,6 +51,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-audio',
     'expo-sqlite',
     'expo-secure-store',
+    'expo-notifications',
     ['./modules/garita-native/app.plugin.js', {}],
     [
       'expo-location',
