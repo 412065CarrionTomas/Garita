@@ -67,4 +67,37 @@ describe('NotificationsProcessor', () => {
     await expect(processor.process(invalidJob)).rejects.toThrow();
     expect(send).not.toHaveBeenCalled();
   });
+
+  it('sends a private high-priority shift notice only to app devices', async () => {
+    const shiftJob = {
+      data: {
+        companyId: 'company-1',
+        userIds: ['guard-1'],
+        priority: 'high',
+        payload: {
+          kind: 'shift_assigned',
+          day: 'sábado',
+          time: '21:00',
+          body: 'Te asignaron un turno del sábado a las 21:00',
+          link: '/turno/shift-1',
+        },
+      },
+    } as Parameters<typeof processor.process>[0];
+    await processor.process(shiftJob);
+    expect(findDevices).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ kind: 'app' }) }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notification: {
+          title: 'Turno asignado',
+          body: 'Te asignaron un turno del sábado a las 21:00',
+        },
+        data: expect.objectContaining({ shiftId: 'shift-1' }),
+        android: { priority: 'high', notification: { channelId: 'turnos' } },
+        apns: { headers: { 'apns-priority': '10' } },
+      }),
+    );
+    expect(JSON.stringify(send.mock.calls[0])).not.toMatch(/Predio|Calle|Pedro/);
+  });
 });
