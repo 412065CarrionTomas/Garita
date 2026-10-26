@@ -5,10 +5,15 @@ import { useAudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import * as Network from 'expo-network';
 import { z } from 'zod';
-import { nfcConfigurationSitesSchema, normalizeNfcUid } from '@garita/shared';
+import {
+  nfcConfigurationSitesSchema,
+  normalizeNfcUid,
+  secureTagStepResponseSchema,
+} from '@garita/shared';
 import { useAuth } from '@/features/auth/auth-context';
 import { ApiError, apiDelete, apiGet, apiRequest } from '@/lib/api-client';
-import { cancelNfcRead, nfcAvailability, openNfcSettings, readFactoryUid } from '@/lib/nfc';
+import { cancelNfcRead, nfcAvailability, openNfcSettings, readNfcTag } from '@/lib/nfc';
+import { NotSecureNfcTag, withSecureNfcTag } from '@/lib/nfc-secure';
 
 const checkpointListSchema = z.array(
   z.looseObject({
@@ -127,9 +132,46 @@ export default function ConfigurationHome() {
     setBusyId(point.id);
     setMessage('Acercá la etiqueta al celular…');
     try {
-      await associate(point, await readFactoryUid());
-    } catch {
-      setMessage('No se pudo leer la etiqueta. Volvé a intentarlo.');
+      const sessionId = await withSecureNfcTag(async (tag) => {
+        setMessage('Etiqueta segura detectada. Configurando…');
+        let step = await apiRequest(
+          'POST',
+          `/puntos/${encodeURIComponent(point.id)}/etiqueta-segura/configuracion`,
+          secureTagStepResponseSchema,
+          { uid: tag.uid, version: tag.version },
+        );
+        for (let i = 0; step.apdu && i < 12; i++) {
+          const response = await tag.transceive(step.apdu);
+          step = await apiRequest(
+            'POST',
+            `/etiquetas-seguras/configuracion/${encodeURIComponent(step.sessionId)}/comando`,
+            secureTagStepResponseSchema,
+            { response },
+          );
+          setMessage(`Configurando etiqueta segura: paso ${i + 1}`);
+        }
+        if (!step.complete) throw new Error('Configuración incompleta');
+        return step.sessionId;
+      });
+      setMessage('Configuración enviada. Acercá la etiqueta para la lectura de prueba.');
+      const proof = await readNfcTag();
+      if (!proof.sdmMessage) throw new Error('Lectura de prueba sin SUN');
+      await apiRequest(
+        'POST',
+        `/etiquetas-seguras/configuracion/${encodeURIComponent(sessionId)}/confirmar`,
+        resultSchema,
+        { sdmMessage: proof.sdmMessage },
+      );
+      await loadPoints(siteId);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      player.seekTo(0);
+      player.play();
+      setMessage(`Etiqueta segura asociada a ${point.name}`);
+    } catch (error) {
+      if (error instanceof NotSecureNfcTag) await associate(point, error.uid);
+      else if (error instanceof ApiError && error.status === 422)
+        setMessage('Etiqueta no disponible');
+      else setMessage('La configuración no se completó. Volvé a acercar el celular');
     } finally {
       setBusyId('');
       await cancelNfcRead();

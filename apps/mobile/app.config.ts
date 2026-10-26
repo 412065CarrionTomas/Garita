@@ -14,6 +14,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: 'com.garita.app',
     supportsTablet: false,
     infoPlist: {
+      'com.apple.developer.nfc.readersession.iso7816.select-identifiers': ['D2760000850101'],
       NSLocationWhenInUseUsageDescription:
         'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',
       NSCameraUsageDescription:
