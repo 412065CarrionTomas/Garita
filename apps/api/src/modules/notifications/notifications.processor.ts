@@ -15,6 +15,7 @@ const notificationJobSchema = z
     companyId: z.string().min(1),
     userIds: z.array(z.string().min(1)),
     payload: notificationPayloadSchema,
+    priority: z.enum(['normal', 'high']).optional(),
   })
   .strict();
 type NotificationJob = z.infer<typeof notificationJobSchema>;
@@ -28,6 +29,8 @@ const TITLES: Record<string, string> = {
   shift_removed: 'Turno eliminado',
   shift_cancelled: 'Turno cancelado',
   shift_closed_site_removed: 'Turno cerrado',
+  shift_reassigned_from_you: 'Turno reasignado',
+  shift_schedule_summary: 'Turnos programados',
   round_missed: 'Ronda incumplida',
   shift_unsynced: 'Turno sin sincronizar',
   shift_not_started: 'Turno no iniciado',
@@ -57,7 +60,11 @@ export class NotificationsProcessor extends WorkerHost {
       select: { id: true },
     });
     const devices = await this.prisma.systemPrisma.notificationDevice.findMany({
-      where: { companyId: input.companyId, userId: { in: activeUsers.map(({ id }) => id) } },
+      where: {
+        companyId: input.companyId,
+        userId: { in: activeUsers.map(({ id }) => id) },
+        ...(payload.kind.startsWith('shift_') ? { kind: 'app' as const } : {}),
+      },
     });
     for (let start = 0; start < devices.length; start += 500) {
       const batch = devices.slice(start, start + 500);
@@ -65,6 +72,7 @@ export class NotificationsProcessor extends WorkerHost {
         this.message(
           batch.map(({ token }) => token),
           payload,
+          input.priority,
         ),
       );
       const invalid: string[] = [];
@@ -96,8 +104,12 @@ export class NotificationsProcessor extends WorkerHost {
     }
   }
 
-  private message(tokens: string[], payload: NotificationJob['payload']): MulticastMessage {
-    const body = payload.siteName ?? '';
+  private message(
+    tokens: string[],
+    payload: NotificationJob['payload'],
+    priority: 'normal' | 'high' = 'normal',
+  ): MulticastMessage {
+    const body = payload.body ?? payload.siteName ?? '';
     const appUrl = this.config.get('WEB_APP_URL', { infer: true });
     const link = new URL(payload.link, appUrl);
     if (link.origin !== new URL(appUrl).origin || link.username || link.password)
@@ -111,8 +123,17 @@ export class NotificationsProcessor extends WorkerHost {
         ...(payload.siteName ? { siteName: payload.siteName } : {}),
         ...(payload.day ? { day: payload.day } : {}),
         ...(payload.time ? { time: payload.time } : {}),
+        ...(payload.body ? { body: payload.body } : {}),
+        ...(/^\/turno\/([\w-]+)$/.exec(payload.link)?.[1]
+          ? { shiftId: payload.link.slice('/turno/'.length) }
+          : {}),
       },
       webpush: { fcmOptions: { link: link.toString() } },
+      android: {
+        priority: priority === 'high' ? 'high' : 'normal',
+        notification: { channelId: 'turnos' },
+      },
+      apns: { headers: { 'apns-priority': priority === 'high' ? '10' : '5' } },
     };
   }
 }

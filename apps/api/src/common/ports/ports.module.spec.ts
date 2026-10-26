@@ -3,6 +3,7 @@ import { NoopRealtime } from './realtime.port';
 import type { RealtimePort } from './realtime.port';
 import { SocketRealtimeService } from '../../modules/realtime/socket-realtime.service';
 import { NotificationsService } from '../../modules/notifications/notifications.service';
+import { NoopSms } from './sms.port';
 
 describe('RealtimePort provider', () => {
   it('implements the typed realtime port without throwing before a gateway connects', async () => {
@@ -42,5 +43,19 @@ describe('NotificationsPort provider', () => {
       }),
     ).resolves.toBeUndefined();
     expect(queue.add).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SmsPort provider', () => {
+  it('keeps the noop sms implementation harmless without logging the phone number', async () => {
+    const sms = new NoopSms();
+    await expect(
+      sms.sendShiftClosed({
+        phone: '+541100000000',
+        shiftId: 'shift-1',
+        guardId: 'guard-1',
+        message: 'Tu turno terminó',
+      }),
+    ).resolves.toBeUndefined();
   });
 });

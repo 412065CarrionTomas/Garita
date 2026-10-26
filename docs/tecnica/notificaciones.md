@@ -30,3 +30,22 @@ La PWA principal usa el service worker de `vite-plugin-pwa`; el worker FCM se re
 2. Agregar su título en `TITLES` de `notifications.processor.ts`.
 3. El emisor usa `NOTIFICATIONS_PORT` y entrega un `notificationPayloadSchema` válido con link al detalle.
 4. Mantener el payload limitado al tipo, predio, fecha/hora necesarias y link; no incluir nombres ni ubicaciones.
+
+## App del vigilador (HU-45)
+
+En Android, al iniciar sesión como vigilador la app solicita permiso, obtiene el token FCM nativo con `expo-notifications.getDevicePushTokenAsync()` y lo registra en `POST /api/v1/dispositivos` con `kind: app` y `platform: android`. Al cerrar sesión elimina su registro con `DELETE /api/v1/dispositivos/:id` antes de cerrar Firebase Auth; si está sin conexión, informa que debe conectarse para poder quitar el celular. Al desactivar al usuario, la API borra sus dispositivos y el worker vuelve a comprobar su estado antes de enviar. Si se rechaza el permiso, la app explica cómo activarlo en Ajustes.
+
+`ShiftsService` emite después de guardar un turno nuevo, modificar su horario, quitar al vigilador o cancelarlo. `SitesService` dispara el efecto `notifyGuardToLeave` después del commit que cierra un turno en curso por baja del predio. Este efecto también llama a `SMS_PORT`; `NoopSms` registra turno y destinatario sin el número mientras HU-24 no provea el envío real. `buildShiftNotification` mantiene el contenido limitado al tipo de cambio, día y hora. No se incorpora el nombre ni la dirección del predio. El worker entrega los eventos de turno solo a dispositivos `app`, con Android `channelId: turnos` y prioridad FCM alta para reasignaciones próximas, además de `apns-priority` preparado para iOS. La lista «Mis turnos» consulta de nuevo la API al abrirse y sigue siendo la fuente de verdad.
+
+`buildShiftNotification` incluye los casos de reasignación y resumen de programación para HU-44 y HU-32. **TODO(HU-44):** conectar el emisor de reasignación. **TODO(HU-32):** conectar el emisor del resumen semanal.
+
+### Configuración de Android con EAS
+
+1. Descargar `google-services.json` desde Firebase para `com.garita.app` y verificar que corresponde al mismo proyecto usado por la API.
+2. Cargarlo en el entorno de build de EAS como archivo secreto y asignar su ruta a `GOOGLE_SERVICES_JSON`; en desarrollo local, colocarlo en `apps/mobile/google-services.json` (ignorado por Git).
+3. Generar el cliente nativo con Expo prebuild y probar en un Android físico. Si falta el archivo, prebuild emite un aviso y continúa sin FCM.
+4. Verificar permiso concedido y rechazado, llegada con el celular bloqueado, apertura del turno y baja del token al cerrar sesión. Repetir con un turno cancelado y comprobar que se abre «Mis turnos».
+
+### iOS pendiente de decisión
+
+`app.config.ts` incluye `UIBackgroundModes: remote-notification` y el entitlement `aps-environment`. En iOS, `getDevicePushTokenAsync()` devuelve un token APNs, que `firebase-admin` FCM no acepta. Por eso la app no registra ese token. Para habilitar iPhone se debe elegir **una** integración: obtener un token FCM con `@react-native-firebase/messaging` y su configuración nativa, o agregar un emisor APNs separado. La prueba manual en iPhone queda pendiente de esa decisión y de una build firmada. El SMS real también queda pendiente de HU-24.
