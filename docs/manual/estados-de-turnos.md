@@ -12,6 +12,7 @@ En **En vivo** ves los turnos de tus predios. Podés filtrar por estado o predio
 | No presentado           | Terminó el horario sin que nadie lo iniciara.                                                    |
 | Sin vigilador           | No hay un vigilador vigente asignado.                                                            |
 | Cancelado               | Se canceló antes de empezar.                                                                     |
+| Cancelado por suspensión | Caía durante la suspensión de la cuenta (HU-43). Sus ventanas no se evalúan.                     |
 
 El segundo estado muestra la **sincronización**: **Al día**, **Sincronizando (quedan N eventos)**, **Sin contacto desde HH:MM**, **Esperando sincronización hasta HH:MM**, **Sin sincronizar** o **Completo**. “Sin contacto” solo significa que el servidor no recibió avisos recientes; no confirma que el celular esté sin conexión, porque la app puede quedar suspendida al bloquear la pantalla.
 
