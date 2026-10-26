@@ -42,12 +42,12 @@ describe('EV2 relay vectors', () => {
       FACTORY_KEY,
     );
     expect(command).toBe('905F0000190261B6D97903566E84C3AE5274467E89EAD799B7C1A0EF7A0400');
-    expect(() =>
-      checkFullResponse(Buffer.from('57BFF87B1241E93D9100', 'hex'), 1, state, FACTORY_KEY),
-    ).not.toThrow();
-    expect(() =>
-      checkFullResponse(Buffer.from('57BFF87B1241E93C9100', 'hex'), 1, state, FACTORY_KEY),
-    ).toThrow();
+    expect(() => {
+      checkFullResponse(Buffer.from('57BFF87B1241E93D9100', 'hex'), 1, state, FACTORY_KEY);
+    }).not.toThrow();
+    expect(() => {
+      checkFullResponse(Buffer.from('57BFF87B1241E93C9100', 'hex'), 1, state, FACTORY_KEY);
+    }).toThrow();
   });
 
   it('places encrypted PICCData and CMAC placeholders at non-overlapping NDEF offsets', () => {

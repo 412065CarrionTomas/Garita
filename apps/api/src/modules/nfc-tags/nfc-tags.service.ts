@@ -30,7 +30,7 @@ export class NfcTagsService {
     message: string | null,
   ): Promise<'valid' | 'invalid_signature' | 'missing' | 'replayed'> {
     const tag = await this.prisma.tenantPrisma.nfcTag.findUnique({ where: { id: tagId } });
-    if (!tag || tag.kind !== 'secure') return 'missing';
+    if (tag?.kind !== 'secure') return 'missing';
     const masterHex = this.config.get('NFC_MASTER_KEY', { infer: true });
     const currentVersion = this.config.get('NFC_MASTER_KEY_VERSION', { infer: true });
     if (!masterHex || currentVersion === undefined || currentVersion !== tag.masterKeyVersion) {

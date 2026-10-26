@@ -25,7 +25,7 @@ export class NotSecureNfcTag extends Error {
 }
 
 export async function withSecureNfcTag<T>(
-  useTag: (tag: {
+  action: (tag: {
     uid: string;
     version: string;
     transceive(apdu: string): Promise<string>;
@@ -65,7 +65,7 @@ export async function withSecureNfcTag<T>(
     const version = versionSchema.parse(parts.join(''));
     if (!version.startsWith('0404') || version.slice(14, 18) !== '0404')
       throw new NotSecureNfcTag(uid);
-    return await useTag({ uid, version, transceive });
+    return await action({ uid, version, transceive });
   } finally {
     await nfc.default.cancelTechnologyRequest().catch(() => undefined);
   }
