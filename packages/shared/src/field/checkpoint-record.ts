@@ -36,6 +36,7 @@ export const checkpointRecordRequestSchema = z.object({
   method: z.enum(CHECKPOINT_RECORD_METHODS),
   /** Raw content read: the QR payload or the NFC uid. The server verifies it again. */
   scannedValue: z.string().min(1).max(512),
+  sdmMessage: z.string().min(1).max(512).optional(),
   occurredAtDevice: isoDateTime,
   clock: deviceClockSchema.optional(),
   location: fieldLocationSchema,
