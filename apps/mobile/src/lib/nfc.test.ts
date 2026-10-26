@@ -28,8 +28,7 @@ jest.mock('react-native-nfc-manager', () => ({
   Ndef: {
     uri: {
       decodePayload: jest.fn((bytes: Uint8Array) => {
-        // En registros NDEF URI el byte 0 es el código de prefijo (0x00 = sin prefijo o texto plano)
-        return Buffer.from(bytes.subarray(1)).toString('utf8');
+        return new TextDecoder().decode(bytes.subarray(1));
       }),
     },
   },
@@ -78,9 +77,7 @@ describe('lectura del UID NFC', () => {
   it('extrae el mensaje dinámico SUN si la etiqueta tiene NDEF URI', async () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     const sunUri = 'garita:nfc?e=EF963FF7828658A599F3041510671E88&c=94EED9EE65337086';
-    const payloadBytes = Array.from(
-      Buffer.concat([Buffer.from([0x00]), Buffer.from(sunUri, 'utf8')]),
-    );
+    const payloadBytes = [0x00, ...Array.from(new TextEncoder().encode(sunUri))];
     getTag.mockResolvedValueOnce({
       id: '04DE5F1EACC040',
       ndefMessage: [{ type: 'U', payload: payloadBytes }],

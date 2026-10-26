@@ -13,6 +13,7 @@ jest.mock('@/lib/nfc', () => ({
   nfcAvailability: jest.fn(),
   cancelNfcRead: jest.fn(async () => undefined),
   readFactoryUid: jest.fn(async () => '04AABBCC'),
+  readNfcTag: jest.fn(async () => ({ uid: '04AABBCC' })),
 }));
 
 const mockBack = jest.fn();
