@@ -1599,7 +1599,7 @@ describe('Aplicación (e2e)', () => {
         payload: expect.objectContaining({
           kind: 'shift_assigned',
           link: `/turno/${createdBody.id}`,
-        }),
+        }) as unknown,
       }),
     );
     expect(createdBody.status).toBe('scheduled');
