@@ -20,11 +20,11 @@ function double(block: Buffer): Buffer {
   const shifted = Buffer.alloc(16);
   let carry = 0;
   for (let i = 15; i >= 0; i--) {
-    const byte = block[i];
+    const byte = block[i]!;
     shifted[i] = ((byte << 1) & 0xff) | carry;
     carry = byte >>> 7;
   }
-  if (carry) shifted[15] ^= 0x87;
+  if (carry) shifted[15] = (shifted[15] ?? 0) ^ 0x87;
   return shifted;
 }
 
@@ -37,24 +37,24 @@ export function aesCmac(key: Buffer, data: Buffer): Buffer {
   const final = data.subarray((blocks - 1) * 16);
   final.copy(last);
   if (final.length === 16) {
-    for (let i = 0; i < 16; i++) last[i] ^= k1[i];
+    for (let i = 0; i < 16; i++) last[i] = (last[i] ?? 0) ^ (k1[i] ?? 0);
   } else {
     last[final.length] = 0x80;
-    for (let i = 0; i < 16; i++) last[i] ^= k2[i];
+    for (let i = 0; i < 16; i++) last[i] = (last[i] ?? 0) ^ (k2[i] ?? 0);
   }
-  let state = ZERO;
+  let state: Buffer = ZERO;
   for (let block = 0; block < blocks - 1; block++) {
     const input = Buffer.from(data.subarray(block * 16, (block + 1) * 16));
-    for (let i = 0; i < 16; i++) input[i] ^= state[i];
-    state = aesBlock(key, input);
+    for (let i = 0; i < 16; i++) input[i] = (input[i] ?? 0) ^ (state[i] ?? 0);
+    state = Buffer.from(aesBlock(key, input));
   }
-  for (let i = 0; i < 16; i++) last[i] ^= state[i];
+  for (let i = 0; i < 16; i++) last[i] = (last[i] ?? 0) ^ (state[i] ?? 0);
   return aesBlock(key, last);
 }
 
 /** NT4H2421Gx section 9.1.3: bytes 1,3,...,15 of the full CMAC. */
 export function truncateMac(mac: Buffer): Buffer {
-  return Buffer.from(Array.from({ length: 8 }, (_, i) => mac[i * 2 + 1]));
+  return Buffer.from(Array.from({ length: 8 }, (_, i) => mac[i * 2 + 1] ?? 0));
 }
 
 /** NIST SP 800-108 counter mode, CMAC PRF; UID, key slot and version bind each key. */
@@ -87,7 +87,10 @@ export function verifySun(
   if (!message) return { result: 'missing' };
   const match = /^garita:nfc\?e=([0-9A-Fa-f]{32})&c=([0-9A-Fa-f]{16})$/.exec(message);
   if (!match) return { result: 'invalid_signature' };
-  const picc = aesCbc(metaKey, ZERO, Buffer.from(match[1], 'hex'), true);
+  const rawPicc = match[1];
+  const rawMac = match[2];
+  if (!rawPicc || !rawMac) return { result: 'invalid_signature' };
+  const picc = aesCbc(metaKey, ZERO, Buffer.from(rawPicc, 'hex'), true);
   if (picc[0] !== 0xc7 || picc.subarray(1, 8).toString('hex').toUpperCase() !== uid)
     return { result: 'invalid_signature' };
   const counterBytes = picc.subarray(8, 11);
@@ -97,7 +100,7 @@ export function verifySun(
     Buffer.concat([Buffer.from('3CC300010080', 'hex'), picc.subarray(1, 11)]),
   );
   const expected = truncateMac(aesCmac(sessionKey, Buffer.alloc(0)));
-  const received = Buffer.from(match[2], 'hex');
+  const received = Buffer.from(rawMac, 'hex');
   if (!timingSafeEqual(expected, received)) return { result: 'invalid_signature' };
   if (lastCounter !== null && counter <= lastCounter) return { result: 'replayed', counter };
   return { result: 'valid', counter };

@@ -54,7 +54,7 @@ export function sessionKeys(key: Buffer, state: Ev2State): { enc: Buffer; mac: B
   const a = Buffer.from(state.rndA, 'hex');
   const b = Buffer.from(state.rndB, 'hex');
   const mixed = Buffer.alloc(6);
-  for (let i = 0; i < 6; i++) mixed[i] = a[2 + i] ^ b[i];
+  for (let i = 0; i < 6; i++) mixed[i] = (a[2 + i] ?? 0) ^ (b[i] ?? 0);
   const body = Buffer.concat([a.subarray(0, 2), mixed, b.subarray(6), a.subarray(8)]);
   return {
     enc: aesCmac(key, Buffer.concat([Buffer.from('A55A00010080', 'hex'), body])),

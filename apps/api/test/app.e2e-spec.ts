@@ -2257,6 +2257,7 @@ describe('Aplicación (e2e)', () => {
       assignmentId: assignment.id,
       userId: northGuardId,
       companyId: 'norte-company',
+      scheduledEnd: shift.endsAt,
     });
     const batchRecordId = randomUUID();
     await client

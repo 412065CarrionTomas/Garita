@@ -190,7 +190,9 @@ export class SecureTagsService {
           step = 'ready';
           command = null;
         } else {
-          step = STEPS[index + 1];
+          const nextStep = STEPS[index + 1];
+          if (!nextStep) throw new Error('Paso no válido');
+          step = nextStep;
           command = this.nextCommand(step, index + 1, state as Ev2State, authKey, session.tagUid);
         }
       }
