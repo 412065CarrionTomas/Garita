@@ -85,7 +85,7 @@ describe('NotificationsProcessor', () => {
     } as Parameters<typeof processor.process>[0];
     await processor.process(shiftJob);
     expect(findDevices).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ kind: 'app' }) }),
+      expect.objectContaining({ where: expect.objectContaining({ kind: 'app' }) as unknown }),
     );
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -93,7 +93,7 @@ describe('NotificationsProcessor', () => {
           title: 'Turno asignado',
           body: 'Te asignaron un turno del sábado a las 21:00',
         },
-        data: expect.objectContaining({ shiftId: 'shift-1' }),
+        data: expect.objectContaining({ shiftId: 'shift-1' }) as unknown,
         android: { priority: 'high', notification: { channelId: 'turnos' } },
         apns: { headers: { 'apns-priority': '10' } },
       }),

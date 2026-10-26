@@ -124,7 +124,7 @@ export class NotificationsProcessor extends WorkerHost {
         ...(payload.day ? { day: payload.day } : {}),
         ...(payload.time ? { time: payload.time } : {}),
         ...(payload.body ? { body: payload.body } : {}),
-        ...(payload.link.match(/^\/turno\/([\w-]+)$/)?.[1]
+        ...(/^\/turno\/([\w-]+)$/.exec(payload.link)?.[1]
           ? { shiftId: payload.link.slice('/turno/'.length) }
           : {}),
       },
