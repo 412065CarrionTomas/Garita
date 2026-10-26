@@ -9,6 +9,7 @@ import {
   LogOutIcon,
   MapPinIcon,
   MenuIcon,
+  RadioIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   UsersIcon,
@@ -34,6 +35,7 @@ export interface NavSection {
 const COLLAPSED_KEY = 'garita-sidebar-collapsed';
 
 const ICONS: Record<string, typeof UsersIcon> = {
+  '/supervision': RadioIcon,
   '/resumen': LayoutDashboardIcon,
   '/turnos': CalendarClockIcon,
   '/mis-turnos': CalendarClockIcon,
