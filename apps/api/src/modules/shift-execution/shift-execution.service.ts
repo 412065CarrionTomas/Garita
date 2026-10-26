@@ -484,8 +484,6 @@ export class ShiftExecutionService {
           actorUserId: adminId,
         },
       });
-      // HU-45 must enqueue notification/SMS through a transaction-aware outbox.
-      await this.effects.notifyGuardToLeave(tx, shift.id, assignment.guardId);
       this.logger.log({
         event: 'shift.admin_closed',
         shiftId: shift.id,
@@ -495,6 +493,10 @@ export class ShiftExecutionService {
         result: 'closed',
       });
     }
+  }
+
+  async notifyGuardToLeaveAfterCommit(shiftId: string, guardId: string | null) {
+    await this.effects.notifyGuardToLeave(undefined, shiftId, guardId);
   }
 
   async closeForGuard(id: string, adminId: string, reason: string) {
