@@ -203,9 +203,11 @@ it('actualiza el punto y la ventana al llegar un registro sin recargar la págin
   );
   expect(await screen.findByText('Pendiente de sincronizar')).toBeInTheDocument();
   expect(screen.getByText('Pendiente', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+  const firstWindow = detail.windows[0];
+  if (!firstWindow) throw new Error('Falta ventana en el detalle de prueba');
   current = {
     ...detail,
-    windows: [{ ...detail.windows[0]!, status: 'complete', recordedCount: 2 }],
+    windows: [{ ...firstWindow, status: 'complete', recordedCount: 2 }],
     points: detail.points.map((point) => ({ ...point, registered: true })),
   };
   act(() => {
@@ -228,7 +230,7 @@ it('soporta 100 turnos simultáneos y filtra por predio', async () => {
     id: `s-${index}`,
     site: { id: `p-${index % 5}`, name: `Predio ${index % 5}` },
   }));
-  jest.mocked(apiGet).mockResolvedValue(hundredRows as never);
+  jest.mocked(apiGet).mockResolvedValue(hundredRows);
   renderWithQueryClient(
     <MemoryRouter>
       <SupervisionPage />

@@ -25,12 +25,14 @@ function Probe({ onRender }: { onRender?: (rt: ReturnType<typeof useRealtime>) =
   return (
     <>
       <p>{realtime.connected ? 'Conectado' : 'Reconectando…'}</p>
-      <p>{realtime.incident}</p>
-      <p>{realtime.announcement}</p>
+      <p aria-live="polite">{realtime.announcement}</p>
       {realtime.incident && (
-        <button type="button" onClick={realtime.dismissIncident}>
-          Cerrar
-        </button>
+        <div role="status">
+          <span>{realtime.incident}</span>{' '}
+          <button type="button" onClick={realtime.dismissIncident}>
+            Cerrar
+          </button>
+        </div>
       )}
     </>
   );
@@ -68,9 +70,10 @@ it('invalida las consultas por registro y recarga todo al reconectar', async () 
 
 it('muestra aviso de incidente con predio, anuncia y permite cerrarlo', async () => {
   const client = new QueryClient();
-  client.setQueryData(['supervision', 'turnos'], [
-    { site: { id: 'p1', name: 'Depósito Central' } },
-  ]);
+  client.setQueryData(
+    ['supervision', 'turnos'],
+    [{ site: { id: 'p1', name: 'Depósito Central' } }],
+  );
   render(
     <QueryClientProvider client={client}>
       <Probe />
@@ -85,9 +88,9 @@ it('muestra aviso de incidente con predio, anuncia y permite cerrarlo', async ()
       siteId: 'p1',
     });
   });
-  expect(screen.getByText('Incidente nuevo en Depósito Central')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Incidente nuevo en Depósito Central');
   act(() => {
     screen.getByRole('button', { name: 'Cerrar' }).click();
   });
-  expect(screen.queryByText('Incidente nuevo en Depósito Central')).not.toBeInTheDocument();
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
