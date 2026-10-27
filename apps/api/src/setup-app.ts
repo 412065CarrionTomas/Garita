@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import type { Env } from './config/env';
+import { CorsIoAdapter } from './modules/realtime/cors-io-adapter';
 
 /**
  * Configuración HTTP común a la aplicación real y a los tests de integración,
@@ -14,7 +15,9 @@ export function setupApp(app: INestApplication): void {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
   app.use(helmet());
-  app.enableCors({ origin: config.get('CORS_ORIGINS', { infer: true }) });
+  const origins = config.get('CORS_ORIGINS', { infer: true });
+  app.enableCors({ origin: origins });
+  app.useWebSocketAdapter(new CorsIoAdapter(app, origins));
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.enableShutdownHooks();
