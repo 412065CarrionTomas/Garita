@@ -220,8 +220,14 @@ it('permite elegir reemplazo con teclado y advierte sobre el predio sin señal',
     </MemoryRouter>,
   );
   await userEvent.click(await screen.findByRole('button', { name: 'Cubrir el resto' }));
+  const replacementStart = new Date('2030-01-02T07:00:00Z');
+  const localStart = new Date(
+    replacementStart.getTime() - replacementStart.getTimezoneOffset() * 60_000,
+  )
+    .toISOString()
+    .slice(0, 16);
   fireEvent.change(screen.getByLabelText('Inicio del reemplazo (opcional: ahora)'), {
-    target: { value: '2030-01-02T04:00' },
+    target: { value: localStart },
   });
   await screen.findByRole('option', { name: 'Juan Pérez' });
   await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
@@ -232,7 +238,7 @@ it('permite elegir reemplazo con teclado y advierte sobre el predio sin señal',
   await waitFor(() => {
     expect(apiPost).toHaveBeenCalledWith(
       '/turnos/s1/reasignar',
-      { guardId: 'u2', startsAt: new Date('2030-01-02T04:00').toISOString() },
+      { guardId: 'u2', startsAt: replacementStart.toISOString() },
       expect.anything(),
       expect.anything(),
     );
