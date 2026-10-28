@@ -82,6 +82,7 @@ export class SupervisionService {
                 syncDeadlineAt: shift.syncDeadlineAt,
                 withoutSignal: shift.connectivityType === 'without_signal',
                 closed: shift.events.length > 0,
+                closedWithoutData: Boolean(shift.closedWithoutDataAt),
               })
             : null,
           assignment: shift.assignments[0] ?? null,

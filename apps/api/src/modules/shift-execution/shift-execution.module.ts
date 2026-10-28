@@ -14,12 +14,17 @@ import { PrismaSyncDeadline } from './prisma-sync-deadline';
 import { ShiftAutoCloseProcessor } from './shift-auto-close.processor';
 import { SHIFT_EXECUTION_EFFECTS_PORT } from './shift-execution-effects.port';
 import { ShiftGuardLeaveEffects } from './shift-guard-leave.effects';
+import {
+  RoundWindowEvaluationProcessor,
+  ROUND_WINDOW_EVALUATION_QUEUE,
+} from './round-window-evaluation.processor';
 
 @Module({
   imports: [
     PrismaModule,
     ClockModule,
     BullModule.registerQueue({ name: SHIFT_AUTO_CLOSE_QUEUE }),
+    BullModule.registerQueue({ name: ROUND_WINDOW_EVALUATION_QUEUE }),
     ShiftCredentialModule,
     SupervisionModule,
   ],
@@ -27,6 +32,7 @@ import { ShiftGuardLeaveEffects } from './shift-guard-leave.effects';
   providers: [
     ShiftExecutionService,
     ShiftAutoCloseProcessor,
+    RoundWindowEvaluationProcessor,
     { provide: SHIFT_EXECUTION_EFFECTS_PORT, useClass: ShiftGuardLeaveEffects },
     { provide: SYNC_DEADLINE_PORT, useClass: PrismaSyncDeadline },
   ],
