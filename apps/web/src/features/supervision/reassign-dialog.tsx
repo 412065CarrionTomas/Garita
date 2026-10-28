@@ -141,8 +141,8 @@ export function ReassignDialog({
           {(warning || warningReceived) && (
             <Alert role="status">
               {warningReceived && 'Turno reasignado. '}
-              El reemplazo podría no llegar al predio antes del fin del turno. Podés confirmar
-              igual.
+              El reemplazo podría no llegar al predio antes del fin del turno.
+              {!warningReceived && ' Podés confirmar igual.'}
             </Alert>
           )}
           {error && <Alert role="alert">{error}</Alert>}

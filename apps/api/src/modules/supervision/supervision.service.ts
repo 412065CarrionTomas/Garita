@@ -105,7 +105,7 @@ export class SupervisionService {
       include: {
         site: { select: { id: true, name: true, connectivityType: true, minutesToSignal: true } },
         assignments: {
-          orderBy: { startsAt: 'asc' },
+          orderBy: { createdAt: 'asc' },
           include: {
             guard: { select: { id: true, firstName: true, lastName: true, status: true } },
             assignedBy: { select: { firstName: true, lastName: true } },

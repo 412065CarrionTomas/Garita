@@ -232,6 +232,7 @@ it('permite elegir reemplazo con teclado y advierte sobre el predio sin señal',
   await screen.findByRole('option', { name: 'Juan Pérez' });
   await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
   expect(screen.getByText(/podría no llegar al predio/)).toBeInTheDocument();
+  expect(screen.getByText(/Podés confirmar igual/)).toBeInTheDocument();
   await userEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Cubrir el resto' }),
   );
@@ -320,6 +321,8 @@ it('muestra la advertencia del servidor después de confirmar y evita otro enví
   await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
   await userEvent.click(screen.getByRole('button', { name: 'Reasignar' }));
   expect(await screen.findByText(/Turno reasignado/)).toHaveTextContent('podría no llegar');
+  expect(screen.queryByText(/Podés confirmar igual/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Cerrar' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Reasignar' })).toBeDisabled();
 });
 

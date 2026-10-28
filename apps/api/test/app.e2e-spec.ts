@@ -14,6 +14,7 @@ import {
   deviceSchema,
   shiftRecordsResponseSchema,
   siteResponseSchema,
+  noticeKey,
   USER_ROLES,
   SOCKET_NAMESPACE,
 } from '@garita/shared';
@@ -208,7 +209,6 @@ import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { CLOCK } from '../src/common/clock';
 import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-error';
-import { NOTICES_PORT, type NoticesPort } from '../src/common/ports/notices.port';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
@@ -5299,7 +5299,7 @@ describe('Aplicación (e2e)', () => {
     const round = await prisma.round.findUniqueOrThrow({
       where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
     });
-    const notices = jest.spyOn(app.get<NoticesPort>(NOTICES_PORT), 'resolve').mockResolvedValue();
+    const notices = jest.spyOn(app.get<NoticesPort>(NOTICES_PORT), 'resolve');
     const notifications = jest
       .spyOn(app.get(NotificationsService), 'notifyUsers')
       .mockResolvedValue();
@@ -5427,6 +5427,16 @@ describe('Aplicación (e2e)', () => {
         .send({})
         .expect(201);
       testNow = beforeCancel;
+      const openNotice = await prisma.notice.create({
+        data: {
+          companyId: 'norte-company',
+          siteId: shift.siteId,
+          shiftId: shift.id,
+          kind: 'shift_not_started',
+          subjectId: old.id,
+          key: noticeKey('shift_not_started', old.id),
+        },
+      });
       const requestedAt = performance.now();
       const assigned = await client
         .post(path)
@@ -5447,6 +5457,9 @@ describe('Aplicación (e2e)', () => {
         subjectId: old.id,
         resolution: 'reassigned',
       });
+      expect(await prisma.notice.findUniqueOrThrow({ where: { id: openNotice.id } })).toMatchObject(
+        { status: 'resolved', resolution: 'reassigned', resolvedAt: expect.any(Date) },
+      );
       expect(notifications).toHaveBeenCalledWith(
         expect.objectContaining({ userIds: [source.id], kind: 'shift_reassigned_from_you' }),
       );
@@ -5545,6 +5558,16 @@ describe('Aplicación (e2e)', () => {
         'replaced',
         'scheduled',
       ]);
+      const repeatedDetail = await client
+        .get(`/api/v1/turnos/${repeated.id}/detalle`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      expect(
+        z
+          .object({ assignments: z.array(z.object({ id: z.string() })) })
+          .parse(repeatedDetail.body)
+          .assignments.map(({ id }) => id),
+      ).toEqual(repeatedHistory.map(({ id }) => id));
       testNow = new Date('2030-01-04T21:05:00Z');
       await client
         .post(`/api/v1/turnos/${repeated.id}/reasignar`)
