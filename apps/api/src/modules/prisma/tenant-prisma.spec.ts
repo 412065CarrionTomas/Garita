@@ -39,6 +39,7 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('Checkpoint');
     expect(COMPANY_ID_MODELS).toContain('RoundWindowState');
     expect(COMPANY_ID_MODELS).toContain('RoundReviewDecision');
+    expect(COMPANY_ID_MODELS).toContain('Notice');
     expect(scopeArgs('Checkpoint', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
       where: { status: 'active', companyId: 'norte' },
     });
@@ -285,6 +286,11 @@ describe('registro del aislamiento tenant', () => {
           { shiftId: 's-1' },
           { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
         ],
+      },
+    });
+    expect(addSiteAssignmentFilter('Notice', { where: { status: 'open' } }, user)).toEqual({
+      where: {
+        AND: [{ status: 'open' }, { site: { supervisors: { some: { userId: 'supervisor-1' } } } }],
       },
     });
   });

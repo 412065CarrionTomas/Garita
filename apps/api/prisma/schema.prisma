@@ -94,6 +94,7 @@ model Company {
   panicAlerts PanicAlert[]
   incidentClassifications IncidentClassification[]
   roundReviewDecisions RoundReviewDecision[]
+  notices Notice[]
 }
 
 model User {
@@ -124,6 +125,7 @@ model User {
   incidentClassifications IncidentClassification[] @relation("IncidentDecider")
   roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
+  closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
 
   @@index([companyId])
   @@index([clientId])
@@ -205,6 +207,7 @@ model Site {
   shifts             Shift[]
   incidents          Incident[]
   panicAlerts        PanicAlert[]
+  notices            Notice[]
 
   @@unique([clientId, name])
   @@index([companyId, status])
@@ -484,6 +487,9 @@ model Shift {
   closedBy            ShiftClosedBy?
   closedByUserId      String?
   autoClosedAt        DateTime?            @db.Timestamptz(3)
+  closedWithoutDataAt DateTime?           @db.Timestamptz(3)
+  closedWithoutDataById String?
+  closedWithoutDataReason String?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -502,10 +508,33 @@ model Shift {
   roundWindowStates   RoundWindowState[]
   incidents           Incident[]
   panicAlerts         PanicAlert[]
+  notices             Notice[]
+  closedWithoutDataBy User? @relation("ClosedWithoutDataBy", fields: [closedWithoutDataById], references: [id], onDelete: Restrict)
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
   @@index([status, startsAt])
+}
+
+model Notice {
+  id         String    @id @default(cuid())
+  companyId  String
+  siteId     String
+  shiftId    String
+  kind       String
+  subjectId  String
+  key        String    @unique
+  status     String    @default("open")
+  resolution String?
+  details    Json?
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  resolvedAt DateTime? @db.Timestamptz(3)
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site       Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  shift      Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status, createdAt])
+  @@index([siteId, createdAt])
 }
 
 model ShiftEvent {

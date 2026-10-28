@@ -23,6 +23,7 @@ import { ServerTimeModule } from './modules/server-time/server-time.module';
 import { SupervisionModule } from './modules/supervision/supervision.module';
 import { RoundReviewModule } from './modules/round-review/round-review.module';
 import { PanicModule } from './modules/panic/panic.module';
+import { NoticesModule } from './modules/notices/notices.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { PanicModule } from './modules/panic/panic.module';
     SupervisionModule,
     RoundReviewModule,
     PanicModule,
+    NoticesModule,
   ],
 })
 export class AppModule {}
