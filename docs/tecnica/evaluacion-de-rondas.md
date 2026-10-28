@@ -6,6 +6,8 @@ La tarea BullMQ `round-window-evaluation` corre cada minuto mientras la API est�
 
 `ShiftSyncState.syncedUntil` avanza de forma monótona con avisos de conexión y lotes. Una ventana iniciada se evalúa al vencer su gracia solo si `syncedUntil >= graceEndsAt`. Si falta esa certeza, queda `pending_sync`, con o sin señal en el predio. Un lote parcial evalúa únicamente las ventanas cubiertas. Los registros posteriores corrigen el estado: una ventana que resulta completa resuelve su aviso `round_missed` con `data_arrived`; el aviso `shift_unsynced` permanece en el historial. Los registros cuentan solo para la asignación que era dueña de la ventana cuando terminó.
 
+Los lotes publican su marca después de persistir los eventos. Si algún evento se rechaza, conservan la marca anterior: un lote con errores no certifica datos completos. Cerrar sin datos tampoco adelanta `syncedUntil` ni genera un aviso de ronda por la falta de datos; la decisión sigue registrada cuando llegan los datos reales.
+
 | Situación                               | Cuándo se evalúa                                                  | Aviso de ronda                        |
 | --------------------------------------- | ----------------------------------------------------------------- | ------------------------------------- |
 | Asignación iniciada o cierre automático | Gracia vencida y `syncedUntil` cubre la gracia                    | Sí, si faltan puntos                  |
