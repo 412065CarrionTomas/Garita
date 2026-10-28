@@ -19,6 +19,18 @@ updates:
       - dependency-name: react-native
       - dependency-name: react-native-*
       - dependency-name: '@react-native/*'
+      - dependency-name: '@react-native-async-storage/*'
+      # React Native exige la versión exacta de React del SDK; la web y la app comparten el nombre del paquete.
+      - dependency-name: react
+      - dependency-name: react-dom
+      - dependency-name: '@types/react'
+      # jest-expo usa jest 29; los tipos de Node siguen al runtime (.nvmrc).
+      - dependency-name: jest
+        update-types: [version-update:semver-major]
+      - dependency-name: '@types/jest'
+        update-types: [version-update:semver-major]
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /
