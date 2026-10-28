@@ -169,6 +169,9 @@ export class PanicService {
     const alert = await this.owned(alertId, credential);
     const next = input.location;
     if (
+      next.status !== 'ok' ||
+      next.latitude === null ||
+      next.longitude === null ||
       next.accuracyMeters === null ||
       (alert.accuracyMeters !== null && Number(alert.accuracyMeters) <= next.accuracyMeters)
     )

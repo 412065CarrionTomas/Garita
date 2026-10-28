@@ -553,6 +553,22 @@ describe('Aplicación (e2e)', () => {
           (await prisma.panicAlert.findUniqueOrThrow({ where: { id: alertId } })).accuracyMeters,
         ),
       ).toBe(5);
+      for (const invalid of [
+        { status: 'unverifiable', latitude: null, longitude: null },
+        { status: 'ok', latitude: null, longitude: body.location.longitude },
+        { status: 'ok', latitude: body.location.latitude, longitude: null },
+      ]) {
+        await client
+          .patch(`/api/v1/alertas-panico/${alertId}/ubicacion`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ location: { ...body.location, ...invalid, accuracyMeters: 1 } })
+          .expect(200);
+        const preserved = await prisma.panicAlert.findUniqueOrThrow({ where: { id: alertId } });
+        expect(Number(preserved.latitude)).toBe(body.location.latitude);
+        expect(Number(preserved.longitude)).toBe(body.location.longitude);
+        expect(Number(preserved.accuracyMeters)).toBe(5);
+        expect(preserved.locationStatus).toBe('ok');
+      }
       await client
         .get(`/api/v1/alertas-panico/${alertId}/estado`)
         .set('Authorization', `Bearer ${token}`)
