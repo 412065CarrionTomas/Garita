@@ -6,6 +6,14 @@ export const reassignShiftRequestSchema = z.object({
   startsAt: z.iso.datetime({ offset: true }).optional(),
 });
 
+export const shiftReplacementsQuerySchema = z.object({
+  startsAt: z.iso.datetime({ offset: true }).optional(),
+});
+
+export const shiftReplacementsResponseSchema = z.array(
+  z.object({ id: z.string(), firstName: z.string(), lastName: z.string() }),
+);
+
 export const shiftAssignmentHistorySchema = z.array(
   z.object({
     id: z.string(),
