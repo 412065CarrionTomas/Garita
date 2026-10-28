@@ -5457,9 +5457,11 @@ describe('Aplicación (e2e)', () => {
         subjectId: old.id,
         resolution: 'reassigned',
       });
-      expect(await prisma.notice.findUniqueOrThrow({ where: { id: openNotice.id } })).toMatchObject(
-        { status: 'resolved', resolution: 'reassigned', resolvedAt: expect.any(Date) },
-      );
+      const resolvedNotice = await prisma.notice.findUniqueOrThrow({
+        where: { id: openNotice.id },
+      });
+      expect(resolvedNotice).toMatchObject({ status: 'resolved', resolution: 'reassigned' });
+      expect(resolvedNotice.resolvedAt).toBeInstanceOf(Date);
       expect(notifications).toHaveBeenCalledWith(
         expect.objectContaining({ userIds: [source.id], kind: 'shift_reassigned_from_you' }),
       );
