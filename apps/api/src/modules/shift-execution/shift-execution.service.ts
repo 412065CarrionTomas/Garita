@@ -128,6 +128,26 @@ export class ShiftExecutionService {
     const late = lateStartMinutes(assignment.startsAt.toISOString(), now.toISOString());
     try {
       await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        const claimed = await tx.shiftAssignment.updateMany({
+          where: { id: assignment.id, isCurrent: true, result: 'scheduled' },
+          data: { result: 'started' },
+        });
+        if (claimed.count !== 1)
+          throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.reassigned });
+        const changed = await tx.shift.updateMany({
+          where: { id, status: 'scheduled' },
+          data: {
+            status: 'in_progress',
+            startedAt: now,
+            lateStartMinutes: late,
+            connectivityType: connectivity.type,
+            minutesToSignal: connectivity.minutesToSignal,
+            marginMinutes: connectivity.marginMinutes,
+            syncDeadlineAt: computeSyncDeadline(shift.endsAt, connectivity),
+          },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
         const rounds = await tx.shiftRound.findMany({
           where: { shiftId: id },
           include: { round: { select: { currentVersionId: true } } },
@@ -140,18 +160,6 @@ export class ShiftExecutionService {
             data: { roundVersionId: round.round.currentVersionId },
           });
         }
-        await tx.shift.update({
-          where: { id },
-          data: {
-            status: 'in_progress',
-            startedAt: now,
-            lateStartMinutes: late,
-            connectivityType: connectivity.type,
-            minutesToSignal: connectivity.minutesToSignal,
-            marginMinutes: connectivity.marginMinutes,
-            syncDeadlineAt: computeSyncDeadline(shift.endsAt, connectivity),
-          },
-        });
         await tx.shiftEvent.create({
           data: {
             companyId: shift.companyId,
@@ -830,7 +838,7 @@ export class ShiftExecutionService {
         id,
         siteId: shift.siteId,
         siteName: shift.site.name,
-        startsAt: shift.startsAt.toISOString(),
+        startsAt: assignment.startsAt.toISOString(),
         endsAt: shift.endsAt.toISOString(),
         timezone: shift.site.company.timezone,
         assignmentId: assignment.id,

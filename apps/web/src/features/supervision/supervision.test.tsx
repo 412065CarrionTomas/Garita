@@ -1,7 +1,7 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { apiGet } from '@/lib/api-client';
+import { apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
 import { SupervisionPage } from './supervision-page';
 import { ShiftDetailPage } from './shift-detail-page';
@@ -19,7 +19,7 @@ const mockSocket = {
 };
 jest.mock('socket.io-client', () => ({ io: jest.fn(() => mockSocket) }));
 
-jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn(), apiPost: jest.fn() }));
 jest.mock('react-router', () => ({
   ...jest.requireActual<Record<string, unknown>>('@/test/react-router'),
   useParams: () => ({ id: 's1' }),
@@ -37,7 +37,7 @@ const row = {
 };
 const detail = {
   id: 's1',
-  site: row.site,
+  site: { ...row.site, connectivityType: 'without_signal', minutesToSignal: 200 },
   status: 'uncovered',
   scheduled: { startsAt: row.startsAt, endsAt: row.endsAt },
   actual: {
@@ -54,7 +54,10 @@ const detail = {
       startsAt: row.startsAt,
       endsAt: row.endsAt,
       isCurrent: true,
+      result: 'closed_early',
+      reassignedAt: null,
       guard: row.assignment.guard,
+      assignedBy: { firstName: 'Ana', lastName: 'López' },
     },
   ],
   rounds: [{ id: 'r1', name: 'Perimetral' }],
@@ -99,14 +102,20 @@ const detail = {
       highlighted: true,
     },
   ],
-  canCover: false,
+  canCover: true,
 };
 
 beforeEach(() => {
   jest
     .mocked(apiGet)
     .mockImplementation((path) =>
-      Promise.resolve((path.includes('/detalle') ? detail : [row]) as never),
+      Promise.resolve(
+        (path.includes('/detalle')
+          ? detail
+          : path.includes('/usuarios')
+            ? { items: [{ id: 'u2', firstName: 'Juan', lastName: 'Pérez', status: 'active' }] }
+            : [row]) as never,
+      ),
     );
 });
 
@@ -186,7 +195,35 @@ it('muestra ventanas, recorrido, rechazos y filtra marcas por gravedad', async (
     expect(screen.getByText(/Fuera de rango/)).toBeInTheDocument();
   });
   expect(screen.queryByText(/Ubicación simulada/)).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /Cubrir el resto/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cubrir el resto' })).toBeEnabled();
+  expect(screen.getByText(/Cerrada antes de hora/)).toBeInTheDocument();
+});
+
+it('permite elegir reemplazo con teclado y advierte sobre el predio sin señal', async () => {
+  jest.mocked(apiPost).mockResolvedValue({ shiftId: 's1', assignmentId: 'a2' });
+  renderWithQueryClient(
+    <MemoryRouter>
+      <ShiftDetailPage />
+    </MemoryRouter>,
+  );
+  await userEvent.click(await screen.findByRole('button', { name: 'Cubrir el resto' }));
+  await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
+  await userEvent.type(
+    screen.getByLabelText('Inicio del reemplazo (opcional: ahora)'),
+    '2030-01-02T04:00',
+  );
+  expect(screen.getByText(/podría no llegar al predio/)).toBeInTheDocument();
+  await userEvent.click(
+    within(screen.getByRole('dialog')).getByRole('button', { name: 'Cubrir el resto' }),
+  );
+  await waitFor(() => {
+    expect(apiPost).toHaveBeenCalledWith(
+      '/turnos/s1/reasignar',
+      { guardId: 'u2', startsAt: new Date('2030-01-02T04:00').toISOString() },
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 });
 
 it('actualiza el punto y la ventana al llegar un registro sin recargar la página', async () => {

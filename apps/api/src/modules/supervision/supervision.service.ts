@@ -102,11 +102,12 @@ export class SupervisionService {
     const shift = await this.prisma.tenantPrisma.shift.findFirst({
       where: { id: shiftId },
       include: {
-        site: { select: { id: true, name: true } },
+        site: { select: { id: true, name: true, connectivityType: true, minutesToSignal: true } },
         assignments: {
           orderBy: { startsAt: 'asc' },
           include: {
             guard: { select: { id: true, firstName: true, lastName: true, status: true } },
+            assignedBy: { select: { firstName: true, lastName: true } },
           },
         },
         events: { orderBy: { occurredAt: 'asc' } },
@@ -223,7 +224,13 @@ export class SupervisionService {
         })),
       records: orderedRecords,
       rejectedAttempts: shift.invalidScanAttempts,
-      canCover: false, // TODO(HU-44)
+      canCover:
+        this.clock.now() < shift.endsAt &&
+        (shift.status === 'scheduled' ||
+          shift.status === 'unassigned' ||
+          (shift.status === 'closed' &&
+            shift.closedEarly &&
+            shift.closeReason !== 'baja del predio')),
     };
   }
 }

@@ -82,6 +82,7 @@ describe('<ShiftScreen />', () => {
         startsAt: new Date(Date.now() + 4 * 60 * 60_000).toISOString(),
         endsAt: new Date(Date.now() + 6 * 60 * 60_000).toISOString(),
         site: { name: 'Campo' },
+        assignments: [{ startsAt: new Date(Date.now() + 4 * 60 * 60_000).toISOString() }],
       },
     ]);
     jest
@@ -253,6 +254,7 @@ describe('<ShiftScreen />', () => {
         startsAt: nowUtc,
         endsAt: windowEndUtc,
         site: { name: 'Predio A' },
+        assignments: [{ startsAt: nowUtc }],
       },
     ]);
     await render(<ShiftScreen shiftId="shift-1" />);

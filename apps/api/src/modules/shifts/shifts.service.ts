@@ -13,6 +13,8 @@ import {
   findUncoveredWindows,
   windowsForShift,
   buildShiftNotification,
+  previousAssignmentResult,
+  type ReassignShiftRequest,
   type ShiftInput,
 } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +23,8 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
 import { isShiftOverlapViolation } from './shift-overlap-error';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
+import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
+import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 
 interface ShiftListQuery {
   predio?: string;
@@ -38,6 +42,8 @@ export class ShiftsService {
     private readonly resources: TenantResourceService,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(NOTIFICATIONS_PORT) private readonly notifications: NotificationsPort,
+    @Inject(NOTICES_PORT) private readonly notices: NoticesPort,
+    @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
   ) {}
 
   async list(query: ShiftListQuery) {
@@ -172,7 +178,7 @@ export class ShiftsService {
       const updated = await this.prisma.tenantPrisma.$transaction(async (tx) => {
         await tx.shiftAssignment.updateMany({
           where: { shiftId: id, isCurrent: true },
-          data: { isCurrent: false, active: false },
+          data: { isCurrent: false, active: false, result: 'replaced' },
         });
         await tx.shiftRound.deleteMany({ where: { shiftId: id } });
         return tx.shift.update({
@@ -228,11 +234,173 @@ export class ShiftsService {
           updated.startsAt,
           timezone,
         );
-      // TODO(HU-44): use the reassignment event when the dedicated flow is introduced.
       return await this.withWarnings(updated, validation);
     } catch (error) {
       await this.throwOverlapOrRethrow(error, input.guardId, input.startsAt, input.endsAt);
     }
+  }
+
+  async assignments(id: string, user: AuthenticatedUser) {
+    await this.get(id, user);
+    return this.prisma.tenantPrisma.shiftAssignment.findMany({
+      where: { shiftId: id },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        guard: { select: { firstName: true, lastName: true } },
+        assignedBy: { select: { firstName: true, lastName: true } },
+      },
+    });
+  }
+
+  async reassign(id: string, input: ReassignShiftRequest, user: AuthenticatedUser) {
+    const shift = await this.get(id, user);
+    const now = this.clock.now();
+    if (now >= shift.endsAt)
+      throw new ConflictException({
+        code: 'SHIFT_NOT_REASSIGNABLE',
+        message: 'El turno ya terminó',
+      });
+    const startsAt = input.startsAt ? new Date(input.startsAt) : now;
+    if (startsAt < now || startsAt >= shift.endsAt)
+      throw new BadRequestException('La hora de inicio debe estar entre ahora y el fin del turno');
+    const covering =
+      shift.status === 'closed' &&
+      shift.closedEarly &&
+      shift.closeReason !== 'baja del predio' &&
+      now < shift.endsAt;
+    if (!['scheduled', 'unassigned'].includes(shift.status) && !covering)
+      throw new ConflictException({
+        code: 'SHIFT_NOT_REASSIGNABLE',
+        message: 'El turno ya se inició o terminó',
+      });
+    const current = shift.assignments[0];
+    if (!current) throw new ConflictException('El turno no tiene una asignación vigente');
+    if (current.guardId === input.guardId)
+      throw new BadRequestException('Elegí un vigilador distinto del asignado');
+    const guard = await this.prisma.tenantPrisma.user.findFirst({
+      where: { id: input.guardId, role: 'guard', status: 'active' },
+      select: { id: true },
+    });
+    if (!guard) throw new BadRequestException('El vigilador debe estar activo');
+    const conflict = await this.findConflict(
+      input.guardId,
+      startsAt.toISOString(),
+      shift.endsAt.toISOString(),
+      id,
+    );
+    if (conflict)
+      throw new ConflictException({
+        code: 'SHIFT_OVERLAP',
+        message: 'El vigilador ya tiene un turno superpuesto',
+        shift: conflict,
+      });
+    const priorResult = previousAssignmentResult({
+      covering,
+      hadGuard: Boolean(current.guardId),
+      previousStartsAt: current.startsAt,
+      now,
+    });
+    const assignment = await this.prisma.tenantPrisma
+      .$transaction(async (tx) => {
+        const changed = await tx.shiftAssignment.updateMany({
+          where: { id: current.id, isCurrent: true, result: covering ? 'started' : 'scheduled' },
+          data: { isCurrent: false, active: false, result: priorResult },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException({
+            code: 'SHIFT_ALREADY_STARTED',
+            message: 'El vigilador acaba de iniciar el turno',
+          });
+        const updated = await tx.shift.updateMany({
+          where: { id, status: shift.status },
+          data: {
+            status: 'scheduled',
+            startedAt: null,
+            lateStartMinutes: null,
+            closedAt: null,
+            closedEarly: false,
+            closeReason: null,
+            closedBy: null,
+            closedByUserId: null,
+            individuallyModified: true, // TODO(HU-32): weekly scheduling must preserve individually modified shifts.
+          },
+        });
+        if (updated.count !== 1)
+          throw new ConflictException({
+            code: 'SHIFT_ALREADY_STARTED',
+            message: 'El vigilador acaba de iniciar el turno',
+          });
+        return tx.shiftAssignment.create({
+          data: {
+            shiftId: id,
+            guardId: input.guardId,
+            startsAt,
+            endsAt: shift.endsAt,
+            assignedById: user.userId,
+            reassignedAt: now,
+          },
+        });
+      })
+      .catch((error: unknown) =>
+        this.throwOverlapOrRethrow(
+          error,
+          input.guardId,
+          startsAt.toISOString(),
+          shift.endsAt.toISOString(),
+        ),
+      );
+    this.logger.log({
+      action: 'shift.reassigned',
+      shiftId: id,
+      userId: user.userId,
+      at: now.toISOString(),
+      assignmentId: assignment.id,
+    });
+    try {
+      await this.notices.resolve({
+        companyId: user.companyId,
+        kind: covering
+          ? 'shift_closed_early'
+          : current.guardId
+            ? 'shift_not_started'
+            : 'shift_without_guard',
+        subjectId: covering || current.guardId ? current.id : id,
+        resolution: covering ? 'covered' : current.guardId ? 'reassigned' : 'guard_assigned',
+      });
+    } catch (error) {
+      this.logger.error({ action: 'shift.notice_resolution_failed', shiftId: id, error });
+    }
+    const timezone = shift.site.company.timezone;
+    if (current.guardId)
+      await this.notifyGuard(
+        user.companyId,
+        current.guardId,
+        'shift_reassigned_from_you',
+        id,
+        current.startsAt,
+        timezone,
+      );
+    await this.notifyGuard(
+      user.companyId,
+      input.guardId,
+      'shift_reassigned_to_you',
+      id,
+      startsAt,
+      timezone,
+    );
+    this.realtime.emitToSite(user.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId: id,
+      siteId: shift.siteId,
+    });
+    const minutesToSignal = shift.site.minutesToSignal;
+    return {
+      shiftId: id,
+      assignmentId: assignment.id,
+      ...(shift.site.connectivityType === 'without_signal' &&
+      startsAt.getTime() + minutesToSignal * 60_000 > shift.endsAt.getTime()
+        ? { warning: 'replacement_late' as const }
+        : {}),
+    };
   }
 
   async cancel(id: string, user: AuthenticatedUser) {
@@ -284,8 +452,8 @@ export class ShiftsService {
     return this.prisma.tenantPrisma.shift.findMany({
       where: {
         status: { in: ['scheduled', 'unassigned'] },
-        startsAt: { gte: now, lte: until },
-        assignments: { some: { guardId: user.userId, isCurrent: true } },
+        endsAt: { gte: now },
+        assignments: { some: { guardId: user.userId, isCurrent: true, startsAt: { lte: until } } },
       },
       include: this.shiftInclude(),
       orderBy: { startsAt: 'asc' },
@@ -483,7 +651,13 @@ export class ShiftsService {
   private async notifyGuard(
     companyId: string,
     guardId: string,
-    kind: 'shift_assigned' | 'shift_changed' | 'shift_removed' | 'shift_cancelled',
+    kind:
+      | 'shift_assigned'
+      | 'shift_changed'
+      | 'shift_removed'
+      | 'shift_cancelled'
+      | 'shift_reassigned_from_you'
+      | 'shift_reassigned_to_you',
     shiftId: string,
     startsAt: Date,
     timezone: string,

@@ -117,6 +117,7 @@ model User {
   siteAssignments  SiteSupervisor[]
   createdShifts    Shift[]           @relation("ShiftCreator")
   shiftAssignments ShiftAssignment[]
+  assignedShifts    ShiftAssignment[] @relation("ShiftAssignmentAssigner")
   shiftCredentials ShiftCredential[]
   incidents        Incident[]
   incidentClassifications IncidentClassification[] @relation("IncidentDecider")
@@ -364,6 +365,14 @@ enum ShiftStatus {
   auto_closed
 }
 
+enum ShiftAssignmentResult {
+  scheduled
+  started
+  absent
+  replaced
+  closed_early
+}
+
 enum RoundWindowStatus {
   pending
   in_progress
@@ -481,6 +490,7 @@ model Shift {
   closedBy            ShiftClosedBy?
   closedByUserId      String?
   autoClosedAt        DateTime?            @db.Timestamptz(3)
+  individuallyModified Boolean            @default(false)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -544,8 +554,9 @@ model ShiftAssignment {
   endsAt              DateTime             @db.Timestamptz(3)
   isCurrent           Boolean              @default(true)
   active              Boolean              @default(true)
-  result              String?
+  result              ShiftAssignmentResult @default(scheduled)
   assignedById        String
+  reassignedAt        DateTime?             @db.Timestamptz(3)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   shift               Shift                @relation(fields: [shiftId], references: [id], onDelete: Cascade)
@@ -554,6 +565,7 @@ model ShiftAssignment {
   invalidScanAttempts InvalidScanAttempt[]
   incidents           Incident[]
   guard               User?                @relation(fields: [guardId], references: [id], onDelete: Restrict)
+  assignedBy          User                 @relation("ShiftAssignmentAssigner", fields: [assignedById], references: [id], onDelete: Restrict)
 
   @@index([shiftId, isCurrent])
   @@index([guardId, startsAt, endsAt])

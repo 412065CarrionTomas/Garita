@@ -1,4 +1,4 @@
-import { ROUND_WINDOW_STATUSES } from '@garita/shared';
+import { ASSIGNMENT_RESULTS, ROUND_WINDOW_STATUSES } from '@garita/shared';
 import { z } from 'zod';
 import type { StatusTone } from '@/components/status-badge';
 
@@ -41,7 +41,7 @@ export const shiftListSchema = z.array(
 const severitySchema = z.enum(['grave', 'media', 'leve']);
 export const shiftDetailSchema = z.object({
   id: z.string(),
-  site: siteSchema,
+  site: siteSchema.extend({ connectivityType: z.string(), minutesToSignal: z.number().nullable() }),
   status: shiftStatusSchema,
   scheduled: z.object({ startsAt: z.string(), endsAt: z.string() }),
   actual: z.object({
@@ -58,7 +58,10 @@ export const shiftDetailSchema = z.object({
       startsAt: z.string(),
       endsAt: z.string(),
       isCurrent: z.boolean(),
+      result: z.enum(ASSIGNMENT_RESULTS),
+      reassignedAt: z.string().nullable(),
       guard: z.object({ firstName: z.string(), lastName: z.string() }).nullable(),
+      assignedBy: z.object({ firstName: z.string(), lastName: z.string() }),
     }),
   ),
   rounds: z.array(z.object({ id: z.string(), name: z.string() })),

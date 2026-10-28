@@ -207,6 +207,7 @@ import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { CLOCK } from '../src/common/clock';
 import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-error';
+import { NOTICES_PORT, type NoticesPort } from '../src/common/ports/notices.port';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
@@ -245,6 +246,8 @@ describe('Aplicación (e2e)', () => {
             return Promise.resolve({ uid: 'seed-norte-deactivated' });
           if (token === 'token-pending') return Promise.resolve({ uid: 'seed-norte-pending' });
           if (token === 'token-guard') return Promise.resolve({ uid: 'seed-norte-guard' });
+          if (token === 'token-replacement')
+            return Promise.resolve({ uid: 'tenant-test-replacement' });
           if (token === 'token-supervisor')
             return Promise.resolve({ uid: 'seed-norte-supervisor' });
           if (token === 'token-other-supervisor')
@@ -5258,6 +5261,241 @@ describe('Aplicación (e2e)', () => {
         .send({ firstName: 'Marta', lastName: 'Ruiz', email: 'hu27-permisos@example.invalid' })
 
         .expect(404);
+    }
+  });
+
+  it('reasigna por HTTP, conserva el historial y arbitra la carrera con el inicio', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const savedNow = testNow;
+    const replacement = await prisma.user.upsert({
+      where: { firebaseUid: 'tenant-test-replacement' },
+      create: {
+        companyId: 'norte-company',
+        firebaseUid: 'tenant-test-replacement',
+        email: 'tenant-test-replacement@example.invalid',
+        firstName: 'Juan',
+        lastName: 'Reemplazo',
+        role: 'guard',
+        status: 'active',
+      },
+      update: { status: 'active' },
+    });
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const round = await prisma.round.findUniqueOrThrow({
+      where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
+    });
+    const notices = jest.spyOn(app.get<NoticesPort>(NOTICES_PORT), 'resolve').mockResolvedValue();
+    const notifications = jest
+      .spyOn(app.get(NotificationsService), 'notifyUsers')
+      .mockResolvedValue();
+    const makeShift = async (start: string, end: string) => {
+      const shift = await prisma.shift.create({
+        data: {
+          companyId: 'norte-company',
+          siteId: northAssignedSiteId,
+          createdById: admin.id,
+          startsAt: new Date(start),
+          endsAt: new Date(end),
+          serviceDate: new Date(start.slice(0, 10) + 'T00:00:00Z'),
+          assignments: {
+            create: {
+              guardId: northGuardId,
+              startsAt: new Date(start),
+              endsAt: new Date(end),
+              assignedById: admin.id,
+            },
+          },
+          rounds: { create: { roundId: round.id } },
+        },
+      });
+      createdShiftIds.push(shift.id);
+      return shift;
+    };
+    const client = request(app.getHttpServer());
+    try {
+      testNow = new Date('2030-01-01T20:20:00Z');
+      const shift = await makeShift('2030-01-01T20:00:00Z', '2030-01-02T08:00:00Z');
+      const old = await prisma.shiftAssignment.findFirstOrThrow({ where: { shiftId: shift.id } });
+      const path = `/api/v1/turnos/${shift.id}/reasignar`;
+      await client.post(path).send({ guardId: replacement.id }).expect(401);
+      await client
+        .post(path)
+        .set('Authorization', 'Bearer token-guard')
+        .send({ guardId: replacement.id })
+        .expect(403);
+      await client
+        .post(path)
+        .set('Authorization', 'Bearer token-other-supervisor')
+        .send({ guardId: replacement.id })
+        .expect(404);
+      await client
+        .post(path)
+        .set('Authorization', 'Bearer token-south-admin')
+        .send({ guardId: replacement.id })
+        .expect(404);
+      await client
+        .post(path)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ guardId: northGuardId })
+        .expect(400);
+      const pending = await prisma.user.findUniqueOrThrow({
+        where: { firebaseUid: 'seed-norte-pending' },
+      });
+      await client
+        .post(path)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ guardId: pending.id })
+        .expect(400);
+      await client
+        .post(path)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ guardId: replacement.id, startsAt: '2030-01-02T09:00:00Z' })
+        .expect(400);
+      const assigned = await client
+        .post(path)
+        .set('Authorization', 'Bearer token-supervisor')
+        .send({ guardId: replacement.id, startsAt: '2030-01-01T21:00:00Z' })
+        .expect(201);
+      expect(z.object({ assignmentId: z.string() }).parse(assigned.body).assignmentId).toBeTruthy();
+      expect(
+        await prisma.shiftAssignment.findUniqueOrThrow({ where: { id: old.id } }),
+      ).toMatchObject({ result: 'absent', isCurrent: false });
+      expect(await prisma.shift.findUniqueOrThrow({ where: { id: shift.id } })).toMatchObject({
+        individuallyModified: true,
+      });
+      expect(notices).toHaveBeenCalledWith({
+        companyId: 'norte-company',
+        kind: 'shift_not_started',
+        subjectId: old.id,
+        resolution: 'reassigned',
+      });
+      expect(notifications).toHaveBeenCalledWith(
+        expect.objectContaining({ userIds: [northGuardId], kind: 'shift_reassigned_from_you' }),
+      );
+      expect(notifications).toHaveBeenCalledWith(
+        expect.objectContaining({ userIds: [replacement.id], kind: 'shift_reassigned_to_you' }),
+      );
+      const history = await client
+        .get(`/api/v1/turnos/${shift.id}/asignaciones`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      expect(
+        z
+          .array(z.object({ result: z.string(), assignedBy: z.object({ firstName: z.string() }) }))
+          .parse(history.body),
+      ).toHaveLength(2);
+      const location = {
+        status: 'ok',
+        latitude: -34.6,
+        longitude: -58.4,
+        accuracyMeters: 5,
+        simulation: 'not_simulated',
+        takenAt: '2030-01-01T21:10:00Z',
+      };
+      testNow = new Date('2030-01-01T21:10:00Z');
+      const started = await client
+        .post(`/api/v1/turnos/${shift.id}/iniciar`)
+        .set('Authorization', 'Bearer token-replacement')
+        .send({ eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location })
+        .expect(201);
+      expect(z.object({ lateStartMinutes: z.number() }).parse(started.body).lateStartMinutes).toBe(
+        10,
+      );
+      await client
+        .post(path)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ guardId: northGuardId })
+        .expect(409);
+      testNow = new Date('2030-01-02T20:10:00Z');
+      const race = await makeShift('2030-01-02T20:00:00Z', '2030-01-03T08:00:00Z');
+      const [startRace, reassignRace] = await Promise.all([
+        client
+          .post(`/api/v1/turnos/${race.id}/iniciar`)
+          .set('Authorization', 'Bearer token-guard')
+          .send({
+            eventId: randomUUID(),
+            occurredAtDevice: testNow.toISOString(),
+            location: { ...location, takenAt: testNow.toISOString() },
+          }),
+        client
+          .post(`/api/v1/turnos/${race.id}/reasignar`)
+          .set('Authorization', 'Bearer token-admin')
+          .send({ guardId: replacement.id }),
+      ]);
+      expect([startRace.status, reassignRace.status].sort()).toEqual([201, 409]);
+      await prisma.shift.update({ where: { id: race.id }, data: { status: 'closed' } });
+
+      testNow = new Date('2030-01-04T20:20:00Z');
+      const repeated = await makeShift('2030-01-04T20:00:00Z', '2030-01-05T08:00:00Z');
+      await client
+        .post(`/api/v1/turnos/${repeated.id}/reasignar`)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ guardId: replacement.id, startsAt: '2030-01-04T21:00:00Z' })
+        .expect(201);
+      testNow = new Date('2030-01-04T20:40:00Z');
+      await client
+        .post(`/api/v1/turnos/${repeated.id}/reasignar`)
+        .set('Authorization', 'Bearer token-admin')
+        .send({ guardId: northGuardId })
+        .expect(201);
+      const repeatedHistory = await prisma.shiftAssignment.findMany({
+        where: { shiftId: repeated.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(repeatedHistory.map((assignment) => assignment.result)).toEqual([
+        'absent',
+        'replaced',
+        'scheduled',
+      ]);
+
+      testNow = new Date('2030-01-06T20:05:00Z');
+      const early = await makeShift('2030-01-06T20:00:00Z', '2030-01-07T08:00:00Z');
+      await client
+        .post(`/api/v1/turnos/${early.id}/iniciar`)
+        .set('Authorization', 'Bearer token-guard')
+        .send({
+          eventId: randomUUID(),
+          occurredAtDevice: testNow.toISOString(),
+          location: { ...location, takenAt: testNow.toISOString() },
+        })
+        .expect(201);
+      testNow = new Date('2030-01-06T21:00:00Z');
+      await client
+        .post(`/api/v1/turnos/${early.id}/cerrar`)
+        .set('Authorization', 'Bearer token-guard')
+        .send({
+          eventId: randomUUID(),
+          occurredAtDevice: testNow.toISOString(),
+          reason: 'Me descompuse',
+          location: { ...location, takenAt: testNow.toISOString() },
+        })
+        .expect(201);
+      await client
+        .post(`/api/v1/turnos/${early.id}/reasignar`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .send({ guardId: replacement.id, startsAt: '2030-01-06T22:00:00Z' })
+        .expect(201);
+      const earlyHistory = await prisma.shiftAssignment.findMany({
+        where: { shiftId: early.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(earlyHistory.map((assignment) => assignment.result)).toEqual([
+        'closed_early',
+        'scheduled',
+      ]);
+      expect(notices).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'shift_closed_early',
+          subjectId: earlyHistory[0]?.id,
+          resolution: 'covered',
+        }),
+      );
+    } finally {
+      testNow = savedNow;
+      notices.mockRestore();
+      notifications.mockRestore();
     }
   });
 });
