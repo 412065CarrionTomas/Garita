@@ -43,6 +43,7 @@ export class PanicService {
         if (
           duplicate.companyId !== credential.companyId ||
           duplicate.shiftId !== credential.shiftId ||
+          duplicate.assignmentId !== credential.assignmentId ||
           duplicate.guardId !== credential.userId
         )
           throw new NotFoundException('Alerta no encontrada');
@@ -56,6 +57,7 @@ export class PanicService {
         if (
           repeatedActivation.alert.companyId !== credential.companyId ||
           repeatedActivation.alert.shiftId !== credential.shiftId ||
+          repeatedActivation.alert.assignmentId !== credential.assignmentId ||
           repeatedActivation.alert.guardId !== credential.userId
         )
           throw new NotFoundException('Alerta no encontrada');
@@ -172,7 +174,7 @@ export class PanicService {
     )
       return this.response(alert);
     const now = this.clock.now();
-    const updated = await this.prisma.systemPrisma.panicAlert.update({
+    const updated = await this.prisma.tenantPrisma.panicAlert.update({
       where: { id: alertId },
       data: {
         locationStatus: next.status,
@@ -182,6 +184,11 @@ export class PanicService {
         events: { create: { type: 'location_updated', occurredAt: now } },
       },
     });
+    this.realtime.emitToSite(credential.companyId, updated.siteId, 'panico.actualizado', {
+      alertId: updated.id,
+      siteId: updated.siteId,
+    });
+    this.logger.log({ event: 'panic.location_updated', alertId });
     return this.response(updated);
   }
 
@@ -193,7 +200,7 @@ export class PanicService {
   }
 
   private async owned(alertId: string, credential: ShiftCredentialPayload) {
-    const alert = await this.prisma.systemPrisma.panicAlert.findFirst({
+    const alert = await this.prisma.tenantPrisma.panicAlert.findFirst({
       where: {
         id: alertId,
         companyId: credential.companyId,

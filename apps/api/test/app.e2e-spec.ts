@@ -119,6 +119,12 @@ class TestOnlyUserController {
     return this.prisma.tenantPrisma.company.findMany({ select: { id: true } });
   }
 
+  @Get('panic/:id')
+  @Roles('admin', 'supervisor')
+  panicById(@Param('id') id: string) {
+    return this.tenantResources.findOwnedOrThrow('PanicAlert', id);
+  }
+
   @Get('transaction')
   @Roles(...USER_ROLES)
   transaction() {
@@ -480,6 +486,30 @@ describe('Aplicación (e2e)', () => {
         .send(body)
         .expect(200);
       expect(first.body).toMatchObject({ alertId, status: 'active' });
+      for (const firebaseToken of ['token-admin', 'token-guard', 'token-supervisor']) {
+        await client
+          .post('/api/v1/alertas-panico')
+          .set('Authorization', `Bearer ${firebaseToken}`)
+          .send(body)
+          .expect(401);
+      }
+      await client
+        .get(`/api/v1/test-only/users/panic/${alertId}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      await client
+        .get(`/api/v1/test-only/users/panic/${alertId}`)
+        .set('Authorization', 'Bearer token-other-supervisor')
+        .expect(404);
+      await client
+        .get(`/api/v1/test-only/users/panic/${alertId}`)
+        .set('Authorization', 'Bearer token-south-admin')
+        .expect(404);
+      await client.get(`/api/v1/alertas-panico/${alertId}/estado`).expect(401);
+      await client
+        .patch(`/api/v1/alertas-panico/${alertId}/ubicacion`)
+        .send({ location: body.location })
+        .expect(401);
       expect(notifications).toHaveBeenCalledWith(
         expect.objectContaining({ kind: 'panic', priority: 'high' }),
       );
@@ -560,6 +590,16 @@ describe('Aplicación (e2e)', () => {
           scheduledEnd: other.endsAt,
         })
       ).token;
+      await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send(body)
+        .expect(403);
+      await client
+        .patch(`/api/v1/alertas-panico/${alertId}/ubicacion`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ location: body.location })
+        .expect(404);
       await client
         .get(`/api/v1/alertas-panico/${alertId}/estado`)
         .set('Authorization', `Bearer ${otherToken}`)
