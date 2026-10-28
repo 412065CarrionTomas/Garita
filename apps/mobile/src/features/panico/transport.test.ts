@@ -1,5 +1,5 @@
 import { PANIC_SMS_FALLBACK_SECONDS, type CreatePanicAlertRequest } from '@garita/shared';
-import { createDefaultFieldRepository } from '@/lib/db/database';
+import { createDefaultFieldRepository, type LocalPanicAlert } from '@/lib/db/database';
 import { getShiftCredentialToken } from '@/lib/cola/credential';
 import {
   dispatchPanicAlert,
@@ -35,8 +35,12 @@ describe('priority panic transport', () => {
     jest.useFakeTimers();
     jest.mocked(getShiftCredentialToken).mockResolvedValue('credential');
     jest.mocked(createDefaultFieldRepository).mockResolvedValue({
-      updatePanicAlert: jest.fn().mockResolvedValue(undefined),
+      patchPanicAlert: jest.fn(async (_id: string, patch: Partial<LocalPanicAlert>) => ({
+        ...alert,
+        ...patch,
+      })),
       listPanicAlerts: jest.fn().mockResolvedValue([alert]),
+      listPendingEvents: async () => [],
     } as never);
   });
   afterEach(() => {
@@ -78,13 +82,14 @@ describe('priority panic transport', () => {
     const pending = dispatchPanicAlert(alert);
     const repo = await createDefaultFieldRepository();
     await jest.advanceTimersByTimeAsync(7999);
-    expect(repo.updatePanicAlert).not.toHaveBeenCalled();
+    expect(repo.patchPanicAlert).not.toHaveBeenCalled();
     await jest.advanceTimersByTimeAsync(1);
     await pending;
-    expect(repo.updatePanicAlert).toHaveBeenCalledWith(expect.objectContaining({ state: null }));
+    expect(repo.patchPanicAlert).toHaveBeenCalledWith(request.alertId, { attempts: 1 });
     await jest.advanceTimersByTimeAsync(5000);
     expect(send).toHaveBeenCalledTimes(2);
-    expect(repo.updatePanicAlert).toHaveBeenCalledWith(
+    expect(repo.patchPanicAlert).toHaveBeenCalledWith(
+      request.alertId,
       expect.objectContaining({
         state: expect.objectContaining({ status: 'active' }),
       }),
@@ -122,6 +127,55 @@ describe('priority panic transport', () => {
     await sendBetterLocation(
       { ...alert, state, request: { ...request, location } },
       { ...location, accuracyMeters: 20 },
+    );
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('H3: shares the in-flight promise with queue callers until receipt is persisted', async () => {
+    let receive!: (state: NonNullable<LocalPanicAlert['state']>) => void;
+    const send = jest.fn(
+      () =>
+        new Promise<NonNullable<LocalPanicAlert['state']>>((resolve) => {
+          receive = resolve;
+        }),
+    );
+    setPanicTransportForTesting({ online: async () => true, send });
+    const direct = dispatchPanicAlert(alert);
+    const queued = dispatchPanicAlert(alert);
+    expect(queued).toBe(direct);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(1);
+    receive({
+      alertId: request.alertId,
+      status: 'active',
+      receivedAt: request.occurredAtDevice,
+      confirmedAt: null,
+    });
+    await Promise.all([direct, queued]);
+    const repo = await createDefaultFieldRepository();
+    expect(repo.patchPanicAlert).toHaveBeenCalledWith(
+      request.alertId,
+      expect.objectContaining({ state: expect.anything() }),
+    );
+  });
+
+  it.each([
+    { status: 'unverifiable' as const, latitude: null, longitude: null },
+    { status: 'ok' as const, latitude: null, longitude: -58 },
+    { status: 'ok' as const, latitude: -34, longitude: null },
+  ])('H3: never patches unusable coordinates even with better accuracy: %j', async (invalid) => {
+    jest.mocked(apiRequest).mockClear();
+    await sendBetterLocation(
+      {
+        ...alert,
+        state: {
+          alertId: request.alertId,
+          status: 'active',
+          receivedAt: request.occurredAtDevice,
+          confirmedAt: null,
+        },
+      },
+      { ...request.location, ...invalid, accuracyMeters: 1 },
     );
     expect(apiRequest).not.toHaveBeenCalled();
   });

@@ -16,8 +16,23 @@ export const localPanicAlertSchema = z.object({
   smsState: z.enum(['pending', 'unavailable']),
   attempts: z.number().int().nonnegative(),
   betterLocation: fieldLocationSchema.optional(),
+  blockedReason: z.literal('shift_closed').optional(),
 });
 export type LocalPanicAlert = z.infer<typeof localPanicAlertSchema>;
+type PanicAlertPatch = Partial<
+  Pick<LocalPanicAlert, 'state' | 'betterLocation' | 'smsState' | 'attempts' | 'blockedReason'>
+>;
+const panicListeners = new Set<() => void>();
+const panicWrites = new WeakMap<FieldDatabase, Promise<unknown>>();
+export function subscribePanicChanges(listener: () => void): () => void {
+  panicListeners.add(listener);
+  return () => {
+    panicListeners.delete(listener);
+  };
+}
+function notifyPanicChanges(): void {
+  for (const listener of panicListeners) listener();
+}
 
 export const localCheckpointRecordSchema = z.object({
   recordId: z.string().uuid(),
@@ -452,6 +467,7 @@ export function createFieldRepository(database: FieldDatabase) {
     async saveShiftData(input: unknown): Promise<ShiftOfflineData> {
       const data = shiftOfflineDataSchema.parse(input);
       await database.transaction(() => database.replaceShift(data));
+      notifyPanicChanges();
       return data;
     },
     async getShiftData(): Promise<ShiftOfflineData | null> {
@@ -460,10 +476,12 @@ export function createFieldRepository(database: FieldDatabase) {
     },
     async clearShiftData(): Promise<void> {
       await database.transaction(() => database.replaceShift(null));
+      notifyPanicChanges();
     },
     async addPendingEvent(input: unknown): Promise<void> {
       const event = pendingFieldEventSchema.parse(input);
       await database.insertEvent(event);
+      if (event.type === 'shift_close') notifyPanicChanges();
     },
     async updatePendingEventPayload(id: string, payload: unknown): Promise<void> {
       if (!database.updateEventPayload)
@@ -491,7 +509,7 @@ export function createFieldRepository(database: FieldDatabase) {
       const panic = database.readPanicAlerts
         ? (await database.readPanicAlerts())
             .map((alert) => localPanicAlertSchema.parse(alert))
-            .filter((alert) => !alert.state).length
+            .filter((alert) => !alert.state && !alert.blockedReason).length
         : 0;
       return regular + panic;
     },
@@ -559,6 +577,7 @@ export function createFieldRepository(database: FieldDatabase) {
       const alert = localPanicAlertSchema.parse(input);
       if (!database.insertPanicAlert) throw new Error('La base local no admite alertas de pánico');
       await database.insertPanicAlert(alert);
+      notifyPanicChanges();
       return alert;
     },
     async listPanicAlerts(): Promise<LocalPanicAlert[]> {
@@ -569,6 +588,27 @@ export function createFieldRepository(database: FieldDatabase) {
       const alert = localPanicAlertSchema.parse(input);
       if (!database.updatePanicAlert) throw new Error('La base local no admite alertas de pánico');
       await database.updatePanicAlert(alert);
+      notifyPanicChanges();
+    },
+    async patchPanicAlert(id: string, patch: PanicAlertPatch): Promise<LocalPanicAlert> {
+      const previous = panicWrites.get(database) ?? Promise.resolve();
+      const write = previous
+        .catch(() => undefined)
+        .then(() =>
+          database.transaction(async () => {
+            const saved = (await repository.listPanicAlerts()).find(
+              (alert) => alert.request.alertId === id,
+            );
+            if (!saved || !database.updatePanicAlert) throw new Error('Alerta local no encontrada');
+            const merged = localPanicAlertSchema.parse({ ...saved, ...patch });
+            await database.updatePanicAlert(merged);
+            return merged;
+          }),
+        );
+      panicWrites.set(database, write);
+      const result = await write;
+      notifyPanicChanges();
+      return result;
     },
   };
   return repository;

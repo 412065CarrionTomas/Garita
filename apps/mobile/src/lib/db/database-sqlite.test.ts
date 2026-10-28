@@ -1,7 +1,12 @@
 import type * as SQLite from 'expo-sqlite';
 import { readClock, saveTimeReference, prepareEventClocks } from '@/lib/clock/clock';
 import GaritaNative from '../../../modules/garita-native/src';
-import { createFieldRepository, ExpoFieldDatabase, migrateDatabase } from './database';
+import {
+  createFieldRepository,
+  ExpoFieldDatabase,
+  migrateDatabase,
+  subscribePanicChanges,
+} from './database';
 
 interface SqliteStatement {
   get(...params: unknown[]): unknown;
@@ -90,6 +95,107 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     const reopened = createFieldRepository(new ExpoFieldDatabase(adapter));
     expect(await reopened.listPanicAlerts()).toEqual([alert]);
     expect(await reopened.countPendingEvents()).toBe(1);
+    const database = new ExpoFieldDatabase(adapter);
+    const sender = createFieldRepository(database);
+    const locator = createFieldRepository(database);
+    const state = {
+      alertId: alert.request.alertId,
+      status: 'active' as const,
+      receivedAt: '2035-01-01T12:00:01Z',
+      confirmedAt: null,
+    };
+    const betterLocation = {
+      ...alert.request.location,
+      status: 'ok' as const,
+      latitude: -34.6,
+      longitude: -58.4,
+      accuracyMeters: 5,
+    };
+    await Promise.all([
+      sender.patchPanicAlert(alert.request.alertId, { state }),
+      locator.patchPanicAlert(alert.request.alertId, { betterLocation }),
+    ]);
+    expect((await reopened.listPanicAlerts())[0]).toMatchObject({ state, betterLocation });
+    await Promise.all([
+      locator.patchPanicAlert(alert.request.alertId, {
+        betterLocation: { ...betterLocation, accuracyMeters: 1 },
+      }),
+      sender.patchPanicAlert(alert.request.alertId, {
+        state: { ...state, status: 'confirmed', confirmedAt: '2035-01-01T12:00:02Z' },
+      }),
+    ]);
+    expect((await reopened.listPanicAlerts())[0]).toMatchObject({
+      state: { status: 'confirmed' },
+      betterLocation: { accuracyMeters: 1 },
+    });
+    expect(await reopened.countPendingEvents()).toBe(0);
+  });
+
+  it('H1/H2: notifies panic observers after local start, close and server state persistence', async () => {
+    const { adapter } = createNodeSqliteExpoAdapter();
+    const database = new ExpoFieldDatabase(adapter);
+    await migrateDatabase(database);
+    const repo = createFieldRepository(database);
+    const changed = jest.fn();
+    const unsubscribe = subscribePanicChanges(changed);
+    try {
+      await repo.saveShiftData({
+        shift: {
+          id: 'shift',
+          siteId: 'site',
+          siteName: 'Predio',
+          startsAt: '2035-01-01T10:00:00Z',
+          endsAt: '2035-01-01T18:00:00Z',
+          timezone: 'America/Argentina/Buenos_Aires',
+          assignmentId: 'assignment',
+        },
+        rounds: [],
+        windows: [],
+        checkpoints: [],
+        serverTime: { serverNowUtc: '2035-01-01T10:00:00Z' },
+      });
+      expect(changed).toHaveBeenCalledTimes(1);
+      await repo.addPendingEvent({
+        id: '00000000-0000-4000-8000-000000000099',
+        type: 'shift_close',
+        payload: { shiftId: 'shift' },
+        occurredAtDevice: '2035-01-01T18:00:00Z',
+        createdAt: '2035-01-01T18:00:00Z',
+      });
+      expect(changed).toHaveBeenCalledTimes(2);
+      const location = {
+        status: 'unverifiable',
+        latitude: null,
+        longitude: null,
+        accuracyMeters: null,
+        simulation: 'unavailable',
+        takenAt: null,
+      };
+      await repo.savePanicAlert({
+        request: {
+          alertId: '00000000-0000-4000-8000-000000000001',
+          shiftId: 'shift',
+          occurredAtDevice: '2035-01-01T12:00:00Z',
+          location,
+        },
+        state: null,
+        smsState: 'pending',
+        attempts: 0,
+      });
+      changed.mockClear();
+      await repo.patchPanicAlert('00000000-0000-4000-8000-000000000001', {
+        state: {
+          alertId: '00000000-0000-4000-8000-000000000001',
+          status: 'active',
+          receivedAt: '2035-01-01T12:00:01Z',
+          confirmedAt: null,
+        },
+      });
+      expect(changed).toHaveBeenCalledTimes(1);
+      expect((await repo.listPanicAlerts())[0]?.state?.status).toBe('active');
+    } finally {
+      unsubscribe();
+    }
   });
   it('HU-14: persists boot references and recalculated payload across repository reopen, preserves insertion order after wall-clock rollback', async () => {
     const { adapter } = createNodeSqliteExpoAdapter();

@@ -6,6 +6,7 @@ import { readClock } from '@/lib/clock/clock';
 import { createDefaultFieldRepository, type LocalPanicAlert } from '@/lib/db/database';
 import { getCurrentLocation } from '@/lib/location';
 import { sendBetterLocation } from './transport';
+import { getRunningPanicShift } from './running-shift';
 
 export interface PanicActionDependencies {
   now(): Date;
@@ -78,9 +79,8 @@ export function resetPanicActionsForTesting(): void {
 export async function triggerPanic(): Promise<LocalPanicAlert> {
   const deps = { ...defaults, ...overrides };
   const repository = await createDefaultFieldRepository();
-  const shift = await repository.getShiftData();
-  if (!shift || (await repository.getSyncMeta('shift_closed_done')) === 'true')
-    throw new Error('Necesitás un turno en curso para activar el pánico');
+  const shift = await getRunningPanicShift(repository);
+  if (!shift) throw new Error('Necesitás un turno en curso para activar el pánico');
   const now = deps.now().toISOString();
   const alert = await repository.savePanicAlert({
     request: {
@@ -99,11 +99,9 @@ export async function triggerPanic(): Promise<LocalPanicAlert> {
   void deps
     .betterLocation()
     .then(async (location) => {
-      const saved = (await repository.listPanicAlerts()).find(
-        (item) => item.request.alertId === alert.request.alertId,
-      );
-      if (!saved) return;
-      await repository.updatePanicAlert({ ...saved, betterLocation: location });
+      const saved = await repository.patchPanicAlert(alert.request.alertId, {
+        betterLocation: location,
+      });
       if (saved.state) await sendBetterLocation(saved, location);
     })
     .catch(() => undefined);

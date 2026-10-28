@@ -24,8 +24,10 @@ describe('panic trigger', () => {
     jest.mocked(createDefaultFieldRepository).mockResolvedValue({
       getShiftData: async () => ({ shift: { id: 'shift' } }),
       getSyncMeta: async () => null,
+      listPendingEvents: async () => [],
       savePanicAlert,
       listPanicAlerts: async () => [],
+      patchPanicAlert: jest.fn().mockRejectedValue(new Error('No location saved in this test')),
     } as never);
     jest.mocked(readClock).mockResolvedValue({
       deviceTime: '2035-01-01T12:00:00.000Z',
@@ -71,5 +73,20 @@ describe('panic trigger', () => {
     });
     await triggerPanic();
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('H1: rejects panic after an offline close without persisting or sending an alert', async () => {
+    const savePanicAlert = jest.fn();
+    const send = jest.fn();
+    jest.mocked(createDefaultFieldRepository).mockResolvedValue({
+      getShiftData: async () => ({ shift: { id: 'shift-1' } }),
+      getSyncMeta: async () => null,
+      listPendingEvents: async () => [{ type: 'shift_close', payload: { shiftId: 'shift-1' } }],
+      savePanicAlert,
+    } as never);
+    setPanicActionsForTesting({ send });
+    await expect(triggerPanic()).rejects.toThrow('Necesitás un turno en curso');
+    expect(savePanicAlert).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 });

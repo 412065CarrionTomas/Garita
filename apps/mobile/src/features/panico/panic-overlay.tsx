@@ -3,7 +3,7 @@ import { Animated, StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Text, useTheme } from '@/ui';
-import { createDefaultFieldRepository } from '@/lib/db/database';
+import { createDefaultFieldRepository, subscribePanicChanges } from '@/lib/db/database';
 import { fetchPanicState, resumePanicAlerts } from './transport';
 import { triggerPanic } from './actions';
 
@@ -15,34 +15,39 @@ export function PanicOverlay() {
 
   useEffect(() => {
     let active = true;
-    const refresh = async () => {
+    const refresh = async (remote = false) => {
       const repository = await createDefaultFieldRepository();
       const shift = await repository.getShiftData();
       const latest = (await repository.listPanicAlerts()).find(
-        (alert) => alert.request.shiftId === shift?.shift.id,
+        (alert) => alert.request.shiftId === shift?.shift.id && alert.state !== null,
       );
       if (!latest?.state) {
         if (active) setStatus(null);
         return;
       }
-      const state =
-        latest.state.status !== 'resolved'
-          ? await fetchPanicState(latest.state.alertId).catch(() => latest.state)
-          : latest.state;
-      if (state && active) {
-        await repository.updatePanicAlert({ ...latest, state });
-        setStatus(state.confirmedAt ? 'confirmed' : 'received');
+      if (active) setStatus(latest.state.confirmedAt ? 'confirmed' : 'received');
+      if (remote && latest.state.status !== 'resolved') {
+        const state = await fetchPanicState(latest.state.alertId).catch(() => latest.state);
+        if (state && active) {
+          if (JSON.stringify(state) !== JSON.stringify(latest.state))
+            await repository.patchPanicAlert(latest.request.alertId, { state });
+          setStatus(state.confirmedAt ? 'confirmed' : 'received');
+        }
       }
     };
+    const unsubscribe = subscribePanicChanges(() => {
+      void refresh().catch(() => undefined);
+    });
     void resumePanicAlerts()
-      .then(refresh)
+      .then(() => refresh(true))
       .catch(() => undefined);
     const interval = setInterval(() => {
-      void refresh().catch(() => undefined);
+      void refresh(true).catch(() => undefined);
     }, 10_000);
     return () => {
       active = false;
       clearInterval(interval);
+      unsubscribe();
     };
   }, []);
 

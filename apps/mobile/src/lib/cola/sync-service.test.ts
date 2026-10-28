@@ -294,15 +294,77 @@ describe('SyncService (HU-13)', () => {
     await repo.addPendingEvent({
       id: '00000000-0000-4000-8000-000000000998',
       type: 'shift_close',
-      payload: {},
-      occurredAtDevice: '2026-10-14T10:00:00Z',
-      createdAt: '2026-10-14T10:00:00Z',
+      payload: { shiftId: 'shift-100' },
+      occurredAtDevice: '2026-10-14T10:01:00Z',
+      createdAt: '2026-10-14T10:01:00Z',
     });
     jest.mocked(dispatchPanicAlert).mockResolvedValue(undefined);
     await processSyncQueue();
     expect(sendBatchMock).not.toHaveBeenCalled();
     expect(deleteCredentialMock).not.toHaveBeenCalled();
     expect(await repo.getShiftData()).not.toBeNull();
+  });
+
+  it('H1: sends a panic occurring before the offline close, then sends the close', async () => {
+    await addPanic();
+    const closeId = '00000000-0000-4000-8000-000000000998';
+    await repo.addPendingEvent({
+      id: closeId,
+      type: 'shift_close',
+      payload: { shiftId: 'shift-100' },
+      occurredAtDevice: '2026-10-14T10:01:00Z',
+      createdAt: '2026-10-14T10:01:00Z',
+    });
+    const order: string[] = [];
+    jest.mocked(dispatchPanicAlert).mockImplementation(async (alert) => {
+      order.push('panic');
+      await repo.patchPanicAlert(alert.request.alertId, {
+        state: {
+          alertId: alert.request.alertId,
+          status: 'active',
+          receivedAt: '2026-10-14T10:00:01Z',
+          confirmedAt: null,
+        },
+      });
+    });
+    sendBatchMock.mockImplementation(async () => {
+      order.push('close');
+      return {
+        results: [{ eventId: closeId, status: 'duplicate' }],
+        receivedAt: '2026-10-14T10:02:00Z',
+      };
+    });
+    await processSyncQueue();
+    expect(order).toEqual(['panic', 'close']);
+    expect(deleteCredentialMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('H1: preserves a legacy panic after local close without sending or blocking the close', async () => {
+    const panic = await addPanic();
+    const closeId = '00000000-0000-4000-8000-000000000998';
+    await repo.addPendingEvent({
+      id: closeId,
+      type: 'shift_close',
+      payload: { shiftId: 'shift-100' },
+      occurredAtDevice: '2026-10-14T09:59:00Z',
+      createdAt: '2026-10-14T09:59:00Z',
+    });
+    jest.mocked(dispatchPanicAlert).mockClear();
+    sendBatchMock.mockResolvedValue({
+      results: [{ eventId: closeId, status: 'duplicate' }],
+      receivedAt: '2026-10-14T10:02:00Z',
+    });
+    await processSyncQueue();
+    expect(dispatchPanicAlert).not.toHaveBeenCalled();
+    expect(sendBatchMock).toHaveBeenCalledTimes(1);
+    expect((await repo.listPanicAlerts())[0]).toMatchObject({
+      state: null,
+      blockedReason: 'shift_closed',
+    });
+    expect(await repo.getSyncMeta(`panic_after_close:${panic.request.alertId}`)).toBe(
+      'Turno cerrado localmente',
+    );
+    expect(deleteCredentialMock).toHaveBeenCalledTimes(1);
   });
 
   it('resumes pending panic on network recovery and foreground', async () => {

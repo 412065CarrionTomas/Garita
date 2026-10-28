@@ -8,6 +8,7 @@ import { apiRequest } from '@/lib/api-client';
 import { computeSyncBackoff } from '@/lib/cola/backoff';
 import { getShiftCredentialToken } from '@/lib/cola/credential';
 import { createDefaultFieldRepository, type LocalPanicAlert } from '@/lib/db/database';
+import { blockPanicAfterClose, isPanicAfterLocalClose } from './running-shift';
 
 export interface PanicTransportDependencies {
   online(): Promise<boolean>;
@@ -36,7 +37,7 @@ const defaultTransport: PanicTransportDependencies = {
   clearTimeout: (timer) => clearTimeout(timer),
 };
 let transportOverrides: Partial<PanicTransportDependencies> = {};
-const sending = new Set<string>();
+const sending = new Map<string, Promise<void>>();
 const retries = new Map<string, ReturnType<typeof setTimeout>>();
 export function setPanicTransportForTesting(next: Partial<PanicTransportDependencies>): void {
   transportOverrides = next;
@@ -55,16 +56,28 @@ async function unavailableSms(alert: LocalPanicAlert): Promise<void> {
   const deps = transport();
   await deps.sms(alert);
   const repository = await createDefaultFieldRepository();
-  const saved = (await repository.listPanicAlerts()).find(
-    (item) => item.request.alertId === alert.request.alertId,
-  );
-  await repository.updatePanicAlert({ ...(saved ?? alert), smsState: 'unavailable' });
+  await repository.patchPanicAlert(alert.request.alertId, { smsState: 'unavailable' });
 }
 
-export async function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> {
+export function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> {
   const id = alert.request.alertId;
-  if (alert.state || sending.has(id)) return;
-  sending.add(id);
+  const running = sending.get(id);
+  if (running) return running;
+  if (alert.state || alert.blockedReason) return Promise.resolve();
+  const pending = sendPanicAlert(alert).finally(() => {
+    sending.delete(id);
+  });
+  sending.set(id, pending);
+  return pending;
+}
+
+async function sendPanicAlert(alert: LocalPanicAlert): Promise<void> {
+  const id = alert.request.alertId;
+  const repository = await createDefaultFieldRepository();
+  if (await isPanicAfterLocalClose(repository, alert)) {
+    await blockPanicAfterClose(repository, alert);
+    return;
+  }
   const deps = transport();
   let confirmed = false;
   let smsStarted = false;
@@ -90,9 +103,7 @@ export async function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> 
       }),
     ]);
     confirmed = true;
-    const repository = await createDefaultFieldRepository();
-    const saved = (await repository.listPanicAlerts()).find((item) => item.request.alertId === id);
-    await repository.updatePanicAlert({ ...(saved ?? alert), state });
+    const saved = await repository.patchPanicAlert(id, { state });
     if (saved?.betterLocation)
       void sendBetterLocation({ ...saved, state }, saved.betterLocation).catch(() => undefined);
     const retry = retries.get(id);
@@ -102,14 +113,12 @@ export async function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> 
     await fallback().catch(() => undefined);
   } finally {
     if (timer !== undefined) deps.clearTimeout(timer);
-    sending.delete(id);
     if (!confirmed && !retries.has(id)) {
-      const repository = await createDefaultFieldRepository();
       const current = (await repository.listPanicAlerts()).find(
         (item) => item.request.alertId === id,
       );
       const attempts = (current?.attempts ?? alert.attempts) + 1;
-      await repository.updatePanicAlert({ ...(current ?? alert), attempts });
+      await repository.patchPanicAlert(id, { attempts });
       retries.set(
         id,
         deps.setTimeout(
@@ -127,7 +136,7 @@ export async function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> 
 export async function resumePanicAlerts(): Promise<void> {
   const repository = await createDefaultFieldRepository();
   for (const alert of await repository.listPanicAlerts())
-    if (!alert.state) void dispatchPanicAlert(alert);
+    if (!alert.state && !alert.blockedReason) void dispatchPanicAlert(alert).catch(() => undefined);
 }
 
 export async function fetchPanicState(alertId: string): Promise<PanicAlertStateResponse> {
@@ -147,6 +156,9 @@ export async function sendBetterLocation(
   location: LocalPanicAlert['request']['location'],
 ): Promise<void> {
   if (
+    location.status !== 'ok' ||
+    location.latitude === null ||
+    location.longitude === null ||
     location.accuracyMeters === null ||
     (alert.request.location.accuracyMeters !== null &&
       location.accuracyMeters >= alert.request.location.accuracyMeters)

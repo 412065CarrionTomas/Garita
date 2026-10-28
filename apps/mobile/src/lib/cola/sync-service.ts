@@ -21,6 +21,7 @@ import { computeSyncBackoff } from './backoff';
 import { deleteShiftCredential, getShiftCredentialToken } from './credential';
 import { processIncidentPhotos } from '@/lib/fotos/photo-queue';
 import { dispatchPanicAlert } from '@/features/panico/transport';
+import { blockPanicAfterClose, isPanicAfterLocalClose } from '@/features/panico/running-shift';
 
 export interface SyncStateSnapshot {
   isSyncing: boolean;
@@ -183,9 +184,14 @@ export async function processSyncQueue(): Promise<{
     const repo = await d.repository();
 
     while (true) {
-      const pendingPanics = (await repo.listPanicAlerts()).filter((alert) => !alert.state);
-      for (const alert of pendingPanics) await sendUrgentEvent(alert);
-      if ((await repo.listPanicAlerts()).some((alert) => !alert.state)) {
+      const pendingPanics = (await repo.listPanicAlerts()).filter(
+        (alert) => !alert.state && !alert.blockedReason,
+      );
+      for (const alert of pendingPanics) {
+        if (await isPanicAfterLocalClose(repo, alert)) await blockPanicAfterClose(repo, alert);
+        else await sendUrgentEvent(alert);
+      }
+      if ((await repo.listPanicAlerts()).some((alert) => !alert.state && !alert.blockedReason)) {
         scheduleRetry(computeSyncBackoff(consecutiveFailures++));
         overallSuccess = false;
         break;
