@@ -82,6 +82,9 @@ export class ShiftExecutionService {
       if (replay.shiftId !== id)
         throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
       await this.assertCurrentGuard(id, user);
+      const current = await this.currentAssignment(id);
+      if (current?.id !== replay.assignmentId)
+        throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.reassigned });
       return this.startResponse(replay.shift.id);
     }
     const shift = await this.ownedShift(id);
@@ -360,6 +363,10 @@ export class ShiftExecutionService {
           closedByUserId: user.userId,
         },
       });
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: { result: early ? 'closed_early' : 'started' },
+      });
       await tx.shiftEvent.create({
         data: {
           companyId: shift.companyId,
@@ -480,6 +487,14 @@ export class ShiftExecutionService {
           closedByUserId: adminId,
         },
       });
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          result: isEarlyClose(shift.endsAt.toISOString(), now.toISOString())
+            ? 'closed_early'
+            : 'started',
+        },
+      });
       await tx.shiftEvent.create({
         data: {
           companyId: shift.companyId,
@@ -529,6 +544,14 @@ export class ShiftExecutionService {
           closeReason: reason,
           closedBy: 'admin',
           closedByUserId: adminId,
+        },
+      });
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          result: isEarlyClose(shift.endsAt.toISOString(), now.toISOString())
+            ? 'closed_early'
+            : 'started',
         },
       });
       await tx.shiftEvent.create({
@@ -681,6 +704,10 @@ export class ShiftExecutionService {
           closedByUserId: user.userId,
         },
       });
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: { result: early ? 'closed_early' : 'started' },
+      });
       await tx.shiftEvent.create({
         data: {
           companyId: shift.companyId,
@@ -712,8 +739,9 @@ export class ShiftExecutionService {
 
   private async startResponse(id: string) {
     const shift = await this.prisma.tenantPrisma.shift.findFirstOrThrow({ where: { id } });
+    const current = await this.currentAssignment(id);
     const event = await this.prisma.tenantPrisma.shiftEvent.findFirst({
-      where: { shiftId: id, type: 'start' },
+      where: { shiftId: id, assignmentId: current?.id, type: 'start' },
       orderBy: { receivedAt: 'asc' },
     });
     let credential: { token: string; expiresAt: string } | undefined;

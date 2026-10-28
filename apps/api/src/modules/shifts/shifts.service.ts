@@ -252,6 +252,32 @@ export class ShiftsService {
     });
   }
 
+  async replacements(id: string, chosenStart: string | undefined, user: AuthenticatedUser) {
+    const shift = await this.get(id, user);
+    const now = this.clock.now();
+    const startsAt = chosenStart ? new Date(chosenStart) : now;
+    if (startsAt < now || startsAt >= shift.endsAt)
+      throw new BadRequestException('La hora de inicio debe estar entre ahora y el fin del turno');
+    return this.prisma.tenantPrisma.user.findMany({
+      where: {
+        role: 'guard',
+        status: 'active',
+        id: { not: shift.assignments[0]?.guardId ?? undefined },
+        shiftAssignments: {
+          none: {
+            active: true,
+            isCurrent: true,
+            shiftId: { not: id },
+            startsAt: { lt: shift.endsAt },
+            endsAt: { gt: startsAt },
+          },
+        },
+      },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
+    });
+  }
+
   async reassign(id: string, input: ReassignShiftRequest, user: AuthenticatedUser) {
     const shift = await this.get(id, user);
     const now = this.clock.now();
@@ -303,7 +329,11 @@ export class ShiftsService {
     const assignment = await this.prisma.tenantPrisma
       .$transaction(async (tx) => {
         const changed = await tx.shiftAssignment.updateMany({
-          where: { id: current.id, isCurrent: true, result: covering ? 'started' : 'scheduled' },
+          where: {
+            id: current.id,
+            isCurrent: true,
+            result: covering ? 'closed_early' : 'scheduled',
+          },
           data: { isCurrent: false, active: false, result: priorResult },
         });
         if (changed.count !== 1)
@@ -662,7 +692,13 @@ export class ShiftsService {
     startsAt: Date,
     timezone: string,
   ) {
-    const notification = buildShiftNotification({ kind, shiftId, startsAt, timezone });
+    const notification = buildShiftNotification({
+      kind,
+      shiftId,
+      startsAt,
+      timezone,
+      now: this.clock.now(),
+    });
     try {
       await this.notifications.notifyUsers({
         companyId,
