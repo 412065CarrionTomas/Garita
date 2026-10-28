@@ -14,7 +14,6 @@ export function windowSeverity(
   return marked.length > 0 ? 'leve' : null;
 }
 
-// TODO(HU-17): use this rule when the missed-round notification is implemented.
 export function shouldNotifyMissedRound(status: RoundWindowStatus): boolean {
   return status === 'incomplete' || status === 'not_done';
 }

@@ -63,15 +63,6 @@ export class SyncBatchService {
       },
     });
 
-    await this.syncStateService.updateSyncState({
-      companyId: credential.companyId,
-      shiftId: credential.shiftId,
-      pendingCount: input.pendingCount,
-      syncedUntil: syncedUntil ? new Date(syncedUntil) : null,
-      contactAt: receivedAt,
-      isBatch: true,
-    });
-
     // Precarga de contexto de turno para optimizar procesamiento por lote
     const shift = await this.prisma.systemPrisma.shift.findFirst({
       where: { id: credential.shiftId, companyId: credential.companyId },
@@ -291,6 +282,19 @@ export class SyncBatchService {
         }
       }
     }
+
+    // Publicar la marca antes de persistir el lote produciría avisos falsos; un rechazo no certifica datos completos.
+    await this.syncStateService.updateSyncState({
+      companyId: credential.companyId,
+      shiftId: credential.shiftId,
+      pendingCount: input.pendingCount,
+      syncedUntil:
+        syncedUntil && !results.some((result) => result.status === 'rejected')
+          ? new Date(syncedUntil)
+          : null,
+      contactAt: receivedAt,
+      isBatch: true,
+    });
 
     this.logger.log({
       event: 'sync_batch.processed',

@@ -234,6 +234,52 @@ export class ShiftExecutionService {
     return this.buildData(id);
   }
 
+  async closeWithoutData(id: string, reason: string, user: AuthenticatedUser) {
+    const shift = await this.ownedShift(id);
+    if (
+      user.role === 'supervisor' &&
+      !(await this.prisma.tenantPrisma.siteSupervisor.findFirst({
+        where: { siteId: shift.siteId, userId: user.userId },
+      }))
+    )
+      throw new NotFoundException('Turno no encontrado');
+    const now = this.clock.now();
+    const notice = await this.prisma.tenantPrisma.notice.findFirst({
+      where: { shiftId: id, kind: 'shift_unsynced', status: 'open' },
+      select: { id: true },
+    });
+    if (!notice) throw new ConflictException('El turno no está sin sincronizar');
+    await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const changed = await tx.notice.updateMany({
+        where: { id: notice.id, status: 'open' },
+        data: { status: 'resolved', resolution: 'closed_without_data', resolvedAt: now },
+      });
+      if (!changed.count) throw new ConflictException('El turno ya fue cerrado sin datos');
+      await tx.shift.update({
+        where: { id },
+        data: {
+          closedWithoutDataAt: now,
+          closedWithoutDataById: user.userId,
+          closedWithoutDataReason: reason,
+        },
+      });
+      await tx.roundWindowState.updateMany({
+        where: { shiftId: id, status: 'pending_sync' },
+        data: { status: 'not_done' },
+      });
+    });
+    this.realtime?.emitToSite(user.companyId, shift.siteId, 'aviso.actualizado', {
+      noticeId: notice.id,
+      siteId: shift.siteId,
+    });
+    this.realtime?.emitToSite(user.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId: id,
+      siteId: shift.siteId,
+    });
+    this.logger.log({ event: 'shift.closed_without_data', shiftId: id, userId: user.userId });
+    return { shiftId: id, closedWithoutDataAt: now, closedWithoutDataById: user.userId, reason };
+  }
+
   async state(id: string, user: AuthenticatedUser) {
     const data = await this.data(id, user);
     const shift = await this.prisma.tenantPrisma.shift.findFirstOrThrow({ where: { id } });
@@ -590,7 +636,6 @@ export class ShiftExecutionService {
     for (const shift of noShows) {
       noShowCount += await this.setNoShow(shift, now);
     }
-    await this.windowStates?.recalculateExpired();
     return shifts.length + noShowCount;
   }
 
