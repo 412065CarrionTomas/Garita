@@ -18,7 +18,7 @@
     "@expo-google-fonts/geist": "^0.4.2",
     "@garita/shared": "workspace:*",
     "@garita/tokens": "workspace:*",
-    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-async-storage/async-storage": "3.1.1",
     "expo": "~57.0.27",
     "expo-audio": "~57.0.5",
     "expo-camera": "~57.0.6",
