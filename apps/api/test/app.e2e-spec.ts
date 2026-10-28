@@ -16,6 +16,7 @@ import {
   siteResponseSchema,
   USER_ROLES,
   SOCKET_NAMESPACE,
+  panicAlertStateResponseSchema,
 } from '@garita/shared';
 import {
   Controller,
@@ -52,6 +53,7 @@ import type { App } from 'supertest/types';
 import { z } from 'zod';
 import { io, type Socket as ClientSocket } from 'socket.io-client';
 import { REALTIME_PORT, type RealtimePort } from '../src/common/ports/realtime.port';
+import { NOTIFICATIONS_PORT, type NotificationsPort } from '../src/common/ports/notifications.port';
 import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
 import { RoundWindowStateService } from '../src/modules/supervision/round-window-state.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
@@ -116,6 +118,12 @@ class TestOnlyUserController {
   @Roles(...USER_ROLES)
   companies() {
     return this.prisma.tenantPrisma.company.findMany({ select: { id: true } });
+  }
+
+  @Get('panic/:id')
+  @Roles('admin', 'supervisor')
+  panicById(@Param('id') id: string) {
+    return this.tenantResources.findOwnedOrThrow('PanicAlert', id);
   }
 
   @Get('transaction')
@@ -360,6 +368,7 @@ describe('Aplicación (e2e)', () => {
       where: { windowState: { shiftId: { in: createdShiftIds } } },
     });
     await prisma.checkpointRecord.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
+    await prisma.panicAlert.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
     await prisma.shift.deleteMany({ where: { id: { in: createdShiftIds } } });
     await prisma.site.deleteMany({ where: { id: { in: createdSiteIds } } });
     const rounds = await prisma.round.findMany({
@@ -409,6 +418,220 @@ describe('Aplicación (e2e)', () => {
       });
     }
     await app.close();
+  });
+
+  it('registra pánico por HTTP con la credencial de turno, deduplica y aísla turnos', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const creator = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2035-01-01T10:00:00Z'),
+        endsAt: new Date('2035-01-01T18:00:00Z'),
+        serviceDate: new Date('2035-01-01T00:00:00Z'),
+        createdById: creator.id,
+        status: 'in_progress',
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date('2035-01-01T10:00:00Z'),
+            endsAt: new Date('2035-01-01T18:00:00Z'),
+            assignedById: creator.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+      where: { shiftId: shift.id },
+    });
+    testNow = new Date('2035-01-01T12:00:00Z');
+    const { token } = await app.get(ShiftCredentialService).issueCredential({
+      shiftId: shift.id,
+      assignmentId: assignment.id,
+      userId: northGuardId,
+      companyId: 'norte-company',
+      scheduledEnd: shift.endsAt,
+    });
+    testNow = new Date('2026-10-13T12:00:00.000Z');
+    const notifications = jest
+      .spyOn(app.get<NotificationsPort>(NOTIFICATIONS_PORT), 'notifySiteStaff')
+      .mockResolvedValue();
+    const realtime = jest
+      .spyOn(app.get<RealtimePort>(REALTIME_PORT), 'emitToSite')
+      .mockImplementation(() => undefined);
+    const client = request(app.getHttpServer());
+    const alertId = randomUUID();
+    const body = {
+      alertId,
+      shiftId: shift.id,
+      occurredAtDevice: testNow.toISOString(),
+      location: {
+        status: 'ok',
+        latitude: -34.6,
+        longitude: -58.4,
+        accuracyMeters: 20,
+        simulation: 'not_simulated',
+        takenAt: testNow.toISOString(),
+      },
+    };
+    const panicShiftIds = [shift.id];
+    try {
+      await client.post('/api/v1/alertas-panico').send(body).expect(401);
+      const first = await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body)
+        .expect(200);
+      expect(first.body).toMatchObject({ alertId, status: 'active' });
+      for (const firebaseToken of ['token-admin', 'token-guard', 'token-supervisor']) {
+        await client
+          .post('/api/v1/alertas-panico')
+          .set('Authorization', `Bearer ${firebaseToken}`)
+          .send(body)
+          .expect(401);
+      }
+      await client
+        .get(`/api/v1/test-only/users/panic/${alertId}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      await client
+        .get(`/api/v1/test-only/users/panic/${alertId}`)
+        .set('Authorization', 'Bearer token-other-supervisor')
+        .expect(404);
+      await client
+        .get(`/api/v1/test-only/users/panic/${alertId}`)
+        .set('Authorization', 'Bearer token-south-admin')
+        .expect(404);
+      await client.get(`/api/v1/alertas-panico/${alertId}/estado`).expect(401);
+      await client
+        .patch(`/api/v1/alertas-panico/${alertId}/ubicacion`)
+        .send({ location: body.location })
+        .expect(401);
+      expect(notifications).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'panic', priority: 'high' }),
+      );
+      expect(realtime).toHaveBeenCalledWith(
+        'norte-company',
+        northAssignedSiteId,
+        'panico.actualizado',
+        { alertId, siteId: northAssignedSiteId },
+      );
+      await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body)
+        .expect(200);
+      expect(await prisma.panicAlert.count({ where: { shiftId: shift.id } })).toBe(1);
+      const activationId = randomUUID();
+      const next = await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...body, alertId: activationId })
+        .expect(200);
+      await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...body, alertId: activationId })
+        .expect(200);
+      expect(panicAlertStateResponseSchema.parse(next.body).alertId).toBe(alertId);
+      expect(
+        (await prisma.panicAlert.findUniqueOrThrow({ where: { id: alertId } })).activationCount,
+      ).toBe(2);
+      expect(await prisma.panicAlertEvent.count({ where: { alertId, type: 'activation' } })).toBe(
+        1,
+      );
+      await client
+        .patch(`/api/v1/alertas-panico/${alertId}/ubicacion`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ location: { ...body.location, accuracyMeters: 5 } })
+        .expect(200);
+      expect(
+        Number(
+          (await prisma.panicAlert.findUniqueOrThrow({ where: { id: alertId } })).accuracyMeters,
+        ),
+      ).toBe(5);
+      for (const invalid of [
+        { status: 'unverifiable', latitude: null, longitude: null },
+        { status: 'ok', latitude: null, longitude: body.location.longitude },
+        { status: 'ok', latitude: body.location.latitude, longitude: null },
+      ]) {
+        await client
+          .patch(`/api/v1/alertas-panico/${alertId}/ubicacion`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ location: { ...body.location, ...invalid, accuracyMeters: 1 } })
+          .expect(200);
+        const preserved = await prisma.panicAlert.findUniqueOrThrow({ where: { id: alertId } });
+        expect(Number(preserved.latitude)).toBe(body.location.latitude);
+        expect(Number(preserved.longitude)).toBe(body.location.longitude);
+        expect(Number(preserved.accuracyMeters)).toBe(5);
+        expect(preserved.locationStatus).toBe('ok');
+      }
+      await client
+        .get(`/api/v1/alertas-panico/${alertId}/estado`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const other = await prisma.shift.create({
+        data: {
+          companyId: 'norte-company',
+          siteId: northUnassignedSiteId,
+          startsAt: new Date('2035-01-02T10:00:00Z'),
+          endsAt: new Date('2035-01-02T18:00:00Z'),
+          serviceDate: new Date('2035-01-02T00:00:00Z'),
+          createdById: creator.id,
+          status: 'scheduled',
+          assignments: {
+            create: {
+              guardId: northGuardId,
+              startsAt: new Date('2035-01-02T10:00:00Z'),
+              endsAt: new Date('2035-01-02T18:00:00Z'),
+              assignedById: creator.id,
+            },
+          },
+        },
+      });
+      createdShiftIds.push(other.id);
+      panicShiftIds.push(other.id);
+      const otherAssignment = await prisma.shiftAssignment.findFirstOrThrow({
+        where: { shiftId: other.id },
+      });
+      const otherToken = (
+        await app.get(ShiftCredentialService).issueCredential({
+          shiftId: other.id,
+          assignmentId: otherAssignment.id,
+          userId: northGuardId,
+          companyId: 'norte-company',
+          scheduledEnd: other.endsAt,
+        })
+      ).token;
+      await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send(body)
+        .expect(403);
+      await client
+        .patch(`/api/v1/alertas-panico/${alertId}/ubicacion`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ location: body.location })
+        .expect(404);
+      await client
+        .get(`/api/v1/alertas-panico/${alertId}/estado`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .expect(404);
+      await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ ...body, alertId: randomUUID(), shiftId: other.id })
+        .expect(409);
+    } finally {
+      notifications.mockRestore();
+      realtime.mockRestore();
+      await prisma.panicAlert.deleteMany({ where: { shiftId: { in: panicShiftIds } } });
+      await prisma.shift.deleteMany({ where: { id: { in: panicShiftIds } } });
+    }
   });
 
   it('clasifica, reclasifica y filtra incidentes sin exponerlos al cliente ni a otros predios', async () => {

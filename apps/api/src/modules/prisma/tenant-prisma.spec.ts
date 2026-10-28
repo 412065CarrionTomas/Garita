@@ -119,6 +119,22 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('InvalidScanAttempt');
     expect(COMPANY_ID_MODELS).toContain('RecordFlag');
     expect(COMPANY_ID_MODELS).toContain('Incident');
+    expect(COMPANY_ID_MODELS).toContain('PanicAlert');
+    expect(INDIRECT_TENANT_MODELS).toHaveProperty('PanicAlertEvent');
+    expect(
+      addSiteAssignmentFilter(
+        'PanicAlert',
+        { where: { status: 'active' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { status: 'active' },
+          { site: { supervisors: { some: { userId: 'supervisor-1' } } } },
+        ],
+      },
+    });
     expect(COMPANY_ID_MODELS).toContain('IncidentClassification');
     expect(
       addSiteAssignmentFilter(
