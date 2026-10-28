@@ -60,7 +60,7 @@ export class RoundWindowStateService {
     shiftId: string,
     affectedWindows?: readonly { roundId: string; windowIndex: number }[],
   ): Promise<void> {
-    // Internal recalculation also runs from BullMQ and sync credentials, without an authenticated tenant request.
+    // BullMQ y las credenciales de sincronización no tienen contexto de usuario autenticado.
     this.logger.debug({ event: 'round_window.recalculate_system_query', shiftId });
     const db = this.prisma.systemPrisma;
     const shift = await db.shift.findUnique({
@@ -94,6 +94,11 @@ export class RoundWindowStateService {
       const started = shift.events.some(
         (event) => event.assignmentId === assignment.id && event.type === 'start',
       );
+      const closed = shift.events.some(
+        (event) =>
+          event.assignmentId === assignment.id &&
+          (event.type === 'close' || event.type === 'admin_close'),
+      );
       const result: AssignmentResult =
         assignment.result === 'replaced' ||
         assignment.result === 'absent' ||
@@ -101,7 +106,9 @@ export class RoundWindowStateService {
         assignment.result === 'started'
           ? assignment.result
           : started
-            ? 'started'
+            ? closed
+              ? 'closed_early'
+              : 'started'
             : 'scheduled';
       return { id: assignment.id, startsAt: assignment.startsAt.toISOString(), result, started };
     });
@@ -165,10 +172,7 @@ export class RoundWindowStateService {
         recordedCount: recorded.size,
         expectedCount: window.expectedCount,
         coverage,
-        syncedUntil:
-          shift.closedWithoutDataAt && now >= shift.closedWithoutDataAt
-            ? window.graceEndsAt
-            : (shift.syncState?.syncedUntil ?? null),
+        syncedUntil: shift.syncState?.syncedUntil ?? null,
       });
       const completion = windowCompletion(
         { roundId: window.roundId, checkpointIds: checkpoints.map((entry) => entry.checkpointId) },
@@ -181,7 +185,11 @@ export class RoundWindowStateService {
         })),
       );
       const completeStatus =
-        completion === 'complete_late' && status === 'complete' ? 'complete_late' : status;
+        shift.closedWithoutDataAt && status === 'pending_sync'
+          ? 'not_done'
+          : completion === 'complete_late' && status === 'complete'
+            ? 'complete_late'
+            : status;
       const validated =
         window.status === 'complete' &&
         (await db.roundReviewDecision.findFirst({
@@ -218,6 +226,7 @@ export class RoundWindowStateService {
         });
       if (
         shouldNotifyMissedRound(nextStatus) &&
+        status !== 'pending_sync' &&
         owner?.started &&
         coverage !== 'guard_closed_after' &&
         coverage !== 'admin_closed_after'
@@ -229,8 +238,11 @@ export class RoundWindowStateService {
           kind: 'round_missed',
           subjectId: window.id,
           details: {
+            kind: 'round_missed',
             siteName: shift.site.name,
             shiftId,
+            startsAt: shift.startsAt.toISOString(),
+            endsAt: shift.endsAt.toISOString(),
             missingPoints: checkpoints
               .filter((entry) => !recorded.has(entry.checkpointId))
               .map((entry) => entry.checkpoint.name),
@@ -261,6 +273,11 @@ export class RoundWindowStateService {
         rounds: {
           include: {
             roundVersion: { include: { checkpoints: { select: { checkpointId: true } } } },
+            round: {
+              include: {
+                currentVersion: { include: { checkpoints: { select: { checkpointId: true } } } },
+              },
+            },
           },
         },
       },
@@ -270,7 +287,7 @@ export class RoundWindowStateService {
       const previous = new Date(`${date}T00:00:00.000Z`);
       previous.setUTCDate(previous.getUTCDate() - 1);
       const data = shift.rounds.flatMap((round) => {
-        const version = round.roundVersion;
+        const version = round.roundVersion ?? round.round.currentVersion;
         if (!version) return [];
         const candidates = [previous.toISOString().slice(0, 10), date].flatMap((day) =>
           computeRoundWindows(day, {
@@ -314,17 +331,33 @@ export class RoundWindowStateService {
         startedAt: { not: null },
         syncDeadlineAt: { lte: now },
         status: { not: 'cancelled' },
-        events: { none: { type: 'close' } },
+        events: { none: { type: 'close', assignment: { isCurrent: true } } },
       },
-      select: { id: true, companyId: true, siteId: true },
+      select: {
+        id: true,
+        companyId: true,
+        siteId: true,
+        startsAt: true,
+        endsAt: true,
+        site: { select: { name: true } },
+        syncState: { select: { syncedUntil: true } },
+      },
     });
     for (const shift of shifts) {
+      if (shift.syncState?.syncedUntil && shift.syncState.syncedUntil >= shift.endsAt) continue;
       await this.notices.raise({
         companyId: shift.companyId,
         siteId: shift.siteId,
         shiftId: shift.id,
         kind: 'shift_unsynced',
         subjectId: shift.id,
+        details: {
+          kind: 'shift_unsynced',
+          siteName: shift.site.name,
+          shiftId: shift.id,
+          startsAt: shift.startsAt.toISOString(),
+          endsAt: shift.endsAt.toISOString(),
+        },
       });
     }
   }
