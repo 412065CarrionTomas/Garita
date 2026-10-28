@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Text, useTheme } from '@/ui';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { fetchPanicState, resumePanicAlerts } from './transport';
@@ -8,6 +9,7 @@ import { triggerPanic } from './actions';
 
 export function PanicOverlay() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [progress] = useState(() => new Animated.Value(0));
   const [status, setStatus] = useState<'received' | 'confirmed' | null>(null);
 
@@ -15,11 +17,18 @@ export function PanicOverlay() {
     let active = true;
     const refresh = async () => {
       const repository = await createDefaultFieldRepository();
-      const latest = (await repository.listPanicAlerts())[0];
-      if (!latest) return;
-      const state = latest.state
-        ? await fetchPanicState(latest.state.alertId).catch(() => latest.state)
-        : null;
+      const shift = await repository.getShiftData();
+      const latest = (await repository.listPanicAlerts()).find(
+        (alert) => alert.request.shiftId === shift?.shift.id,
+      );
+      if (!latest?.state) {
+        if (active) setStatus(null);
+        return;
+      }
+      const state =
+        latest.state.status !== 'resolved'
+          ? await fetchPanicState(latest.state.alertId).catch(() => latest.state)
+          : latest.state;
       if (state && active) {
         await repository.updatePanicAlert({ ...latest, state });
         setStatus(state.confirmedAt ? 'confirmed' : 'received');
@@ -40,14 +49,19 @@ export function PanicOverlay() {
   const activate = () => {
     progress.stopAnimation();
     progress.setValue(0);
-    void triggerPanic()
-      .then(() => {
-        // Server state is read on the next poll; no local success message is shown.
-      })
-      .catch(() => undefined);
+    void triggerPanic().catch(() => undefined);
   };
   return (
-    <View style={[styles.overlay, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View
+      style={[
+        styles.overlay,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          bottom: insets.bottom + space[5],
+        },
+      ]}
+    >
       <Button
         label="Pánico"
         accessibilityLabel="Pánico, mantener presionado"

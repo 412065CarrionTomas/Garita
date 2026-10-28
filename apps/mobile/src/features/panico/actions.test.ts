@@ -23,6 +23,7 @@ describe('panic trigger', () => {
     });
     jest.mocked(createDefaultFieldRepository).mockResolvedValue({
       getShiftData: async () => ({ shift: { id: 'shift' } }),
+      getSyncMeta: async () => null,
       savePanicAlert,
       listPanicAlerts: async () => [],
     } as never);
@@ -61,5 +62,14 @@ describe('panic trigger', () => {
     });
     await triggerPanic();
     expect(order).toEqual(['persist', 'vibrate', 'send']);
+    const send = jest.fn().mockResolvedValue(undefined);
+    setPanicActionsForTesting({
+      vibrate: async () => {
+        throw new Error('Haptics unavailable');
+      },
+      send,
+    });
+    await triggerPanic();
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });

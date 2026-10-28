@@ -183,6 +183,13 @@ export async function processSyncQueue(): Promise<{
     const repo = await d.repository();
 
     while (true) {
+      const pendingPanics = (await repo.listPanicAlerts()).filter((alert) => !alert.state);
+      for (const alert of pendingPanics) await sendUrgentEvent(alert);
+      if ((await repo.listPanicAlerts()).some((alert) => !alert.state)) {
+        scheduleRetry(computeSyncBackoff(consecutiveFailures++));
+        overallSuccess = false;
+        break;
+      }
       // Re-verify network connection before each batch
       if (!(await d.online())) {
         isOffline = true;

@@ -79,7 +79,8 @@ export async function triggerPanic(): Promise<LocalPanicAlert> {
   const deps = { ...defaults, ...overrides };
   const repository = await createDefaultFieldRepository();
   const shift = await repository.getShiftData();
-  if (!shift) throw new Error('Necesitás un turno en curso para activar el pánico');
+  if (!shift || (await repository.getSyncMeta('shift_closed_done')) === 'true')
+    throw new Error('Necesitás un turno en curso para activar el pánico');
   const now = deps.now().toISOString();
   const alert = await repository.savePanicAlert({
     request: {
@@ -93,8 +94,8 @@ export async function triggerPanic(): Promise<LocalPanicAlert> {
     smsState: 'pending',
     attempts: 0,
   });
-  await deps.vibrate();
-  void deps.send(alert);
+  void deps.vibrate().catch(() => undefined);
+  void deps.send(alert).catch(() => undefined);
   void deps
     .betterLocation()
     .then(async (location) => {

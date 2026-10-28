@@ -69,23 +69,27 @@ export async function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> 
   let confirmed = false;
   let smsStarted = false;
   const fallback = async () => {
-    if (confirmed || smsStarted) return;
+    if (confirmed || smsStarted || alert.smsState === 'unavailable') return;
     smsStarted = true;
     await unavailableSms(alert);
   };
-  const timer = deps.setTimeout(() => {
-    void fallback();
-  }, PANIC_SMS_FALLBACK_SECONDS * 1000);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    if (!(await deps.online())) {
-      await fallback();
-      return;
-    }
-    const token = await getShiftCredentialToken();
-    if (!token) return;
-    const state = await deps.send(alert, token);
+    const state = await Promise.race([
+      (async () => {
+        if (!(await deps.online())) throw new Error('Sin conexión');
+        const token = await getShiftCredentialToken();
+        if (!token) throw new Error('Credencial de turno no disponible');
+        return deps.send(alert, token);
+      })(),
+      new Promise<never>((_, reject) => {
+        timer = deps.setTimeout(
+          () => reject(new Error('Sin confirmación')),
+          PANIC_SMS_FALLBACK_SECONDS * 1000,
+        );
+      }),
+    ]);
     confirmed = true;
-    deps.clearTimeout(timer);
     const repository = await createDefaultFieldRepository();
     const saved = (await repository.listPanicAlerts()).find((item) => item.request.alertId === id);
     await repository.updatePanicAlert({ ...(saved ?? alert), state });
@@ -95,8 +99,9 @@ export async function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> 
     if (retry) deps.clearTimeout(retry);
     retries.delete(id);
   } catch {
-    // The persisted alert stays pending and is retried with the regular exponential backoff.
+    await fallback().catch(() => undefined);
   } finally {
+    if (timer !== undefined) deps.clearTimeout(timer);
     sending.delete(id);
     if (!confirmed && !retries.has(id)) {
       const repository = await createDefaultFieldRepository();
@@ -110,7 +115,7 @@ export async function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> 
         deps.setTimeout(
           () => {
             retries.delete(id);
-            void dispatchPanicAlert({ ...(current ?? alert), attempts });
+            void resumePanicAlerts().catch(() => undefined);
           },
           computeSyncBackoff(attempts - 1) * 1000,
         ),
