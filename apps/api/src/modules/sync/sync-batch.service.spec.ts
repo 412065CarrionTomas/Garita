@@ -194,6 +194,11 @@ describe('SyncBatchService', () => {
   });
 
   it('procesa exitosamente un lote con registros y cierre', async () => {
+    updateSyncStateMock.mockImplementation(() => {
+      // La evaluación no puede ver la marca nueva antes que los datos del lote.
+      expect(checkpointRecords.size).toBe(1);
+      expect(shiftEvents.size).toBe(1);
+    });
     const input: SyncBatchRequest = {
       shiftId: 'shift-1',
       pendingCount: 0,
@@ -433,6 +438,9 @@ describe('SyncBatchService', () => {
     const response = await service.processBatch(input, credential, guardUser);
 
     expect(response.results).toHaveLength(3);
+    expect(updateSyncStateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ syncedUntil: null }),
+    );
     expect(response.results[0]).toEqual({
       status: 'rejected',
       eventId: '11111111-1111-4111-8111-111111111111',
