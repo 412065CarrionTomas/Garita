@@ -10,11 +10,21 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { shiftDetailSchema, shiftLabels, shiftTones, time } from './contracts';
 import type { Severity } from './contracts';
 import { RecordsSection, RouteSection, WindowsSection } from './detail-sections';
+import { ReassignDialog } from './reassign-dialog';
+
+const assignmentResults = {
+  scheduled: 'Programada',
+  started: 'Iniciada',
+  absent: 'Ausente',
+  replaced: 'Reemplazada',
+  closed_early: 'Cerrada antes de hora',
+};
 
 export function ShiftDetailPage() {
   const { id } = useParams();
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [severity, setSeverity] = useState<'' | Severity>('');
+  const [reassignOpen, setReassignOpen] = useState(false);
   const {
     data: detail,
     isPending,
@@ -81,14 +91,13 @@ export function ShiftDetailPage() {
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            {detail.status === 'uncovered' && (
-              <Button disabled title="Disponible próximamente">
-                Cubrir el resto · Disponible próximamente
-              </Button>
-            )}
-            {(detail.status === 'without_guard' || detail.status === 'unassigned') && (
-              <Button disabled title="Disponible próximamente">
-                Asignarle uno · Disponible próximamente
+            {detail.canCover && (
+              <Button
+                onClick={() => {
+                  setReassignOpen(true);
+                }}
+              >
+                {detail.status === 'uncovered' ? 'Cubrir el resto' : 'Reasignar'}
               </Button>
             )}
           </div>
@@ -106,13 +115,32 @@ export function ShiftDetailPage() {
                   ? `${assignment.guard.firstName} ${assignment.guard.lastName}`
                   : 'Sin vigilador'}{' '}
                 · {time(assignment.startsAt)}–{time(assignment.endsAt)}
+                {' · '}
+                {assignmentResults[assignment.result]}
                 {assignment.isCurrent ? ' · Vigente' : ''}
+                {' · Asignó: '}
+                {assignment.assignedBy.firstName} {assignment.assignedBy.lastName}
+                {assignment.reassignedAt
+                  ? ` · Reasignó a las ${time(assignment.reassignedAt)}`
+                  : ''}
               </li>
             ))}
           </ol>
           {detail.assignments.length === 0 && <p>Sin asignaciones.</p>}
         </CardContent>
       </Card>
+      {reassignOpen && (
+        <ReassignDialog
+          shiftId={detail.id}
+          endsAt={detail.scheduled.endsAt}
+          minutesToSignal={
+            detail.site.connectivityType === 'without_signal' ? detail.site.minutesToSignal : null
+          }
+          covering={detail.status === 'uncovered'}
+          open={reassignOpen}
+          onOpenChange={setReassignOpen}
+        />
+      )}
       <WindowsSection detail={detail} />
       <RouteSection detail={detail} />
       <RecordsSection

@@ -18,6 +18,7 @@ const shiftsSchema = z.array(
     startsAt: z.string(),
     endsAt: z.string(),
     site: z.looseObject({ name: z.string() }),
+    assignments: z.array(z.looseObject({ startsAt: z.string() })),
   }),
 );
 type ScheduledShift = z.infer<typeof shiftsSchema>[number];
@@ -78,7 +79,10 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
     if (await refreshLocal()) return;
     try {
       const shifts = await apiGet('/mis-turnos', shiftsSchema);
-      setScheduled(shifts.find((shift) => shift.id === shiftId) ?? null);
+      const found = shifts.find((shift) => shift.id === shiftId);
+      setScheduled(
+        found ? { ...found, startsAt: found.assignments[0]?.startsAt ?? found.startsAt } : null,
+      );
     } catch {
       setMessage('No pudimos cargar este turno. Revisá tu conexión.');
     }

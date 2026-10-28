@@ -16,7 +16,11 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import { shiftInputSchema } from '@garita/shared';
+import {
+  reassignShiftRequestSchema,
+  shiftReplacementsQuerySchema,
+  shiftInputSchema,
+} from '@garita/shared';
 import { z } from 'zod';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -115,6 +119,53 @@ export class ShiftsController {
   })
   cancel(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.shifts.cancel(id, user);
+  }
+
+  @Post('turnos/:id/reasignar')
+  @Roles('admin', 'supervisor')
+  @ApiOperation({
+    summary: 'Reasigna un turno sin iniciar o cubre el resto de uno cerrado antes de hora',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['guardId'],
+      properties: {
+        guardId: { type: 'string' },
+        startsAt: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'Turno iniciado, terminado o vigilador con turno superpuesto',
+  })
+  reassign(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
+    const parsed = reassignShiftRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+    return this.shifts.reassign(id, parsed.data, user);
+  }
+
+  @Get('turnos/:id/asignaciones')
+  @Roles('admin', 'supervisor')
+  @ApiOperation({ summary: 'Historial de asignaciones del turno' })
+  assignments(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.shifts.assignments(id, user);
+  }
+
+  @Get('turnos/:id/reemplazos')
+  @Roles('admin', 'supervisor')
+  @ApiOperation({
+    summary: 'Lista vigiladores activos disponibles para cubrir el intervalo elegido',
+  })
+  @ApiQuery({ name: 'startsAt', required: false, type: String, format: 'date-time' })
+  replacements(
+    @Param('id') id: string,
+    @Query() query: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const parsed = shiftReplacementsQuerySchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+    return this.shifts.replacements(id, parsed.data.startsAt, user);
   }
 
   @Get('mis-turnos')

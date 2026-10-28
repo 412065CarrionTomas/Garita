@@ -6,6 +6,82 @@ import type { SyncDeadlinePort } from './shift-execution.service';
 
 const now = new Date('2026-10-13T08:00:00.000Z');
 
+describe('ShiftExecutionService assignment closure result', () => {
+  it.each(['close', 'closeForSites', 'closeForGuard', 'realCloseAfterAuto'] as const)(
+    '%s preserves the assignment result for window ownership',
+    async (operation) => {
+      for (const early of [true, false]) {
+        const assignment = {
+          id: 'assignment-1',
+          guardId: 'guard-1',
+          startsAt: new Date('2026-10-13T07:00:00Z'),
+        };
+        const shift = {
+          id: 'shift-1',
+          companyId: 'company-1',
+          siteId: 'site-1',
+          status: operation === 'realCloseAfterAuto' ? 'auto_closed' : 'in_progress',
+          startedAt: assignment.startsAt,
+          endsAt: early ? new Date('2026-10-13T09:00:00Z') : now,
+          assignments: [assignment],
+        };
+        const tx = {
+          shift: {
+            findFirst: jest.fn().mockResolvedValue(shift),
+            findMany: jest.fn().mockResolvedValue([shift]),
+            update: jest.fn(),
+          },
+          shiftAssignment: {
+            findFirst: jest.fn().mockResolvedValue(assignment),
+            update: jest.fn(),
+          },
+          shiftEvent: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
+        };
+        const service = new ShiftExecutionService(
+          {
+            tenantPrisma: {
+              ...tx,
+              $transaction: (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
+            },
+          } as unknown as PrismaService,
+          { now: () => now },
+          {} as Queue,
+          {
+            deadlineForSite: () => Promise.resolve(null),
+            deadlineForShift: () => Promise.resolve(null),
+          },
+          new NoopShiftExecutionEffects(),
+        );
+        if (operation === 'closeForSites') await service.closeForSites(tx, ['site-1'], 'admin-1');
+        else if (operation === 'closeForGuard')
+          await service.closeForGuard('guard-1', 'admin-1', 'Me descompuse');
+        else
+          await service.close(
+            'shift-1',
+            {
+              eventId: '00000000-0000-4000-8000-000000000001',
+              occurredAtDevice: now.toISOString(),
+              reason: 'Me descompuse',
+              location: {
+                status: 'disabled',
+                latitude: null,
+                longitude: null,
+                accuracyMeters: null,
+                simulation: 'unavailable',
+                takenAt: null,
+              },
+            },
+            { userId: 'guard-1', companyId: 'company-1', role: 'guard', status: 'active' },
+          );
+        expect(tx.shiftAssignment.update).toHaveBeenCalledWith({
+          where: { id: 'assignment-1' },
+          data: { result: early ? 'closed_early' : 'started' },
+        });
+      }
+    },
+  );
+});
+
 describe('ShiftExecutionService.autoClose', () => {
   function setup(deadline: Date | null) {
     const tx = {
