@@ -1,0 +1,825 @@
+// Esquema de la base de datos de Garita.
+// Todo cambio pasa por una migración: pnpm --filter api db:migrate --name <nombre_descriptivo>
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  // La API compila a CommonJS; el cliente se genera en el mismo formato.
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  supervisor
+  guard
+  client
+}
+
+enum UserStatus {
+  invitation_pending
+  active
+  deactivated
+}
+
+enum InvitationSendStatus {
+  pending
+  sent
+  failed
+}
+
+enum RecordStatus {
+  active
+  inactive
+}
+
+enum NfcTagStatus {
+  active
+  replaced
+  removed
+}
+
+enum NfcTagKind {
+  basic
+  secure
+}
+
+enum NfcTagConfigurationStatus {
+  none
+  incomplete
+  configured
+}
+
+enum SdmResult {
+  valid
+  invalid_signature
+  missing
+  replayed
+}
+
+enum IncidentType {
+  intrusion
+  suspicious_person
+  suspicious_vehicle
+  property_damage
+  open_or_forced_access
+  utility_failure
+  accident
+  other
+}
+
+enum IncidentClassificationStatus {
+  pending
+  client_visible
+  internal
+}
+
+model Company {
+  id                String             @id @default(cuid())
+  name              String
+  timezone          String             @default("America/Argentina/Buenos_Aires")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  users             User[]
+  clients           Client[]
+  sites             Site[]
+  rounds            Round[]
+  shifts            Shift[]
+  recordFlags       RecordFlag[]
+  roundWindowStates RoundWindowState[]
+  incidents   Incident[]
+  incidentClassifications IncidentClassification[]
+}
+
+model User {
+  id               String            @id @default(cuid())
+  companyId        String
+  firebaseUid      String            @unique
+  email            String            @unique
+  firstName        String
+  lastName         String
+  phone            String?
+  employeeNumber   String?
+  clientId         String?
+  position         String?
+  lastLoginAt      DateTime?
+  client           Client?           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  role             UserRole
+  status           UserStatus        @default(invitation_pending)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invitations      Invitation[]
+  siteAssignments  SiteSupervisor[]
+  createdShifts    Shift[]           @relation("ShiftCreator")
+  shiftAssignments ShiftAssignment[]
+  shiftCredentials ShiftCredential[]
+  incidents        Incident[]
+  incidentClassifications IncidentClassification[] @relation("IncidentDecider")
+  notificationDevices NotificationDevice[]
+
+  @@index([companyId])
+  @@index([clientId])
+}
+
+enum NotificationDeviceKind {
+  web
+  app
+}
+
+enum NotificationDevicePlatform {
+  android
+  ios
+  web
+}
+
+model NotificationDevice {
+  id         String                     @id @default(cuid())
+  companyId  String
+  userId     String
+  kind       NotificationDeviceKind
+  platform   NotificationDevicePlatform
+  token      String                     @unique
+  label      String?
+  createdAt  DateTime                   @default(now())
+  lastSeenAt DateTime                   @updatedAt
+  user       User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, userId])
+}
+
+model Client {
+  id          String       @id @default(cuid())
+  companyId   String
+  name        String
+  contactName String
+  phone       String
+  email       String
+  taxId       String?
+  status      RecordStatus @default(active)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sites       Site[]
+  users       User[]
+
+  @@unique([companyId, name])
+  @@index([companyId, status])
+}
+
+enum ConnectivityType {
+  with_signal
+  without_signal
+}
+
+model Site {
+  id                 String           @id @default(cuid())
+  companyId          String
+  clientId           String
+  name               String
+  address            String
+  latitude           Decimal          @db.Decimal(9, 6)
+  longitude          Decimal          @db.Decimal(10, 6)
+  accessInstructions String?
+  observations       String?
+  status             RecordStatus     @default(active)
+  maxSpeedProfile    SpeedProfile     @default(walking)
+  maxSpeedKmh        Int              @default(10)
+  connectivityType   ConnectivityType @default(with_signal)
+  minutesToSignal    Int              @default(0)
+  marginMinutes      Int              @default(30)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  company            Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  client             Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  supervisors        SiteSupervisor[]
+  checkpoints        Checkpoint[]
+  rounds             Round[]
+  shifts             Shift[]
+  incidents          Incident[]
+
+  @@unique([clientId, name])
+  @@index([companyId, status])
+  @@index([clientId])
+}
+
+model SiteSupervisor {
+  id         String   @id @default(cuid())
+  companyId  String
+  siteId     String
+  userId     String
+  assignedAt DateTime @default(now())
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, userId])
+  @@index([companyId])
+  @@index([userId])
+}
+
+model Checkpoint {
+  id                    String                   @id @default(cuid())
+  companyId             String
+  siteId                String
+  name                  String
+  latitude              Decimal                  @db.Decimal(9, 6)
+  longitude             Decimal                  @db.Decimal(10, 6)
+  toleranceRadiusMeters Int                      @default(30)
+  stickerLocation       String?
+  isIndoor              Boolean                  @default(false)
+  qrVersion             Int                      @default(1)
+  status                RecordStatus             @default(active)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  site                  Site                     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  nfcTags               NfcTag[]
+  secureTagSessions     SecureTagSession[]
+  roundVersions         RoundVersionCheckpoint[]
+  records               CheckpointRecord[]
+
+  @@unique([siteId, name])
+  @@index([companyId, status])
+  @@index([siteId, status])
+}
+
+model NfcTag {
+  id             String       @id @default(cuid())
+  companyId      String
+  checkpointId   String
+  uid            String
+  status         NfcTagStatus @default(active)
+  kind           NfcTagKind @default(basic)
+  configurationStatus NfcTagConfigurationStatus @default(none)
+  masterKeyVersion Int?
+  lastCounter    Int?
+  associatedById String
+  associatedAt   DateTime     @default(now())
+  endedAt        DateTime?
+  endedById      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  checkpoint     Checkpoint   @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, checkpointId, status])
+  @@index([uid, status])
+}
+
+model SecureTagSession {
+  id String @id @default(cuid())
+  companyId String
+  tagUid String
+  checkpointId String
+  step String
+  state Json?
+  expiresAt DateTime @db.Timestamptz(3)
+  createdById String
+  createdAt DateTime @default(now())
+  checkpoint Checkpoint @relation(fields: [checkpointId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, checkpointId, expiresAt])
+}
+
+model Round {
+  id                String             @id @default(cuid())
+  companyId         String
+  siteId            String
+  name              String
+  status            RecordStatus       @default(active)
+  currentVersionId  String?            @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site              Site               @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  versions          RoundVersion[]
+  currentVersion    RoundVersion?      @relation("CurrentRoundVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  shifts            ShiftRound[]
+  roundWindowStates RoundWindowState[]
+
+  @@unique([siteId, name])
+  @@index([companyId, status])
+  @@index([siteId, status])
+}
+
+model RoundVersion {
+  id               String                   @id @default(cuid())
+  roundId          String
+  versionNumber    Int
+  frequencyMinutes Int
+  windowStartLocal String
+  windowEndLocal   String
+  graceMinutes     Int
+  createdById      String
+  createdAt        DateTime                 @default(now())
+  round            Round                    @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  currentFor       Round?                   @relation("CurrentRoundVersion")
+  checkpoints      RoundVersionCheckpoint[]
+  shifts           ShiftRound[]
+
+  @@unique([roundId, versionNumber])
+  @@index([roundId, createdAt])
+}
+
+model RoundVersionCheckpoint {
+  id             String       @id @default(cuid())
+  companyId      String
+  roundVersionId String
+  checkpointId   String
+  position       Int
+  roundVersion   RoundVersion @relation(fields: [roundVersionId], references: [id], onDelete: Restrict)
+  checkpoint     Checkpoint   @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+
+  @@unique([roundVersionId, checkpointId])
+  @@unique([roundVersionId, position])
+  @@index([checkpointId])
+}
+
+model Invitation {
+  id                String               @id @default(cuid())
+  userId            String
+  tokenHash         String               @unique
+  expiresAt         DateTime
+  usedAt            DateTime?
+  replacedAt        DateTime?
+  sendStatus        InvitationSendStatus @default(pending)
+  providerMessageId String?
+  createdAt         DateTime             @default(now())
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum ShiftStatus {
+  scheduled
+  unassigned
+  uncovered
+  no_show
+  cancelled
+  in_progress
+  closed
+  auto_closed
+}
+
+enum RoundWindowStatus {
+  pending
+  in_progress
+  late
+  complete
+  complete_late
+  incomplete
+  not_done
+  pending_sync
+  in_review
+}
+
+enum RoundWindowSeverityLevel {
+  grave
+  media
+  leve
+}
+
+model RoundWindowState {
+  id            String                    @id @default(cuid())
+  companyId     String
+  shiftId       String
+  roundId       String
+  windowIndex   Int
+  startsAt      DateTime                  @db.Timestamptz(3)
+  endsAt        DateTime                  @db.Timestamptz(3)
+  graceEndsAt   DateTime                  @db.Timestamptz(3)
+  status        RoundWindowStatus         @default(pending)
+  severityLevel RoundWindowSeverityLevel?
+  recordedCount Int                       @default(0)
+  expectedCount Int
+  updatedAt     DateTime                  @updatedAt
+  company       Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  shift         Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  round         Round                     @relation(fields: [roundId], references: [id], onDelete: Restrict)
+
+  @@unique([shiftId, roundId, windowIndex])
+  @@index([companyId, shiftId, startsAt])
+  @@index([shiftId, status, endsAt])
+}
+
+enum ShiftEventType {
+  start
+  close
+  auto_close
+  admin_close
+}
+
+enum ShiftEventLocationStatus {
+  ok
+  unverifiable
+  disabled
+}
+
+enum ShiftEventSimulation {
+  simulated
+  not_simulated
+  unavailable
+}
+
+enum ShiftClosedBy {
+  guard
+  admin
+  system
+}
+
+model Shift {
+  id                  String               @id @default(cuid())
+  companyId           String
+  siteId              String
+  startsAt            DateTime             @db.Timestamptz(3)
+  endsAt              DateTime             @db.Timestamptz(3)
+  serviceDate         DateTime             @db.Date
+  status              ShiftStatus          @default(scheduled)
+  createdById         String
+  cancelledAt         DateTime?            @db.Timestamptz(3)
+  cancelledById       String?
+  cancellationReason  String?
+  startedAt           DateTime?            @db.Timestamptz(3)
+  lateStartMinutes    Int?
+  connectivityType    ConnectivityType?
+  minutesToSignal     Int?
+  marginMinutes       Int?
+  syncDeadlineAt      DateTime?            @db.Timestamptz(3)
+  closedAt            DateTime?            @db.Timestamptz(3)
+  closedEarly         Boolean              @default(false)
+  closeReason         String?
+  closedBy            ShiftClosedBy?
+  closedByUserId      String?
+  autoClosedAt        DateTime?            @db.Timestamptz(3)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site                Site                 @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  createdBy           User                 @relation("ShiftCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments         ShiftAssignment[]
+  rounds              ShiftRound[]
+  events              ShiftEvent[]
+  checkpointRecords   CheckpointRecord[]
+  invalidScanAttempts InvalidScanAttempt[]
+  recordFlags         RecordFlag[]
+  credentials         ShiftCredential[]
+  syncBatches         SyncBatch[]
+  connectionNotices   ConnectionNotice[]
+  syncState           ShiftSyncState?
+  roundWindowStates   RoundWindowState[]
+  incidents           Incident[]
+
+  @@index([companyId, startsAt])
+  @@index([siteId, serviceDate])
+  @@index([status, startsAt])
+}
+
+model ShiftEvent {
+  trustedAt           DateTime?                 @db.Timestamptz(3)
+  elapsedMs           Float?
+  bootId              String?
+  timeStatus          TimeStatus?
+  deviceOffsetMs      Float?
+  id                  String                    @id @default(cuid())
+  companyId           String
+  shiftId             String
+  assignmentId        String
+  type                ShiftEventType
+  deviceEventId       String?                   @unique @db.Uuid
+  occurredAt          DateTime                  @db.Timestamptz(3)
+  occurredAtDevice    DateTime?                 @db.Timestamptz(3)
+  receivedAt          DateTime                  @default(now()) @db.Timestamptz(3)
+  locationStatus      ShiftEventLocationStatus?
+  latitude            Decimal?                  @db.Decimal(9, 6)
+  longitude           Decimal?                  @db.Decimal(10, 6)
+  accuracyMeters      Decimal?                  @db.Decimal(10, 2)
+  simulation          ShiftEventSimulation?
+  reason              String?
+  actorUserId         String?
+  lateStartMinutes    Int?
+  countsForCompliance Boolean                   @default(true)
+  response            Json?
+  shift               Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment          ShiftAssignment           @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, shiftId, occurredAt])
+  @@index([assignmentId, type])
+}
+
+model ShiftAssignment {
+  id                  String               @id @default(cuid())
+  shiftId             String
+  guardId             String?
+  startsAt            DateTime             @db.Timestamptz(3)
+  endsAt              DateTime             @db.Timestamptz(3)
+  isCurrent           Boolean              @default(true)
+  active              Boolean              @default(true)
+  result              String?
+  assignedById        String
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  shift               Shift                @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  events              ShiftEvent[]
+  checkpointRecords   CheckpointRecord[]
+  invalidScanAttempts InvalidScanAttempt[]
+  incidents           Incident[]
+  guard               User?                @relation(fields: [guardId], references: [id], onDelete: Restrict)
+
+  @@index([shiftId, isCurrent])
+  @@index([guardId, startsAt, endsAt])
+}
+
+model ShiftRound {
+  shiftId        String
+  roundId        String
+  roundVersionId String?
+  shift          Shift         @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  round          Round         @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  roundVersion   RoundVersion? @relation(fields: [roundVersionId], references: [id], onDelete: Restrict)
+
+  @@id([shiftId, roundId])
+  @@index([roundId])
+}
+
+enum CheckpointRecordMethod {
+  qr
+  nfc
+}
+
+enum PhoneNfcState {
+  on
+  off
+  unsupported
+}
+
+enum InvalidScanReason {
+  malformed
+  signature
+  other_site
+  outdated_version
+  unknown_checkpoint
+  tag_not_associated
+  tag_replaced
+}
+
+model CheckpointRecord {
+  trustedAt           DateTime?                @db.Timestamptz(3)
+  elapsedMs           Float?
+  bootId              String?
+  timeStatus          TimeStatus?
+  deviceOffsetMs      Float?
+  id                  String                   @id @default(cuid())
+  companyId           String
+  shiftId             String
+  assignmentId        String
+  checkpointId        String
+  recordId            String                   @unique @db.Uuid
+  method              CheckpointRecordMethod
+  sdmMessage          String?
+  sdmResult           SdmResult?
+  occurredAtDevice    DateTime                 @db.Timestamptz(3)
+  receivedAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  locationStatus      ShiftEventLocationStatus
+  latitude            Decimal?                 @db.Decimal(9, 6)
+  longitude           Decimal?                 @db.Decimal(10, 6)
+  accuracyMeters      Decimal?                 @db.Decimal(10, 2)
+  simulation          ShiftEventSimulation
+  phoneNfc            PhoneNfcState
+  countedFor          Json
+  outOfWindow         Boolean                  @default(false)
+  countsForCompliance Boolean                  @default(true)
+  requestHash         String
+  createdAt           DateTime                 @default(now())
+  shift               Shift                    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment          ShiftAssignment          @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  checkpoint          Checkpoint               @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+  flags               RecordFlag[]
+
+  @@index([companyId, shiftId, occurredAtDevice])
+  @@index([shiftId, occurredAtDevice])
+  @@index([checkpointId, occurredAtDevice])
+}
+
+model InvalidScanAttempt {
+  id               String                   @id @default(cuid())
+  companyId        String
+  shiftId          String
+  assignmentId     String
+  recordId         String                   @unique @db.Uuid
+  method           CheckpointRecordMethod
+  reason           InvalidScanReason
+  scannedValue     String                   @db.VarChar(512)
+  occurredAtDevice DateTime                 @db.Timestamptz(3)
+  receivedAt       DateTime                 @default(now()) @db.Timestamptz(3)
+  locationStatus   ShiftEventLocationStatus
+  latitude         Decimal?                 @db.Decimal(9, 6)
+  longitude        Decimal?                 @db.Decimal(10, 6)
+  accuracyMeters   Decimal?                 @db.Decimal(10, 2)
+  simulation       ShiftEventSimulation
+  highlighted      Boolean                  @default(false)
+  requestHash      String
+  createdAt        DateTime                 @default(now())
+  shift            Shift                    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment       ShiftAssignment          @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, shiftId, occurredAtDevice])
+  @@index([shiftId, occurredAtDevice])
+}
+
+model Incident {
+  id                   String                      @id @default(cuid())
+  companyId            String
+  siteId               String
+  shiftId              String
+  assignmentId         String
+  guardId              String
+  incidentId           String                      @unique @db.Uuid
+  type                 IncidentType
+  description          String?                     @db.VarChar(1000)
+  occurredAtDevice     DateTime                    @db.Timestamptz(3)
+  receivedAt           DateTime                    @default(now()) @db.Timestamptz(3)
+  trustedAt            DateTime?                   @db.Timestamptz(3)
+  elapsedMs            Float?
+  bootId               String?
+  timeStatus           TimeStatus?
+  deviceOffsetMs       Float?
+  locationStatus       ShiftEventLocationStatus
+  latitude             Decimal?                    @db.Decimal(9, 6)
+  longitude            Decimal?                    @db.Decimal(10, 6)
+  accuracyMeters       Decimal?                    @db.Decimal(10, 2)
+  simulation           ShiftEventSimulation
+  countsForCompliance  Boolean                     @default(true)
+  classificationStatus IncidentClassificationStatus @default(pending)
+  createdAt            DateTime                    @default(now())
+  company              Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site                 Site                        @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  shift                Shift                       @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment           ShiftAssignment             @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  guard                User                        @relation(fields: [guardId], references: [id], onDelete: Restrict)
+  photos               IncidentPhoto[]
+  photoAuthorizations  IncidentPhotoAuthorization[]
+  classifications      IncidentClassification[]
+
+  @@index([companyId, siteId, createdAt])
+  @@index([companyId, classificationStatus, createdAt])
+  @@index([companyId, siteId, classificationStatus, createdAt])
+  @@index([shiftId, occurredAtDevice])
+  @@index([assignmentId])
+}
+
+model IncidentClassification {
+  id              String                       @id @default(cuid())
+  companyId       String
+  incidentId      String
+  classification  IncidentClassificationStatus
+  internalComment String                       @db.VarChar(1000)
+  clientNote      String?                      @db.VarChar(500)
+  reason          String?                      @db.VarChar(500)
+  decidedById     String
+  decidedAt       DateTime                     @default(now()) @db.Timestamptz(3)
+  company         Company                      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  incident        Incident                     @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  decidedBy       User                         @relation("IncidentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([companyId, incidentId, decidedAt])
+}
+
+model IncidentPhoto {
+  id                String   @id @default(cuid())
+  incidentId        String
+  cloudinaryPublicId String  @unique
+  width             Int
+  height            Int
+  bytes             Int
+  uploadedAt        DateTime @default(now()) @db.Timestamptz(3)
+  incident          Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, uploadedAt])
+}
+
+model IncidentPhotoAuthorization {
+  id                 String   @id @default(cuid())
+  incidentId         String
+  cloudinaryPublicId String   @unique
+  expiresAt          DateTime @db.Timestamptz(3)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  incident           Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, expiresAt])
+}
+
+enum SpeedProfile {
+  walking
+  bicycle
+  vehicle
+  custom
+}
+
+enum RecordFlagType {
+  time_altered
+  time_unverifiable
+  out_of_range
+  simulated_location
+  impossible_time
+  location_disabled
+  qr_on_tagged_point
+  location_unverifiable
+  tag_not_authentic
+  replayed_read
+}
+
+enum RecordFlagSeverity {
+  grave
+  media
+  leve
+}
+
+model RecordFlag {
+  id                 String             @id @default(cuid())
+  companyId          String
+  checkpointRecordId String
+  shiftId            String
+  type               RecordFlagType
+  severity           RecordFlagSeverity
+  reason             String?
+  details            Json?
+  createdAt          DateTime           @default(now())
+
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  checkpointRecord CheckpointRecord @relation(fields: [checkpointRecordId], references: [id], onDelete: Cascade)
+  shift            Shift            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([checkpointRecordId, type])
+  @@index([companyId, shiftId, createdAt])
+  @@index([shiftId, createdAt])
+  @@index([checkpointRecordId])
+}
+
+model ShiftCredential {
+  id        String    @id @default(cuid())
+  companyId String
+  shiftId   String
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(3)
+  revokedAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now())
+  shift     Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, shiftId])
+  @@index([shiftId])
+}
+
+model SyncBatch {
+  id           String    @id @default(cuid())
+  companyId    String
+  shiftId      String
+  receivedAt   DateTime  @default(now()) @db.Timestamptz(3)
+  eventCount   Int
+  pendingCount Int
+  syncedUntil  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now())
+  shift        Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, shiftId, receivedAt])
+  @@index([shiftId, receivedAt])
+}
+
+model ConnectionNotice {
+  id           String    @id @default(cuid())
+  companyId    String
+  shiftId      String
+  sentAtDevice DateTime  @db.Timestamptz(3)
+  receivedAt   DateTime  @default(now()) @db.Timestamptz(3)
+  pendingCount Int
+  syncedUntil  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now())
+  shift        Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, shiftId, receivedAt])
+  @@index([shiftId, receivedAt])
+}
+
+model ShiftSyncState {
+  id               String    @id @default(cuid())
+  companyId        String
+  shiftId          String    @unique
+  lastContactAt    DateTime  @db.Timestamptz(3)
+  lastPendingCount Int
+  syncedUntil      DateTime? @db.Timestamptz(3)
+  lastBatchAt      DateTime? @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+  shift            Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, shiftId])
+}
+
+enum TimeStatus {
+  verified
+  recalculated
+  pending
+  unverifiable
+}

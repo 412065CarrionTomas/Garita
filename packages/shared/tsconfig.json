@@ -1,0 +1,7 @@
+{
+  "extends": "@garita/typescript-config/library.json",
+  "compilerOptions": {
+    "types": ["jest"]
+  },
+  "include": ["src", "*.config.ts"]
+}

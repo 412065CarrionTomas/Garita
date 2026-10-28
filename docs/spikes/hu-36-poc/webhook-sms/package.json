@@ -1,0 +1,22 @@
+{
+  "name": "garita-poc-webhook-sms",
+  "version": "1.0.0",
+  "description": "PoC HU-36 / CA4 - Receptor de webhook para recepción de SMS de alerta de pánico (Twilio y Android SMS Gateway)",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.7.5",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
+  }
+}

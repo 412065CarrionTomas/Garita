@@ -1,0 +1,492 @@
+import {
+  BadRequestException,
+  ConflictException,
+  GoneException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  HttpException,
+} from '@nestjs/common';
+import { Prisma } from '../../generated/prisma/client';
+import { createHash, randomBytes } from 'node:crypto';
+import type { CreateClientUserRequest, CreateUserRequest, UpdateUserRequest } from '@garita/shared';
+import { PrismaService } from '../prisma/prisma.service';
+import { TenantResourceService } from '../auth/tenant-resource.service';
+import { FIREBASE_IDENTITY_PROVIDER } from '../auth/auth.types';
+import type { FirebaseIdentityProvider } from '../auth/auth.types';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env';
+import { ResendInvitationMailer } from './email.service';
+import { purgeExpiredRedeemAttempts } from './redeem-attempts';
+import { CLOCK, type Clock } from '../../common/clock';
+import { WEEKLY_SCHEDULE_DERIVATION_PORT } from './weekly-schedule-derivation.port';
+import type { WeeklyScheduleDerivationPort } from './weekly-schedule-derivation.port';
+import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
+
+@Injectable()
+export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly resources: TenantResourceService,
+    @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly firebase: FirebaseIdentityProvider,
+    private readonly mailer: ResendInvitationMailer,
+    private readonly config: ConfigService<Env, true>,
+    @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(WEEKLY_SCHEDULE_DERIVATION_PORT)
+    private readonly weeklySchedules: WeeklyScheduleDerivationPort,
+    private readonly shiftExecution: ShiftExecutionService,
+  ) {}
+
+  async list(query: {
+    rol?: 'supervisor' | 'guard';
+    estado?: 'invitation_pending' | 'active' | 'deactivated';
+    pagina: number;
+  }) {
+    const roleFilter: 'supervisor' | 'guard' | { in: ('supervisor' | 'guard')[] } = query.rol ?? {
+      in: ['supervisor', 'guard'],
+    };
+    const where = { role: roleFilter, status: query.estado };
+    const [total, users] = await Promise.all([
+      this.prisma.tenantPrisma.user.count({ where }),
+      this.prisma.tenantPrisma.user.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (query.pagina - 1) * 20,
+        take: 20,
+        include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      }),
+    ]);
+    return {
+      items: users.map((user) => this.present(user)),
+      pagina: query.pagina,
+      total,
+      paginas: Math.ceil(total / 20),
+    };
+  }
+
+  async detail(id: string) {
+    await this.getUser(id);
+    const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({
+      where: { id },
+      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+    });
+    return this.present(user);
+  }
+
+  async listClientUsers(clientId: string) {
+    await this.resources.findOwnedOrThrow('Client', clientId);
+    const users = await this.prisma.tenantPrisma.user.findMany({
+      where: { clientId, role: 'client' },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+    });
+    return users.map((user) => this.present(user));
+  }
+
+  async createClientUser(
+    clientId: string,
+    input: CreateClientUserRequest,
+    adminId: string,
+    companyId: string,
+  ) {
+    await this.assertActiveClient(clientId);
+    return this.create({ ...input, role: 'client', clientId }, adminId, companyId);
+  }
+
+  private async assertActiveClient(clientId: string) {
+    await this.resources.findOwnedOrThrow('Client', clientId);
+    const client = await this.prisma.tenantPrisma.client.findUniqueOrThrow({
+      where: { id: clientId },
+    });
+    if (client.status !== 'active') throw new ConflictException('El cliente está dado de baja');
+  }
+
+  async create(
+    input: CreateUserRequest | (CreateClientUserRequest & { role: 'client'; clientId: string }),
+    adminId: string,
+    companyId: string,
+  ) {
+    const clientId = 'clientId' in input ? input.clientId : null;
+    if ((input.role === 'client') !== Boolean(clientId))
+      throw new BadRequestException(
+        'El rol cliente requiere un cliente y los demás roles no lo admiten',
+      );
+    // Email uniqueness spans companies, so this is a justified system-level lookup.
+    if (await this.prisma.systemPrisma.user.findUnique({ where: { email: input.email } }))
+      throw new ConflictException('Ese correo ya está en uso');
+    let identity: { uid: string };
+    try {
+      identity = await this.firebase.createDisabledUser(input.email);
+    } catch (error) {
+      if ((error as { code?: string }).code === 'auth/email-already-exists')
+        throw new ConflictException('Ese correo ya está en uso');
+      throw error;
+    }
+    const token = randomBytes(32).toString('base64url');
+    const user = await this.prisma.tenantPrisma
+      .$transaction(async (tx) => {
+        if (clientId) {
+          // Serializa el alta con la baja del cliente para no dejar accesos activos tras la baja.
+          const locked = await tx.client.updateMany({
+            where: { id: clientId, status: 'active' },
+            data: { status: 'active' },
+          });
+          if (!locked.count) throw new ConflictException('El cliente está dado de baja');
+        }
+        return tx.user.create({
+          data: {
+            firebaseUid: identity.uid,
+            email: input.email,
+            firstName: input.firstName,
+            lastName: input.lastName,
+            phone: 'phone' in input ? input.phone : null,
+            employeeNumber: 'employeeNumber' in input ? input.employeeNumber : null,
+            clientId,
+            position: 'position' in input ? input.position : null,
+            role: input.role,
+            status: 'invitation_pending',
+            companyId,
+            invitations: {
+              create: {
+                tokenHash: hash(token),
+                expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+              },
+            },
+          },
+          include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+        });
+      })
+      .catch(async (error: unknown) => {
+        // Compensación: evita dejar un usuario huérfano en Firebase si falla la BD.
+        await this.firebase.deleteUser(identity.uid).catch((cleanupError: unknown) => {
+          this.logger.error({
+            event: 'personnel_firebase_cleanup_failed',
+            firebaseUid: identity.uid,
+            error: cleanupError instanceof Error ? cleanupError.message : 'unknown',
+          });
+        });
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+          throw new ConflictException('Ese correo ya está en uso');
+        throw error;
+      });
+    const invitation = user.invitations[0];
+    if (!invitation) throw new Error('No se pudo crear la invitación del usuario');
+    await this.send(invitation.id, input.firstName, input.email, token);
+    // shortcut: auditoría en logs, reemplazar por tabla de auditoría en E6.
+    this.logger.log({ event: 'personnel_created', actorUserId: adminId, userId: user.id });
+    return this.detail(user.id);
+  }
+
+  async update(id: string, input: UpdateUserRequest, adminId: string) {
+    await this.getUser(id);
+    const result = await this.prisma.tenantPrisma.user.update({ where: { id }, data: input });
+    this.logger.log({ event: 'personnel_updated', adminId, userId: result.id });
+    return this.detail(id);
+  }
+
+  async deactivate(
+    id: string,
+    adminId: string,
+    choice: {
+      deriveToUserId?: string;
+      leaveUnassigned?: true;
+      confirmUnassignedCount?: number;
+      forceDeactivate?: true;
+      reason?: string;
+    } = {},
+  ) {
+    const user = await this.getUser(id);
+    const inProgressShift = await this.shiftExecution.findInProgressForGuard(id);
+    if (inProgressShift && (!choice.forceDeactivate || !choice.reason))
+      throw new ConflictException({
+        code: 'GUARD_HAS_SHIFT_IN_PROGRESS',
+        shiftId: inProgressShift,
+      });
+    const futureShifts = await this.prisma.tenantPrisma.shift.findMany({
+      where: {
+        status: 'scheduled',
+        startsAt: { gt: this.clock.now() },
+        assignments: { some: { guardId: id, isCurrent: true, active: true } },
+      },
+      include: { assignments: { where: { guardId: id, isCurrent: true } } },
+      orderBy: { startsAt: 'asc' },
+    });
+    if (choice.deriveToUserId && choice.leaveUnassigned)
+      throw new ConflictException('Elegí derivar o dejar sin vigilador, no ambas opciones');
+    if (futureShifts.length && !choice.deriveToUserId && !choice.leaveUnassigned)
+      throw new ConflictException({ code: 'SHIFT_DECISION_REQUIRED', shifts: futureShifts });
+
+    let derivedCount = 0;
+    let unassignedCount = 0;
+    let notDerived: typeof futureShifts = [];
+    if (choice.deriveToUserId) {
+      if (user.role !== 'guard') throw new NotFoundException('Vigilador no encontrado');
+      const target = await this.prisma.tenantPrisma.user.findFirst({
+        where: {
+          id: choice.deriveToUserId,
+          role: 'guard',
+          status: { in: ['active', 'invitation_pending'] },
+        },
+      });
+      if (!target) throw new NotFoundException('Vigilador destino no encontrado');
+      const candidateAssignments = await this.prisma.tenantPrisma.shiftAssignment.findMany({
+        where: {
+          guardId: target.id,
+          active: true,
+          isCurrent: true,
+          endsAt: { gt: this.clock.now() },
+        },
+        select: { startsAt: true, endsAt: true },
+      });
+      notDerived = futureShifts.filter((shift) => {
+        const source = shift.assignments[0];
+        return (
+          !source ||
+          candidateAssignments.some(
+            (assignment) =>
+              assignment.startsAt < source.endsAt && assignment.endsAt > source.startsAt,
+          )
+        );
+      });
+      const notDerivedIds = new Set(notDerived.map(({ id: shiftId }) => shiftId));
+      derivedCount = futureShifts.length - notDerived.length;
+      await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        for (const shift of futureShifts) {
+          if (notDerivedIds.has(shift.id)) continue;
+          const assignment = shift.assignments[0];
+          if (!assignment) continue;
+          await tx.shiftAssignment.updateMany({
+            where: { shiftId: shift.id, isCurrent: true, active: true },
+            data: { isCurrent: false, active: false },
+          });
+          await tx.shiftAssignment.create({
+            data: {
+              shiftId: shift.id,
+              guardId: target.id,
+              startsAt: assignment.startsAt,
+              endsAt: assignment.endsAt,
+              assignedById: adminId,
+            },
+          });
+        }
+        await this.weeklySchedules.deriveForGuard(tx, id, target.id);
+        await tx.user.update({ where: { id }, data: { status: 'deactivated' } });
+        await tx.notificationDevice.deleteMany({ where: { userId: id } });
+        await tx.invitation.updateMany({
+          where: { userId: id, usedAt: null, replacedAt: null },
+          data: { replacedAt: this.clock.now() },
+        });
+      });
+    } else {
+      if (choice.leaveUnassigned && choice.confirmUnassignedCount !== futureShifts.length)
+        throw new ConflictException({
+          code: 'UNASSIGNED_COUNT_MISMATCH',
+          unassignedCount: futureShifts.length,
+        });
+      unassignedCount = choice.leaveUnassigned ? futureShifts.length : 0;
+      await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        if (choice.leaveUnassigned) {
+          for (const shift of futureShifts) {
+            const assignment = shift.assignments[0];
+            if (!assignment) continue;
+            await tx.shiftAssignment.updateMany({
+              where: { shiftId: shift.id, isCurrent: true, active: true },
+              data: { isCurrent: false, active: false },
+            });
+            await tx.shiftAssignment.create({
+              data: {
+                shiftId: shift.id,
+                guardId: null,
+                startsAt: assignment.startsAt,
+                endsAt: assignment.endsAt,
+                assignedById: adminId,
+              },
+            });
+            await tx.shift.update({ where: { id: shift.id }, data: { status: 'unassigned' } });
+          }
+        }
+        await this.weeklySchedules.deriveForGuard(tx, id, null);
+        await tx.user.update({ where: { id }, data: { status: 'deactivated' } });
+        await tx.notificationDevice.deleteMany({ where: { userId: id } });
+        await tx.invitation.updateMany({
+          where: { userId: id, usedAt: null, replacedAt: null },
+          data: { replacedAt: this.clock.now() },
+        });
+      });
+    }
+    if (inProgressShift && choice.forceDeactivate && choice.reason)
+      await this.shiftExecution.closeForGuard(id, adminId, choice.reason);
+    await this.firebase.setDisabled(user.firebaseUid, true);
+    await this.firebase.revokeRefreshTokens(user.firebaseUid);
+    this.logger.log({
+      event: 'personnel_deactivated',
+      actorUserId: adminId,
+      userId: id,
+      derivedCount,
+      unassignedCount,
+    });
+    return { ok: true as const, derivedCount, unassignedCount, notDerived };
+  }
+
+  async reactivate(id: string, adminId: string) {
+    const user = await this.getUser(id);
+    if (user.clientId) await this.assertActiveClient(user.clientId);
+    await this.firebase.setDisabled(user.firebaseUid, false);
+    await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      if (user.clientId) {
+        const locked = await tx.client.updateMany({
+          where: { id: user.clientId, status: 'active' },
+          data: { status: 'active' },
+        });
+        if (!locked.count) throw new ConflictException('El cliente está dado de baja');
+      }
+      await tx.user.update({ where: { id }, data: { status: 'active' } });
+    });
+    this.logger.log({ event: 'personnel_reactivated', actorUserId: adminId, userId: id });
+    return { ok: true as const };
+  }
+
+  async resend(id: string, adminId: string) {
+    const user = await this.getUser(id);
+    if (user.status === 'deactivated')
+      throw new ConflictException(
+        'El usuario está desactivado. Reactivalo antes de reenviar la invitación',
+      );
+    await this.prisma.tenantPrisma.invitation.updateMany({
+      where: { userId: id, usedAt: null, replacedAt: null },
+      data: { replacedAt: new Date() },
+    });
+    const token = randomBytes(32).toString('base64url');
+    const invite = await this.prisma.tenantPrisma.invitation.create({
+      data: {
+        userId: id,
+        tokenHash: hash(token),
+        expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+      },
+    });
+    await this.send(invite.id, user.firstName, user.email, token);
+    this.logger.log({ event: 'personnel_invitation_resent', adminId, userId: id });
+    return this.detail(id);
+  }
+
+  async redeem(token: string, ip: string) {
+    purgeExpiredRedeemAttempts(redeemAttempts);
+    const key = `${ip}:${Math.floor(Date.now() / 60000)}`;
+    const attempts = (redeemAttempts.get(key) ?? 0) + 1;
+    redeemAttempts.set(key, attempts);
+    if (attempts > 10)
+      throw new HttpException(
+        {
+          message: 'Demasiados intentos. Probá más tarde.',
+          reason: 'rate_limited',
+        },
+        429,
+      );
+    const invitation = await this.prisma.systemPrisma.invitation.findUnique({
+      where: { tokenHash: hash(token) },
+      include: { user: true },
+    });
+    if (!invitation) throw new GoneException({ message: 'Invitación inválida', reason: 'invalid' });
+    if (invitation.replacedAt)
+      throw new GoneException({
+        message:
+          'Esta invitación fue reemplazada. Pedile a tu administrador que te envíe una nueva',
+        reason: 'replaced',
+      });
+    if (invitation.usedAt)
+      throw new GoneException({ message: 'Esta invitación ya fue usada', reason: 'used' });
+    if (invitation.expiresAt <= new Date())
+      throw new GoneException({
+        message: 'Esta invitación venció. Pedile a tu administrador que te envíe una nueva',
+        reason: 'expired',
+      });
+    if (invitation.user.status === 'deactivated')
+      throw new GoneException({ message: 'Invitación inválida', reason: 'invalid' });
+    await this.firebase.setDisabled(invitation.user.firebaseUid, false);
+    return {
+      passwordSetupUrl: await this.firebase.generatePasswordResetLink(invitation.user.email),
+      role: invitation.user.role as 'supervisor' | 'guard' | 'client',
+    };
+  }
+
+  async markUsed(userId: string) {
+    await this.prisma.tenantPrisma.invitation.updateMany({
+      where: { userId, usedAt: null, replacedAt: null },
+      data: { usedAt: new Date() },
+    });
+  }
+
+  private async send(invitationId: string, name: string, email: string, token: string) {
+    const url = new URL('/activar', this.config.get('WEB_APP_URL', { infer: true }));
+    url.searchParams.set('token', token);
+    try {
+      const result = await this.mailer.sendInvitation({ name, email, link: url.toString() });
+      await this.prisma.tenantPrisma.invitation.update({
+        where: { id: invitationId },
+        data: { sendStatus: 'sent', providerMessageId: result.id },
+      });
+    } catch (error) {
+      await this.prisma.tenantPrisma.invitation.update({
+        where: { id: invitationId },
+        data: { sendStatus: 'failed' },
+      });
+      this.logger.error({
+        event: 'invitation_email',
+        invitationId,
+        result: 'failed',
+        error: error instanceof Error ? error.message : 'unknown',
+      });
+    }
+  }
+
+  private async getUser(id: string) {
+    await this.resources.findOwnedOrThrow('User', id);
+    const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({ where: { id } });
+    if (user.role !== 'supervisor' && user.role !== 'guard' && user.role !== 'client')
+      throw new NotFoundException('Recurso no encontrado');
+    return user;
+  }
+
+  private present(user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string | null;
+    employeeNumber: string | null;
+    role: 'admin' | 'supervisor' | 'guard' | 'client';
+    status: 'invitation_pending' | 'active' | 'deactivated';
+    clientId?: string | null;
+    position?: string | null;
+    lastLoginAt?: Date | null;
+    invitations?: { sendStatus: 'pending' | 'sent' | 'failed' }[];
+  }) {
+    if (user.role !== 'supervisor' && user.role !== 'guard' && user.role !== 'client')
+      throw new NotFoundException('Recurso no encontrado');
+    return {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      ...(user.role === 'client'
+        ? {
+            clientId: user.clientId,
+            position: user.position ?? null,
+            lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+          }
+        : {}),
+      phone: user.phone,
+      employeeNumber: user.employeeNumber,
+      role: user.role,
+      status: user.status,
+      invitationStatus: user.invitations?.[0]?.sendStatus ?? null,
+    };
+  }
+}
+
+const redeemAttempts = new Map<string, number>();
+function hash(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}

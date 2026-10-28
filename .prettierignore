@@ -1,0 +1,7 @@
+pnpm-lock.yaml
+dist
+build
+coverage
+.turbo
+.expo
+**/src/generated

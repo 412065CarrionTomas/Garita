@@ -1,0 +1,42 @@
+name: Nombre de ramas
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  nombre-de-rama:
+    name: Validar nombre de la rama
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMERO: ${{ github.event.pull_request.number }}
+      RAMA: ${{ github.head_ref }}
+      BASE: ${{ github.base_ref }}
+    steps:
+      - name: Validar según la rama destino
+        run: |
+          if [ "$BASE" = "main" ]; then
+            PATRON='^(release/[0-9]+\.[0-9]+\.[0-9]+|hotfix/[a-z0-9]+([.-][a-z0-9]+)*)$'
+            REGLA="release/<version> o hotfix/<descripcion>"
+          else
+            PATRON='^((feature|fix|hotfix|release|backport)/[a-z0-9]+([.-][a-z0-9]+)*|main)$'
+            REGLA="feature/<descripcion>, fix/<descripcion>, hotfix/<descripcion>, release/<version>, backport/<descripcion> o main"
+          fi
+
+          if [[ "$RAMA" =~ $PATRON ]]; then
+            echo "✅ Nombre de rama válido: $RAMA"
+            exit 0
+          fi
+
+          echo "::error::Nombre de rama inválido '$RAMA' para un PR a $BASE. Usar: $REGLA."
+          gh pr comment "$PR_NUMERO" --repo "$GITHUB_REPOSITORY" --body "❌ **Nombre de rama inválido** (\`$RAMA\`). Para un PR a \`$BASE\` usar: $REGLA. Ver [CONTRIBUTING.md](CONTRIBUTING.md)." || true
+          exit 1

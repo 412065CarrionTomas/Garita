@@ -1,0 +1,17 @@
+{
+  "name": "garita-poc-android-send-sms",
+  "version": "1.0.0",
+  "description": "PoC HU-36 - Envío de SMS en segundo plano con SEND_SMS y captura de acuses (sent/delivered) en Android",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@expo/modules-core": "^2.0.0",
+    "expo": "~52.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.0",
+    "typescript": "^5.3.3"
+  }
+}

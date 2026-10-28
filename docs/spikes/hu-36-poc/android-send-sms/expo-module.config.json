@@ -1,0 +1,8 @@
+{
+  "name": "garita-poc-android-send-sms",
+  "platforms": ["android"],
+  "android": {
+    "package": "expo.modules.garitasendsms",
+    "modules": ["expo.modules.garitasendsms.GaritaSendSmsModule"]
+  }
+}

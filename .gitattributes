@@ -1,0 +1,25 @@
+# Normaliza los finales de línea a LF en el repositorio, sin importar el sistema operativo.
+* text=auto eol=lf
+
+# Scripts de Windows necesitan CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binarios: sin conversión ni diff de texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.docx binary
+*.jar binary
+
+# Lockfile generado: no mostrar diffs completos en las revisiones.
+pnpm-lock.yaml linguist-generated=true -diff

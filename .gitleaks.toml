@@ -1,0 +1,14 @@
+# Configuración de Gitleaks para el repositorio Garita
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Permitir claves simuladas de prueba en tests unitarios y e2e"
+paths = [
+  '''apps/api/test/app\.e2e-spec\.ts''',
+  '''apps/api/src/modules/nfc-tags/secure/.*''',
+]
+commits = [
+  "e7ebdba5dbb58244abc07fd230c19121d6497179"
+]

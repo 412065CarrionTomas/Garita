@@ -1,0 +1,107 @@
+import type { ConfigContext, ExpoConfig } from 'expo/config';
+
+declare const require: (name: string) => { existsSync: (path: string) => boolean };
+const { existsSync } = require('node:fs');
+
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON ?? './google-services.json';
+if (!existsSync(googleServicesFile))
+  process.emitWarning(
+    'No se encontró google-services.json: el prebuild continúa sin FCM en Android.',
+  );
+
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
+  name: 'Garita',
+  slug: 'garita',
+  owner: 'garita.com',
+  version: '1.0.0',
+  orientation: 'portrait',
+  icon: './assets/images/icon.png',
+  scheme: 'garita',
+  userInterfaceStyle: 'automatic',
+  ios: {
+    bundleIdentifier: 'com.garita.app',
+    supportsTablet: false,
+    entitlements: { 'aps-environment': 'development' },
+    infoPlist: {
+      'com.apple.developer.nfc.readersession.iso7816.select-identifiers': ['D2760000850101'],
+      UIBackgroundModes: ['remote-notification'],
+      NSLocationWhenInUseUsageDescription:
+        'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',
+      NSCameraUsageDescription:
+        'Garita usa la cámara para leer códigos QR y tomar fotos de incidentes.',
+    },
+  },
+  android: {
+    package: 'com.garita.app',
+    ...(existsSync(googleServicesFile) ? { googleServicesFile } : {}),
+    adaptiveIcon: {
+      backgroundColor: '#0F2347',
+      foregroundImage: './assets/images/android-icon-foreground.png',
+      monochromeImage: './assets/images/android-icon-monochrome.png',
+    },
+  },
+  plugins: [
+    'expo-router',
+    [
+      'react-native-nfc-manager',
+      {
+        nfcPermission: 'Garita usa NFC para asociar etiquetas a los puntos de control.',
+        includeNdefEntitlement: false,
+      },
+    ],
+    './plugins/withNfcFeature',
+    'expo-audio',
+    'expo-sqlite',
+    'expo-secure-store',
+    'expo-notifications',
+    ['./modules/garita-native/app.plugin.js', {}],
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Garita usa tu ubicación precisa solo al iniciar y cerrar el turno y al registrar un punto de control.',
+        locationAlwaysAndWhenInUsePermission: false,
+        locationAlwaysPermission: false,
+        motionUsagePermission: false,
+        isIosBackgroundLocationEnabled: false,
+        isAndroidBackgroundLocationEnabled: false,
+        isAndroidForegroundServiceEnabled: false,
+      },
+    ],
+    [
+      'expo-camera',
+      {
+        cameraPermission: 'Garita usa la cámara para leer los códigos QR de los puntos de control.',
+        recordAudioAndroid: false,
+      },
+    ],
+    [
+      'expo-image-picker',
+      {
+        cameraPermission: 'Garita usa la cámara para adjuntar fotos a reportes de incidentes.',
+        photosPermission:
+          'Garita accede a tus fotos solo cuando adjuntás evidencia a un incidente.',
+        microphonePermission: false,
+      },
+    ],
+    [
+      'expo-splash-screen',
+      {
+        backgroundColor: '#0F2347',
+        image: './assets/images/splash-icon.png',
+        imageWidth: 120,
+      },
+    ],
+  ],
+  experiments: {
+    typedRoutes: true,
+    reactCompiler: true,
+  },
+  extra: {
+    ...config.extra,
+    eas: {
+      projectId: '9fa675ec-1e76-4328-a7f2-9c3821cd25d8',
+    },
+  },
+});

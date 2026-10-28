@@ -1,0 +1,43 @@
+# Dependencias
+node_modules/
+.pnpm-store/
+
+# Builds y artefactos
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Variables de entorno (solo se versionan los .env.example)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Credenciales y certificados (las reglas propias de Expo están en apps/mobile/.gitignore)
+*service-account*.json
+google-services.json
+GoogleService-Info.plist
+*.pem
+*.p8
+*.p12
+*.jks
+*.keystore
+*.mobileprovision
+
+# Editores y sistema operativo
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db

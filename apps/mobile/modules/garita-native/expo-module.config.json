@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["GaritaNativeModule"] },
+  "android": { "modules": ["com.garita.nativefield.GaritaNativeModule"] }
+}
