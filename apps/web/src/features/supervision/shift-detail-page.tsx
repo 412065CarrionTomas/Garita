@@ -129,16 +129,18 @@ export function ShiftDetailPage() {
           {detail.assignments.length === 0 && <p>Sin asignaciones.</p>}
         </CardContent>
       </Card>
-      <ReassignDialog
-        shiftId={detail.id}
-        endsAt={detail.scheduled.endsAt}
-        minutesToSignal={
-          detail.site.connectivityType === 'without_signal' ? detail.site.minutesToSignal : null
-        }
-        covering={detail.status === 'uncovered'}
-        open={reassignOpen}
-        onOpenChange={setReassignOpen}
-      />
+      {reassignOpen && (
+        <ReassignDialog
+          shiftId={detail.id}
+          endsAt={detail.scheduled.endsAt}
+          minutesToSignal={
+            detail.site.connectivityType === 'without_signal' ? detail.site.minutesToSignal : null
+          }
+          covering={detail.status === 'uncovered'}
+          open={reassignOpen}
+          onOpenChange={setReassignOpen}
+        />
+      )}
       <WindowsSection detail={detail} />
       <RouteSection detail={detail} />
       <RecordsSection

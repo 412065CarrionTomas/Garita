@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { reassignShiftRequestSchema, reassignShiftResponseSchema } from '@garita/shared';
+import {
+  reassignShiftRequestSchema,
+  reassignShiftResponseSchema,
+  shiftReplacementsResponseSchema,
+} from '@garita/shared';
 import { z } from 'zod';
 import { apiGet, apiPost, ApiError } from '@/lib/api-client';
 import { Alert } from '@/components/ui/alert';
@@ -9,12 +13,6 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-
-const guardsSchema = z.object({
-  items: z.array(
-    z.object({ id: z.string(), firstName: z.string(), lastName: z.string(), status: z.string() }),
-  ),
-});
 
 export function ReassignDialog({
   shiftId,
@@ -34,12 +32,21 @@ export function ReassignDialog({
   const [guardId, setGuardId] = useState('');
   const [startsAt, setStartsAt] = useState('');
   const [error, setError] = useState('');
+  const [warningReceived, setWarningReceived] = useState(false);
   const [openedAt] = useState(() => Date.now());
+  const selected = startsAt ? Date.parse(startsAt) : openedAt;
+  const invalidTime =
+    Boolean(startsAt) &&
+    (!Number.isFinite(selected) || selected < openedAt || selected >= Date.parse(endsAt));
   const queryClient = useQueryClient();
-  const { data } = useQuery({
-    queryKey: ['reassign', 'guards'],
-    queryFn: () => apiGet('/usuarios?rol=guard&pagina=1', guardsSchema),
-    enabled: open,
+  const { data, isPending, isError, refetch } = useQuery({
+    queryKey: ['supervision', 'replacements', shiftId, startsAt],
+    queryFn: () =>
+      apiGet(
+        `/turnos/${encodeURIComponent(shiftId)}/reemplazos${startsAt ? `?startsAt=${encodeURIComponent(new Date(startsAt).toISOString())}` : ''}`,
+        shiftReplacementsResponseSchema,
+      ),
+    enabled: open && !invalidTime,
   });
   const mutation = useMutation({
     mutationFn: () =>
@@ -49,9 +56,10 @@ export function ReassignDialog({
         reassignShiftRequestSchema,
         reassignShiftResponseSchema,
       ),
-    onSuccess: () => {
+    onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: ['supervision'] });
-      onOpenChange(false);
+      if (response.warning) setWarningReceived(true);
+      else onOpenChange(false);
     },
     onError: (cause: unknown) => {
       const body =
@@ -61,10 +69,8 @@ export function ReassignDialog({
       );
     },
   });
-  const selected = startsAt ? Date.parse(startsAt) : openedAt;
   const warning =
     minutesToSignal !== null && selected + minutesToSignal * 60_000 > Date.parse(endsAt);
-  const invalidTime = Boolean(startsAt) && (selected < openedAt || selected >= Date.parse(endsAt));
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -75,7 +81,7 @@ export function ReassignDialog({
           onSubmit={(event) => {
             event.preventDefault();
             setError('');
-            if (startsAt && Date.parse(startsAt) < Date.now()) {
+            if (invalidTime || (startsAt && Date.parse(startsAt) < Date.now())) {
               setError('Elegí una hora entre ahora y el fin del turno.');
               return;
             }
@@ -88,18 +94,17 @@ export function ReassignDialog({
               id="replacement-guard"
               required
               value={guardId}
+              disabled={isPending || isError || warningReceived}
               onChange={(event) => {
                 setGuardId(event.target.value);
               }}
             >
               <NativeSelectOption value="">Elegí un vigilador</NativeSelectOption>
-              {data?.items
-                .filter((guard) => guard.status === 'active')
-                .map((guard) => (
-                  <NativeSelectOption key={guard.id} value={guard.id}>
-                    {guard.firstName} {guard.lastName}
-                  </NativeSelectOption>
-                ))}
+              {data?.map((guard) => (
+                <NativeSelectOption key={guard.id} value={guard.id}>
+                  {guard.firstName} {guard.lastName}
+                </NativeSelectOption>
+              ))}
             </NativeSelect>
           </div>
           <div className="space-y-2">
@@ -110,6 +115,7 @@ export function ReassignDialog({
               value={startsAt}
               onChange={(event) => {
                 setStartsAt(event.target.value);
+                setGuardId('');
               }}
               aria-invalid={invalidTime}
               aria-describedby={invalidTime ? 'replacement-start-error' : undefined}
@@ -120,8 +126,21 @@ export function ReassignDialog({
               </p>
             )}
           </div>
-          {warning && (
+          {isPending && !invalidTime && <p role="status">Buscando vigiladores disponibles…</p>}
+          {isError && (
+            <Alert role="alert">
+              No pudimos cargar los reemplazos.{' '}
+              <Button type="button" variant="outline" onClick={() => void refetch()}>
+                Reintentar
+              </Button>
+            </Alert>
+          )}
+          {data?.length === 0 && !invalidTime && (
+            <p role="status">No hay vigiladores disponibles para ese horario.</p>
+          )}
+          {(warning || warningReceived) && (
             <Alert role="status">
+              {warningReceived && 'Turno reasignado. '}
               El reemplazo podría no llegar al predio antes del fin del turno. Podés confirmar
               igual.
             </Alert>
@@ -135,9 +154,20 @@ export function ReassignDialog({
                 onOpenChange(false);
               }}
             >
-              Cancelar
+              {warningReceived ? 'Cerrar' : 'Cancelar'}
             </Button>
-            <Button type="submit" disabled={!guardId || invalidTime || mutation.isPending}>
+            <Button
+              type="submit"
+              disabled={
+                !guardId ||
+                !data?.some((guard) => guard.id === guardId) ||
+                invalidTime ||
+                mutation.isPending ||
+                warningReceived ||
+                isPending ||
+                isError
+              }
+            >
               {mutation.isPending ? 'Guardando…' : covering ? 'Cubrir el resto' : 'Reasignar'}
             </Button>
           </div>

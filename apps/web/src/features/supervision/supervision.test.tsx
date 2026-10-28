@@ -1,12 +1,13 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { apiGet, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
 import { SupervisionPage } from './supervision-page';
 import { ShiftDetailPage } from './shift-detail-page';
 import { time } from './contracts';
 import { useRealtime } from '@/lib/realtime';
+import { ReassignDialog } from './reassign-dialog';
 
 const mockListeners = new Map<string, (value?: unknown) => void>();
 const mockSocket = {
@@ -19,7 +20,19 @@ const mockSocket = {
 };
 jest.mock('socket.io-client', () => ({ io: jest.fn(() => mockSocket) }));
 
-jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn(), apiPost: jest.fn() }));
+jest.mock('@/lib/api-client', () => ({
+  apiGet: jest.fn(),
+  apiPost: jest.fn(),
+  ApiError: class extends Error {
+    status?: number;
+    body: unknown;
+    constructor(message: string, status?: number, body?: unknown) {
+      super(message);
+      this.status = status;
+      this.body = body;
+    }
+  },
+}));
 jest.mock('react-router', () => ({
   ...jest.requireActual<Record<string, unknown>>('@/test/react-router'),
   useParams: () => ({ id: 's1' }),
@@ -112,8 +125,8 @@ beforeEach(() => {
       Promise.resolve(
         (path.includes('/detalle')
           ? detail
-          : path.includes('/usuarios')
-            ? { items: [{ id: 'u2', firstName: 'Juan', lastName: 'Pérez', status: 'active' }] }
+          : path.includes('/reemplazos')
+            ? [{ id: 'u2', firstName: 'Juan', lastName: 'Pérez' }]
             : [row]) as never,
       ),
     );
@@ -207,11 +220,11 @@ it('permite elegir reemplazo con teclado y advierte sobre el predio sin señal',
     </MemoryRouter>,
   );
   await userEvent.click(await screen.findByRole('button', { name: 'Cubrir el resto' }));
+  fireEvent.change(screen.getByLabelText('Inicio del reemplazo (opcional: ahora)'), {
+    target: { value: '2030-01-02T04:00' },
+  });
+  await screen.findByRole('option', { name: 'Juan Pérez' });
   await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
-  await userEvent.type(
-    screen.getByLabelText('Inicio del reemplazo (opcional: ahora)'),
-    '2030-01-02T04:00',
-  );
   expect(screen.getByText(/podría no llegar al predio/)).toBeInTheDocument();
   await userEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Cubrir el resto' }),
@@ -224,6 +237,84 @@ it('permite elegir reemplazo con teclado y advierte sobre el predio sin señal',
       expect.anything(),
     );
   });
+});
+
+it('valida el horario, mantiene el foco en el diálogo y permite cancelar con Escape', async () => {
+  const onOpenChange = jest.fn();
+  renderWithQueryClient(
+    <ReassignDialog
+      shiftId="s1"
+      endsAt={row.endsAt}
+      minutesToSignal={null}
+      covering={false}
+      open
+      onOpenChange={onOpenChange}
+    />,
+  );
+  const guard = await screen.findByLabelText('Vigilador');
+  await waitFor(() => {
+    expect(guard).toBeEnabled();
+  });
+  guard.focus();
+  expect(guard).toHaveFocus();
+  await userEvent.selectOptions(guard, 'u2');
+  await userEvent.tab();
+  const start = screen.getByLabelText('Inicio del reemplazo (opcional: ahora)');
+  expect(start).toHaveFocus();
+  fireEvent.change(start, { target: { value: '2030-01-02T09:00' } });
+  expect(start).toHaveAttribute('aria-invalid', 'true');
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Elegí una hora entre ahora y el fin del turno.',
+  );
+  expect(screen.getByRole('button', { name: 'Reasignar' })).toBeDisabled();
+  await userEvent.keyboard('{Escape}');
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+it('muestra el motivo de la carrera y conserva el formulario', async () => {
+  jest
+    .mocked(apiPost)
+    .mockRejectedValueOnce(
+      new ApiError('conflicto', 409, { message: 'El vigilador acaba de iniciar el turno' }),
+    );
+  renderWithQueryClient(
+    <ReassignDialog
+      shiftId="s1"
+      endsAt={row.endsAt}
+      minutesToSignal={null}
+      covering={false}
+      open
+      onOpenChange={jest.fn()}
+    />,
+  );
+  await screen.findByRole('option', { name: 'Juan Pérez' });
+  await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
+  await userEvent.click(screen.getByRole('button', { name: 'Reasignar' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'El vigilador acaba de iniciar el turno',
+  );
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+
+it('muestra la advertencia del servidor después de confirmar y evita otro envío', async () => {
+  jest
+    .mocked(apiPost)
+    .mockResolvedValueOnce({ shiftId: 's1', assignmentId: 'a2', warning: 'replacement_late' });
+  renderWithQueryClient(
+    <ReassignDialog
+      shiftId="s1"
+      endsAt={row.endsAt}
+      minutesToSignal={null}
+      covering={false}
+      open
+      onOpenChange={jest.fn()}
+    />,
+  );
+  await screen.findByRole('option', { name: 'Juan Pérez' });
+  await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
+  await userEvent.click(screen.getByRole('button', { name: 'Reasignar' }));
+  expect(await screen.findByText(/Turno reasignado/)).toHaveTextContent('podría no llegar');
+  expect(screen.getByRole('button', { name: 'Reasignar' })).toBeDisabled();
 });
 
 it('actualiza el punto y la ventana al llegar un registro sin recargar la página', async () => {
