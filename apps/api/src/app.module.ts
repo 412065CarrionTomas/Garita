@@ -22,6 +22,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { ServerTimeModule } from './modules/server-time/server-time.module';
 import { SupervisionModule } from './modules/supervision/supervision.module';
 import { RoundReviewModule } from './modules/round-review/round-review.module';
+import { NoticesModule } from './modules/notices/notices.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { RoundReviewModule } from './modules/round-review/round-review.module';
     ServerTimeModule,
     SupervisionModule,
     RoundReviewModule,
+    NoticesModule,
   ],
 })
 export class AppModule {}
