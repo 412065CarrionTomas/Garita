@@ -54,7 +54,6 @@ import { io, type Socket as ClientSocket } from 'socket.io-client';
 import { REALTIME_PORT, type RealtimePort } from '../src/common/ports/realtime.port';
 import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
 import { RoundWindowStateService } from '../src/modules/supervision/round-window-state.service';
-import { ShiftSyncStateService } from '../src/modules/sync/shift-sync-state.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { SMS_PORT, type SmsPort } from '../src/common/ports/sms.port';
 import { NOTICES_PORT, type NoticesPort } from '../src/common/ports/notices.port';
@@ -5297,6 +5296,9 @@ describe('Aplicación (e2e)', () => {
       },
     });
     const notices = app.get<NoticesPort>(NOTICES_PORT);
+    const notify = jest
+      .spyOn(app.get(NotificationsService), 'notifySiteStaff')
+      .mockResolvedValue(undefined);
     const input = {
       companyId: shift.companyId,
       siteId: shift.siteId,
@@ -5306,6 +5308,8 @@ describe('Aplicación (e2e)', () => {
     };
     await notices.raise(input);
     await notices.raise(input);
+    expect(notify).toHaveBeenCalledTimes(1);
+    notify.mockRestore();
     expect(await prisma.notice.count({ where: { key: `shift_unsynced:${shift.id}` } })).toBe(1);
     const http = request(app.getHttpServer());
     const list = '/api/v1/avisos';
@@ -5322,6 +5326,14 @@ describe('Aplicación (e2e)', () => {
               .send({ reason: 'Celular roto' })
           : http.get(url).set('Authorization', 'Bearer token-client');
       await forbidden.expect(403);
+      const guardCall =
+        url === close
+          ? http
+              .post(url)
+              .set('Authorization', 'Bearer token-guard')
+              .send({ reason: 'Celular roto' })
+          : http.get(url).set('Authorization', 'Bearer token-guard');
+      await guardCall.expect(403);
       const hidden =
         url === close
           ? http
@@ -5338,6 +5350,11 @@ describe('Aplicación (e2e)', () => {
       } else await hidden.expect(404);
     }
     await http.get(detail).set('Authorization', 'Bearer token-south-admin').expect(404);
+    await http
+      .post(close)
+      .set('Authorization', 'Bearer token-south-admin')
+      .send({ reason: 'Celular roto' })
+      .expect(404);
     await http.get(list).set('Authorization', 'Bearer token-supervisor').expect(200);
     await http.get(detail).set('Authorization', 'Bearer token-supervisor').expect(200);
     await http
@@ -5379,135 +5396,230 @@ describe('Aplicación (e2e)', () => {
     ).toBe('cerrado_sin_datos');
   });
 
-  it('espera sincronización, avisa al vencer el plazo y corrige la ronda con datos tardíos', async () => {
-    const previousNow = testNow;
-    testNow = new Date('2026-10-13T11:30:00Z');
-    const prisma = app.get(PrismaService).systemPrisma;
-    const round = await prisma.round.findFirstOrThrow({
-      where: { siteId: northAssignedSiteId, currentVersionId: { not: null } },
-      include: { currentVersion: { include: { checkpoints: { take: 1 } } } },
-    });
-    const version = round.currentVersion;
-    const checkpointId = version?.checkpoints[0]?.checkpointId;
-    if (!version || !checkpointId) throw new Error('Falta la ronda de prueba sembrada');
-    const shift = await prisma.shift.create({
-      data: {
-        companyId: 'norte-company',
-        siteId: northAssignedSiteId,
-        startsAt: new Date('2026-10-13T10:00:00Z'),
-        endsAt: new Date('2026-10-13T11:00:00Z'),
-        serviceDate: new Date('2026-10-13T00:00:00Z'),
-        createdById: northSupervisorId,
-        status: 'auto_closed',
-        startedAt: new Date('2026-10-13T10:00:00Z'),
-        syncDeadlineAt: testNow,
-        assignments: {
-          create: {
-            guardId: northGuardId,
-            assignedById: northSupervisorId,
+  it.each([true, false])(
+    'espera sincronización y procesa el lote tardío sin falsas alarmas (aviso previo: %s)',
+    async (missedBeforeBatch) => {
+      const previousNow = testNow;
+      const notify = jest
+        .spyOn(app.get(NotificationsService), 'notifySiteStaff')
+        .mockResolvedValue(undefined);
+      testNow = new Date('2026-10-13T11:30:00Z');
+      const prisma = app.get(PrismaService).systemPrisma;
+      const guard = await prisma.user.create({
+        data: {
+          companyId: 'norte-company',
+          firebaseUid: `tenant-test-notices-${randomUUID()}`,
+          email: `notices-${randomUUID()}@example.invalid`,
+          firstName: 'Prueba',
+          lastName: 'Avisos',
+          role: 'guard',
+          status: 'active',
+        },
+      });
+      try {
+        const checkpoint = await prisma.checkpoint.create({
+          data: {
+            companyId: 'norte-company',
+            siteId: northAssignedSiteId,
+            name: `Avisos ${randomUUID()}`,
+            latitude: -34.6,
+            longitude: -58.4,
+          },
+        });
+        createdCheckpointIds.push(checkpoint.id);
+        const checkpointId = checkpoint.id;
+        const roundName = `Lote avisos ${randomUUID()}`;
+        const round = await prisma.round.create({
+          data: { companyId: 'norte-company', siteId: northAssignedSiteId, name: roundName },
+        });
+        createdRoundNames.push(roundName);
+        const version = await prisma.roundVersion.create({
+          data: {
+            roundId: round.id,
+            versionNumber: 1,
+            frequencyMinutes: 60,
+            windowStartLocal: '07:00',
+            windowEndLocal: '08:00',
+            graceMinutes: 15,
+            createdById: northSupervisorId,
+            checkpoints: { create: { companyId: 'norte-company', checkpointId, position: 0 } },
+          },
+        });
+        await prisma.round.update({
+          where: { id: round.id },
+          data: { currentVersionId: version.id },
+        });
+        const shift = await prisma.shift.create({
+          data: {
+            companyId: 'norte-company',
+            siteId: northAssignedSiteId,
             startsAt: new Date('2026-10-13T10:00:00Z'),
             endsAt: new Date('2026-10-13T11:00:00Z'),
+            serviceDate: new Date('2026-10-13T00:00:00Z'),
+            createdById: northSupervisorId,
+            status: 'auto_closed',
+            startedAt: new Date('2026-10-13T10:00:00Z'),
+            syncDeadlineAt: testNow,
+            connectivityType: 'without_signal',
+            assignments: {
+              create: {
+                guardId: guard.id,
+                assignedById: northSupervisorId,
+                startsAt: new Date('2026-10-13T10:00:00Z'),
+                endsAt: new Date('2026-10-13T11:00:00Z'),
+              },
+            },
+            rounds: { create: { roundId: round.id, roundVersionId: version.id } },
           },
-        },
-        rounds: { create: { roundId: round.id, roundVersionId: version.id } },
-      },
-    });
-    createdShiftIds.push(shift.id);
-    const assignment = await prisma.shiftAssignment.findFirstOrThrow({
-      where: { shiftId: shift.id },
-    });
-    await prisma.shiftEvent.create({
-      data: {
-        companyId: shift.companyId,
-        shiftId: shift.id,
-        assignmentId: assignment.id,
-        type: 'start',
-        occurredAt: shift.startsAt,
-      },
-    });
-    const window = await prisma.roundWindowState.create({
-      data: {
-        companyId: shift.companyId,
-        shiftId: shift.id,
-        roundId: round.id,
-        windowIndex: 0,
-        startsAt: shift.startsAt,
-        endsAt: shift.endsAt,
-        graceEndsAt: new Date('2026-10-13T11:15:00Z'),
-        expectedCount: 1,
-      },
-    });
-    const windows = app.get(RoundWindowStateService);
-    await windows.recalculateExpired();
-    expect(
-      (await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } })).status,
-    ).toBe('pending_sync');
-    expect(await prisma.notice.count({ where: { shiftId: shift.id, kind: 'round_missed' } })).toBe(
-      0,
-    );
-    expect(
-      await prisma.notice.count({ where: { shiftId: shift.id, kind: 'shift_unsynced' } }),
-    ).toBe(1);
-    await app
-      .get(ShiftSyncStateService)
-      .updateSyncState({
-        companyId: shift.companyId,
-        shiftId: shift.id,
-        pendingCount: 0,
-        syncedUntil: window.graceEndsAt,
-        contactAt: testNow,
-        isBatch: true,
-      });
-    expect(
-      (await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } })).status,
-    ).toBe('not_done');
-    expect(
-      await prisma.notice.count({
-        where: { shiftId: shift.id, kind: 'round_missed', status: 'open' },
-      }),
-    ).toBe(1);
-    await prisma.checkpointRecord.create({
-      data: {
-        companyId: shift.companyId,
-        shiftId: shift.id,
-        assignmentId: assignment.id,
-        checkpointId,
-        recordId: randomUUID(),
-        method: 'qr',
-        occurredAtDevice: new Date('2026-10-13T10:30:00Z'),
-        locationStatus: 'ok',
-        simulation: 'not_simulated',
-        phoneNfc: 'on',
-        countedFor: [{ roundId: round.id, windowIndex: 0 }],
-        requestHash: `late-${shift.id}`,
-      },
-    });
-    await windows.recalculate(shift.id);
-    expect(
-      (await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } })).status,
-    ).toBe('complete');
-    expect(
-      await prisma.notice.count({
-        where: {
+        });
+        createdShiftIds.push(shift.id);
+        const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+          where: { shiftId: shift.id },
+        });
+        await prisma.shiftEvent.create({
+          data: {
+            companyId: shift.companyId,
+            shiftId: shift.id,
+            assignmentId: assignment.id,
+            type: 'start',
+            occurredAt: shift.startsAt,
+          },
+        });
+        const window = await prisma.roundWindowState.create({
+          data: {
+            companyId: shift.companyId,
+            shiftId: shift.id,
+            roundId: round.id,
+            windowIndex: 0,
+            startsAt: shift.startsAt,
+            endsAt: shift.endsAt,
+            graceEndsAt: new Date('2026-10-13T11:15:00Z'),
+            expectedCount: 1,
+          },
+        });
+        const windows = app.get(RoundWindowStateService);
+        await windows.recalculateExpired();
+        expect(
+          (await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } })).status,
+        ).toBe('pending_sync');
+        expect(
+          await prisma.notice.count({ where: { shiftId: shift.id, kind: 'round_missed' } }),
+        ).toBe(0);
+        expect(
+          await prisma.notice.count({ where: { shiftId: shift.id, kind: 'shift_unsynced' } }),
+        ).toBe(1);
+        const { token } = await app.get(ShiftCredentialService).issueCredential({
           shiftId: shift.id,
-          kind: 'round_missed',
-          status: 'resolved',
-          resolution: 'data_arrived',
-        },
-      }),
-    ).toBe(1);
-    expect(
-      await prisma.notice.count({
-        where: { shiftId: shift.id, kind: 'shift_unsynced', status: 'open' },
-      }),
-    ).toBe(1);
-    const response = await request(app.getHttpServer())
-      .get('/api/v1/avisos?tipo=shift_unsynced')
-      .set('Authorization', 'Bearer token-supervisor')
-      .expect(200);
-    expect(
-      z.object({ items: z.array(z.object({ shiftId: z.string() })) }).parse(response.body).items,
-    ).toEqual(expect.arrayContaining([expect.objectContaining({ shiftId: shift.id })]));
-    testNow = previousNow;
-  });
+          assignmentId: assignment.id,
+          userId: guard.id,
+          companyId: shift.companyId,
+          scheduledEnd: shift.endsAt,
+        });
+        if (!missedBeforeBatch) {
+          await request(app.getHttpServer())
+            .post(`/api/v1/turnos/${shift.id}/cerrar-sin-datos`)
+            .set('Authorization', 'Bearer token-supervisor')
+            .send({ reason: 'Celular perdido' })
+            .expect(201);
+          expect(
+            (await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } })).status,
+          ).toBe('not_done');
+        }
+        if (missedBeforeBatch) {
+          await request(app.getHttpServer())
+            .post('/api/v1/avisos-conexion')
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+              shiftId: shift.id,
+              pendingCount: 0,
+              syncedUntil: window.graceEndsAt.toISOString(),
+              sentAtDevice: testNow.toISOString(),
+            })
+            .expect(200);
+          expect(
+            (await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } })).status,
+          ).toBe('not_done');
+          expect(
+            await prisma.notice.count({
+              where: { shiftId: shift.id, kind: 'round_missed', status: 'open' },
+            }),
+          ).toBe(1);
+        }
+        const recordId = randomUUID();
+        const batch = await request(app.getHttpServer())
+          .post('/api/v1/sincronizacion/eventos')
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            shiftId: shift.id,
+            pendingCount: 0,
+            syncedUntil: window.graceEndsAt.toISOString(),
+            events: [
+              {
+                type: 'checkpoint_record',
+                payload: {
+                  recordId,
+                  shiftId: shift.id,
+                  method: 'qr',
+                  scannedValue: app
+                    .get(QrService)
+                    .createPayload(checkpoint.id, checkpoint.qrVersion),
+                  occurredAtDevice: '2026-10-13T10:30:00Z',
+                  location: {
+                    status: 'ok',
+                    latitude: -34.6,
+                    longitude: -58.4,
+                    accuracyMeters: 5,
+                    simulation: 'not_simulated',
+                    takenAt: '2026-10-13T10:30:00Z',
+                  },
+                  phoneNfc: 'on',
+                },
+              },
+            ],
+          })
+          .expect(200);
+        expect(
+          z.object({ results: z.array(z.object({ status: z.string() })) }).parse(batch.body)
+            .results[0]?.status,
+        ).toBe('accepted');
+        expect(
+          (await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } })).status,
+        ).toBe('complete');
+        expect(
+          await prisma.notice.count({
+            where: {
+              shiftId: shift.id,
+              kind: 'round_missed',
+              status: 'resolved',
+              resolution: 'data_arrived',
+            },
+          }),
+        ).toBe(missedBeforeBatch ? 1 : 0);
+        expect(
+          await prisma.notice.count({
+            where: {
+              shiftId: shift.id,
+              kind: 'shift_unsynced',
+              status: missedBeforeBatch ? 'open' : 'resolved',
+            },
+          }),
+        ).toBe(1);
+        const response = await request(app.getHttpServer())
+          .get('/api/v1/avisos?tipo=shift_unsynced')
+          .set('Authorization', 'Bearer token-supervisor')
+          .expect(200);
+        expect(
+          z.object({ items: z.array(z.object({ shiftId: z.string() })) }).parse(response.body)
+            .items,
+        ).toEqual(expect.arrayContaining([expect.objectContaining({ shiftId: shift.id })]));
+        await prisma.shiftAssignment.update({
+          where: { id: assignment.id },
+          data: { active: false },
+        });
+      } finally {
+        notify.mockRestore();
+        testNow = previousNow;
+      }
+    },
+  );
 });
