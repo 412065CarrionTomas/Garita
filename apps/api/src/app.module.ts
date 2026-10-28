@@ -22,6 +22,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { ServerTimeModule } from './modules/server-time/server-time.module';
 import { SupervisionModule } from './modules/supervision/supervision.module';
 import { RoundReviewModule } from './modules/round-review/round-review.module';
+import { PanicModule } from './modules/panic/panic.module';
 import { NoticesModule } from './modules/notices/notices.module';
 
 @Module({
@@ -53,6 +54,7 @@ import { NoticesModule } from './modules/notices/notices.module';
     ServerTimeModule,
     SupervisionModule,
     RoundReviewModule,
+    PanicModule,
     NoticesModule,
   ],
 })

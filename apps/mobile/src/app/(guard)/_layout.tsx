@@ -4,7 +4,10 @@ import { useStackOptions } from '@/ui';
 import { useAuth } from '@/features/auth/auth-context';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import { initSyncService } from '@/lib/cola';
-import { createDefaultFieldRepository } from '@/lib/db/database';
+import { createDefaultFieldRepository, subscribePanicChanges } from '@/lib/db/database';
+import { getRunningPanicShift } from '@/features/panico/running-shift';
+import { View } from 'react-native';
+import { PanicOverlay } from '@/features/panico/panic-overlay';
 export default function GuardLayout() {
   const screenOptions = useStackOptions();
   const { user, loading } = useAuth();
@@ -12,6 +15,25 @@ export default function GuardLayout() {
   const [permissionState, setPermissionState] = useState<FieldPermissionState | null>(null);
   const [savedShiftId, setSavedShiftId] = useState<string | null>(null);
   const [localCheckPath, setLocalCheckPath] = useState<string | null>(null);
+  const [panicShiftId, setPanicShiftId] = useState<string | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      const saved = await getRunningPanicShift(await createDefaultFieldRepository());
+      if (mounted) setPanicShiftId(saved?.shift.id ?? null);
+    };
+    const update = () => {
+      void refresh().catch(() => {
+        if (mounted) setPanicShiftId(null);
+      });
+    };
+    const unsubscribe = subscribePanicChanges(update);
+    update();
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
   useEffect(() => {
     return initSyncService();
   }, []);
@@ -59,5 +81,10 @@ export default function GuardLayout() {
   if (savedShiftId && localCheckPath === pathname && !isAllowedSubroute) {
     return <Redirect href={`/turno/${savedShiftId}`} />;
   }
-  return <Stack screenOptions={screenOptions} />;
+  return (
+    <View style={{ flex: 1 }}>
+      <Stack screenOptions={screenOptions} />
+      {panicShiftId && <PanicOverlay />}
+    </View>
+  );
 }

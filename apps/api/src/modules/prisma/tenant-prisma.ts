@@ -21,6 +21,7 @@ export const COMPANY_ID_MODELS = [
   'InvalidScanAttempt',
   'RecordFlag',
   'Incident',
+  'PanicAlert',
   'IncidentClassification',
   'ShiftCredential',
   'SyncBatch',
@@ -38,6 +39,7 @@ export const INDIRECT_TENANT_MODELS = {
   ShiftAssignment: { relation: 'shift', foreignKey: 'shiftId', relatedModel: 'Shift' },
   ShiftRound: { relation: 'shift', foreignKey: 'shiftId', relatedModel: 'Shift' },
   IncidentPhoto: { relation: 'incident', foreignKey: 'incidentId', relatedModel: 'Incident' },
+  PanicAlertEvent: { relation: 'alert', foreignKey: 'alertId', relatedModel: 'PanicAlert' },
   IncidentPhotoAuthorization: {
     relation: 'incident',
     foreignKey: 'incidentId',
@@ -119,6 +121,9 @@ export function addSiteAssignmentFilter(
   if (model === 'RecordFlag')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'Incident') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'PanicAlert') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'PanicAlertEvent')
+    return { ...args, where: { AND: [where, { alert: { site: assignment } }] } };
   if (model === 'IncidentClassification')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
   if (model === 'IncidentPhotoAuthorization')
