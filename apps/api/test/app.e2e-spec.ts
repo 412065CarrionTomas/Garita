@@ -56,6 +56,10 @@ import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
 import { RoundWindowStateService } from '../src/modules/supervision/round-window-state.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { SMS_PORT, type SmsPort } from '../src/common/ports/sms.port';
+import {
+  REPORT_RECALCULATION_PORT,
+  type ReportRecalculationPort,
+} from '../src/common/ports/report-recalculation.port';
 
 function isLogEntry(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -351,6 +355,9 @@ describe('Aplicación (e2e)', () => {
     });
     await prisma.notificationDevice.deleteMany({ where: { token: { in: notificationTokens } } });
     await prisma.recordFlag.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
+    await prisma.roundReviewDecision.deleteMany({
+      where: { windowState: { shiftId: { in: createdShiftIds } } },
+    });
     await prisma.checkpointRecord.deleteMany({ where: { shiftId: { in: createdShiftIds } } });
     await prisma.shift.deleteMany({ where: { id: { in: createdShiftIds } } });
     await prisma.site.deleteMany({ where: { id: { in: createdSiteIds } } });
@@ -793,6 +800,278 @@ describe('Aplicación (e2e)', () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
 
     expect(liveHealthResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it('revisa una ronda grave, conserva el historial y recalcula al invalidar registros', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const reviewNow = new Date('2026-10-12T12:00:00Z');
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const notifications = jest
+      .spyOn(app.get(NotificationsService), 'notifySiteStaff')
+      .mockResolvedValue(undefined);
+    const reports = jest.spyOn(
+      app.get<ReportRecalculationPort>(REPORT_RECALCULATION_PORT),
+      'recalculate',
+    );
+    const checkpoints = await Promise.all(
+      Array.from({ length: 5 }, (_, index) =>
+        prisma.checkpoint.create({
+          data: {
+            companyId: 'norte-company',
+            siteId: northAssignedSiteId,
+            name: `Punto revisión ${index} ${randomUUID()}`,
+            latitude: -34.6,
+            longitude: -58.4,
+          },
+        }),
+      ),
+    );
+    createdCheckpointIds.push(...checkpoints.map((checkpoint) => checkpoint.id));
+    const roundName = `Ronda revisión ${randomUUID()}`;
+    createdRoundNames.push(roundName);
+    const round = await prisma.round.create({
+      data: { companyId: 'norte-company', siteId: northAssignedSiteId, name: roundName },
+    });
+    const version = await prisma.roundVersion.create({
+      data: {
+        roundId: round.id,
+        versionNumber: 1,
+        frequencyMinutes: 60,
+        windowStartLocal: '00:00',
+        windowEndLocal: '23:00',
+        graceMinutes: 15,
+        createdById: admin.id,
+      },
+    });
+    await prisma.round.update({ where: { id: round.id }, data: { currentVersionId: version.id } });
+    await prisma.roundVersionCheckpoint.createMany({
+      data: checkpoints.map((checkpoint, position) => ({
+        companyId: 'norte-company',
+        roundVersionId: version.id,
+        checkpointId: checkpoint.id,
+        position,
+      })),
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date(reviewNow.getTime() - 60 * 60_000),
+        endsAt: new Date(reviewNow.getTime() + 60 * 60_000),
+        serviceDate: new Date('2026-10-12T00:00:00Z'),
+        createdById: admin.id,
+        rounds: { create: { roundId: round.id, roundVersionId: version.id } },
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt: new Date(reviewNow.getTime() - 60 * 60_000),
+            endsAt: new Date(reviewNow.getTime() + 60 * 60_000),
+            assignedById: admin.id,
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+      where: { shiftId: shift.id },
+    });
+    const window = await prisma.roundWindowState.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: shift.id,
+        roundId: round.id,
+        windowIndex: 0,
+        startsAt: new Date(reviewNow.getTime() - 30 * 60_000),
+        endsAt: new Date(reviewNow.getTime() + 30 * 60_000),
+        graceEndsAt: new Date(reviewNow.getTime() + 45 * 60_000),
+        expectedCount: 5,
+      },
+    });
+    const records = [];
+    for (const checkpoint of checkpoints) {
+      records.push(
+        await prisma.checkpointRecord.create({
+          data: {
+            companyId: 'norte-company',
+            shiftId: shift.id,
+            assignmentId: assignment.id,
+            checkpointId: checkpoint.id,
+            recordId: randomUUID(),
+            method: 'qr',
+            occurredAtDevice: reviewNow,
+            locationStatus: 'ok',
+            simulation: 'not_simulated',
+            phoneNfc: 'on',
+            countedFor: [{ roundId: round.id, windowIndex: 0 }],
+            requestHash: randomUUID(),
+          },
+        }),
+      );
+    }
+    const [firstRecord, secondRecord] = records;
+    if (!firstRecord || !secondRecord) throw new Error('Faltan registros de la ronda de prueba');
+    await prisma.recordFlag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointRecordId: firstRecord.id,
+        shiftId: shift.id,
+        type: 'simulated_location',
+        severity: 'grave',
+      },
+    });
+    await app.get(TenantContext).run(
+      {
+        correlationId: randomUUID(),
+        user: { userId: admin.id, companyId: 'norte-company', role: 'admin', status: 'active' },
+      },
+      () =>
+        app
+          .get(RoundWindowStateService)
+          .recalculate(shift.id, [{ roundId: round.id, windowIndex: 0 }]),
+    );
+    expect(
+      await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } }),
+    ).toMatchObject({ status: 'in_review', severityLevel: 'grave', inReviewSince: testNow });
+    expect(notifications).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'round_in_review' }),
+    );
+    const path = `/api/v1/ventanas-ronda/${window.id}`;
+    await request(app.getHttpServer()).get(path).expect(401);
+    await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', 'Bearer token-guard')
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', 'Bearer token-client')
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', 'Bearer token-south-admin')
+      .expect(404);
+    const unassignedRoundName = `Ronda sin asignación ${randomUUID()}`;
+    createdRoundNames.push(unassignedRoundName);
+    const unassignedRound = await prisma.round.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        name: unassignedRoundName,
+      },
+    });
+    const unassignedShift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+        serviceDate: new Date('2026-10-12T00:00:00Z'),
+        createdById: admin.id,
+      },
+    });
+    createdShiftIds.push(unassignedShift.id);
+    const unassignedWindow = await prisma.roundWindowState.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: unassignedShift.id,
+        roundId: unassignedRound.id,
+        windowIndex: 0,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+        graceEndsAt: window.graceEndsAt,
+        status: 'in_review',
+        expectedCount: 1,
+      },
+    });
+    await request(app.getHttpServer())
+      .get(`/api/v1/ventanas-ronda/${unassignedWindow.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`/api/v1/ventanas-ronda/${unassignedWindow.id}/validar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ comment: 'Sin acceso al predio' })
+      .expect(404);
+    await request(app.getHttpServer())
+      .get('/api/v1/ventanas-ronda/inexistente')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+    const queue = await request(app.getHttpServer())
+      .get('/api/v1/ventanas-ronda/en-revision')
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    await request(app.getHttpServer()).get('/api/v1/ventanas-ronda/en-revision').expect(401);
+    await request(app.getHttpServer())
+      .get('/api/v1/ventanas-ronda/en-revision')
+      .set('Authorization', 'Bearer token-guard')
+      .expect(403);
+    expect(z.object({ count: z.number() }).parse(queue.body).count).toBeGreaterThan(0);
+    await request(app.getHttpServer())
+      .post(`${path}/validar`)
+      .set('Authorization', 'Bearer token-client')
+      .send({ comment: 'Sin permiso' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`${path}/validar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ comment: 'Recorrido verificado por cámara' })
+      .expect(201);
+    expect(
+      await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } }),
+    ).toMatchObject({ status: 'complete', inReviewSince: null });
+    await request(app.getHttpServer())
+      .post(`${path}/validar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ comment: 'Segunda validación' })
+      .expect(409);
+    await prisma.recordFlag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointRecordId: secondRecord.id,
+        shiftId: shift.id,
+        type: 'impossible_time',
+        severity: 'grave',
+      },
+    });
+    await request(app.getHttpServer())
+      .post(`/api/v1/registros-puntos/${firstRecord.id}/invalidar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ comment: 'Ubicación simulada' })
+      .expect(201);
+    expect(
+      await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } }),
+    ).toMatchObject({ status: 'incomplete', severityLevel: 'grave', recordedCount: 4 });
+    expect(notifications).toHaveBeenCalledTimes(1);
+    await request(app.getHttpServer())
+      .post(`/api/v1/registros-puntos/${firstRecord.id}/restituir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ comment: 'Verificado por cámara' })
+      .expect(201);
+    for (const record of records)
+      await request(app.getHttpServer())
+        .post(`/api/v1/registros-puntos/${record.id}/invalidar`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .send({ comment: 'Registrado desde la garita' })
+        .expect(201);
+    expect(
+      await prisma.roundWindowState.findUniqueOrThrow({ where: { id: window.id } }),
+    ).toMatchObject({ status: 'not_done', recordedCount: 0 });
+    const detail = await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(z.object({ decisions: z.array(z.unknown()) }).parse(detail.body).decisions).toHaveLength(
+      8,
+    );
+    expect(reports).toHaveBeenCalledTimes(8);
+    expect(notifications).toHaveBeenCalledTimes(2);
+    await prisma.shiftAssignment.updateMany({
+      where: { shiftId: shift.id },
+      data: { active: false, isCurrent: false },
+    });
+    reports.mockRestore();
+    notifications.mockRestore();
   });
 
   it('protege los endpoints de supervisión y oculta turnos inexistentes', async () => {

@@ -22,6 +22,7 @@ import {
 } from '../incidentes/incidents-page';
 import { SupervisionPage } from '../supervision/supervision-page';
 import { ShiftDetailPage } from '../supervision/shift-detail-page';
+import { ReviewPage, ReviewDetailPage, useReviewCount } from '../revision/review-page';
 import { useRealtime } from '@/lib/realtime';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
@@ -61,6 +62,7 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
 function RoleLayout() {
   const { user, logout } = useAuth();
   const pending = useIncidentPendingCount(user?.role === 'admin' || user?.role === 'supervisor');
+  const reviews = useReviewCount(user?.role === 'admin' || user?.role === 'supervisor');
   const realtime = useRealtime(user?.role === 'admin' || user?.role === 'supervisor');
   if (!user) return null;
   return (
@@ -70,6 +72,7 @@ function RoleLayout() {
         user.role === 'admin' || user.role === 'supervisor'
           ? [
               ...SECTIONS[user.role],
+              { path: '/revision', title: `Rondas en revisión (${reviews.data?.count ?? 0})` },
               {
                 path: '/incidentes/cola',
                 title: `Cola de clasificación (${pending.data?.count ?? 0})`,
@@ -139,6 +142,22 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <ShiftDetailPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/revision"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <ReviewPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/revision/:id"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <ReviewDetailPage />
             </Protected>
           }
         />

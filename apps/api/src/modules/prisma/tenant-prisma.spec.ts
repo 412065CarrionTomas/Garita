@@ -38,6 +38,7 @@ describe('registro del aislamiento tenant', () => {
   it('registra puntos y limita las lecturas del supervisor a predios asignados', () => {
     expect(COMPANY_ID_MODELS).toContain('Checkpoint');
     expect(COMPANY_ID_MODELS).toContain('RoundWindowState');
+    expect(COMPANY_ID_MODELS).toContain('RoundReviewDecision');
     expect(scopeArgs('Checkpoint', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
       where: { status: 'active', companyId: 'norte' },
     });
@@ -232,6 +233,18 @@ describe('registro del aislamiento tenant', () => {
         },
       },
     );
+    expect(
+      addSiteAssignmentFilter('RoundReviewDecision', { where: { id: 'decision-1' } }, user),
+    ).toEqual({
+      where: {
+        AND: [
+          { id: 'decision-1' },
+          {
+            windowState: { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+          },
+        ],
+      },
+    });
     expect(addSiteAssignmentFilter('SyncBatch', { where: { shiftId: 's-1' } }, user)).toEqual({
       where: {
         AND: [

@@ -92,6 +92,7 @@ model Company {
   roundWindowStates RoundWindowState[]
   incidents   Incident[]
   incidentClassifications IncidentClassification[]
+  roundReviewDecisions RoundReviewDecision[]
 }
 
 model User {
@@ -119,6 +120,7 @@ model User {
   shiftCredentials ShiftCredential[]
   incidents        Incident[]
   incidentClassifications IncidentClassification[] @relation("IncidentDecider")
+  roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
 
   @@index([companyId])
@@ -391,16 +393,43 @@ model RoundWindowState {
   graceEndsAt   DateTime                  @db.Timestamptz(3)
   status        RoundWindowStatus         @default(pending)
   severityLevel RoundWindowSeverityLevel?
+  inReviewSince DateTime?                 @db.Timestamptz(3)
   recordedCount Int                       @default(0)
   expectedCount Int
   updatedAt     DateTime                  @updatedAt
   company       Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   shift         Shift                     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   round         Round                     @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  decisions     RoundReviewDecision[]
 
   @@unique([shiftId, roundId, windowIndex])
   @@index([companyId, shiftId, startsAt])
   @@index([shiftId, status, endsAt])
+}
+
+enum RoundReviewDecisionKind {
+  validate
+  invalidate
+  restore
+}
+
+model RoundReviewDecision {
+  id                 String                  @id @default(cuid())
+  companyId          String
+  windowStateId      String
+  kind               RoundReviewDecisionKind
+  checkpointRecordId String?
+  comment            String                  @db.VarChar(500)
+  decidedById        String
+  decidedAt          DateTime                @default(now()) @db.Timestamptz(3)
+  company            Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  windowState        RoundWindowState        @relation(fields: [windowStateId], references: [id], onDelete: Cascade)
+  checkpointRecord   CheckpointRecord?       @relation(fields: [checkpointRecordId], references: [id], onDelete: Restrict)
+  decidedBy          User                    @relation("RoundReviewDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([companyId, windowStateId, decidedAt])
+  @@index([companyId, decidedAt])
+  @@index([checkpointRecordId, decidedAt])
 }
 
 enum ShiftEventType {
@@ -589,12 +618,14 @@ model CheckpointRecord {
   countedFor          Json
   outOfWindow         Boolean                  @default(false)
   countsForCompliance Boolean                  @default(true)
+  invalidatedAt       DateTime?                @db.Timestamptz(3)
   requestHash         String
   createdAt           DateTime                 @default(now())
   shift               Shift                    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   assignment          ShiftAssignment          @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
   checkpoint          Checkpoint               @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
   flags               RecordFlag[]
+  reviewDecisions     RoundReviewDecision[]
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])

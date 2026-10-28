@@ -6,25 +6,11 @@ import { apiGet } from '@/lib/api-client';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
-import type { StatusTone } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { shiftLabels, shiftListSchema, syncLabel, time } from './contracts';
-
-const tones: Record<keyof typeof shiftLabels, StatusTone> = {
-  scheduled: 'info',
-  in_progress: 'signal',
-  uncovered: 'danger',
-  closed: 'success',
-  auto_closed: 'warning',
-  no_show: 'warning',
-  without_guard: 'warning',
-  unassigned: 'warning',
-  cancelled: 'neutral',
-  cancelled_by_suspension: 'neutral',
-};
+import { shiftLabels, shiftListSchema, shiftTones, syncLabel, time } from './contracts';
 
 export function SupervisionPage() {
   const [status, setStatus] = useState('');
@@ -124,7 +110,9 @@ export function SupervisionPage() {
                         {time(row.startsAt)}–{time(row.endsAt)}
                       </p>
                     </div>
-                    <StatusBadge tone={tones[row.status]}>{shiftLabels[row.status]}</StatusBadge>
+                    <StatusBadge tone={shiftTones[row.status]}>
+                      {shiftLabels[row.status]}
+                    </StatusBadge>
                   </div>
                   <p className="flex items-center gap-2 text-sm">
                     {row.status === 'without_guard' ||

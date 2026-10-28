@@ -7,7 +7,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { shiftDetailSchema, shiftLabels, time } from './contracts';
+import { shiftDetailSchema, shiftLabels, shiftTones, time } from './contracts';
 import type { Severity } from './contracts';
 import { RecordsSection, RouteSection, WindowsSection } from './detail-sections';
 
@@ -48,17 +48,7 @@ export function ShiftDetailPage() {
         title={`Turno en ${detail.site.name}`}
         description="Detalle de cobertura, ventanas y registros"
         actions={
-          <StatusBadge
-            tone={
-              detail.status === 'uncovered'
-                ? 'danger'
-                : detail.status === 'without_guard'
-                  ? 'warning'
-                  : 'info'
-            }
-          >
-            {shiftLabels[detail.status]}
-          </StatusBadge>
+          <StatusBadge tone={shiftTones[detail.status]}>{shiftLabels[detail.status]}</StatusBadge>
         }
       />
       <Card>

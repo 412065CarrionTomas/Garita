@@ -33,7 +33,10 @@ export function useRealtime(enabled: boolean) {
     let connectedOnce = false;
     socket.on('connect', () => {
       setConnected(true);
-      if (connectedOnce) void queryClient.invalidateQueries({ queryKey: ['supervision'] });
+      if (connectedOnce) {
+        void queryClient.invalidateQueries({ queryKey: ['supervision'] });
+        void queryClient.invalidateQueries({ queryKey: ['revision'] });
+      }
       connectedOnce = true;
       setAnnouncement('Supervisión conectada');
     });
@@ -45,12 +48,14 @@ export function useRealtime(enabled: boolean) {
       const event = shiftUpdatedEventSchema.safeParse(raw);
       if (!event.success) return;
       void queryClient.invalidateQueries({ queryKey: ['supervision'] });
+      void queryClient.invalidateQueries({ queryKey: ['revision'] });
       setAnnouncement(`Turno actualizado`);
     });
     socket.on(REALTIME_EVENTS.recordNew, (raw: unknown) => {
       const event = recordNewEventSchema.safeParse(raw);
       if (!event.success) return;
       void queryClient.invalidateQueries({ queryKey: ['supervision'] });
+      void queryClient.invalidateQueries({ queryKey: ['revision'] });
       setAnnouncement('Registro nuevo en un turno');
     });
     socket.on(REALTIME_EVENTS.noticeNew, (raw: unknown) => {
