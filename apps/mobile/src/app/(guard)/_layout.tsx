@@ -5,6 +5,8 @@ import { useAuth } from '@/features/auth/auth-context';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import { initSyncService } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
+import { View } from 'react-native';
+import { PanicOverlay } from '@/features/panico/panic-overlay';
 export default function GuardLayout() {
   const screenOptions = useStackOptions();
   const { user, loading } = useAuth();
@@ -59,5 +61,10 @@ export default function GuardLayout() {
   if (savedShiftId && localCheckPath === pathname && !isAllowedSubroute) {
     return <Redirect href={`/turno/${savedShiftId}`} />;
   }
-  return <Stack screenOptions={screenOptions} />;
+  return (
+    <View style={{ flex: 1 }}>
+      <Stack screenOptions={screenOptions} />
+      {savedShiftId && <PanicOverlay />}
+    </View>
+  );
 }

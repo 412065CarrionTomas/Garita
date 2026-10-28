@@ -5,7 +5,19 @@ import {
   shiftOfflineDataSchema,
   type PendingFieldEvent,
   type ShiftOfflineData,
+  createPanicAlertRequestSchema,
+  panicAlertStateResponseSchema,
+  fieldLocationSchema,
 } from '@garita/shared';
+
+export const localPanicAlertSchema = z.object({
+  request: createPanicAlertRequestSchema,
+  state: panicAlertStateResponseSchema.nullable(),
+  smsState: z.enum(['pending', 'unavailable']),
+  attempts: z.number().int().nonnegative(),
+  betterLocation: fieldLocationSchema.optional(),
+});
+export type LocalPanicAlert = z.infer<typeof localPanicAlertSchema>;
 
 export const localCheckpointRecordSchema = z.object({
   recordId: z.string().uuid(),
@@ -66,6 +78,9 @@ export interface FieldDatabase {
     nextAttemptAt: string,
   ): Promise<void>;
   deleteIncidentPhoto?(photoId: string): Promise<void>;
+  insertPanicAlert?(alert: LocalPanicAlert): Promise<void>;
+  readPanicAlerts?(): Promise<unknown[]>;
+  updatePanicAlert?(alert: LocalPanicAlert): Promise<void>;
 }
 
 export interface MigrationDatabase {
@@ -143,6 +158,14 @@ export async function migrateDatabase(database: MigrationDatabase): Promise<void
         'CREATE INDEX IF NOT EXISTS idx_incident_photos_retry ON incident_photos (next_attempt_at)',
       );
       await database.setVersion(6);
+    });
+  }
+  if (version < 7) {
+    await database.transaction(async () => {
+      await database.exec(
+        'CREATE TABLE IF NOT EXISTS panic_alerts (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL)',
+      );
+      await database.setVersion(7);
     });
   }
 }
@@ -391,6 +414,27 @@ export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
   async deleteIncidentPhoto(photoId: string): Promise<void> {
     await this.db.runAsync('DELETE FROM incident_photos WHERE photo_id = ?', photoId);
   }
+  async insertPanicAlert(alert: LocalPanicAlert): Promise<void> {
+    await this.db.runAsync(
+      'INSERT OR IGNORE INTO panic_alerts (id, data, created_at) VALUES (?, ?, ?)',
+      alert.request.alertId,
+      JSON.stringify(alert),
+      alert.request.occurredAtDevice,
+    );
+  }
+  async readPanicAlerts(): Promise<unknown[]> {
+    const rows = await this.db.getAllAsync<{ data: string }>(
+      'SELECT data FROM panic_alerts ORDER BY created_at DESC',
+    );
+    return rows.map((row) => JSON.parse(row.data) as unknown);
+  }
+  async updatePanicAlert(alert: LocalPanicAlert): Promise<void> {
+    await this.db.runAsync(
+      'UPDATE panic_alerts SET data = ? WHERE id = ?',
+      JSON.stringify(alert),
+      alert.request.alertId,
+    );
+  }
 }
 
 let databasePromise: Promise<ExpoFieldDatabase> | undefined;
@@ -441,10 +485,15 @@ export function createFieldRepository(database: FieldDatabase) {
       }
     },
     async countPendingEvents(): Promise<number> {
-      if (database.countPendingEvents) {
-        return database.countPendingEvents();
-      }
-      return (await database.readEvents()).length;
+      const regular = database.countPendingEvents
+        ? await database.countPendingEvents()
+        : (await database.readEvents()).length;
+      const panic = database.readPanicAlerts
+        ? (await database.readPanicAlerts())
+            .map((alert) => localPanicAlertSchema.parse(alert))
+            .filter((alert) => !alert.state).length
+        : 0;
+      return regular + panic;
     },
     async getSyncMeta(key: string): Promise<string | null> {
       if (database.getSyncMeta) {
@@ -505,6 +554,21 @@ export function createFieldRepository(database: FieldDatabase) {
     },
     async removeIncidentPhoto(photoId: string): Promise<void> {
       await database.deleteIncidentPhoto?.(photoId);
+    },
+    async savePanicAlert(input: unknown): Promise<LocalPanicAlert> {
+      const alert = localPanicAlertSchema.parse(input);
+      if (!database.insertPanicAlert) throw new Error('La base local no admite alertas de pánico');
+      await database.insertPanicAlert(alert);
+      return alert;
+    },
+    async listPanicAlerts(): Promise<LocalPanicAlert[]> {
+      if (!database.readPanicAlerts) return [];
+      return (await database.readPanicAlerts()).map((alert) => localPanicAlertSchema.parse(alert));
+    },
+    async updatePanicAlert(input: unknown): Promise<void> {
+      const alert = localPanicAlertSchema.parse(input);
+      if (!database.updatePanicAlert) throw new Error('La base local no admite alertas de pánico');
+      await database.updatePanicAlert(alert);
     },
   };
   return repository;

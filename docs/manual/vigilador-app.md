@@ -31,6 +31,12 @@ Tocá **Escanear código QR** desde la pantalla del turno en curso para abrir el
    - **Códigos QR inválidos o ajenos:** si escaneás un código QR que no corresponde al predio o turno asignado, la app muestra «Este punto no pertenece a tu turno». Si el código fue reemplazado por una versión nueva, indica «Código QR desactualizado». El intento queda guardado localmente y se reporta al servidor para conocimiento de la supervisión.
    - **Permiso de cámara ausente:** si la cámara no cuenta con permiso, la app explica el motivo y muestra el botón para otorgarlo. Si el teléfono posee lector NFC, se ofrece la opción de registrar por NFC como alternativa.
 
+## Pedir ayuda con el botón de pánico
+
+Durante un turno en curso, el botón **Pánico** está disponible en las pantallas del vigilador. Mantenelo presionado dos segundos; un toque breve no activa nada. La app confirma el gesto con una vibración corta, sin sonido. La alerta queda guardada en el teléfono y se intenta enviar de inmediato, incluso si hay otros registros pendientes. Si no hay internet, queda pendiente de envío y se reintenta cuando vuelva la conexión.
+
+El texto **Alerta recibida por la central** aparece solamente cuando el servidor registró la alerta. **Confirmada por el supervisor** aparece solamente después de que un supervisor confirmó su lectura. Sin esos textos, no supongas que la central ya recibió el pedido: buscá ayuda por otra vía disponible. No podés cancelar la alerta desde la app; avisá al supervisor si fue una falsa alarma. Una segunda activación de una alerta abierta queda registrada en la misma alerta. La práctica guiada y la resolución como «prueba» quedarán disponibles con HU-24.
+
 ## Cerrar el turno
 
 Tocá **Cerrar turno**. Si todavía no llegó el fin programado, escribí un motivo de al menos tres caracteres para habilitar el cierre. Garita registra un identificador único, la hora y una lectura puntual de ubicación. Con conexión, envía el cierre al servidor y elimina los datos activos del turno local cuando recibe confirmación.

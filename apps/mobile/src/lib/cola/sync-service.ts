@@ -10,12 +10,17 @@ import {
   type SyncBatchRequest,
   type SyncBatchResponse,
 } from '@garita/shared';
-import { createDefaultFieldRepository, type FieldRepository } from '@/lib/db/database';
+import {
+  createDefaultFieldRepository,
+  type FieldRepository,
+  type LocalPanicAlert,
+} from '@/lib/db/database';
 import { prepareEventClocks, saveTimeReference } from '@/lib/clock/clock';
 import { sendConnectionNotice, sendSyncBatch } from './api';
 import { computeSyncBackoff } from './backoff';
 import { deleteShiftCredential, getShiftCredentialToken } from './credential';
 import { processIncidentPhotos } from '@/lib/fotos/photo-queue';
+import { dispatchPanicAlert } from '@/features/panico/transport';
 
 export interface SyncStateSnapshot {
   isSyncing: boolean;
@@ -139,9 +144,8 @@ export async function getSyncSnapshot(): Promise<SyncStateSnapshot> {
  * Extensibility point for HU-21 (panic alert):
  * Urgent events bypass normal queue waiting and are sent immediately.
  */
-export async function sendUrgentEvent(event: unknown): Promise<void> {
-  // HU-21 will implement immediate priority dispatch
-  void event;
+export async function sendUrgentEvent(event: LocalPanicAlert): Promise<void> {
+  await dispatchPanicAlert(event);
 }
 
 /**

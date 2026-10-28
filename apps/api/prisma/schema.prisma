@@ -91,6 +91,7 @@ model Company {
   recordFlags       RecordFlag[]
   roundWindowStates RoundWindowState[]
   incidents   Incident[]
+  panicAlerts PanicAlert[]
   incidentClassifications IncidentClassification[]
   roundReviewDecisions RoundReviewDecision[]
 }
@@ -119,6 +120,7 @@ model User {
   shiftAssignments ShiftAssignment[]
   shiftCredentials ShiftCredential[]
   incidents        Incident[]
+  panicAlerts      PanicAlert[]
   incidentClassifications IncidentClassification[] @relation("IncidentDecider")
   roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
@@ -202,6 +204,7 @@ model Site {
   rounds             Round[]
   shifts             Shift[]
   incidents          Incident[]
+  panicAlerts        PanicAlert[]
 
   @@unique([clientId, name])
   @@index([companyId, status])
@@ -498,6 +501,7 @@ model Shift {
   syncState           ShiftSyncState?
   roundWindowStates   RoundWindowState[]
   incidents           Incident[]
+  panicAlerts         PanicAlert[]
 
   @@index([companyId, startsAt])
   @@index([siteId, serviceDate])
@@ -553,6 +557,7 @@ model ShiftAssignment {
   checkpointRecords   CheckpointRecord[]
   invalidScanAttempts InvalidScanAttempt[]
   incidents           Incident[]
+  panicAlerts         PanicAlert[]
   guard               User?                @relation(fields: [guardId], references: [id], onDelete: Restrict)
 
   @@index([shiftId, isCurrent])
@@ -697,6 +702,60 @@ model Incident {
   @@index([companyId, siteId, classificationStatus, createdAt])
   @@index([shiftId, occurredAtDevice])
   @@index([assignmentId])
+}
+
+enum PanicAlertStatus {
+  active
+  confirmed
+  resolved
+}
+
+enum PanicAlertChannel {
+  internet
+  sms
+}
+
+model PanicAlert {
+  id             String            @id @db.Uuid
+  companyId      String
+  siteId         String
+  shiftId        String
+  assignmentId   String
+  guardId        String
+  status         PanicAlertStatus  @default(active)
+  channel        PanicAlertChannel @default(internet)
+  triggeredAt    DateTime          @db.Timestamptz(3)
+  receivedAt     DateTime          @db.Timestamptz(3)
+  confirmedAt    DateTime?         @db.Timestamptz(3)
+  latitude       Decimal?          @db.Decimal(9, 6)
+  longitude      Decimal?          @db.Decimal(10, 6)
+  accuracyMeters Decimal?          @db.Decimal(10, 2)
+  locationStatus ShiftEventLocationStatus
+  timeStatus     TimeStatus?
+  activationCount Int              @default(1)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  company        Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site           Site              @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  shift          Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  assignment     ShiftAssignment   @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  guard          User              @relation(fields: [guardId], references: [id], onDelete: Restrict)
+  events         PanicAlertEvent[]
+
+  @@index([companyId, status])
+  @@index([siteId, createdAt])
+  @@index([shiftId, status])
+}
+
+model PanicAlertEvent {
+  id         String     @id @default(cuid())
+  alertId    String     @db.Uuid
+  type       String
+  occurredAt DateTime   @db.Timestamptz(3)
+  data       Json?
+  alert      PanicAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@index([alertId, occurredAt])
 }
 
 model IncidentClassification {

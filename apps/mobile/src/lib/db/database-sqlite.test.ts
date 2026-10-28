@@ -64,6 +64,33 @@ function createNodeSqliteExpoAdapter(): {
 }
 
 describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
+  it('persists a panic alert before transport and restores it after reopening', async () => {
+    const { adapter } = createNodeSqliteExpoAdapter();
+    await migrateDatabase(new ExpoFieldDatabase(adapter));
+    const first = createFieldRepository(new ExpoFieldDatabase(adapter));
+    const alert = {
+      request: {
+        alertId: '00000000-0000-4000-8000-000000000001',
+        shiftId: 'shift',
+        occurredAtDevice: '2035-01-01T12:00:00.000Z',
+        location: {
+          status: 'unverifiable' as const,
+          latitude: null,
+          longitude: null,
+          accuracyMeters: null,
+          simulation: 'unavailable' as const,
+          takenAt: null,
+        },
+      },
+      state: null,
+      smsState: 'pending' as const,
+      attempts: 0,
+    };
+    await first.savePanicAlert(alert);
+    const reopened = createFieldRepository(new ExpoFieldDatabase(adapter));
+    expect(await reopened.listPanicAlerts()).toEqual([alert]);
+    expect(await reopened.countPendingEvents()).toBe(1);
+  });
   it('HU-14: persists boot references and recalculated payload across repository reopen, preserves insertion order after wall-clock rollback', async () => {
     const { adapter } = createNodeSqliteExpoAdapter();
     const database = new ExpoFieldDatabase(adapter);
@@ -122,7 +149,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
 
     expect(await db.getVersion()).toBe(0);
     await migrateDatabase(db);
-    expect(await db.getVersion()).toBe(6);
+    expect(await db.getVersion()).toBe(7);
 
     // Verify tables exist in SQLite
     const tables = rawDb
@@ -188,7 +215,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     // Reset user_version to 4 to test step 5
     rawDb.exec('PRAGMA user_version = 4');
     await migrateDatabase(db);
-    expect(await db.getVersion()).toBe(6);
+    expect(await db.getVersion()).toBe(7);
 
     const row = rawDb
       .prepare("SELECT type FROM pending_events WHERE id = '00000000-0000-4000-8000-000000000001'")
