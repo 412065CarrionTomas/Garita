@@ -1,4 +1,4 @@
-import { screen, within, waitFor } from '@testing-library/react';
+import { screen, within, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { computeCompliance, type ComplianceReport } from '@garita/shared';
@@ -135,7 +135,7 @@ it('selecciona un segmento con teclado y muestra las ventanas y el enlace al tur
     expect.anything(),
   );
 });
-it('envía filtros nativos usando teclado y rechaza períodos inválidos', async () => {
+it('envía filtros nativos usando teclado', async () => {
   const user = userEvent.setup();
   renderWithQueryClient(
     <MemoryRouter>
@@ -155,4 +155,19 @@ it('envía filtros nativos usando teclado y rechaza períodos inválidos', async
       expect.anything(),
     );
   });
+});
+it('rechaza un período invertido antes de consultar la API', async () => {
+  const user = userEvent.setup();
+  renderWithQueryClient(
+    <MemoryRouter>
+      <ReportsPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText(/18 completas de 20/);
+  jest.mocked(apiGet).mockClear();
+  fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-12-01' } });
+  screen.getByRole('button', { name: 'Consultar cumplimiento' }).focus();
+  await user.keyboard('{Enter}');
+  expect(await screen.findByRole('alert')).toHaveTextContent('Ingresá un período válido');
+  expect(apiGet).not.toHaveBeenCalled();
 });
