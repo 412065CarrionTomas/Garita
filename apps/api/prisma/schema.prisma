@@ -419,6 +419,8 @@ model RoundWindowState {
 
   @@unique([shiftId, roundId, windowIndex])
   @@index([companyId, shiftId, startsAt])
+  @@index([companyId, startsAt])
+  @@index([companyId, status, startsAt])
   @@index([shiftId, status, endsAt])
 }
 
@@ -544,6 +546,7 @@ model Notice {
   shift      Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   @@index([companyId, status, createdAt])
+  @@index([companyId, kind, status, createdAt])
   @@index([siteId, createdAt])
 }
 
@@ -674,6 +677,8 @@ model CheckpointRecord {
   reviewDecisions     RoundReviewDecision[]
 
   @@index([companyId, shiftId, occurredAtDevice])
+  @@index([companyId, occurredAtDevice])
+  @@index([companyId, checkpointId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
   @@index([checkpointId, occurredAtDevice])
 }
@@ -883,6 +888,7 @@ model RecordFlag {
 
   @@unique([checkpointRecordId, type])
   @@index([companyId, shiftId, createdAt])
+  @@index([companyId, createdAt])
   @@index([shiftId, createdAt])
   @@index([checkpointRecordId])
 }
