@@ -83,6 +83,28 @@ describe('panic button', () => {
     });
     await waitFor(() => expect(rendered.getByText('Alerta recibida por la central')).toBeTruthy());
   });
+
+  it('shows the new SMS after an earlier alert was resolved in the same shift', async () => {
+    alerts = [
+      {
+        request: { shiftId: 'shift', alertId: 'new' },
+        state: null,
+        smsState: 'sent',
+      } as LocalPanicAlert,
+      {
+        request: { shiftId: 'shift', alertId: 'resolved' },
+        state: {
+          alertId: 'resolved',
+          status: 'resolved',
+          receivedAt: '2035-01-01T12:00:00Z',
+          confirmedAt: '2035-01-01T12:01:00Z',
+        },
+      } as LocalPanicAlert,
+    ];
+    const rendered = await render(<PanicOverlay />);
+    await waitFor(() => expect(rendered.getByText('SMS enviado')).toBeTruthy());
+    expect(rendered.queryByText('Confirmada por el supervisor')).toBeNull();
+  });
   afterEach(() => jest.useRealTimers());
 
   it.each([

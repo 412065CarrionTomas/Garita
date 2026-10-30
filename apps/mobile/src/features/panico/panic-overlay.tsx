@@ -29,10 +29,12 @@ export function PanicOverlay() {
     const refresh = async (remote = false) => {
       const repository = await createDefaultFieldRepository();
       const shift = await repository.getShiftData();
-      const alerts = await repository.listPanicAlerts();
-      const latest = alerts.find(
-        (alert) => alert.request.shiftId === shift?.shift.id && alert.state !== null,
+      const shiftAlerts = (await repository.listPanicAlerts()).filter(
+        (alert) => alert.request.shiftId === shift?.shift.id && !alert.blockedReason,
       );
+      const resolved = shiftAlerts.findIndex((alert) => alert.state?.status === 'resolved');
+      const alerts = resolved > 0 ? shiftAlerts.slice(0, resolved) : shiftAlerts;
+      const latest = alerts.find((alert) => alert.state !== null);
       if (!latest?.state) {
         const sms = alerts.find(
           (alert) => alert.request.shiftId === shift?.shift.id && !alert.blockedReason,

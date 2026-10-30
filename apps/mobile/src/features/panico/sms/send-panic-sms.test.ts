@@ -231,6 +231,34 @@ describe('panic SMS through the priority transport', () => {
     expect(await repository.countPendingEvents()).toBe(1);
   });
 
+  it('allows one SMS for a new alert after the previous alert is resolved', async () => {
+    await sendPanicSms(alert);
+    await repository.patchPanicAlert(alert.request.alertId, {
+      state: {
+        alertId: alert.request.alertId,
+        status: 'resolved',
+        receivedAt: alert.request.occurredAtDevice,
+        confirmedAt: alert.request.occurredAtDevice,
+      },
+    });
+    const next = await repository.savePanicAlert({
+      ...alert,
+      request: { ...alert.request, alertId: 'b1234567-0000-4000-8000-000000000002' },
+    });
+    await sendPanicSms(next);
+    expect(GaritaNative.sendSms).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists a native acknowledgement that arrives before sendSms resolves', async () => {
+    jest.mocked(GaritaNative.sendSms).mockImplementation(async () => {
+      receive({ id: 'native-id', status: 'sent' });
+      return { id: 'native-id' };
+    });
+    await sendPanicSms(alert);
+    await flush();
+    expect((await repository.listPanicAlerts())[0]?.smsState).toBe('sent');
+  });
+
   it('reports native send failure without dropping the queued alert', async () => {
     await sendPanicSms(alert);
     receive({ id: 'native-id', status: 'failed' });
