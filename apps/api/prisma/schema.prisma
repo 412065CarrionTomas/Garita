@@ -94,6 +94,7 @@ model Company {
   panicAlerts PanicAlert[]
   incidentClassifications IncidentClassification[]
   roundReviewDecisions RoundReviewDecision[]
+  noticeViews NoticeView[]
   notices Notice[]
 }
 
@@ -127,6 +128,7 @@ model User {
   roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
+  noticeViews NoticeView[]
 
   @@index([companyId])
   @@index([clientId])
@@ -526,6 +528,19 @@ model Shift {
   @@index([status, startsAt])
 }
 
+model NoticeView {
+  noticeId String
+  userId String
+  companyId String
+  seenAt DateTime @default(now()) @db.Timestamptz(3)
+  notice Notice @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@id([noticeId, userId])
+  @@index([companyId, userId])
+}
+
 model Notice {
   id         String    @id @default(cuid())
   companyId  String
@@ -542,6 +557,8 @@ model Notice {
   company    Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   site       Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
   shift      Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  views NoticeView[]
 
   @@index([companyId, status, createdAt])
   @@index([siteId, createdAt])

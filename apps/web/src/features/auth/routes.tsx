@@ -23,6 +23,9 @@ import {
 import { SupervisionPage } from '../supervision/supervision-page';
 import { ShiftDetailPage } from '../supervision/shift-detail-page';
 import { ReviewPage, ReviewDetailPage, useReviewCount } from '../revision/review-page';
+import { NoticesPage } from '../avisos/notices-page';
+import { NoticeDetailPage } from '../avisos/notice-detail-page';
+import { useOpenNotices } from '../avisos/queries';
 import { useRealtime } from '@/lib/realtime';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
@@ -59,10 +62,11 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
   guard: [{ path: '/mis-turnos', title: 'Mis turnos' }],
 };
 
-function RoleLayout() {
+export function RoleLayout() {
   const { user, logout } = useAuth();
   const pending = useIncidentPendingCount(user?.role === 'admin' || user?.role === 'supervisor');
   const reviews = useReviewCount(user?.role === 'admin' || user?.role === 'supervisor');
+  const notices = useOpenNotices(user?.role === 'admin' || user?.role === 'supervisor');
   const realtime = useRealtime(user?.role === 'admin' || user?.role === 'supervisor');
   if (!user) return null;
   return (
@@ -72,6 +76,7 @@ function RoleLayout() {
         user.role === 'admin' || user.role === 'supervisor'
           ? [
               ...SECTIONS[user.role],
+              { path: '/avisos', title: `Avisos (${notices.data?.unseenOpenCount ?? 0})` },
               { path: '/revision', title: `Rondas en revisión (${reviews.data?.count ?? 0})` },
               {
                 path: '/incidentes/cola',
@@ -142,6 +147,22 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <ShiftDetailPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/avisos"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <NoticesPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/avisos/:id"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <NoticeDetailPage />
             </Protected>
           }
         />

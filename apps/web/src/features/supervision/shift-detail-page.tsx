@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { shiftDetailSchema, shiftLabels, shiftTones, time } from './contracts';
 import type { Severity } from './contracts';
 import { RecordsSection, RouteSection, WindowsSection } from './detail-sections';
+import { useOpenNotices } from '../avisos/queries';
+import { CloseWithoutDataDialog } from '../avisos/close-without-data-dialog';
 import { ReassignDialog } from './reassign-dialog';
 
 const assignmentResults = {
@@ -25,6 +27,8 @@ export function ShiftDetailPage() {
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [severity, setSeverity] = useState<'' | Severity>('');
   const [reassignOpen, setReassignOpen] = useState(false);
+  const [closeWithoutDataOpen, setCloseWithoutDataOpen] = useState(false);
+  const notices = useOpenNotices(Boolean(id));
   const {
     data: detail,
     isPending,
@@ -91,6 +95,21 @@ export function ShiftDetailPage() {
             </p>
           )}
           <div className="flex flex-wrap gap-2">
+            {(notices.data?.items ?? []).some(
+              (notice) =>
+                notice.shiftId === detail.id &&
+                notice.kind === 'shift_unsynced' &&
+                notice.status === 'open',
+            ) && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCloseWithoutDataOpen(true);
+                }}
+              >
+                Cerrar sin datos
+              </Button>
+            )}
             {detail.canCover && (
               <Button
                 onClick={() => {
@@ -129,6 +148,14 @@ export function ShiftDetailPage() {
           {detail.assignments.length === 0 && <p>Sin asignaciones.</p>}
         </CardContent>
       </Card>
+      {closeWithoutDataOpen && (
+        <CloseWithoutDataDialog
+          shiftId={detail.id}
+          onClose={() => {
+            setCloseWithoutDataOpen(false);
+          }}
+        />
+      )}
       {reassignOpen && (
         <ReassignDialog
           shiftId={detail.id}

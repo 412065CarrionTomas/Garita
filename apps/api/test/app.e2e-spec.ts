@@ -15,6 +15,8 @@ import {
   shiftRecordsResponseSchema,
   siteResponseSchema,
   noticeKey,
+  noticeSchema,
+  noticesListResponseSchema,
   USER_ROLES,
   SOCKET_NAMESPACE,
   panicAlertStateResponseSchema,
@@ -5913,6 +5915,99 @@ describe('Aplicación (e2e)', () => {
       notifications.mockRestore();
     }
   }, 60_000);
+  it('marca visto por usuario, es idempotente y respeta permisos por HTTP', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-13T10:00:00Z'),
+        endsAt: new Date('2026-10-13T11:00:00Z'),
+        serviceDate: new Date('2026-10-13T00:00:00Z'),
+        createdById: northSupervisorId,
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const notice = await prisma.notice.create({
+      data: {
+        companyId: shift.companyId,
+        siteId: shift.siteId,
+        shiftId: shift.id,
+        kind: 'shift_unsynced',
+        subjectId: shift.id,
+        key: noticeKey('shift_unsynced', shift.id),
+      },
+    });
+    const http = request(app.getHttpServer());
+    const path = `/api/v1/avisos/${notice.id}`;
+    const seenPath = `${path}/marcar-visto`;
+    await http.post(seenPath).expect(401);
+    for (const token of ['token-guard', 'token-client']) {
+      await http.post(seenPath).set('Authorization', `Bearer ${token}`).expect(403);
+    }
+    for (const token of ['token-other-supervisor', 'token-south-admin']) {
+      await http.post(seenPath).set('Authorization', `Bearer ${token}`).expect(404);
+    }
+    await http
+      .post('/api/v1/avisos/no-existe/marcar-visto')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+    const assignment = await prisma.siteSupervisor.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        userId: otherSupervisorId,
+      },
+    });
+    try {
+      const list = async (token: string) =>
+        noticesListResponseSchema.parse(
+          (
+            await http
+              .get('/api/v1/avisos?estado=open')
+              .set('Authorization', `Bearer ${token}`)
+              .expect(200)
+          ).body,
+        );
+      const beforeFirst = await list('token-supervisor');
+      const beforeOther = await list('token-other-supervisor');
+      expect(beforeFirst.items.find((item) => item.id === notice.id)?.seenAt).toBeNull();
+      expect(beforeOther.items.find((item) => item.id === notice.id)?.seenAt).toBeNull();
+      const first = noticeSchema.parse(
+        (await http.post(seenPath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      );
+      const second = noticeSchema.parse(
+        (await http.post(seenPath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      );
+      expect(first.seenAt).not.toBeNull();
+      expect(second.seenAt).toBe(first.seenAt);
+      expect(await prisma.noticeView.count({ where: { noticeId: notice.id } })).toBe(1);
+      const afterFirst = await list('token-supervisor');
+      const afterOther = await list('token-other-supervisor');
+      expect(afterFirst.unseenOpenCount).toBe(beforeFirst.unseenOpenCount - 1);
+      expect(afterFirst.openCount).toBe(beforeFirst.openCount);
+      expect(afterOther.unseenOpenCount).toBe(beforeOther.unseenOpenCount);
+      expect(afterFirst.items.find((item) => item.id === notice.id)?.seenAt).toBe(first.seenAt);
+      expect(
+        noticeSchema.parse(
+          (await http.get(path).set('Authorization', 'Bearer token-other-supervisor').expect(200))
+            .body,
+        ).seenAt,
+      ).toBeNull();
+      expect(
+        noticeSchema.parse(
+          (await http.get(path).set('Authorization', 'Bearer token-supervisor').expect(200)).body,
+        ).seenAt,
+      ).toBe(first.seenAt);
+      await http.post(seenPath).set('Authorization', 'Bearer token-admin').expect(200);
+      expect(await prisma.noticeView.count({ where: { noticeId: notice.id } })).toBe(2);
+    } finally {
+      await prisma.siteSupervisor.delete({ where: { id: assignment.id } });
+    }
+  });
+
   it('aísla avisos por HTTP y cierra sin datos solo el turno avisado', async () => {
     const prisma = app.get(PrismaService).systemPrisma;
     const shift = await prisma.shift.create({
