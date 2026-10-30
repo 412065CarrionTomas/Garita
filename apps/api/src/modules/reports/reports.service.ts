@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   complianceOwner,
   computeCompliance,
@@ -104,46 +104,62 @@ export class ReportsService {
         startsAt: true,
         endsAt: true,
         round: { select: { name: true } },
-        shift: {
-          select: {
-            status: true,
-            site: { select: { id: true, name: true } },
-            assignments: {
-              select: {
-                id: true,
-                startsAt: true,
-                result: true,
-                guard: { select: { id: true, firstName: true, lastName: true, status: true } },
-              },
-            },
-          },
-        },
       },
       orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
     });
-    return rows.map((row) => ({
-      id: row.id,
-      shiftId: row.shiftId,
-      roundName: row.round.name,
-      status: row.status,
-      severityLevel: row.severityLevel,
-      startsAt: row.startsAt.toISOString(),
-      endsAt: row.endsAt.toISOString(),
-      shiftStatus: row.shift.status,
-      site: row.shift.site,
-      assignments: row.shift.assignments.map((assignment) => ({
-        id: assignment.id,
-        startsAt: assignment.startsAt.toISOString(),
-        result: assignment.result,
-        guard: assignment.guard
-          ? {
-              id: assignment.guard.id,
-              name: `${assignment.guard.firstName} ${assignment.guard.lastName}`,
-              status: assignment.guard.status,
-            }
-          : null,
-      })),
-    }));
+    // Cargar la historia una vez por turno evita repetirla en cada ventana del mes.
+    const shifts = await this.prisma.tenantPrisma.shift.findMany({
+      where: { id: { in: [...new Set(rows.map((row) => row.shiftId))] } },
+      select: {
+        id: true,
+        status: true,
+        site: { select: { id: true, name: true } },
+        assignments: {
+          select: {
+            id: true,
+            startsAt: true,
+            result: true,
+            guard: { select: { id: true, firstName: true, lastName: true, status: true } },
+          },
+        },
+      },
+    });
+    const byShift = new Map(
+      shifts.map((shift) => [
+        shift.id,
+        {
+          ...shift,
+          assignments: shift.assignments.map((assignment) => ({
+            id: assignment.id,
+            startsAt: assignment.startsAt.toISOString(),
+            result: assignment.result,
+            guard: assignment.guard
+              ? {
+                  id: assignment.guard.id,
+                  name: `${assignment.guard.firstName} ${assignment.guard.lastName}`,
+                  status: assignment.guard.status,
+                }
+              : null,
+          })),
+        },
+      ]),
+    );
+    return rows.map((row) => {
+      const shift = byShift.get(row.shiftId);
+      if (!shift) throw new NotFoundException('Turno no encontrado');
+      return {
+        id: row.id,
+        shiftId: row.shiftId,
+        roundName: row.round.name,
+        status: row.status,
+        severityLevel: row.severityLevel,
+        startsAt: row.startsAt.toISOString(),
+        endsAt: row.endsAt.toISOString(),
+        shiftStatus: shift.status,
+        site: shift.site,
+        assignments: shift.assignments,
+      };
+    });
   }
 
   private matchesGuard(window: ComplianceWindow, guardId?: string) {

@@ -29,6 +29,7 @@ describe('HU-25 cumplimiento por HTTP', () => {
   let guardId: string;
   let supervisorId: string;
   let clientId: string;
+  let hiddenClientId: string;
   let siteId: string;
   let hiddenSiteId: string;
   let shiftId: string;
@@ -93,6 +94,18 @@ describe('HU-25 cumplimiento por HTTP', () => {
     if (!visibleSite || !hiddenSite) throw new Error('Faltan predios del fixture');
     siteId = visibleSite;
     hiddenSiteId = hiddenSite;
+    hiddenClientId = (
+      await db.client.create({
+        data: {
+          companyId: 'norte-company',
+          name: `${prefix}-hidden`,
+          contactName: 'Ana',
+          phone: '+541112345678',
+          email: `${prefix}-hidden@example.invalid`,
+        },
+      })
+    ).id;
+    await db.site.update({ where: { id: hiddenSiteId }, data: { clientId: hiddenClientId } });
     await request(app.getHttpServer())
       .put(`/api/v1/predios/${siteId}/supervisores`)
       .set(auth())
@@ -240,7 +253,7 @@ describe('HU-25 cumplimiento por HTTP', () => {
     await db.checkpoint.deleteMany({ where: { siteId: { in: siteIds } } });
     await db.siteSupervisor.deleteMany({ where: { siteId: { in: siteIds } } });
     await db.site.deleteMany({ where: { id: { in: siteIds } } });
-    await db.client.deleteMany({ where: { id: clientId } });
+    await db.client.deleteMany({ where: { id: { in: [clientId, hiddenClientId] } } });
     await db.user.deleteMany({ where: { id: { in: extraUsers } } });
     await app.close();
   });
@@ -449,6 +462,11 @@ describe('HU-25 cumplimiento por HTTP', () => {
       .get(`/api/v1/reportes/rondas?cliente=${clientId}`)
       .set(auth('seed-sur-admin'))
       .expect(404);
+    for (const endpoint of ['rondas', 'rondas/detalle'])
+      await request(app.getHttpServer())
+        .get(`/api/v1/reportes/${endpoint}?cliente=${hiddenClientId}`)
+        .set(auth('seed-norte-supervisor'))
+        .expect(404);
     const logger = jest.spyOn(Logger.prototype, 'log');
     await report();
     expect(logger).toHaveBeenCalledWith(
