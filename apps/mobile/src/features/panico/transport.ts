@@ -9,6 +9,7 @@ import { computeSyncBackoff } from '@/lib/cola/backoff';
 import { getShiftCredentialToken } from '@/lib/cola/credential';
 import { createDefaultFieldRepository, type LocalPanicAlert } from '@/lib/db/database';
 import { blockPanicAfterClose, isPanicAfterLocalClose } from './running-shift';
+import { sendPanicSms } from './sms/send-panic-sms';
 
 export interface PanicTransportDependencies {
   online(): Promise<boolean>;
@@ -31,8 +32,7 @@ const defaultTransport: PanicTransportDependencies = {
     apiRequest('POST', '/alertas-panico', panicAlertStateResponseSchema, alert.request, {
       headers: { Authorization: `Bearer ${token}` },
     }),
-  // TODO(HU-23): replace this channel with platform SMS; keep the unavailable state locally.
-  sms: async () => undefined,
+  sms: sendPanicSms,
   setTimeout: (callback, ms) => setTimeout(callback, ms),
   clearTimeout: (timer) => clearTimeout(timer),
 };
@@ -50,13 +50,6 @@ export function resetPanicTransportForTesting(): void {
 }
 function transport(): PanicTransportDependencies {
   return { ...defaultTransport, ...transportOverrides };
-}
-
-async function unavailableSms(alert: LocalPanicAlert): Promise<void> {
-  const deps = transport();
-  await deps.sms(alert);
-  const repository = await createDefaultFieldRepository();
-  await repository.patchPanicAlert(alert.request.alertId, { smsState: 'unavailable' });
 }
 
 export function dispatchPanicAlert(alert: LocalPanicAlert): Promise<void> {
@@ -82,9 +75,10 @@ async function sendPanicAlert(alert: LocalPanicAlert): Promise<void> {
   let confirmed = false;
   let smsStarted = false;
   const fallback = async () => {
-    if (confirmed || smsStarted || alert.smsState === 'unavailable') return;
+    if (confirmed || smsStarted || alert.smsAttempted || alert.smsState !== 'pending') return;
     smsStarted = true;
-    await unavailableSms(alert);
+    // The system composer may remain open indefinitely; internet retries must continue.
+    void deps.sms(alert).catch(() => undefined);
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

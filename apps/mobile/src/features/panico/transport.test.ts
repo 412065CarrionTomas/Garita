@@ -28,7 +28,13 @@ const request: CreatePanicAlertRequest = {
     takenAt: null,
   },
 };
-const alert = { request, state: null, smsState: 'pending' as const, attempts: 0 };
+const alert = {
+  request,
+  state: null,
+  smsState: 'pending' as const,
+  smsAttempted: false,
+  attempts: 0,
+};
 
 describe('priority panic transport', () => {
   beforeEach(() => {

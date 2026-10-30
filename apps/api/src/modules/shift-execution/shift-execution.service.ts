@@ -11,6 +11,9 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { ShiftCredentialService } from '../sync/shift-credential.service';
+import { randomInt } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env';
 import { Prisma } from '../../generated/prisma/client';
 import {
   computeRoundWindows,
@@ -71,6 +74,7 @@ export class ShiftExecutionService {
     private readonly shiftCredentialService?: ShiftCredentialService,
     @Optional() private readonly windowStates?: RoundWindowStateService,
     @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
+    @Optional() private readonly config?: ConfigService<Env, true>,
   ) {}
 
   async start(id: string, input: StartShiftRequest, user: AuthenticatedUser) {
@@ -142,6 +146,7 @@ export class ShiftExecutionService {
           data: {
             status: 'in_progress',
             startedAt: now,
+            panicSmsCode: shift.panicSmsCode ?? randomInt(0, 1_000_000).toString().padStart(6, '0'),
             lateStartMinutes: late,
             connectivityType: connectivity.type,
             minutesToSignal: connectivity.minutesToSignal,
@@ -806,6 +811,7 @@ export class ShiftExecutionService {
       const parsed = startShiftResponseSchema.parse(event.response);
       return {
         ...parsed,
+        ...(!parsed.data.shift.panicSms ? { data: await this.buildData(id) } : {}),
         serverTime: this.clock.now().toISOString(),
         credential: parsed.credential ?? credential,
       };
@@ -858,6 +864,22 @@ export class ShiftExecutionService {
     const assignment = shift.assignments[0];
     if (!assignment)
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
+    // Older running shifts acquire the code once, even when two downloads race.
+    if (!shift.panicSmsCode && shift.status === 'in_progress') {
+      await this.prisma.tenantPrisma.shift.updateMany({
+        where: { id, panicSmsCode: null },
+        data: { panicSmsCode: randomInt(0, 1_000_000).toString().padStart(6, '0') },
+      });
+      shift.panicSmsCode = (
+        await this.prisma.tenantPrisma.shift.findUniqueOrThrow({ where: { id } })
+      ).panicSmsCode;
+    }
+    const backup =
+      this.config?.get('PANIC_SMS_DESTINATION_TYPE', { infer: true }) !== 'PLATFORM_GATEWAY';
+    const phone = backup
+      ? shift.site.company.guardPhone
+      : this.config?.get('PANIC_SMS_PLATFORM_NUMBER', { infer: true });
+    const destination = typeof phone === 'string' && /^\+[1-9]\d{1,14}$/.test(phone) ? phone : null;
     const rounds = await Promise.all(
       shift.rounds.map(async ({ roundId, roundVersion, round }) => {
         if (!roundVersion) return null;
@@ -916,6 +938,9 @@ export class ShiftExecutionService {
         timezone: shift.site.company.timezone,
         assignmentId: assignment.id,
         syncDeadlineAt: (await this.syncDeadline.deadlineForShift(id))?.toISOString(),
+        ...(shift.panicSmsCode
+          ? { panicSms: { destination, shiftCode: shift.panicSmsCode, backup } }
+          : {}),
       },
       rounds: rounds.map(({ version: _version, ...round }) => round),
       windows: selected.map(({ roundId, startUtc, endUtc, label }) => ({

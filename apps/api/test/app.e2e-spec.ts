@@ -425,6 +425,130 @@ describe('Aplicación (e2e)', () => {
     await app.close();
   });
 
+  it('HU-23: administra el teléfono propio y entrega destino único y código aleatorio por turno por HTTP', async () => {
+    const client = request(app.getHttpServer());
+    const config = app.get(ConfigService);
+    const previousMode = config.get<string>('PANIC_SMS_DESTINATION_TYPE');
+    const previousNumber = config.get<string>('PANIC_SMS_PLATFORM_NUMBER');
+    const previousNow = testNow;
+    const admin = { Authorization: 'Bearer token-admin' };
+    const phonePath = '/api/v1/empresa/telefono-guardia';
+    const original = z
+      .object({ guardPhone: z.string().nullable() })
+      .parse((await client.get(phonePath).set(admin).expect(200)).body);
+    const round = await app
+      .get(PrismaService)
+      .systemPrisma.round.findFirstOrThrow({
+        where: { siteId: northAssignedSiteId, status: 'active' },
+      });
+    const location = {
+      status: 'unverifiable',
+      latitude: null,
+      longitude: null,
+      accuracyMeters: null,
+      simulation: 'unavailable',
+      takenAt: null,
+    };
+    const startedCodes: string[] = [];
+    try {
+      for (const method of ['get', 'put'] as const) {
+        await client[method](phonePath).send({ guardPhone: '+5493511234567' }).expect(401);
+        for (const token of [
+          'token-supervisor',
+          'token-other-supervisor',
+          'token-guard',
+          'token-client',
+        ])
+          await client[method](phonePath)
+            .set('Authorization', `Bearer ${token}`)
+            .send({ guardPhone: '+5493511234567' })
+            .expect(403);
+      }
+      for (const guardPhone of ['123', '', '+5493511234567,+541100000000'])
+        await client.put(phonePath).set(admin).send({ guardPhone }).expect(400);
+      await client
+        .put(phonePath)
+        .set(admin)
+        .send({ guardPhone: '+5493511234567', companyId: 'sur-company' })
+        .expect(400);
+      await client.put(phonePath).set(admin).send({ guardPhone: '+5493511234567' }).expect(200);
+      await client
+        .put(phonePath)
+        .set('Authorization', 'Bearer token-south-admin')
+        .send({ guardPhone: '+541100000001' })
+        .expect(200);
+      expect((await client.get(phonePath).set(admin).expect(200)).body).toEqual({
+        guardPhone: '+5493511234567',
+      });
+      expect(
+        (await client.get(phonePath).set('Authorization', 'Bearer token-south-admin').expect(200))
+          .body,
+      ).toEqual({ guardPhone: '+541100000001' });
+      for (const [index, mode] of [
+        'GUARD_PHONE',
+        'PLATFORM_GATEWAY',
+        'PLATFORM_GATEWAY',
+        'GUARD_PHONE',
+      ].entries()) {
+        config.set('PANIC_SMS_DESTINATION_TYPE', mode);
+        config.set('PANIC_SMS_PLATFORM_NUMBER', index === 1 ? '+541100000002' : undefined);
+        if (index === 3)
+          await client.put(phonePath).set(admin).send({ guardPhone: null }).expect(200);
+        testNow = new Date(`2040-01-0${index + 1}T12:00:00Z`);
+        const end = new Date(testNow.getTime() + 60 * 60_000);
+        const created = await client
+          .post('/api/v1/turnos')
+          .set(admin)
+          .send({
+            siteId: northAssignedSiteId,
+            guardId: northGuardId,
+            startsAt: testNow.toISOString(),
+            endsAt: end.toISOString(),
+            roundIds: [round.id],
+          })
+          .expect(201);
+        const { id } = z.object({ id: z.string() }).parse(created.body);
+        createdShiftIds.push(id);
+        const body = { eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location };
+        const started = await client
+          .post(`/api/v1/turnos/${id}/iniciar`)
+          .set('Authorization', 'Bearer token-guard')
+          .send(body)
+          .expect(201);
+        const sms = startShiftResponseSchema.parse(started.body).data.shift.panicSms;
+        expect(sms).toEqual({
+          destination: index === 0 ? '+5493511234567' : index === 1 ? '+541100000002' : null,
+          shiftCode: expect.stringMatching(/^\d{6}$/),
+          backup: mode === 'GUARD_PHONE',
+        });
+        startedCodes.push(sms!.shiftCode);
+        const replay = await client
+          .post(`/api/v1/turnos/${id}/iniciar`)
+          .set('Authorization', 'Bearer token-guard')
+          .send(body)
+          .expect(201);
+        expect(startShiftResponseSchema.parse(replay.body).data.shift.panicSms).toEqual(sms);
+        testNow = end;
+        await client
+          .post(`/api/v1/turnos/${id}/cerrar`)
+          .set('Authorization', 'Bearer token-guard')
+          .send({ eventId: randomUUID(), occurredAtDevice: end.toISOString(), location })
+          .expect(201);
+      }
+      expect(new Set(startedCodes).size).toBe(startedCodes.length);
+    } finally {
+      config.set('PANIC_SMS_DESTINATION_TYPE', previousMode);
+      config.set('PANIC_SMS_PLATFORM_NUMBER', previousNumber);
+      testNow = previousNow;
+      await client.put(phonePath).set(admin).send(original).expect(200);
+      await client
+        .put(phonePath)
+        .set('Authorization', 'Bearer token-south-admin')
+        .send({ guardPhone: '+541100000000' })
+        .expect(200);
+    }
+  });
+
   it('registra pánico por HTTP con la credencial de turno, deduplica y aísla turnos', async () => {
     const prisma = app.get(PrismaService).systemPrisma;
     const creator = await prisma.user.findUniqueOrThrow({

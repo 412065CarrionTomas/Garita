@@ -18,8 +18,8 @@ const roles = ['admin', 'supervisor', 'guard', 'client'] as const;
 async function seedCompany(name: string, prefix: string): Promise<string> {
   const company = await prisma.company.upsert({
     where: { id: `${prefix}-company` },
-    create: { id: `${prefix}-company`, name },
-    update: { name },
+    create: { id: `${prefix}-company`, name, guardPhone: '+541100000000' },
+    update: { name, guardPhone: '+541100000000' },
   });
   for (const role of roles) {
     await prisma.user.upsert({

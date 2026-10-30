@@ -92,6 +92,7 @@ export async function triggerPanic(): Promise<LocalPanicAlert> {
     },
     state: null,
     smsState: 'pending',
+    smsAttempted: false,
     attempts: 0,
   });
   void deps.vibrate().catch(() => undefined);
