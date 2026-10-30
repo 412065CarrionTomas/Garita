@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import type * as ReactRouter from 'react-router';
 import { apiGet, apiPost } from '@/lib/api-client';
@@ -119,6 +120,60 @@ it('repite el tono y lo detiene cuando ya no hay activas', async () => {
       value: previous,
     });
     jest.useRealTimers();
+  }
+});
+
+it('recupera el sonido recordado al remontar los efectos en modo estricto', () => {
+  localStorage.setItem('garita-panic-sound', 'enabled');
+  const previous = window.AudioContext;
+  const start = jest.fn();
+  const contexts: { state: string }[] = [];
+  Object.defineProperty(window, 'AudioContext', {
+    configurable: true,
+    writable: true,
+    value: jest.fn(() => {
+      const audio = {
+        state: 'running',
+        currentTime: 0,
+        destination: {},
+        close: async () => {
+          audio.state = 'closed';
+        },
+        createOscillator: () => ({
+          connect: jest.fn(),
+          frequency: { value: 0 },
+          start,
+          stop: jest.fn(),
+        }),
+        createGain: () => ({
+          connect: jest.fn(),
+          gain: { setValueAtTime: jest.fn(), exponentialRampToValueAtTime: jest.fn() },
+        }),
+      };
+      contexts.push(audio);
+      return audio;
+    }),
+  });
+  try {
+    const view = renderWithQueryClient(
+      <StrictMode>
+        <MemoryRouter>
+          <PanicBanner alerts={[alert]} count={1} />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(contexts.map((audio) => audio.state)).toEqual(['closed', 'running']);
+    expect(
+      screen.queryByRole('button', { name: 'Activar sonido de alertas' }),
+    ).not.toBeInTheDocument();
+    view.unmount();
+  } finally {
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      writable: true,
+      value: previous,
+    });
   }
 });
 

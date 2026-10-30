@@ -34,6 +34,7 @@ export function PanicBanner({
       audio = context.current ?? new AudioContext();
       context.current = audio;
     } catch {
+      setBlocked(true);
       return;
     }
     const tone = () => {
@@ -57,7 +58,9 @@ export function PanicBanner({
   }, [enabled, active]);
   useEffect(
     () => () => {
-      void context.current?.close();
+      const audio = context.current;
+      context.current = null;
+      void audio?.close();
     },
     [],
   );
