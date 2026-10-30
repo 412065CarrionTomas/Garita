@@ -435,7 +435,7 @@ describe('Aplicación (e2e)', () => {
     const configGet = jest.spyOn(config, 'get').mockImplementation((key: string) => {
       if (key === 'PANIC_SMS_DESTINATION_TYPE') return destinationType;
       if (key === 'PANIC_SMS_PLATFORM_NUMBER') return platformNumber;
-      return originalGet(key) as unknown;
+      return originalGet<unknown>(key);
     });
     const previousNow = testNow;
     const admin = { Authorization: 'Bearer token-admin' };
