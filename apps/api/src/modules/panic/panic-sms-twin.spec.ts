@@ -71,6 +71,7 @@ describe('SMS twin extension contract for HU-37', () => {
       { now: () => now },
       { notifySiteStaff: jest.fn().mockResolvedValue(undefined) } as never,
       { emitToSite: jest.fn() } as never,
+      { schedule: jest.fn().mockResolvedValue(undefined) } as never,
     );
     expect(await service.create(input, credential)).toMatchObject({ alertId: input.alertId });
     expect(find).toHaveBeenCalledWith({
