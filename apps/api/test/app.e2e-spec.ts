@@ -255,6 +255,7 @@ describe('Aplicación (e2e)', () => {
             return Promise.resolve({ uid: 'seed-norte-deactivated' });
           if (token === 'token-pending') return Promise.resolve({ uid: 'seed-norte-pending' });
           if (token === 'token-guard') return Promise.resolve({ uid: 'seed-norte-guard' });
+          if (token === 'token-sms-guard') return Promise.resolve({ uid: 'tenant-test-sms-guard' });
           if (token === 'token-replacement')
             return Promise.resolve({ uid: 'tenant-test-replacement' });
           if (token === 'token-reassignment-source')
@@ -446,6 +447,20 @@ describe('Aplicación (e2e)', () => {
     const round = await app.get(PrismaService).systemPrisma.round.findUniqueOrThrow({
       where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
     });
+    const guard = await app.get(PrismaService).systemPrisma.user.upsert({
+      where: { firebaseUid: 'tenant-test-sms-guard' },
+      create: {
+        companyId: 'norte-company',
+        firebaseUid: 'tenant-test-sms-guard',
+        email: 'tenant-test-sms-guard@example.invalid',
+        firstName: 'Prueba',
+        lastName: 'SMS',
+        role: 'guard',
+        status: 'active',
+      },
+      update: { status: 'active' },
+    });
+    const guardAuth = { Authorization: 'Bearer token-sms-guard' };
     const location = {
       status: 'unverifiable',
       latitude: null,
@@ -507,7 +522,7 @@ describe('Aplicación (e2e)', () => {
           .set(admin)
           .send({
             siteId: northAssignedSiteId,
-            guardId: northGuardId,
+            guardId: guard.id,
             startsAt: start.toISOString(),
             endsAt: end.toISOString(),
             roundIds: [round.id],
@@ -519,7 +534,7 @@ describe('Aplicación (e2e)', () => {
         const body = { eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location };
         const started = await client
           .post(`/api/v1/turnos/${id}/iniciar`)
-          .set('Authorization', 'Bearer token-guard')
+          .set(guardAuth)
           .send(body)
           .expect(201);
         const sms = startShiftResponseSchema.parse(started.body).data.shift.panicSms;
@@ -532,14 +547,14 @@ describe('Aplicación (e2e)', () => {
         startedCodes.push(sms.shiftCode);
         const replay = await client
           .post(`/api/v1/turnos/${id}/iniciar`)
-          .set('Authorization', 'Bearer token-guard')
+          .set(guardAuth)
           .send(body)
           .expect(201);
         expect(startShiftResponseSchema.parse(replay.body).data.shift.panicSms).toEqual(sms);
         testNow = end;
         await client
           .post(`/api/v1/turnos/${id}/cerrar`)
-          .set('Authorization', 'Bearer token-guard')
+          .set(guardAuth)
           .send({ eventId: randomUUID(), occurredAtDevice: end.toISOString(), location })
           .expect(201);
       }
