@@ -3,35 +3,59 @@ import { Animated, StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Text, useTheme } from '@/ui';
-import { createDefaultFieldRepository, subscribePanicChanges } from '@/lib/db/database';
+import {
+  createDefaultFieldRepository,
+  subscribePanicChanges,
+  type LocalPanicAlert,
+} from '@/lib/db/database';
 import { fetchPanicState, resumePanicAlerts } from './transport';
 import { triggerPanic } from './actions';
+
+const smsMessages: Partial<Record<LocalPanicAlert['smsState'], string>> = {
+  sent: 'SMS enviado',
+  delivered: 'SMS entregado',
+  prepared: 'SMS preparado, sin confirmación de entrega',
+  failed: 'No se pudo enviar',
+};
 
 export function PanicOverlay() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [progress] = useState(() => new Animated.Value(0));
-  const [status, setStatus] = useState<'received' | 'confirmed' | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     const refresh = async (remote = false) => {
       const repository = await createDefaultFieldRepository();
       const shift = await repository.getShiftData();
-      const latest = (await repository.listPanicAlerts()).find(
-        (alert) => alert.request.shiftId === shift?.shift.id && alert.state !== null,
+      const shiftAlerts = (await repository.listPanicAlerts()).filter(
+        (alert) => alert.request.shiftId === shift?.shift.id && !alert.blockedReason,
       );
+      const resolved = shiftAlerts.findIndex((alert) => alert.state?.status === 'resolved');
+      const alerts = resolved > 0 ? shiftAlerts.slice(0, resolved) : shiftAlerts;
+      const latest = alerts.find((alert) => alert.state !== null);
       if (!latest?.state) {
-        if (active) setStatus(null);
+        const sms = alerts.find(
+          (alert) => alert.request.shiftId === shift?.shift.id && !alert.blockedReason,
+        );
+        if (active) setStatus(sms ? (smsMessages[sms.smsState] ?? null) : null);
         return;
       }
-      if (active) setStatus(latest.state.confirmedAt ? 'confirmed' : 'received');
+      if (active)
+        setStatus(
+          latest.state.confirmedAt
+            ? 'Confirmada por el supervisor'
+            : 'Alerta recibida por la central',
+        );
       if (remote && latest.state.status !== 'resolved') {
         const state = await fetchPanicState(latest.state.alertId).catch(() => latest.state);
         if (state && active) {
           if (JSON.stringify(state) !== JSON.stringify(latest.state))
             await repository.patchPanicAlert(latest.request.alertId, { state });
-          setStatus(state.confirmedAt ? 'confirmed' : 'received');
+          setStatus(
+            state.confirmedAt ? 'Confirmada por el supervisor' : 'Alerta recibida por la central',
+          );
         }
       }
     };
@@ -102,10 +126,13 @@ export function PanicOverlay() {
         ]}
       />
       {status && (
-        <Text variant="caption" color="mutedForeground" accessibilityLiveRegion="polite">
-          {status === 'confirmed'
-            ? 'Confirmada por el supervisor'
-            : 'Alerta recibida por la central'}
+        <Text
+          variant="caption"
+          color="mutedForeground"
+          accessibilityLiveRegion="polite"
+          accessibilityRole="alert"
+        >
+          {status}
         </Text>
       )}
     </View>

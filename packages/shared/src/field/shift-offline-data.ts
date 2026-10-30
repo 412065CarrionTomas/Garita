@@ -12,6 +12,17 @@ export const shiftOfflineDataSchema = z.object({
     timezone: z.string().min(1),
     assignmentId: z.string().min(1),
     syncDeadlineAt: isoDateTime.optional(),
+    // Optional for shifts cached by versions before HU-23.
+    panicSms: z
+      .object({
+        destination: z
+          .string()
+          .regex(/^\+[1-9]\d{1,14}$/)
+          .nullable(),
+        shiftCode: z.string().regex(/^\d{6}$/),
+        backup: z.boolean(),
+      })
+      .optional(),
   }),
   rounds: z.array(
     z.object({

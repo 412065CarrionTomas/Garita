@@ -78,6 +78,7 @@ enum IncidentClassificationStatus {
 }
 
 model Company {
+  guardPhone        String?
   id                String             @id @default(cuid())
   name              String
   timezone          String             @default("America/Argentina/Buenos_Aires")
@@ -481,6 +482,7 @@ enum ShiftClosedBy {
 }
 
 model Shift {
+  panicSmsCode        String?
   id                  String               @id @default(cuid())
   companyId           String
   siteId              String

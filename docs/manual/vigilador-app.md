@@ -43,6 +43,21 @@ Tocá **Cerrar turno**. Si todavía no llegó el fin programado, escribí un mot
 
 ## Qué pasa sin señal
 
+### Sin datos: pánico por SMS
+
+Al iniciar el turno en Android, Garita explica el permiso SMS: únicamente para emergencias sin datos o sin confirmación de la central. Podés rechazarlo; no se vuelve a pedir en ese turno.
+
+Sin internet, el pánico intenta el SMS inmediatamente; con datos sin confirmación de la central, a los ocho segundos. Va a un solo número configurado por la empresa. Repetir una alerta abierta no envía otro SMS.
+
+En Android con permiso se envía en segundo plano. En iPhone o Android sin permiso se abre la pantalla del sistema: **tocá enviar** y volvé a Garita. Si cancelás, el SMS no se envía.
+
+- **SMS enviado**: Android confirmó salida hacia la red; no confirma recepción por la central.
+- **SMS entregado**: la operadora informó entrega al teléfono; no significa lectura de un supervisor.
+- **SMS preparado, sin confirmación de entrega**: se usó la pantalla del sistema; Garita no tiene confirmación de entrega.
+- **No se pudo enviar**: falló, cancelaste o no hay destino. Sigue pendiente por internet; buscá ayuda por otra vía disponible.
+
+Necesitás cobertura celular y una línea habilitada para SMS. Al volver internet, la alerta se reintenta: **Alerta recibida por la central** aparece cuando el servidor confirma; **Confirmada por el supervisor**, cuando confirma lectura. Esos textos tienen prioridad. El teléfono y el código se borran con los datos activos al confirmar el cierre y terminar de sincronizar. La recepción automática en la plataforma está prevista para HU-37: mientras se usa el teléfono de guardia, quien lo recibe debe actuar según el procedimiento de la empresa.
+
 El inicio requiere conexión y no se guarda como iniciado si el teléfono está sin red. El registro de puntos y el cierre sí pueden realizarse sin conexión: los eventos quedan guardados en el teléfono como pendientes de envío, junto con los datos que HU-13 usará para sincronizar de forma idempotente. La pantalla del turno se actualiza inmediatamente sin red con los registros locales. Cuando vuelva la conexión, mantené la app instalada hasta que la sincronización envíe los eventos pendientes.
 
 ## Verificación manual de ID-138 e ID-143

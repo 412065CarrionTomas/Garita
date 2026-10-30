@@ -16,6 +16,7 @@ import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/n
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ShiftCredentialPayload } from '../sync/shift-credential.service';
+import { completePanicSmsTwin } from './panic-sms-twin';
 import { PanicJobsService } from './panic-jobs.service';
 
 @Injectable()
@@ -83,6 +84,8 @@ export class PanicService {
       if (!shift?.assignments[0])
         throw new ForbiddenException('El turno no pertenece al vigilador');
       if (shift.status !== 'in_progress') throw new ConflictException('El turno no está en curso');
+      const twin = await completePanicSmsTwin(tx, input, credential, now);
+      if (twin) return { ...twin, siteName: shift.site.name };
       const active = await tx.panicAlert.findFirst({
         where: { companyId: credential.companyId, shiftId: shift.id, status: { not: 'resolved' } },
         orderBy: { createdAt: 'desc' },

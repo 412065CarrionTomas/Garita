@@ -22,6 +22,12 @@ export const envSchema = z
       .default('false')
       .transform((value) => value === 'true'),
     WEB_APP_URL: z.url().default('http://localhost:5173'),
+    // shortcut: destino temporal, se retira cuando HU-36/HU-37 confirme el destino.
+    PANIC_SMS_DESTINATION_TYPE: z.enum(['PLATFORM_GATEWAY', 'GUARD_PHONE']).default('GUARD_PHONE'),
+    PANIC_SMS_PLATFORM_NUMBER: z
+      .string()
+      .regex(/^\+[1-9]\d{1,14}$/)
+      .optional(),
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM: z.string().optional(),
     FIREBASE_PROJECT_ID: z.string().min(1).optional(),

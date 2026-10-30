@@ -83,7 +83,67 @@ describe('panic button', () => {
     });
     await waitFor(() => expect(rendered.getByText('Alerta recibida por la central')).toBeTruthy());
   });
+
+  it('shows the new SMS after an earlier alert was resolved in the same shift', async () => {
+    alerts = [
+      {
+        request: { shiftId: 'shift', alertId: 'new' },
+        state: null,
+        smsState: 'sent',
+      } as LocalPanicAlert,
+      {
+        request: { shiftId: 'shift', alertId: 'resolved' },
+        state: {
+          alertId: 'resolved',
+          status: 'resolved',
+          receivedAt: '2035-01-01T12:00:00Z',
+          confirmedAt: '2035-01-01T12:01:00Z',
+        },
+      } as LocalPanicAlert,
+    ];
+    const rendered = await render(<PanicOverlay />);
+    await waitFor(() => expect(rendered.getByText('SMS enviado')).toBeTruthy());
+    expect(rendered.queryByText('Confirmada por el supervisor')).toBeNull();
+  });
   afterEach(() => jest.useRealTimers());
+
+  it.each([
+    ['sent', 'SMS enviado'],
+    ['delivered', 'SMS entregado'],
+    ['prepared', 'SMS preparado, sin confirmación de entrega'],
+    ['failed', 'No se pudo enviar'],
+  ] as const)(
+    'shows accessible honest SMS state %s and gives server receipt priority',
+    async (smsState, message) => {
+      alerts = [
+        {
+          request: { shiftId: 'shift', alertId: 'first' },
+          state: null,
+          smsState,
+        } as LocalPanicAlert,
+      ];
+      const rendered = await render(<PanicOverlay />);
+      await waitFor(() => expect(rendered.getByText(message)).toBeTruthy());
+      expect(rendered.getByText(message).props.accessibilityLiveRegion).toBe('polite');
+      expect(rendered.getByText(message).props.accessibilityRole).toBe('alert');
+      await act(async () => {
+        alerts[0] = {
+          ...alerts[0]!,
+          state: {
+            alertId: 'a1234567-0000-4000-8000-000000000001',
+            status: 'active',
+            receivedAt: '2035-01-01T12:00:00Z',
+            confirmedAt: null,
+          },
+        };
+        notify();
+      });
+      await waitFor(() =>
+        expect(rendered.getByText('Alerta recibida por la central')).toBeTruthy(),
+      );
+      expect(rendered.queryByText(message)).toBeNull();
+    },
+  );
 
   it('requires two seconds and allows the screen-reader activation actions', async () => {
     const rendered = await render(<PanicOverlay />);

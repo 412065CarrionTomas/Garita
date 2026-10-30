@@ -8,19 +8,26 @@ import {
   createPanicAlertRequestSchema,
   panicAlertStateResponseSchema,
   fieldLocationSchema,
+  PANIC_SMS_STATES,
 } from '@garita/shared';
 
 export const localPanicAlertSchema = z.object({
   request: createPanicAlertRequestSchema,
   state: panicAlertStateResponseSchema.nullable(),
-  smsState: z.enum(['pending', 'unavailable']),
+  smsState: z
+    .enum(['pending', ...PANIC_SMS_STATES, 'unavailable'])
+    .transform((state) => (state === 'unavailable' ? ('failed' as const) : state)),
+  smsAttempted: z.boolean().default(false),
   attempts: z.number().int().nonnegative(),
   betterLocation: fieldLocationSchema.optional(),
   blockedReason: z.literal('shift_closed').optional(),
 });
 export type LocalPanicAlert = z.infer<typeof localPanicAlertSchema>;
 type PanicAlertPatch = Partial<
-  Pick<LocalPanicAlert, 'state' | 'betterLocation' | 'smsState' | 'attempts' | 'blockedReason'>
+  Pick<
+    LocalPanicAlert,
+    'state' | 'betterLocation' | 'smsState' | 'smsAttempted' | 'attempts' | 'blockedReason'
+  >
 >;
 const panicListeners = new Set<() => void>();
 const panicWrites = new WeakMap<FieldDatabase, Promise<unknown>>();

@@ -8,6 +8,7 @@ import {
 } from '@garita/shared';
 import * as Network from 'expo-network';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
+import { requestPanicSmsPermission } from '@/features/permisos/sms-permission';
 import { ApiError } from '@/lib/api-client';
 import { deleteShiftCredential, processSyncQueue, saveShiftCredential } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
@@ -162,6 +163,10 @@ export async function beginShift(
     await d.saveCredential(result.credential);
   }
   await d.repository().then((repository) => repository.saveShiftData(result.data));
+  void d
+    .repository()
+    .then((repository) => requestPanicSmsPermission(repository, id))
+    .catch(() => undefined);
   return { status: 'started', data: result.data, late: result.lateStartMinutes !== null };
 }
 

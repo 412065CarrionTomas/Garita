@@ -90,6 +90,13 @@ public class GaritaNativeModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("GaritaNative")
+    Events("onSmsStatus")
+    AsyncFunction("getSmsCapability") { () -> [String: Bool] in
+      ["canSendInBackground": false]
+    }
+    AsyncFunction("sendSms") { (_: [String: String]) -> [String: String] in
+      throw NSError(domain: "GaritaNative", code: 2, userInfo: [NSLocalizedDescriptionKey: "Envío de SMS en segundo plano no disponible en iPhone"])
+    }
     AsyncFunction("getCapabilities") { () -> [String: Any] in
       ["moduleVersion": "1.1.0", "simulationDetectionAvailable": ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15]
     }

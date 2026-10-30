@@ -69,6 +69,63 @@ function createNodeSqliteExpoAdapter(): {
 }
 
 describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
+  it('reads legacy unavailable SMS as failed without deleting queued alerts', async () => {
+    const { adapter, rawDb } = createNodeSqliteExpoAdapter();
+    await migrateDatabase(new ExpoFieldDatabase(adapter));
+    const legacy = {
+      request: {
+        alertId: 'a1234567-0000-4000-8000-000000000001',
+        shiftId: 'shift',
+        occurredAtDevice: '2035-01-01T12:00:00Z',
+        location: {
+          status: 'unverifiable',
+          latitude: null,
+          longitude: null,
+          accuracyMeters: null,
+          simulation: 'unavailable',
+          takenAt: null,
+        },
+      },
+      state: null,
+      smsState: 'unavailable',
+      attempts: 1,
+    };
+    rawDb
+      .prepare('INSERT INTO panic_alerts (id, data, created_at) VALUES (?, ?, ?)')
+      .run(legacy.request.alertId, JSON.stringify(legacy), legacy.request.occurredAtDevice);
+    const repository = createFieldRepository(new ExpoFieldDatabase(adapter));
+    expect(await repository.listPanicAlerts()).toEqual([
+      { ...legacy, smsState: 'failed', smsAttempted: false },
+    ]);
+    expect(await repository.countPendingEvents()).toBe(1);
+  });
+
+  it('deletes the SMS destination and shift code together with shift data', async () => {
+    const { adapter, rawDb } = createNodeSqliteExpoAdapter();
+    await migrateDatabase(new ExpoFieldDatabase(adapter));
+    const repository = createFieldRepository(new ExpoFieldDatabase(adapter));
+    const data = {
+      shift: {
+        id: 'shift',
+        siteId: 'site',
+        siteName: 'Predio',
+        startsAt: '2035-01-01T00:00:00Z',
+        endsAt: '2035-01-02T00:00:00Z',
+        timezone: 'UTC',
+        assignmentId: 'assignment',
+        panicSms: { destination: '+5493511234567', shiftCode: '483920', backup: true },
+      },
+      rounds: [],
+      windows: [],
+      checkpoints: [],
+      serverTime: { serverNowUtc: '2035-01-01T00:00:00Z' },
+    };
+    await repository.saveShiftData(data);
+    expect((await repository.getShiftData())?.shift.panicSms).toEqual(data.shift.panicSms);
+    await repository.clearShiftData();
+    expect(await repository.getShiftData()).toBeNull();
+    expect(rawDb.prepare('SELECT * FROM current_shift').all()).toEqual([]);
+  });
   it('persists a panic alert before transport and restores it after reopening', async () => {
     const { adapter } = createNodeSqliteExpoAdapter();
     await migrateDatabase(new ExpoFieldDatabase(adapter));
@@ -89,6 +146,7 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
       },
       state: null,
       smsState: 'pending' as const,
+      smsAttempted: false,
       attempts: 0,
     };
     await first.savePanicAlert(alert);

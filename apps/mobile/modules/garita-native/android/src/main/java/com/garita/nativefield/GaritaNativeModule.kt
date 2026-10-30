@@ -1,7 +1,12 @@
 package com.garita.nativefield
 
 import android.Manifest
+import android.app.Activity
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -12,6 +17,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.telephony.SmsManager
+import java.util.concurrent.ConcurrentHashMap
 import java.util.UUID
 import androidx.core.content.ContextCompat
 import expo.modules.kotlin.Promise
@@ -24,9 +31,72 @@ import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicBoolean
 
 class GaritaNativeModule : Module() {
+  private val smsReceivers = ConcurrentHashMap.newKeySet<BroadcastReceiver>()
+  private val smsContext: Context
+    get() = appContext.reactContext ?: error("Contexto no disponible")
+
+  private fun canSendSms(): Boolean =
+    ContextCompat.checkSelfPermission(smsContext, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED &&
+      smsContext.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)
+
+  private fun removeSmsReceiver(receiver: BroadcastReceiver) {
+    if (smsReceivers.remove(receiver)) smsContext.unregisterReceiver(receiver)
+  }
+
   private val fallbackBootId = "process:" + UUID.randomUUID().toString()
   override fun definition() = ModuleDefinition {
     Name("GaritaNative")
+    Events("onSmsStatus")
+    OnDestroy {
+      smsReceivers.toList().forEach { removeSmsReceiver(it) }
+    }
+    AsyncFunction("getSmsCapability") { mapOf("canSendInBackground" to canSendSms()) }
+    AsyncFunction("sendSms") { options: Map<String, String>, promise: Promise ->
+      val destination = options["destination"] ?: ""
+      val message = options["message"] ?: ""
+      if (!Regex("^\\+[1-9]\\d{1,14}$").matches(destination) || message.isEmpty() || message.length > 160 ||
+        !Regex("^[A-Za-z0-9 .,:/?=\\-]+$").matches(message)) {
+        promise.reject("INVALID_SMS", "Destino o mensaje de pánico inválido", null)
+        return@AsyncFunction
+      }
+      if (!canSendSms()) {
+        promise.reject("SMS_UNAVAILABLE", "Se requiere permiso SMS y telefonía", null)
+        return@AsyncFunction
+      }
+      val id = UUID.randomUUID().toString()
+      val context = smsContext
+      val sentAction = "${context.packageName}.SMS_SENT_$id"
+      val deliveredAction = "${context.packageName}.SMS_DELIVERED_$id"
+      val delivered = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+          removeSmsReceiver(this)
+          sendEvent("onSmsStatus", mapOf("id" to id, "status" to if (resultCode == Activity.RESULT_OK) "delivered" else "failed"))
+        }
+      }
+      val sent = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+          removeSmsReceiver(this)
+          if (resultCode != Activity.RESULT_OK) removeSmsReceiver(delivered)
+          sendEvent("onSmsStatus", mapOf("id" to id, "status" to if (resultCode == Activity.RESULT_OK) "sent" else "failed"))
+        }
+      }
+      try {
+        for ((receiver, action) in listOf(sent to sentAction, delivered to deliveredAction)) {
+          ContextCompat.registerReceiver(context, receiver, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
+          smsReceivers.add(receiver)
+        }
+        val flags = PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        val sentIntent = PendingIntent.getBroadcast(context, 0, Intent(sentAction).setPackage(context.packageName), flags)
+        val deliveredIntent = PendingIntent.getBroadcast(context, 0, Intent(deliveredAction).setPackage(context.packageName), flags)
+        val manager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) context.getSystemService(SmsManager::class.java) else legacySmsManager()
+        manager.sendTextMessage(destination, null, message, sentIntent, deliveredIntent)
+        promise.resolve(mapOf("id" to id))
+      } catch (error: Exception) {
+        removeSmsReceiver(sent)
+        removeSmsReceiver(delivered)
+        promise.reject("SMS_SEND_FAILED", "No se pudo enviar el SMS", error)
+      }
+    }
     AsyncFunction("getCapabilities") {
       mapOf("moduleVersion" to "1.1.0", "simulationDetectionAvailable" to true)
     }
@@ -114,6 +184,9 @@ class GaritaNativeModule : Module() {
       }
     }
   }
+
+  @Suppress("DEPRECATION")
+  private fun legacySmsManager(): SmsManager = SmsManager.getDefault()
 
   @Suppress("DEPRECATION")
   private fun isLegacyMockLocation(location: Location): Boolean = location.isFromMockProvider
