@@ -878,7 +878,7 @@ export class ShiftExecutionService {
       this.config?.get('PANIC_SMS_DESTINATION_TYPE', { infer: true }) !== 'PLATFORM_GATEWAY';
     const phone = backup
       ? shift.site.company.guardPhone
-      : this.config?.get('PANIC_SMS_PLATFORM_NUMBER', { infer: true });
+      : this.config.get('PANIC_SMS_PLATFORM_NUMBER', { infer: true });
     const destination = typeof phone === 'string' && /^\+[1-9]\d{1,14}$/.test(phone) ? phone : null;
     const rounds = await Promise.all(
       shift.rounds.map(async ({ roundId, roundVersion, round }) => {

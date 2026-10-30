@@ -52,15 +52,13 @@ describe('SMS twin extension contract for HU-37', () => {
       },
       panicAlertEvent: { findUnique: jest.fn().mockResolvedValue(null) },
       shift: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({
-            id: 'shift',
-            status: 'in_progress',
-            siteId: 'site',
-            site: { name: 'Predio' },
-            assignments: [{ id: 'assignment' }],
-          }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'shift',
+          status: 'in_progress',
+          siteId: 'site',
+          site: { name: 'Predio' },
+          assignments: [{ id: 'assignment' }],
+        }),
       },
     };
     const prisma = {
@@ -85,7 +83,9 @@ describe('SMS twin extension contract for HU-37', () => {
   it('completes a future SMS twin preserving its origin and first receipt', async () => {
     jest.spyOn(panicSmsTwinFinder, 'find').mockResolvedValue({ id: 'sms-id' });
     const sms = { id: 'sms-id', channel: 'sms', receivedAt: now, accuracyMeters: 20 };
-    const update = jest.fn().mockImplementation(async ({ data }) => ({ ...sms, ...data }));
+    const update = jest.fn(({ data }: { data: Partial<typeof sms>; where: { id: string } }) =>
+      Promise.resolve({ ...sms, ...data }),
+    );
     const tx = {
       panicAlert: { findFirst: jest.fn().mockResolvedValue(sms), update },
     } as unknown as Prisma.TransactionClient;
@@ -96,15 +96,10 @@ describe('SMS twin extension contract for HU-37', () => {
       receivedAt: now,
       accuracyMeters: 10,
     });
-    expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'sms-id' },
-        data: expect.not.objectContaining({
-          channel: expect.anything(),
-          receivedAt: expect.anything(),
-        }),
-      }),
-    );
+    const call = update.mock.calls[0]?.[0];
+    expect(call?.where).toEqual({ id: 'sms-id' });
+    expect(call?.data).not.toHaveProperty('channel');
+    expect(call?.data).not.toHaveProperty('receivedAt');
   });
   it('never completes a finder result outside the credential scope', async () => {
     jest.spyOn(panicSmsTwinFinder, 'find').mockResolvedValue({ id: 'foreign' });

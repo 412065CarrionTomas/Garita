@@ -428,19 +428,24 @@ describe('Aplicación (e2e)', () => {
   it('HU-23: administra el teléfono propio y entrega destino único y código aleatorio por turno por HTTP', async () => {
     const client = request(app.getHttpServer());
     const config = app.get(ConfigService);
-    const previousMode = config.get<string>('PANIC_SMS_DESTINATION_TYPE');
-    const previousNumber = config.get<string>('PANIC_SMS_PLATFORM_NUMBER');
+    let destinationType = 'GUARD_PHONE';
+    let platformNumber: string | undefined;
+    const originalGet = config.get.bind(config);
+    // ConfigService.set(undefined) retains its process-env cache; override only these two reads.
+    const configGet = jest.spyOn(config, 'get').mockImplementation((key: string) => {
+      if (key === 'PANIC_SMS_DESTINATION_TYPE') return destinationType;
+      if (key === 'PANIC_SMS_PLATFORM_NUMBER') return platformNumber;
+      return originalGet(key) as unknown;
+    });
     const previousNow = testNow;
     const admin = { Authorization: 'Bearer token-admin' };
     const phonePath = '/api/v1/empresa/telefono-guardia';
     const original = z
       .object({ guardPhone: z.string().nullable() })
       .parse((await client.get(phonePath).set(admin).expect(200)).body);
-    const round = await app
-      .get(PrismaService)
-      .systemPrisma.round.findFirstOrThrow({
-        where: { siteId: northAssignedSiteId, status: 'active' },
-      });
+    const round = await app.get(PrismaService).systemPrisma.round.findUniqueOrThrow({
+      where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
+    });
     const location = {
       status: 'unverifiable',
       latitude: null,
@@ -490,25 +495,27 @@ describe('Aplicación (e2e)', () => {
         'PLATFORM_GATEWAY',
         'GUARD_PHONE',
       ].entries()) {
-        config.set('PANIC_SMS_DESTINATION_TYPE', mode);
-        config.set('PANIC_SMS_PLATFORM_NUMBER', index === 1 ? '+541100000002' : undefined);
+        destinationType = mode;
+        platformNumber = index === 1 ? '+541100000002' : undefined;
         if (index === 3)
           await client.put(phonePath).set(admin).send({ guardPhone: null }).expect(200);
-        testNow = new Date(`2040-01-0${index + 1}T12:00:00Z`);
-        const end = new Date(testNow.getTime() + 60 * 60_000);
+        const start = new Date(`2040-01-0${index + 1}T23:00:00Z`);
+        const end = new Date(start.getTime() + 12 * 60 * 60_000);
+        testNow = new Date(start.getTime() - 60 * 60_000);
         const created = await client
           .post('/api/v1/turnos')
           .set(admin)
           .send({
             siteId: northAssignedSiteId,
             guardId: northGuardId,
-            startsAt: testNow.toISOString(),
+            startsAt: start.toISOString(),
             endsAt: end.toISOString(),
             roundIds: [round.id],
           })
           .expect(201);
         const { id } = z.object({ id: z.string() }).parse(created.body);
         createdShiftIds.push(id);
+        testNow = start;
         const body = { eventId: randomUUID(), occurredAtDevice: testNow.toISOString(), location };
         const started = await client
           .post(`/api/v1/turnos/${id}/iniciar`)
@@ -516,12 +523,13 @@ describe('Aplicación (e2e)', () => {
           .send(body)
           .expect(201);
         const sms = startShiftResponseSchema.parse(started.body).data.shift.panicSms;
-        expect(sms).toEqual({
+        if (!sms) throw new Error('Faltan los datos SMS del turno');
+        expect(sms.shiftCode).toMatch(/^\d{6}$/);
+        expect(sms).toMatchObject({
           destination: index === 0 ? '+5493511234567' : index === 1 ? '+541100000002' : null,
-          shiftCode: expect.stringMatching(/^\d{6}$/),
           backup: mode === 'GUARD_PHONE',
         });
-        startedCodes.push(sms!.shiftCode);
+        startedCodes.push(sms.shiftCode);
         const replay = await client
           .post(`/api/v1/turnos/${id}/iniciar`)
           .set('Authorization', 'Bearer token-guard')
@@ -537,8 +545,7 @@ describe('Aplicación (e2e)', () => {
       }
       expect(new Set(startedCodes).size).toBe(startedCodes.length);
     } finally {
-      config.set('PANIC_SMS_DESTINATION_TYPE', previousMode);
-      config.set('PANIC_SMS_PLATFORM_NUMBER', previousNumber);
+      configGet.mockRestore();
       testNow = previousNow;
       await client.put(phonePath).set(admin).send(original).expect(200);
       await client

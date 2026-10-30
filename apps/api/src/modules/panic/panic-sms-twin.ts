@@ -13,7 +13,7 @@ export interface PanicSmsTwinFinder {
 
 export const panicSmsTwinFinder: PanicSmsTwinFinder = {
   // TODO(HU-37): query authenticated SMS arrivals when the platform receiver exists.
-  find: async () => null,
+  find: () => Promise.resolve(null),
 };
 
 export async function completePanicSmsTwin(
@@ -64,5 +64,5 @@ export async function completePanicSmsTwin(
       events: { create: { id: input.alertId, type: 'internet_completed', occurredAt: now } },
     },
   });
-  return { alert, changed: true, siteName: undefined };
+  return { alert, changed: true as const, siteName: undefined };
 }
