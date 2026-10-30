@@ -27,6 +27,7 @@ import { NoticesPage } from '../avisos/notices-page';
 import { NoticeDetailPage } from '../avisos/notice-detail-page';
 import { useOpenNotices } from '../avisos/queries';
 import { useRealtime } from '@/lib/realtime';
+import { ReportsPage } from '../reportes/reports-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -43,6 +44,7 @@ function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode
 
 const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
   admin: [
+    { path: '/cumplimiento', title: 'Cumplimiento' },
     { path: '/resumen', title: 'Resumen' },
     { path: '/supervision', title: 'En vivo' },
     { path: '/turnos', title: 'Turnos' },
@@ -52,6 +54,7 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
     { path: '/incidentes', title: 'Incidentes' },
   ],
   supervisor: [
+    { path: '/cumplimiento', title: 'Cumplimiento' },
     { path: '/supervision', title: 'En vivo' },
     { path: '/turnos', title: 'Turnos' },
     { path: '/personal', title: 'Personal' },
@@ -139,6 +142,14 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <SupervisionPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/cumplimiento"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <ReportsPage />
             </Protected>
           }
         />

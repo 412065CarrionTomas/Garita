@@ -240,6 +240,32 @@ describe('Aplicación (e2e)', () => {
   const createdNfcCheckpointIds: string[] = [];
   const notificationTokens: string[] = [];
 
+  it.each(['rondas', 'rondas/detalle', 'pendientes', 'puntos-marcas-frecuentes'])(
+    'HU-25 permisos de reportes/%s',
+    async (endpoint) => {
+      const path = `/api/v1/reportes/${endpoint}`;
+      await request(app.getHttpServer()).get(path).expect(401);
+      for (const token of ['token-guard', 'token-client'])
+        await request(app.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+      for (const siteId of [northUnassignedSiteId, southSiteId])
+        await request(app.getHttpServer())
+          .get(`${path}?predio=${siteId}`)
+          .set('Authorization', 'Bearer token-supervisor')
+          .expect(404);
+      await request(app.getHttpServer())
+        .get(`${path}?predio=${northAssignedSiteId}`)
+        .set('Authorization', 'Bearer token-other-supervisor')
+        .expect(404);
+      await request(app.getHttpServer())
+        .get(`${path}?predio=${northAssignedSiteId}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+    },
+  );
+
   beforeAll(async () => {
     process.env.NFC_MASTER_KEY =
       process.env.NFC_MASTER_KEY ?? Buffer.alloc(16, 0x11).toString('hex');
