@@ -17,6 +17,7 @@ import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.po
 import { PrismaService } from '../prisma/prisma.service';
 import type { ShiftCredentialPayload } from '../sync/shift-credential.service';
 import { completePanicSmsTwin } from './panic-sms-twin';
+import { PanicJobsService } from './panic-jobs.service';
 
 @Injectable()
 export class PanicService {
@@ -27,6 +28,7 @@ export class PanicService {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(NOTIFICATIONS_PORT) private readonly notifications: NotificationsPort,
     @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
+    private readonly jobs: PanicJobsService,
   ) {}
 
   async create(
@@ -161,6 +163,11 @@ export class PanicService {
         this.logger.warn({ event: 'panic.delivery_failed', alertId: result.alert.id });
       this.logger.log({ event: 'panic.activation', alertId: result.alert.id });
     }
+    // Repeated HTTP delivery also repairs a queue outage after the transaction committed.
+    await this.jobs.schedule(
+      { companyId: credential.companyId, alertId: result.alert.id },
+      result.alert.receivedAt,
+    );
     return this.response(result.alert);
   }
 

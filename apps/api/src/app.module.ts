@@ -25,6 +25,7 @@ import { RoundReviewModule } from './modules/round-review/round-review.module';
 import { PanicModule } from './modules/panic/panic.module';
 import { NoticesModule } from './modules/notices/notices.module';
 import { CompanyModule } from './modules/company/company.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { CompanyModule } from './modules/company/company.module';
     PanicModule,
     NoticesModule,
     CompanyModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

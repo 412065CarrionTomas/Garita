@@ -15,9 +15,12 @@ import {
   shiftRecordsResponseSchema,
   siteResponseSchema,
   noticeKey,
+  noticeSchema,
+  noticesListResponseSchema,
   USER_ROLES,
   SOCKET_NAMESPACE,
   panicAlertStateResponseSchema,
+  panicAlertDetailSchema,
 } from '@garita/shared';
 import {
   Controller,
@@ -58,6 +61,7 @@ import { NOTIFICATIONS_PORT, type NotificationsPort } from '../src/common/ports/
 import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
 import { RoundWindowStateService } from '../src/modules/supervision/round-window-state.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { PanicJobsService } from '../src/modules/panic/panic-jobs.service';
 import { SMS_PORT, type SmsPort } from '../src/common/ports/sms.port';
 import { NOTICES_PORT, type NoticesPort } from '../src/common/ports/notices.port';
 import {
@@ -125,6 +129,12 @@ class TestOnlyUserController {
   @Roles('admin', 'supervisor')
   panicById(@Param('id') id: string) {
     return this.tenantResources.findOwnedOrThrow('PanicAlert', id);
+  }
+
+  @Get('panic-sms/:id')
+  @Roles('admin', 'supervisor')
+  panicSmsById(@Param('id') id: string) {
+    return this.tenantResources.findOwnedOrThrow('PanicSmsDelivery', id);
   }
 
   @Get('transaction')
@@ -237,6 +247,32 @@ describe('Aplicación (e2e)', () => {
   let testNow = new Date('2026-10-13T12:00:00.000Z');
   const createdNfcCheckpointIds: string[] = [];
   const notificationTokens: string[] = [];
+
+  it.each(['rondas', 'rondas/detalle', 'pendientes', 'puntos-marcas-frecuentes'])(
+    'HU-25 permisos de reportes/%s',
+    async (endpoint) => {
+      const path = `/api/v1/reportes/${endpoint}`;
+      await request(app.getHttpServer()).get(path).expect(401);
+      for (const token of ['token-guard', 'token-client'])
+        await request(app.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+      for (const siteId of [northUnassignedSiteId, southSiteId])
+        await request(app.getHttpServer())
+          .get(`${path}?predio=${siteId}`)
+          .set('Authorization', 'Bearer token-supervisor')
+          .expect(404);
+      await request(app.getHttpServer())
+        .get(`${path}?predio=${northAssignedSiteId}`)
+        .set('Authorization', 'Bearer token-other-supervisor')
+        .expect(404);
+      await request(app.getHttpServer())
+        .get(`${path}?predio=${northAssignedSiteId}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+    },
+  );
 
   beforeAll(async () => {
     process.env.NFC_MASTER_KEY =
@@ -630,6 +666,7 @@ describe('Aplicación (e2e)', () => {
       },
     };
     const panicShiftIds = [shift.id];
+    const schedule = jest.spyOn(app.get(PanicJobsService), 'schedule').mockResolvedValue();
     try {
       await client.post('/api/v1/alertas-panico').send(body).expect(401);
       const first = await client
@@ -777,7 +814,169 @@ describe('Aplicación (e2e)', () => {
         .set('Authorization', `Bearer ${otherToken}`)
         .send({ ...body, alertId: randomUUID(), shiftId: other.id })
         .expect(409);
+
+      const detailPath = `/api/v1/alertas-panico/${alertId}`;
+      for (const [method, path] of [
+        ['get', '/api/v1/alertas-panico'],
+        ['get', detailPath],
+        ['post', `${detailPath}/confirmar`],
+        ['post', `${detailPath}/resolver`],
+      ] as const) {
+        await client[method](path).expect(401);
+        for (const denied of ['token-guard', 'token-client'])
+          await client[method](path).set('Authorization', `Bearer ${denied}`).expect(403);
+        if (path !== '/api/v1/alertas-panico') {
+          for (const denied of ['token-other-supervisor', 'token-south-admin'])
+            await client[method](path)
+              .set('Authorization', `Bearer ${denied}`)
+              .send(
+                method === 'post' && path.endsWith('resolver')
+                  ? { outcome: 'test', comment: 'Prueba válida' }
+                  : {},
+              )
+              .expect(404);
+        }
+      }
+      for (const [authToken, visible] of [
+        ['token-supervisor', true],
+        ['token-other-supervisor', false],
+        ['token-south-admin', false],
+      ] as const) {
+        const inbox = await client
+          .get('/api/v1/alertas-panico')
+          .set('Authorization', `Bearer ${authToken}`)
+          .expect(200);
+        expect(
+          z
+            .object({ items: z.array(z.object({ id: z.string() })) })
+            .parse(inbox.body)
+            .items.some((item) => item.id === alertId),
+        ).toBe(visible);
+      }
+      await client
+        .post(`${detailPath}/resolver`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .send({ outcome: 'test', comment: 'Prueba válida' })
+        .expect(409);
+      for (const invalid of [
+        { comment: 'Sin resultado' },
+        { outcome: 'test', comment: 'cort' },
+        { outcome: 'test', comment: 'x'.repeat(1001) },
+      ])
+        await client
+          .post(`${detailPath}/resolver`)
+          .set('Authorization', 'Bearer token-supervisor')
+          .send(invalid)
+          .expect(400);
+      const confirmed = await client
+        .post(`${detailPath}/confirmar`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      const confirmedDetail = panicAlertDetailSchema.parse(confirmed.body);
+      expect(confirmedDetail).toMatchObject({
+        status: 'confirmed',
+        confirmedAt: testNow.toISOString(),
+      });
+      expect(confirmedDetail.confirmedBy?.name).toBeTruthy();
+      await client
+        .post(`${detailPath}/confirmar`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(409);
+      const guardState = await client
+        .get(`${detailPath}/estado`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(panicAlertStateResponseSchema.parse(guardState.body)).toMatchObject({
+        status: 'confirmed',
+        confirmedAt: testNow.toISOString(),
+      });
+      // A different assigned supervisor can resolve the first supervisor's confirmation.
+      await prisma.siteSupervisor.create({
+        data: {
+          companyId: 'norte-company',
+          siteId: northAssignedSiteId,
+          userId: otherSupervisorId,
+        },
+      });
+      try {
+        const resolved = await client
+          .post(`${detailPath}/resolver`)
+          .set('Authorization', 'Bearer token-other-supervisor')
+          .send({ outcome: 'test', comment: 'Prueba de capacitación' })
+          .expect(200);
+        expect(panicAlertDetailSchema.parse(resolved.body)).toMatchObject({
+          status: 'resolved',
+          outcome: 'test',
+          resolutionComment: 'Prueba de capacitación',
+        });
+      } finally {
+        await prisma.siteSupervisor.deleteMany({
+          where: { siteId: northAssignedSiteId, userId: otherSupervisorId },
+        });
+      }
+      expect(await prisma.panicAlertEvent.count({ where: { alertId, type: 'confirmed' } })).toBe(1);
+      expect(await prisma.panicAlertEvent.count({ where: { alertId, type: 'resolved' } })).toBe(1);
+      const lateId = randomUUID();
+      testNow = new Date('2026-10-13T06:25:00.000Z');
+      await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...body, alertId: lateId, occurredAtDevice: '2026-10-13T06:10:00.000Z' })
+        .expect(200);
+      const late = await client
+        .get(`/api/v1/alertas-panico/${lateId}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      expect(panicAlertDetailSchema.parse(late.body)).toMatchObject({
+        triggeredAt: '2026-10-13T06:10:00.000Z',
+        receivedAt: '2026-10-13T06:25:00.000Z',
+        channel: 'internet',
+      });
+      const staff = await prisma.user.findUniqueOrThrow({
+        where: { firebaseUid: 'seed-norte-supervisor' },
+      });
+      const sms = jest
+        .spyOn(app.get<SmsPort>(SMS_PORT), 'sendPanicAlert')
+        .mockResolvedValue({ sent: true });
+      await prisma.user.update({ where: { id: staff.id }, data: { phone: null } });
+      await prisma.user.update({ where: { id: creator.id }, data: { phone: '+5493517654321' } });
+      try {
+        await app
+          .get(PanicJobsService)
+          .sendSms({ companyId: 'norte-company', alertId: lateId, reason: 'initial' });
+        expect(sms).toHaveBeenCalledWith(expect.objectContaining({ phone: '+5493517654321' }));
+        expect(
+          sms.mock.calls.every(
+            ([input]) =>
+              input.phone !== '' &&
+              !input.message.includes(body.location.latitude.toString()) &&
+              !input.message.includes(confirmedDetail.guard.name),
+          ),
+        ).toBe(true);
+        expect(sms.mock.calls.some(([input]) => input.phone === staff.phone)).toBe(false);
+        const skipped = await prisma.panicSmsDelivery.findUniqueOrThrow({
+          where: {
+            alertId_userId_reason: { alertId: lateId, userId: staff.id, reason: 'initial' },
+          },
+        });
+        expect(skipped.status).toBe('skipped');
+        for (const [authToken, status] of [
+          ['token-supervisor', 200],
+          ['token-other-supervisor', 404],
+          ['token-south-admin', 404],
+        ] as const)
+          await client
+            .get(`/api/v1/test-only/users/panic-sms/${skipped.id}`)
+            .set('Authorization', `Bearer ${authToken}`)
+            .expect(status);
+      } finally {
+        sms.mockRestore();
+        await prisma.user.update({ where: { id: staff.id }, data: { phone: staff.phone } });
+        await prisma.user.update({ where: { id: creator.id }, data: { phone: creator.phone } });
+      }
     } finally {
+      schedule.mockRestore();
+      testNow = new Date('2026-10-13T12:00:00.000Z');
       notifications.mockRestore();
       realtime.mockRestore();
       await prisma.panicAlert.deleteMany({ where: { shiftId: { in: panicShiftIds } } });
@@ -6059,6 +6258,99 @@ describe('Aplicación (e2e)', () => {
       notifications.mockRestore();
     }
   }, 60_000);
+  it('marca visto por usuario, es idempotente y respeta permisos por HTTP', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt: new Date('2026-10-13T10:00:00Z'),
+        endsAt: new Date('2026-10-13T11:00:00Z'),
+        serviceDate: new Date('2026-10-13T00:00:00Z'),
+        createdById: northSupervisorId,
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const notice = await prisma.notice.create({
+      data: {
+        companyId: shift.companyId,
+        siteId: shift.siteId,
+        shiftId: shift.id,
+        kind: 'shift_unsynced',
+        subjectId: shift.id,
+        key: noticeKey('shift_unsynced', shift.id),
+      },
+    });
+    const http = request(app.getHttpServer());
+    const path = `/api/v1/avisos/${notice.id}`;
+    const seenPath = `${path}/marcar-visto`;
+    await http.post(seenPath).expect(401);
+    for (const token of ['token-guard', 'token-client']) {
+      await http.post(seenPath).set('Authorization', `Bearer ${token}`).expect(403);
+    }
+    for (const token of ['token-other-supervisor', 'token-south-admin']) {
+      await http.post(seenPath).set('Authorization', `Bearer ${token}`).expect(404);
+    }
+    await http
+      .post('/api/v1/avisos/no-existe/marcar-visto')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+    const assignment = await prisma.siteSupervisor.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        userId: otherSupervisorId,
+      },
+    });
+    try {
+      const list = async (token: string) =>
+        noticesListResponseSchema.parse(
+          (
+            await http
+              .get('/api/v1/avisos?estado=open')
+              .set('Authorization', `Bearer ${token}`)
+              .expect(200)
+          ).body,
+        );
+      const beforeFirst = await list('token-supervisor');
+      const beforeOther = await list('token-other-supervisor');
+      expect(beforeFirst.items.find((item) => item.id === notice.id)?.seenAt).toBeNull();
+      expect(beforeOther.items.find((item) => item.id === notice.id)?.seenAt).toBeNull();
+      const first = noticeSchema.parse(
+        (await http.post(seenPath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      );
+      const second = noticeSchema.parse(
+        (await http.post(seenPath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      );
+      expect(first.seenAt).not.toBeNull();
+      expect(second.seenAt).toBe(first.seenAt);
+      expect(await prisma.noticeView.count({ where: { noticeId: notice.id } })).toBe(1);
+      const afterFirst = await list('token-supervisor');
+      const afterOther = await list('token-other-supervisor');
+      expect(afterFirst.unseenOpenCount).toBe(beforeFirst.unseenOpenCount - 1);
+      expect(afterFirst.openCount).toBe(beforeFirst.openCount);
+      expect(afterOther.unseenOpenCount).toBe(beforeOther.unseenOpenCount);
+      expect(afterFirst.items.find((item) => item.id === notice.id)?.seenAt).toBe(first.seenAt);
+      expect(
+        noticeSchema.parse(
+          (await http.get(path).set('Authorization', 'Bearer token-other-supervisor').expect(200))
+            .body,
+        ).seenAt,
+      ).toBeNull();
+      expect(
+        noticeSchema.parse(
+          (await http.get(path).set('Authorization', 'Bearer token-supervisor').expect(200)).body,
+        ).seenAt,
+      ).toBe(first.seenAt);
+      await http.post(seenPath).set('Authorization', 'Bearer token-admin').expect(200);
+      expect(await prisma.noticeView.count({ where: { noticeId: notice.id } })).toBe(2);
+    } finally {
+      await prisma.siteSupervisor.delete({ where: { id: assignment.id } });
+    }
+  });
+
   it('aísla avisos por HTTP y cierra sin datos solo el turno avisado', async () => {
     const prisma = app.get(PrismaService).systemPrisma;
     const shift = await prisma.shift.create({

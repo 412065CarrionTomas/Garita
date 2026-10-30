@@ -120,6 +120,24 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('RecordFlag');
     expect(COMPANY_ID_MODELS).toContain('Incident');
     expect(COMPANY_ID_MODELS).toContain('PanicAlert');
+    expect(COMPANY_ID_MODELS).toContain('PanicSmsDelivery');
+    expect(scopeArgs('PanicSmsDelivery', 'findMany', {}, 'norte')).toEqual({
+      where: { companyId: 'norte' },
+    });
+    expect(
+      addSiteAssignmentFilter(
+        'PanicSmsDelivery',
+        { where: { alertId: 'panic-1' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { alertId: 'panic-1' },
+          { alert: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('PanicAlertEvent');
     expect(
       addSiteAssignmentFilter(
@@ -293,6 +311,37 @@ describe('registro del aislamiento tenant', () => {
         AND: [{ status: 'open' }, { site: { supervisors: { some: { userId: 'supervisor-1' } } } }],
       },
     });
+  });
+
+  it('aísla NoticeView por empresa y predio conservando su clave compuesta', () => {
+    const user = {
+      userId: 's1',
+      companyId: 'norte',
+      role: 'supervisor' as const,
+      status: 'active' as const,
+    };
+    expect(COMPANY_ID_MODELS).toContain('NoticeView');
+    const args = scopeArgs(
+      'NoticeView',
+      'findUnique',
+      { where: { noticeId_userId: { noticeId: 'n1', userId: 's1' } } },
+      'norte',
+    );
+    expect(applySiteAssignmentFilter('NoticeView', 'findUnique', args, user)).toEqual({
+      where: {
+        noticeId_userId: { noticeId: 'n1', userId: 's1' },
+        companyId: 'norte',
+        AND: [
+          { noticeId_userId: { noticeId: 'n1', userId: 's1' }, companyId: 'norte' },
+          { notice: { site: { supervisors: { some: { userId: 's1' } } } } },
+        ],
+      },
+    });
+    const create = { data: { noticeId: 'n1', userId: 's1', companyId: 'sur' } };
+    expect(scopeArgs('NoticeView', 'create', create, 'norte')).toEqual({
+      data: { ...create.data, companyId: 'norte' },
+    });
+    expect(applySiteAssignmentFilter('NoticeView', 'createMany', create, user)).toBe(create);
   });
 
   it('aplica el filtro del supervisor sin romper create ni las operaciones por clave única', () => {

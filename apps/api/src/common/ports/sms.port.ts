@@ -28,7 +28,7 @@ export class NoopSms implements SmsPort {
     guardId: string;
     message: string;
   }): Promise<void> {
-    // TODO(HU-24): replace this placeholder with the real SMS provider.
+    // TODO(HU-24-proveedor): replace this placeholder with the real SMS provider.
     this.logger.log({
       event: 'shift_closed_sms_pending',
       shiftId: input.shiftId,

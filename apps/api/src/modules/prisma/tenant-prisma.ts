@@ -22,6 +22,7 @@ export const COMPANY_ID_MODELS = [
   'RecordFlag',
   'Incident',
   'PanicAlert',
+  'PanicSmsDelivery',
   'IncidentClassification',
   'ShiftCredential',
   'SyncBatch',
@@ -30,6 +31,7 @@ export const COMPANY_ID_MODELS = [
   'RoundWindowState',
   'RoundReviewDecision',
   'Notice',
+  'NoticeView',
   'NotificationDevice',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
@@ -105,6 +107,8 @@ export function addSiteAssignmentFilter(
   if (model === 'Shift') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'RoundWindowState')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
+  if (model === 'NoticeView')
+    return { ...args, where: { AND: [where, { notice: { site: assignment } }] } };
   if (model === 'Notice') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'RoundReviewDecision')
     return { ...args, where: { AND: [where, { windowState: { shift: { site: assignment } } }] } };
@@ -123,6 +127,8 @@ export function addSiteAssignmentFilter(
   if (model === 'Incident') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'PanicAlert') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'PanicAlertEvent')
+    return { ...args, where: { AND: [where, { alert: { site: assignment } }] } };
+  if (model === 'PanicSmsDelivery')
     return { ...args, where: { AND: [where, { alert: { site: assignment } }] } };
   if (model === 'IncidentClassification')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
