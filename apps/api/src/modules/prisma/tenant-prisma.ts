@@ -22,6 +22,7 @@ export const COMPANY_ID_MODELS = [
   'RecordFlag',
   'Incident',
   'PanicAlert',
+  'PanicSmsDelivery',
   'IncidentClassification',
   'ShiftCredential',
   'SyncBatch',
@@ -126,6 +127,8 @@ export function addSiteAssignmentFilter(
   if (model === 'Incident') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'PanicAlert') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'PanicAlertEvent')
+    return { ...args, where: { AND: [where, { alert: { site: assignment } }] } };
+  if (model === 'PanicSmsDelivery')
     return { ...args, where: { AND: [where, { alert: { site: assignment } }] } };
   if (model === 'IncidentClassification')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };

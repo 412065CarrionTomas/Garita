@@ -10,6 +10,7 @@ import {
   noticeUpdatedEventSchema,
   recordNewEventSchema,
   shiftUpdatedEventSchema,
+  panicUpdatedEventSchema,
 } from '@garita/shared';
 import { noticeLabels } from '@/features/avisos/labels';
 import { z } from 'zod';
@@ -41,6 +42,7 @@ export function useRealtime(enabled: boolean) {
       if (connectedOnce) {
         void queryClient.invalidateQueries({ queryKey: ['supervision'] });
         void queryClient.invalidateQueries({ queryKey: ['revision'] });
+        void queryClient.invalidateQueries({ queryKey: ['panico'] });
         void queryClient.invalidateQueries({ queryKey: ['avisos'] });
       }
       connectedOnce = true;
@@ -56,6 +58,11 @@ export function useRealtime(enabled: boolean) {
       void queryClient.invalidateQueries({ queryKey: ['supervision'] });
       void queryClient.invalidateQueries({ queryKey: ['revision'] });
       setAnnouncement(`Turno actualizado`);
+    });
+    socket.on(REALTIME_EVENTS.panicUpdated, (raw: unknown) => {
+      if (!panicUpdatedEventSchema.safeParse(raw).success) return;
+      void queryClient.invalidateQueries({ queryKey: ['panico'] });
+      setAnnouncement('Alerta de pánico actualizada');
     });
     socket.on(REALTIME_EVENTS.recordNew, (raw: unknown) => {
       const event = recordNewEventSchema.safeParse(raw);
