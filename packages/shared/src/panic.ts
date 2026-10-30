@@ -57,6 +57,49 @@ export const resolvePanicAlertRequestSchema = z.object({
 });
 export type ResolvePanicAlertRequest = z.infer<typeof resolvePanicAlertRequestSchema>;
 
+/** Supervisor/admin inbox; the active count ignores the current filters. */
+export const panicAlertsQuerySchema = z
+  .object({
+    estado: z.enum(PANIC_STATUSES).optional(),
+    predio: z.string().min(1).max(100).optional(),
+    pagina: z.coerce.number().int().min(1).max(100000).default(1),
+  })
+  .strict();
+
+export const panicAlertSummarySchema = z.object({
+  id: z.uuid(),
+  status: z.enum(PANIC_STATUSES),
+  channel: z.enum(PANIC_CHANNELS),
+  triggeredAt: isoDateTime,
+  receivedAt: isoDateTime,
+  site: z.object({ id: z.string(), name: z.string() }),
+  guard: z.object({ name: z.string(), phone: z.string().nullable() }),
+  confirmedAt: isoDateTime.nullable(),
+  escalatedAt: isoDateTime.nullable(),
+});
+
+export const panicAlertDetailSchema = panicAlertSummarySchema.extend({
+  timezone: z.string(),
+  authenticated: z.boolean(),
+  latitude: z.number().nullable(),
+  longitude: z.number().nullable(),
+  accuracyMeters: z.number().nullable(),
+  confirmedBy: z.object({ id: z.string(), name: z.string() }).nullable(),
+  resolvedAt: isoDateTime.nullable(),
+  resolvedBy: z.object({ id: z.string(), name: z.string() }).nullable(),
+  outcome: z.enum(PANIC_OUTCOMES).nullable(),
+  resolutionComment: z.string().nullable(),
+  smsDeliveries: z.array(
+    z.object({
+      id: z.string(),
+      userId: z.string(),
+      reason: z.enum(['initial', 'escalation']),
+      status: z.enum(['accepted', 'failed', 'skipped']),
+      createdAt: isoDateTime,
+    }),
+  ),
+});
+
 /** First 8 characters of the alert id, upper case: identifies the alert inside the SMS. */
 export function panicShortId(alertId: string): string {
   return alertId.replace(/-/g, '').slice(0, 8).toUpperCase();

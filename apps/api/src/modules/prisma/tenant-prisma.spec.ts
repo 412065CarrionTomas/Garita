@@ -120,6 +120,24 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('RecordFlag');
     expect(COMPANY_ID_MODELS).toContain('Incident');
     expect(COMPANY_ID_MODELS).toContain('PanicAlert');
+    expect(COMPANY_ID_MODELS).toContain('PanicSmsDelivery');
+    expect(scopeArgs('PanicSmsDelivery', 'findMany', {}, 'norte')).toEqual({
+      where: { companyId: 'norte' },
+    });
+    expect(
+      addSiteAssignmentFilter(
+        'PanicSmsDelivery',
+        { where: { alertId: 'panic-1' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { alertId: 'panic-1' },
+          { alert: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
     expect(INDIRECT_TENANT_MODELS).toHaveProperty('PanicAlertEvent');
     expect(
       addSiteAssignmentFilter(

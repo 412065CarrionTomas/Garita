@@ -24,6 +24,10 @@ import { SupervisionPage } from '../supervision/supervision-page';
 import { ShiftDetailPage } from '../supervision/shift-detail-page';
 import { ReviewPage, ReviewDetailPage, useReviewCount } from '../revision/review-page';
 import { useRealtime } from '@/lib/realtime';
+import { PanicListPage } from '../panico/panic-list-page';
+import { PanicDetailPage } from '../panico/panic-detail-page';
+import { PanicBanner } from '../panico/panic-banner';
+import { useActivePanicAlerts } from '../panico/queries';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -64,6 +68,7 @@ function RoleLayout() {
   const pending = useIncidentPendingCount(user?.role === 'admin' || user?.role === 'supervisor');
   const reviews = useReviewCount(user?.role === 'admin' || user?.role === 'supervisor');
   const realtime = useRealtime(user?.role === 'admin' || user?.role === 'supervisor');
+  const panic = useActivePanicAlerts(user?.role === 'admin' || user?.role === 'supervisor');
   if (!user) return null;
   return (
     <AppShell
@@ -72,6 +77,10 @@ function RoleLayout() {
         user.role === 'admin' || user.role === 'supervisor'
           ? [
               ...SECTIONS[user.role],
+              {
+                path: '/alertas-panico',
+                title: `Alertas de pánico (${panic.data?.activeCount ?? 0})`,
+              },
               { path: '/revision', title: `Rondas en revisión (${reviews.data?.count ?? 0})` },
               {
                 path: '/incidentes/cola',
@@ -100,6 +109,9 @@ function RoleLayout() {
             Cerrar
           </button>
         </div>
+      )}
+      {(user.role === 'admin' || user.role === 'supervisor') && (
+        <PanicBanner alerts={panic.data?.items ?? []} count={panic.data?.activeCount ?? 0} />
       )}
       <Outlet />
     </AppShell>
@@ -134,6 +146,22 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <SupervisionPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/alertas-panico"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <PanicListPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/alertas-panico/:id"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <PanicDetailPage />
             </Protected>
           }
         />

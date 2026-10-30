@@ -18,6 +18,7 @@ import {
   USER_ROLES,
   SOCKET_NAMESPACE,
   panicAlertStateResponseSchema,
+  panicAlertDetailSchema,
 } from '@garita/shared';
 import {
   Controller,
@@ -58,6 +59,7 @@ import { NOTIFICATIONS_PORT, type NotificationsPort } from '../src/common/ports/
 import { RealtimeGateway } from '../src/modules/realtime/realtime.gateway';
 import { RoundWindowStateService } from '../src/modules/supervision/round-window-state.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { PanicJobsService } from '../src/modules/panic/panic-jobs.service';
 import { SMS_PORT, type SmsPort } from '../src/common/ports/sms.port';
 import { NOTICES_PORT, type NoticesPort } from '../src/common/ports/notices.port';
 import {
@@ -125,6 +127,12 @@ class TestOnlyUserController {
   @Roles('admin', 'supervisor')
   panicById(@Param('id') id: string) {
     return this.tenantResources.findOwnedOrThrow('PanicAlert', id);
+  }
+
+  @Get('panic-sms/:id')
+  @Roles('admin', 'supervisor')
+  panicSmsById(@Param('id') id: string) {
+    return this.tenantResources.findOwnedOrThrow('PanicSmsDelivery', id);
   }
 
   @Get('transaction')
@@ -484,6 +492,7 @@ describe('Aplicación (e2e)', () => {
       },
     };
     const panicShiftIds = [shift.id];
+    const schedule = jest.spyOn(app.get(PanicJobsService), 'schedule').mockResolvedValue();
     try {
       await client.post('/api/v1/alertas-panico').send(body).expect(401);
       const first = await client
@@ -631,7 +640,169 @@ describe('Aplicación (e2e)', () => {
         .set('Authorization', `Bearer ${otherToken}`)
         .send({ ...body, alertId: randomUUID(), shiftId: other.id })
         .expect(409);
+
+      const detailPath = `/api/v1/alertas-panico/${alertId}`;
+      for (const [method, path] of [
+        ['get', '/api/v1/alertas-panico'],
+        ['get', detailPath],
+        ['post', `${detailPath}/confirmar`],
+        ['post', `${detailPath}/resolver`],
+      ] as const) {
+        await client[method](path).expect(401);
+        for (const denied of ['token-guard', 'token-client'])
+          await client[method](path).set('Authorization', `Bearer ${denied}`).expect(403);
+        if (path !== '/api/v1/alertas-panico') {
+          for (const denied of ['token-other-supervisor', 'token-south-admin'])
+            await client[method](path)
+              .set('Authorization', `Bearer ${denied}`)
+              .send(
+                method === 'post' && path.endsWith('resolver')
+                  ? { outcome: 'test', comment: 'Prueba válida' }
+                  : {},
+              )
+              .expect(404);
+        }
+      }
+      for (const [authToken, visible] of [
+        ['token-supervisor', true],
+        ['token-other-supervisor', false],
+        ['token-south-admin', false],
+      ] as const) {
+        const inbox = await client
+          .get('/api/v1/alertas-panico')
+          .set('Authorization', `Bearer ${authToken}`)
+          .expect(200);
+        expect(
+          z
+            .object({ items: z.array(z.object({ id: z.string() })) })
+            .parse(inbox.body)
+            .items.some((item) => item.id === alertId),
+        ).toBe(visible);
+      }
+      await client
+        .post(`${detailPath}/resolver`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .send({ outcome: 'test', comment: 'Prueba válida' })
+        .expect(409);
+      for (const invalid of [
+        { comment: 'Sin resultado' },
+        { outcome: 'test', comment: 'cort' },
+        { outcome: 'test', comment: 'x'.repeat(1001) },
+      ])
+        await client
+          .post(`${detailPath}/resolver`)
+          .set('Authorization', 'Bearer token-supervisor')
+          .send(invalid)
+          .expect(400);
+      const confirmed = await client
+        .post(`${detailPath}/confirmar`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      const confirmedDetail = panicAlertDetailSchema.parse(confirmed.body);
+      expect(confirmedDetail).toMatchObject({
+        status: 'confirmed',
+        confirmedAt: testNow.toISOString(),
+      });
+      expect(confirmedDetail.confirmedBy?.name).toBeTruthy();
+      await client
+        .post(`${detailPath}/confirmar`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(409);
+      const guardState = await client
+        .get(`${detailPath}/estado`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(panicAlertStateResponseSchema.parse(guardState.body)).toMatchObject({
+        status: 'confirmed',
+        confirmedAt: testNow.toISOString(),
+      });
+      // A different assigned supervisor can resolve the first supervisor's confirmation.
+      await prisma.siteSupervisor.create({
+        data: {
+          companyId: 'norte-company',
+          siteId: northAssignedSiteId,
+          userId: otherSupervisorId,
+        },
+      });
+      try {
+        const resolved = await client
+          .post(`${detailPath}/resolver`)
+          .set('Authorization', 'Bearer token-other-supervisor')
+          .send({ outcome: 'test', comment: 'Prueba de capacitación' })
+          .expect(200);
+        expect(panicAlertDetailSchema.parse(resolved.body)).toMatchObject({
+          status: 'resolved',
+          outcome: 'test',
+          resolutionComment: 'Prueba de capacitación',
+        });
+      } finally {
+        await prisma.siteSupervisor.deleteMany({
+          where: { siteId: northAssignedSiteId, userId: otherSupervisorId },
+        });
+      }
+      expect(await prisma.panicAlertEvent.count({ where: { alertId, type: 'confirmed' } })).toBe(1);
+      expect(await prisma.panicAlertEvent.count({ where: { alertId, type: 'resolved' } })).toBe(1);
+      const lateId = randomUUID();
+      testNow = new Date('2026-10-13T06:25:00.000Z');
+      await client
+        .post('/api/v1/alertas-panico')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...body, alertId: lateId, occurredAtDevice: '2026-10-13T06:10:00.000Z' })
+        .expect(200);
+      const late = await client
+        .get(`/api/v1/alertas-panico/${lateId}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      expect(panicAlertDetailSchema.parse(late.body)).toMatchObject({
+        triggeredAt: '2026-10-13T06:10:00.000Z',
+        receivedAt: '2026-10-13T06:25:00.000Z',
+        channel: 'internet',
+      });
+      const staff = await prisma.user.findUniqueOrThrow({
+        where: { firebaseUid: 'seed-norte-supervisor' },
+      });
+      const sms = jest
+        .spyOn(app.get<SmsPort>(SMS_PORT), 'sendPanicAlert')
+        .mockResolvedValue({ sent: true });
+      await prisma.user.update({ where: { id: staff.id }, data: { phone: null } });
+      await prisma.user.update({ where: { id: creator.id }, data: { phone: '+5493517654321' } });
+      try {
+        await app
+          .get(PanicJobsService)
+          .sendSms({ companyId: 'norte-company', alertId: lateId, reason: 'initial' });
+        expect(sms).toHaveBeenCalledWith(expect.objectContaining({ phone: '+5493517654321' }));
+        expect(
+          sms.mock.calls.every(
+            ([input]) =>
+              input.phone !== '' &&
+              !input.message.includes(body.location.latitude.toString()) &&
+              !input.message.includes(confirmedDetail.guard.name),
+          ),
+        ).toBe(true);
+        expect(sms.mock.calls.some(([input]) => input.phone === staff.phone)).toBe(false);
+        const skipped = await prisma.panicSmsDelivery.findUniqueOrThrow({
+          where: {
+            alertId_userId_reason: { alertId: lateId, userId: staff.id, reason: 'initial' },
+          },
+        });
+        expect(skipped.status).toBe('skipped');
+        for (const [authToken, status] of [
+          ['token-supervisor', 200],
+          ['token-other-supervisor', 404],
+          ['token-south-admin', 404],
+        ] as const)
+          await client
+            .get(`/api/v1/test-only/users/panic-sms/${skipped.id}`)
+            .set('Authorization', `Bearer ${authToken}`)
+            .expect(status);
+      } finally {
+        sms.mockRestore();
+        await prisma.user.update({ where: { id: staff.id }, data: { phone: staff.phone } });
+        await prisma.user.update({ where: { id: creator.id }, data: { phone: creator.phone } });
+      }
     } finally {
+      schedule.mockRestore();
+      testNow = new Date('2026-10-13T12:00:00.000Z');
       notifications.mockRestore();
       realtime.mockRestore();
       await prisma.panicAlert.deleteMany({ where: { shiftId: { in: panicShiftIds } } });
