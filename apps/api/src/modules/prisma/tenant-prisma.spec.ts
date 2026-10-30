@@ -313,6 +313,37 @@ describe('registro del aislamiento tenant', () => {
     });
   });
 
+  it('aísla NoticeView por empresa y predio conservando su clave compuesta', () => {
+    const user = {
+      userId: 's1',
+      companyId: 'norte',
+      role: 'supervisor' as const,
+      status: 'active' as const,
+    };
+    expect(COMPANY_ID_MODELS).toContain('NoticeView');
+    const args = scopeArgs(
+      'NoticeView',
+      'findUnique',
+      { where: { noticeId_userId: { noticeId: 'n1', userId: 's1' } } },
+      'norte',
+    );
+    expect(applySiteAssignmentFilter('NoticeView', 'findUnique', args, user)).toEqual({
+      where: {
+        noticeId_userId: { noticeId: 'n1', userId: 's1' },
+        companyId: 'norte',
+        AND: [
+          { noticeId_userId: { noticeId: 'n1', userId: 's1' }, companyId: 'norte' },
+          { notice: { site: { supervisors: { some: { userId: 's1' } } } } },
+        ],
+      },
+    });
+    const create = { data: { noticeId: 'n1', userId: 's1', companyId: 'sur' } };
+    expect(scopeArgs('NoticeView', 'create', create, 'norte')).toEqual({
+      data: { ...create.data, companyId: 'norte' },
+    });
+    expect(applySiteAssignmentFilter('NoticeView', 'createMany', create, user)).toBe(create);
+  });
+
   it('aplica el filtro del supervisor sin romper create ni las operaciones por clave única', () => {
     const user = {
       userId: 'supervisor-1',

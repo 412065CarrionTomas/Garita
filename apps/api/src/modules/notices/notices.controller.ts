@@ -1,8 +1,9 @@
-import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { noticesQuerySchema } from '@garita/shared';
 import { z } from 'zod';
-import { Roles } from '../auth/auth.decorators';
+import type { AuthenticatedUser } from '../auth/auth.types';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { NoticesService } from './notices.service';
 
 @ApiTags('Avisos')
@@ -17,7 +18,7 @@ export class NoticesController {
   @ApiQuery({ name: 'estado', required: false })
   @ApiQuery({ name: 'tipo', required: false })
   @ApiQuery({ name: 'predio', required: false })
-  list(@Query() raw: unknown) {
+  list(@Query() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = z
       .object({
         estado: z.string().optional(),
@@ -33,14 +34,26 @@ export class NoticesController {
       siteId: parsed.data.predio,
     });
     if (!query.success) throw new BadRequestException(query.error.issues);
-    return this.notices.list(query.data);
+    return this.notices.list(query.data, user.userId);
+  }
+
+  @Post(':id/marcar-visto')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Marca el aviso como visto para el usuario actual (idempotente)' })
+  @ApiOkResponse({
+    description: 'Aviso con seenAt del usuario actual; repetir conserva la primera lectura',
+  })
+  markSeen(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    const parsed = z.string().min(1).max(100).safeParse(id);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+    return this.notices.markSeen(parsed.data, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Consulta un aviso' })
-  detail(@Param('id') id: string) {
+  detail(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     const parsed = z.string().min(1).max(100).safeParse(id);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
-    return this.notices.detail(parsed.data);
+    return this.notices.detail(parsed.data, user.userId);
   }
 }

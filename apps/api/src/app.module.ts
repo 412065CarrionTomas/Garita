@@ -24,6 +24,7 @@ import { SupervisionModule } from './modules/supervision/supervision.module';
 import { RoundReviewModule } from './modules/round-review/round-review.module';
 import { PanicModule } from './modules/panic/panic.module';
 import { NoticesModule } from './modules/notices/notices.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { NoticesModule } from './modules/notices/notices.module';
     RoundReviewModule,
     PanicModule,
     NoticesModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

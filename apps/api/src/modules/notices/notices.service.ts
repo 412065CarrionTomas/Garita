@@ -6,6 +6,7 @@ import { type NoticesPort, type RaiseNoticeInput } from '../../common/ports/noti
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AuthenticatedUser } from '../auth/auth.types';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 
 @Injectable()
@@ -72,36 +73,55 @@ export class NoticesService implements NoticesPort {
       });
   }
 
-  async list(query: NoticesQuery) {
+  async list(query: NoticesQuery, userId: string) {
     const where = {
       ...(query.status ? { status: query.status } : {}),
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.siteId ? { siteId: query.siteId } : {}),
     };
-    const [items, openCount] = await Promise.all([
+    const [items, openCount, unseenOpenCount] = await Promise.all([
       this.prisma.tenantPrisma.notice.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
+          views: { where: { userId }, select: { seenAt: true } },
           site: { select: { name: true } },
           shift: { select: { startsAt: true, endsAt: true } },
         },
       }),
       this.prisma.tenantPrisma.notice.count({ where: { status: 'open' } }),
+      this.prisma.tenantPrisma.notice.count({
+        where: { status: 'open', views: { none: { userId } } },
+      }),
     ]);
-    return { items, openCount };
+    return {
+      items: items.map(({ views, ...notice }) => ({ ...notice, seenAt: views[0]?.seenAt ?? null })),
+      openCount,
+      unseenOpenCount,
+    };
   }
 
-  async detail(id: string) {
+  async markSeen(id: string, user: AuthenticatedUser) {
+    await this.resources.findOwnedOrThrow('Notice', id);
+    await this.prisma.tenantPrisma.noticeView.createMany({
+      data: { noticeId: id, userId: user.userId, companyId: user.companyId },
+      skipDuplicates: true,
+    });
+    return this.detail(id, user.userId);
+  }
+
+  async detail(id: string, userId: string) {
     await this.resources.findOwnedOrThrow('Notice', id);
     const notice = await this.prisma.tenantPrisma.notice.findFirst({
       where: { id },
       include: {
+        views: { where: { userId }, select: { seenAt: true } },
         site: { select: { name: true } },
         shift: { select: { startsAt: true, endsAt: true } },
       },
     });
     if (!notice) throw new NotFoundException('Aviso no encontrado');
-    return notice;
+    const { views, ...result } = notice;
+    return { ...result, seenAt: views[0]?.seenAt ?? null };
   }
 }

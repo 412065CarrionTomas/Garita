@@ -52,3 +52,27 @@ export const noticesQuerySchema = z.object({
   siteId: z.string().min(1).optional(),
 });
 export type NoticesQuery = z.infer<typeof noticesQuerySchema>;
+
+/** Additive HTTP response contract. Times are serialized by the API as ISO strings. */
+export const noticeSchema = z.object({
+  id: z.string(),
+  companyId: z.string(),
+  siteId: z.string(),
+  shiftId: z.string(),
+  kind: z.enum(NOTICE_KINDS),
+  subjectId: z.string(),
+  key: z.string(),
+  status: z.enum(NOTICE_STATUSES),
+  resolution: z.enum(NOTICE_RESOLUTIONS).nullable(),
+  details: z.json().nullable(),
+  createdAt: z.iso.datetime(),
+  resolvedAt: z.iso.datetime().nullable(),
+  seenAt: z.iso.datetime().nullable(),
+  site: z.object({ name: z.string() }),
+  shift: z.object({ startsAt: z.iso.datetime(), endsAt: z.iso.datetime() }),
+});
+export const noticesListResponseSchema = z.object({
+  items: z.array(noticeSchema),
+  openCount: z.number().int().nonnegative(),
+  unseenOpenCount: z.number().int().nonnegative(),
+});
