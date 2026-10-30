@@ -42,7 +42,7 @@ La migración `indices_de_reportes` agrega `RoundWindowState(companyId, startsAt
 
 Cada consulta emite `reports.query` con usuario, rol, IDs de predios, período y `elapsedMs`, con nivel warn al superar diez segundos. No registra ubicación ni registros individuales. El e2e crea 50 predios × 31 días × 12 ventanas (18.600) con `createMany` y exige GET mensual menor a tres segundos.
 
-La consulta carga las ventanas y asignaciones necesarias y agrupa en memoria. El detalle se pagina después de resolver la atribución histórica. Si las mediciones reales requieren escalar, primero mover selección de segmentos/paginación al repositorio conservando exactamente `windowOwner`; luego considerar totales diarios por empresa, fecha local, predio y asignación. Cualquier precálculo deberá invalidarse transaccionalmente por cambios de estado/revisión y ofrecer recomputación verificable. No se implementa sin evidencia de necesidad, porque los totales actuales siempre deben reflejar la última decisión.
+La consulta carga las ventanas y el historial de asignaciones una sola vez por turno y agrupa en memoria. El detalle se pagina después de resolver la atribución histórica. Si las mediciones reales requieren escalar, primero mover selección de segmentos/paginación al repositorio conservando exactamente `windowOwner`; luego considerar totales diarios por empresa, fecha local, predio y asignación. Cualquier precálculo deberá invalidarse transaccionalmente por cambios de estado/revisión y ofrecer recomputación verificable. No se implementa sin evidencia de necesidad, porque los totales actuales siempre deben reflejar la última decisión.
 
 ## Interfaz reutilizable
 
