@@ -34,7 +34,6 @@ export function PanicBanner({
       audio = context.current ?? new AudioContext();
       context.current = audio;
     } catch {
-      setBlocked(true);
       return;
     }
     const tone = () => {
@@ -54,7 +53,9 @@ export function PanicBanner({
     };
     tone();
     const timer = window.setInterval(tone, 4000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [enabled, active]);
   useEffect(
     () => () => {

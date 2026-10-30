@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import type * as ReactRouter from 'react-router';
@@ -63,12 +63,12 @@ it('anuncia una alerta activa con texto, ícono, enlace y control para activar s
 it('repite el tono y lo detiene cuando ya no hay activas', async () => {
   jest.useFakeTimers();
   const start = jest.fn();
-  const close = jest.fn(async () => undefined);
+  const close = jest.fn(() => Promise.resolve());
   const audio = {
     state: 'running',
     currentTime: 0,
     destination: {},
-    resume: jest.fn(async () => undefined),
+    resume: jest.fn(() => Promise.resolve()),
     close,
     createOscillator: () => ({
       connect: jest.fn(),
@@ -94,7 +94,9 @@ it('repite el tono y lo detiene cuando ya no hay activas', async () => {
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Activar sonido de alertas' }));
-    await waitFor(() => expect(localStorage.getItem('garita-panic-sound')).toBe('enabled'));
+    await waitFor(() => {
+      expect(localStorage.getItem('garita-panic-sound')).toBe('enabled');
+    });
     const initial = start.mock.calls.length;
     const { act } = await import('@testing-library/react');
     act(() => {
@@ -136,8 +138,9 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
         state: 'running',
         currentTime: 0,
         destination: {},
-        close: async () => {
+        close: () => {
           audio.state = 'closed';
+          return Promise.resolve();
         },
         createOscillator: () => ({
           connect: jest.fn(),
@@ -155,7 +158,7 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
     }),
   });
   try {
-    const view = renderWithQueryClient(
+    const view = render(
       <StrictMode>
         <MemoryRouter>
           <PanicBanner alerts={[alert]} count={1} />
@@ -247,14 +250,14 @@ it('valida el diálogo y resuelve una alerta confirmada por otra persona', async
     target: { value: 'Prueba de capacitación' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Guardar resolución' }));
-  await waitFor(() =>
+  await waitFor(() => {
     expect(apiPost).toHaveBeenCalledWith(
       `/alertas-panico/${alert.id}/resolver`,
       { outcome: 'test', comment: 'Prueba de capacitación' },
       expect.anything(),
       expect.anything(),
-    ),
-  );
+    );
+  });
 });
 
 it('filtra el historial por predio y estado', async () => {
@@ -275,12 +278,12 @@ it('filtra el historial por predio y estado', async () => {
   await screen.findByText('Depósito Ruta 9 · Pedro Díaz');
   fireEvent.change(screen.getByLabelText('Predio'), { target: { value: 'site' } });
   fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'confirmed' } });
-  await waitFor(() =>
+  await waitFor(() => {
     expect(apiGet).toHaveBeenCalledWith(
       '/alertas-panico?pagina=1&estado=confirmed&predio=site',
       expect.anything(),
-    ),
-  );
+    );
+  });
 });
 
 it('muestra la indicación preparada para una alerta SMS no verificada', async () => {
