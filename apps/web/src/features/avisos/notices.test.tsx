@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
+import { ThemeProvider } from '@/lib/theme';
 import { RoleLayout } from '@/features/auth/routes';
 import type { noticeSchema } from '@garita/shared';
 import type { z } from 'zod';
@@ -85,6 +86,11 @@ let current = [notice, unsynced];
 
 beforeEach(() => {
   jest.clearAllMocks();
+  globalThis.ResizeObserver = jest.fn().mockImplementation(() => ({
+    observe: jest.fn(),
+    unobserve: jest.fn(),
+    disconnect: jest.fn(),
+  }));
   mockDetail = false;
   mockListeners.clear();
   current = [notice, unsynced];
@@ -171,7 +177,9 @@ it('muestra tipo, predio, horario y puntos; filtra con teclado e incluye histori
 it('abrir el aviso marca visto, baja el contador del menú y enlaza al turno', async () => {
   renderWithQueryClient(
     <MemoryRouter initialEntries={['/avisos']}>
-      <RoleLayout />
+      <ThemeProvider>
+        <RoleLayout />
+      </ThemeProvider>
     </MemoryRouter>,
   );
   expect(await screen.findByRole('link', { name: 'Avisos (2)' })).toBeInTheDocument();
@@ -198,7 +206,9 @@ it('refresca y anuncia un aviso nuevo sin recargar; actualizado mueve al histori
   current = [];
   renderWithQueryClient(
     <MemoryRouter initialEntries={['/avisos']}>
-      <RoleLayout />
+      <ThemeProvider>
+        <RoleLayout />
+      </ThemeProvider>
     </MemoryRouter>,
   );
   await screen.findByText('No hay avisos para estos filtros');
@@ -229,7 +239,9 @@ it('al entrar desde una notificación marca visto y ofrece cierre desde el aviso
   mockDetail = true;
   renderWithQueryClient(
     <MemoryRouter initialEntries={['/avisos/n2']}>
-      <RoleLayout />
+      <ThemeProvider>
+        <RoleLayout />
+      </ThemeProvider>
     </MemoryRouter>,
   );
   expect(

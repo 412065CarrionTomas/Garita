@@ -42,6 +42,15 @@ const detail = {
   canCover: false,
 };
 
+beforeEach(() => {
+  jest.clearAllMocks();
+  globalThis.ResizeObserver = jest.fn().mockImplementation(() => ({
+    observe: jest.fn(),
+    unobserve: jest.fn(),
+    disconnect: jest.fn(),
+  }));
+});
+
 it.each([
   ['shift_unsynced', 'open', 's1', true],
   ['shift_unsynced', 'resolved', 's1', false],
