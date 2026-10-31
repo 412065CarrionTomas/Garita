@@ -121,6 +121,23 @@ describe('shift execution actions', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it('does not start another shift while the previous queue still has unsent events', async () => {
+    setup({
+      repository: async () =>
+        ({
+          ...repo,
+          countPendingEvents: jest.fn(async () => 2),
+          listIncidentPhotos: jest.fn(async () => []),
+        }) as never,
+    });
+    await expect(
+      beginShift('shift-2', shiftData.shift.startsAt, shiftData.shift.endsAt),
+    ).resolves.toMatchObject({ status: 'error' });
+    expect(start).not.toHaveBeenCalled();
+    expect(saveCredential).not.toHaveBeenCalled();
+    expect(triggerSync).toHaveBeenCalled();
+  });
+
   it('starts online, validates and saves the offline shift data and credential', async () => {
     const cred = { token: 'tok-123', expiresAt: '2030-01-08T22:00:00.000Z' };
     setup({
