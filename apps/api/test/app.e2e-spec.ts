@@ -1370,6 +1370,63 @@ describe('Aplicación (e2e)', () => {
       .expect(404);
   }, 30000);
 
+  it('no edita ni cancela un turno que el vigilador inició antes de la hora programada', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const client = request(app.getHttpServer());
+    const admin = { Authorization: 'Bearer token-admin' };
+    const creator = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const round = await prisma.round.findUniqueOrThrow({
+      where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
+    });
+    const startsAt = new Date('2036-01-01T10:00:00Z');
+    const endsAt = new Date('2036-01-01T18:00:00Z');
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt,
+        endsAt,
+        serviceDate: new Date('2036-01-01T00:00:00Z'),
+        createdById: creator.id,
+        status: 'in_progress',
+        startedAt: new Date(startsAt.getTime() - 10 * 60_000),
+        assignments: {
+          create: {
+            guardId: northGuardId,
+            startsAt,
+            endsAt,
+            assignedById: creator.id,
+            result: 'started',
+          },
+        },
+      },
+    });
+    createdShiftIds.push(shift.id);
+    const previousNow = testNow;
+    testNow = new Date(startsAt.getTime() - 5 * 60_000);
+    try {
+      await client
+        .patch(`/api/v1/turnos/${shift.id}`)
+        .set(admin)
+        .send({
+          siteId: northAssignedSiteId,
+          guardId: northGuardId,
+          startsAt: new Date(startsAt.getTime() + 60 * 60_000).toISOString(),
+          endsAt: endsAt.toISOString(),
+          roundIds: [round.id],
+        })
+        .expect(409);
+      await client.post(`/api/v1/turnos/${shift.id}/cancelar`).set(admin).expect(409);
+      expect(await prisma.shift.findUniqueOrThrow({ where: { id: shift.id } })).toMatchObject({
+        status: 'in_progress',
+      });
+    } finally {
+      testNow = previousNow;
+    }
+  });
+
   it('GET /api/v1/health/live responde con el contrato compartido', async () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
 
