@@ -585,10 +585,21 @@ export class ShiftsService {
         }).map((window) => ({ ...window, roundId })),
       );
     });
-    const other = await this.prisma.tenantPrisma.shift.findMany({
-      where: { siteId: shift.siteId, status: { not: 'cancelled' }, id: { not: shift.id } },
-      include: { rounds: true },
-    });
+    // Only shifts touching this shift's windows can cover them; the site history is unbounded.
+    const windowStarts = ownWindows.map((window) => Date.parse(window.startUtc));
+    const windowEnds = ownWindows.map((window) => Date.parse(window.endUtc));
+    const other = ownWindows.length
+      ? await this.prisma.tenantPrisma.shift.findMany({
+          where: {
+            siteId: shift.siteId,
+            status: { not: 'cancelled' },
+            id: { not: shift.id },
+            startsAt: { lte: new Date(Math.max(...windowEnds)) },
+            endsAt: { gte: new Date(Math.min(...windowStarts)) },
+          },
+          include: { rounds: true },
+        })
+      : [];
     const candidates = [
       {
         id: shift.id,
