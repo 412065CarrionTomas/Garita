@@ -1427,6 +1427,15 @@ describe('Aplicación (e2e)', () => {
     }
   });
 
+  it('responde 400 y no 500 ante datos inválidos en usuarios y canje de invitación', async () => {
+    const client = request(app.getHttpServer());
+    await client
+      .get('/api/v1/usuarios?pagina=abc')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(400);
+    await client.post('/api/v1/invitaciones/canjear').send({}).expect(400);
+  });
+
   it('GET /api/v1/health/live responde con el contrato compartido', async () => {
     const response = await request(app.getHttpServer()).get('/api/v1/health/live').expect(200);
 
