@@ -3,6 +3,11 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { apiGet } from '@/lib/api-client';
 import { registerGuardDevice, unregisterGuardDevice } from '@/features/notificaciones/guard-device';
 import { AuthProvider, useAuth } from './auth-context';
+import { dismissPanicNotification } from '@/features/panico/bloqueado/notification';
+jest.mock('@/features/panico/bloqueado/notification', () => ({
+  dismissPanicNotification: jest.fn(async () => undefined),
+  recordLockedPanicFailure: jest.fn(),
+}));
 
 jest.mock('firebase/auth', () => ({
   onAuthStateChanged: jest.fn(() => jest.fn()),
@@ -59,6 +64,7 @@ describe('guard notification session', () => {
       await authContext.logout();
     });
     expect(unregisterGuardDevice).toHaveBeenCalledTimes(1);
+    expect(dismissPanicNotification).toHaveBeenCalledTimes(1);
     expect(jest.mocked(unregisterGuardDevice).mock.invocationCallOrder[0]).toBeLessThan(
       jest.mocked(signOut).mock.invocationCallOrder[0] ?? Infinity,
     );

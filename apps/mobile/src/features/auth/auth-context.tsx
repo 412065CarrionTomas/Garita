@@ -14,6 +14,10 @@ import { Alert } from 'react-native';
 import { ApiError, apiGet } from '@/lib/api-client';
 import { auth } from '@/lib/firebase';
 import { registerGuardDevice, unregisterGuardDevice } from '@/features/notificaciones/guard-device';
+import {
+  dismissPanicNotification,
+  recordLockedPanicFailure,
+} from '@/features/panico/bloqueado/notification';
 
 export const DISABLED_MESSAGE =
   'Tu usuario no está habilitado. Si recibiste una invitación, activala desde el enlace del correo; si no, contactá a tu administrador';
@@ -78,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () =>
       onAuthStateChanged(auth, async (firebaseUser) => {
         if (!firebaseUser) {
+          await dismissPanicNotification().catch(recordLockedPanicFailure);
           setUser(null);
           setLoading(false);
           return;
@@ -138,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     await signOut(auth);
+    await dismissPanicNotification().catch(recordLockedPanicFailure);
     registeredUid = null;
     if (uid) await AsyncStorage.removeItem(profileKey(uid));
     setUser(null);

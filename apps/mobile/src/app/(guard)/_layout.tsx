@@ -6,7 +6,11 @@ import { checkFieldPermissions, type FieldPermissionState } from '@/features/per
 import { initSyncService } from '@/lib/cola';
 import { createDefaultFieldRepository, subscribePanicChanges } from '@/lib/db/database';
 import { getRunningPanicShift } from '@/features/panico/running-shift';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
+import {
+  reconcilePanicNotification,
+  recordLockedPanicFailure,
+} from '@/features/panico/bloqueado/notification';
 import { PanicOverlay } from '@/features/panico/panic-overlay';
 export default function GuardLayout() {
   const screenOptions = useStackOptions();
@@ -17,10 +21,12 @@ export default function GuardLayout() {
   const [localCheckPath, setLocalCheckPath] = useState<string | null>(null);
   const [panicShiftId, setPanicShiftId] = useState<string | null>(null);
   useEffect(() => {
+    if (loading || user?.role !== 'guard') return;
     let mounted = true;
     const refresh = async () => {
       const saved = await getRunningPanicShift(await createDefaultFieldRepository());
       if (mounted) setPanicShiftId(saved?.shift.id ?? null);
+      if (mounted) await reconcilePanicNotification().catch(recordLockedPanicFailure);
     };
     const update = () => {
       void refresh().catch(() => {
@@ -28,12 +34,16 @@ export default function GuardLayout() {
       });
     };
     const unsubscribe = subscribePanicChanges(update);
+    const appState = AppState.addEventListener('change', (state) => {
+      if (state === 'active') update();
+    });
     update();
     return () => {
       mounted = false;
       unsubscribe();
+      appState.remove();
     };
-  }, []);
+  }, [loading, user?.role]);
   useEffect(() => {
     return initSyncService();
   }, []);
