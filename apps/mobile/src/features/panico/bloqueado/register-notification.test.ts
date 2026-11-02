@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
+import type * as ReactNative from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import {
@@ -9,7 +10,11 @@ import {
 } from './notification';
 import './register';
 
-jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
+jest.mock('react-native', () => {
+  const native = jest.requireActual<typeof ReactNative>('react-native');
+  Object.defineProperty(native.Platform, 'OS', { value: 'android', configurable: true });
+  return native;
+});
 jest.mock('expo-task-manager', () => ({ defineTask: jest.fn() }));
 jest.mock('expo-notifications', () => ({
   registerTaskAsync: jest.fn(async () => null),
