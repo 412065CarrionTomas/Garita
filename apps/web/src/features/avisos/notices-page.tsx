@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { NOTICE_KINDS, noticesListResponseSchema } from '@garita/shared';
@@ -33,6 +34,11 @@ export function NoticesPage() {
       <PageHeader
         id="notices-title"
         title="Avisos"
+        actions={
+          <Button asChild variant="outline">
+            <Link to="/avisos/preferencias">Preferencias de notificación</Link>
+          </Button>
+        }
         description="Avisos de tus predios y su historial de resolución."
       />
       <div className="flex flex-wrap gap-4">

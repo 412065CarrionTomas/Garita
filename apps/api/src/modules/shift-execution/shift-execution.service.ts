@@ -41,6 +41,7 @@ import {
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
+import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { RoundWindowStateService } from '../supervision/round-window-state.service';
 
 export const SHIFT_AUTO_CLOSE_QUEUE = 'shift-auto-close';
@@ -75,6 +76,7 @@ export class ShiftExecutionService {
     @Optional() private readonly windowStates?: RoundWindowStateService,
     @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
     @Optional() private readonly config?: ConfigService<Env, true>,
+    @Optional() @Inject(NOTICES_PORT) private readonly notices?: NoticesPort,
   ) {}
 
   async start(id: string, input: StartShiftRequest, user: AuthenticatedUser) {
@@ -193,6 +195,16 @@ export class ShiftExecutionService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
         return this.startResponse(id);
       throw error;
+    }
+    try {
+      await this.notices?.resolve({
+        companyId: shift.companyId,
+        kind: 'shift_not_started',
+        subjectId: assignment.id,
+        resolution: 'late_start',
+      });
+    } catch (error) {
+      this.logger.error({ event: 'shift.notice_resolution_failed', shiftId: id, error });
     }
     const data = await this.buildData(id);
     await this.windowStates?.createForShift(data);

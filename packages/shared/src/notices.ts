@@ -31,6 +31,18 @@ export type NoticeResolution = (typeof NOTICE_RESOLUTIONS)[number];
 /** Only `shift_not_started` can be muted as a push by each supervisor (HU-35); the rest always notify. */
 export const MUTABLE_NOTICE_KINDS = ['shift_not_started'] as const satisfies readonly NoticeKind[];
 
+export const SHIFT_NOT_STARTED_TOLERANCE_MINUTES = 15;
+export const SHIFT_WITHOUT_GUARD_LEAD_MINUTES = 120;
+export const notificationPreferencesSchema = z
+  .object(
+    Object.fromEntries(MUTABLE_NOTICE_KINDS.map((kind) => [kind, z.boolean()])) as Record<
+      (typeof MUTABLE_NOTICE_KINDS)[number],
+      z.ZodBoolean
+    >,
+  )
+  .strict();
+export type NotificationPreferences = z.infer<typeof notificationPreferencesSchema>;
+
 /**
  * Idempotency key of a notice: at most one per window (`round_missed`), per assignment (`shift_not_started`,
  * `shift_closed_early`) or per shift (`shift_unsynced`, `shift_without_guard`).
@@ -68,7 +80,7 @@ export const noticeSchema = z.object({
   createdAt: z.iso.datetime(),
   resolvedAt: z.iso.datetime().nullable(),
   seenAt: z.iso.datetime().nullable(),
-  site: z.object({ name: z.string() }),
+  site: z.object({ name: z.string(), minutesToSignal: z.number().int().nonnegative().optional() }),
   shift: z.object({ startsAt: z.iso.datetime(), endsAt: z.iso.datetime() }),
 });
 export const noticesListResponseSchema = z.object({

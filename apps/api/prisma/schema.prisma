@@ -96,6 +96,7 @@ model Company {
   panicSmsDeliveries PanicSmsDelivery[]
   incidentClassifications IncidentClassification[]
   roundReviewDecisions RoundReviewDecision[]
+  notificationPreferences NotificationPreference[]
   noticeViews NoticeView[]
   notices Notice[]
 }
@@ -133,6 +134,7 @@ model User {
   roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
+  notificationPreferences NotificationPreference[]
   noticeViews NoticeView[]
 
   @@index([companyId])
@@ -1028,4 +1030,18 @@ enum TimeStatus {
   recalculated
   pending
   unverifiable
+}
+
+model NotificationPreference {
+  id String @id @default(cuid())
+  companyId String
+  userId String
+  kind String
+  push Boolean @default(true)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
+  @@index([companyId, kind, push])
 }

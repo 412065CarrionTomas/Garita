@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { noticeKey } from '@garita/shared';
+import { noticeKey, MUTABLE_NOTICE_KINDS } from '@garita/shared';
 import type { NoticesQuery } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { type NoticesPort, type RaiseNoticeInput } from '../../common/ports/notices.port';
@@ -20,12 +20,13 @@ export class NoticesService implements NoticesPort {
   ) {}
 
   async raise(input: RaiseNoticeInput): Promise<void> {
+    const { pushBody, ...noticeInput } = input;
     const key = noticeKey(input.kind, input.subjectId);
     let notice;
     try {
       // System jobs have no request context. The caller supplies company and site from the shift.
       notice = await this.prisma.systemPrisma.notice.create({
-        data: { ...input, key, details: input.details ?? Prisma.JsonNull },
+        data: { ...noticeInput, key, details: input.details ?? Prisma.JsonNull },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return;
@@ -43,7 +44,12 @@ export class NoticesService implements NoticesPort {
       siteId: input.siteId,
       shiftId: input.shiftId,
     });
-    // TODO(HU-35): consult per-user preferences for MUTABLE_NOTICE_KINDS before push.
+    const muted = (MUTABLE_NOTICE_KINDS as readonly string[]).includes(input.kind)
+      ? await this.prisma.systemPrisma.notificationPreference.findMany({
+          where: { companyId: input.companyId, kind: input.kind, push: false },
+          select: { userId: true },
+        })
+      : [];
     const site = await this.prisma.systemPrisma.site.findUnique({
       where: { id: input.siteId },
       select: { name: true },
@@ -52,7 +58,13 @@ export class NoticesService implements NoticesPort {
       companyId: input.companyId,
       siteId: input.siteId,
       kind: input.kind,
-      payload: { kind: input.kind, siteName: site?.name, link: `/avisos/${notice.id}` },
+      excludeUserIds: muted.map(({ userId }) => userId),
+      payload: {
+        kind: input.kind,
+        siteName: site?.name,
+        link: `/avisos/${notice.id}`,
+        ...(pushBody ? { body: pushBody } : {}),
+      },
       priority: 'high',
     });
   }
@@ -85,7 +97,7 @@ export class NoticesService implements NoticesPort {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           views: { where: { userId }, select: { seenAt: true } },
-          site: { select: { name: true } },
+          site: { select: { name: true, minutesToSignal: true } },
           shift: { select: { startsAt: true, endsAt: true } },
         },
       }),
@@ -116,7 +128,7 @@ export class NoticesService implements NoticesPort {
       where: { id },
       include: {
         views: { where: { userId }, select: { seenAt: true } },
-        site: { select: { name: true } },
+        site: { select: { name: true, minutesToSignal: true } },
         shift: { select: { startsAt: true, endsAt: true } },
       },
     });
