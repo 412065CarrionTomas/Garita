@@ -37,6 +37,16 @@ Durante un turno en curso, el botón **Pánico** está disponible en las pantall
 
 El texto **Alerta recibida por la central** aparece solamente cuando el servidor registró la alerta. **Confirmada por el supervisor** aparece solamente después de que un supervisor confirmó su lectura. Sin esos textos, no supongas que la central ya recibió el pedido: buscá ayuda por otra vía disponible. No podés cancelar la alerta desde la app; avisá al supervisor si fue una falsa alarma. Una segunda activación de una alerta abierta queda registrada en la misma alerta. La práctica guiada y la resolución como «prueba» quedarán disponibles con HU-24.
 
+## Con el celular bloqueado
+
+En Android, mientras haya un turno en curso y estén habilitadas las notificaciones, aparece **Turno en curso**, sin datos del predio. Encendé la pantalla y tocá **Pánico**; luego tocá **Confirmar pánico** dentro de cinco segundos. Un solo toque no envía. Sin confirmación vuelve a **Pánico**; si el teléfono suspendió la app y quedó la etiqueta anterior, el toque vencido solo vuelve a armarla. La activación usa la misma alerta de la app, con vibración breve y sin sonido.
+
+Al cerrar el turno, incluso sin internet, o cerrar sesión, desaparece el acceso. Si ves **Activá las notificaciones para usar el pánico con el celular bloqueado**, habilitalas en Ajustes del celular y volvé a Garita. La configuración de pantalla bloqueada y el ahorro de batería del fabricante pueden impedir que aparezca: practicá el gesto en tu teléfono con tu supervisor.
+
+Sin internet, Android necesita el permiso SMS para enviarlo sin desbloquear. Sin ese permiso, la pantalla de envío del sistema no se puede usar con el celular bloqueado; no supongas que salió el SMS. La alerta queda pendiente para internet. Revisá en la app los estados confirmados y buscá ayuda por otra vía si no hay recepción.
+
+En iPhone este acceso todavía está pendiente. Se prevé una actividad en vivo; hoy se usa el botón dentro de la app, desbloqueando el celular.
+
 ## Cerrar el turno
 
 Tocá **Cerrar turno**. Si todavía no llegó el fin programado, escribí un motivo de al menos tres caracteres para habilitar el cierre. Garita registra un identificador único, la hora y una lectura puntual de ubicación. Con conexión, envía el cierre al servidor y elimina los datos activos del turno local cuando recibe confirmación.
