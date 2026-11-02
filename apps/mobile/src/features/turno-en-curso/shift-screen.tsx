@@ -11,6 +11,7 @@ import { createDefaultFieldRepository, type LocalCheckpointRecord } from '@/lib/
 import { beginShift, finishShift } from './actions';
 import { NfcReader } from '@/features/escaneo/nfc-reader';
 import { readClock } from '@/lib/clock/clock';
+import { LockedPanicPermissionNotice } from '@/features/panico/bloqueado/permission-notice';
 
 const shiftsSchema = z.array(
   z.looseObject({
@@ -248,6 +249,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           )}
           {!pendingClose && (
             <>
+              <LockedPanicPermissionNotice shiftId={shiftId} />
               <NfcReader shiftData={data} onQr={() => router.push('/escaneo')} />
               <Button
                 label="Reportar incidente"

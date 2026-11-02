@@ -15,7 +15,7 @@ jest.mock('@/lib/cola/sync-service', () => ({ sendUrgentEvent: jest.fn() }));
 
 describe('panic trigger', () => {
   afterEach(resetPanicActionsForTesting);
-  it('persists before transport and vibrates without sound', async () => {
+  it('persists before transport and vibrates without sound without awaiting the network', async () => {
     const order: string[] = [];
     const savePanicAlert = jest.fn(async (alert) => {
       order.push('persist');
@@ -60,6 +60,7 @@ describe('panic trigger', () => {
       },
       send: async () => {
         order.push('send');
+        return new Promise<void>(() => undefined);
       },
     });
     await triggerPanic();

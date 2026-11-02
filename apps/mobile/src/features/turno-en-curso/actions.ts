@@ -7,6 +7,11 @@ import {
   type ShiftOfflineData,
 } from '@garita/shared';
 import * as Network from 'expo-network';
+import {
+  dismissPanicNotification,
+  reconcilePanicNotification,
+  recordLockedPanicFailure,
+} from '@/features/panico/bloqueado/notification';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import { requestPanicSmsPermission } from '@/features/permisos/sms-permission';
 import { ApiError } from '@/lib/api-client';
@@ -163,6 +168,7 @@ export async function beginShift(
     await d.saveCredential(result.credential);
   }
   await d.repository().then((repository) => repository.saveShiftData(result.data));
+  await reconcilePanicNotification().catch(recordLockedPanicFailure);
   void d
     .repository()
     .then((repository) => requestPanicSmsPermission(repository, id))
@@ -199,6 +205,7 @@ export async function finishShift(
     occurredAtDevice,
     createdAt: new Date().toISOString(),
   });
+  await dismissPanicNotification().catch(recordLockedPanicFailure);
   if (!(await d.online())) return { status: 'closed_pending' };
   try {
     await d.triggerSync();
