@@ -1,3 +1,4 @@
+import { NotificationPreferencesPage } from '../avisos/notification-preferences-page';
 import { Navigate, Outlet, Route, Routes } from 'react-router';
 import type { ReactNode } from 'react';
 import { USER_ROLE_LABELS } from '@garita/shared';
@@ -194,6 +195,14 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <NoticesPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/avisos/preferencias"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <NotificationPreferencesPage />
             </Protected>
           }
         />
