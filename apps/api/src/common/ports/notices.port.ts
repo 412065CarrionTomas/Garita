@@ -8,6 +8,7 @@ export interface RaiseNoticeInput {
   /** Window, assignment or shift the notice is about; with `kind` it is the idempotency key (`noticeKey`). */
   subjectId: string;
   shiftId: string;
+  pushBody?: string;
   /** Extra data shown in the panel (missing points, close reason, received time). Never names or addresses. */
   details?: Record<string, string | number | boolean | null | string[]>;
 }

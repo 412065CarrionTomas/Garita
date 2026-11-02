@@ -154,7 +154,7 @@ export class ShiftsService {
     const shift = await this.prisma.tenantPrisma.shift.findUniqueOrThrow({ where: { id } });
     const previousAssignment = await this.prisma.tenantPrisma.shiftAssignment.findFirst({
       where: { shiftId: id, isCurrent: true },
-      select: { guardId: true },
+      select: { guardId: true, guard: { select: { status: true } } },
     });
     if (shift.status === 'cancelled') throw new ConflictException('El turno está cancelado');
     if (shift.startsAt <= this.clock.now())
@@ -202,6 +202,27 @@ export class ShiftsService {
           include: this.shiftInclude(),
         });
       });
+      if (
+        input.guardId &&
+        (!previousAssignment?.guardId || previousAssignment.guard?.status === 'invitation_pending')
+      ) {
+        const guard = await this.prisma.tenantPrisma.user.findUnique({
+          where: { id: input.guardId },
+          select: { status: true },
+        });
+        if (guard?.status === 'active') {
+          try {
+            await this.notices.resolve({
+              companyId: user.companyId,
+              kind: 'shift_without_guard',
+              subjectId: id,
+              resolution: 'guard_assigned',
+            });
+          } catch (error) {
+            this.logger.error({ event: 'shift.notice_resolution_failed', shiftId: id, error });
+          }
+        }
+      }
       this.logger.log({ action: 'shift.updated', shiftId: id, userId: user.userId });
       if (previousAssignment?.guardId && previousAssignment.guardId !== input.guardId)
         await this.notifyGuard(

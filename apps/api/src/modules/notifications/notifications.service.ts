@@ -50,6 +50,7 @@ export class NotificationsService implements NotificationsPort {
   async notifySiteStaff(input: {
     companyId: string;
     siteId: string;
+    excludeUserIds?: string[];
     kind: NotificationKind;
     payload: NotificationPayload;
     priority?: 'normal' | 'high';
@@ -61,6 +62,7 @@ export class NotificationsService implements NotificationsPort {
       where: {
         companyId: input.companyId,
         status: 'active',
+        ...(input.excludeUserIds?.length ? { id: { notIn: input.excludeUserIds } } : {}),
         OR: [
           { role: 'admin' },
           {

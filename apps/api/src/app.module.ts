@@ -1,3 +1,5 @@
+import { CoverageNoticesModule } from './modules/coverage-notices/coverage-notices.module';
+import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -60,6 +62,8 @@ import { ReportsModule } from './modules/reports/reports.module';
     NoticesModule,
     CompanyModule,
     ReportsModule,
+    CoverageNoticesModule,
+    NotificationPreferencesModule,
   ],
 })
 export class AppModule {}

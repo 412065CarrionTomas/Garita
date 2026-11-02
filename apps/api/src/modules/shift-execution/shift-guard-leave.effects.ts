@@ -1,3 +1,4 @@
+import { CoverageNoticesService } from '../coverage-notices/coverage-notices.service';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { buildShiftNotification } from '@garita/shared';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
@@ -17,6 +18,17 @@ export class ShiftGuardLeaveEffects extends NoopShiftExecutionEffects {
     @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
   ) {
     super();
+  }
+
+  @Inject(CoverageNoticesService) private readonly coverage!: CoverageNoticesService;
+
+  override async notifyEarlyClose(
+    shiftId?: string,
+    guardId?: string,
+    reason: string | null = null,
+  ): Promise<void> {
+    if (!shiftId || !guardId) return;
+    await this.coverage.notifyEarlyClose(shiftId, guardId, reason);
   }
 
   override async offerCoverage(shiftId?: string): Promise<void> {

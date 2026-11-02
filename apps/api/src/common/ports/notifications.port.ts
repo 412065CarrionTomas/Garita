@@ -8,6 +8,7 @@ export interface NotificationsPort {
   notifySiteStaff(input: {
     companyId: string;
     siteId: string;
+    excludeUserIds?: string[];
     kind: NotificationKind;
     payload: NotificationPayload;
     priority?: NotificationPriority;
@@ -28,7 +29,7 @@ export const NOTIFICATIONS_PORT = Symbol('NOTIFICATIONS_PORT');
 export class NoopNotifications implements NotificationsPort {
   private readonly logger = new Logger(NoopNotifications.name);
 
-  notifySiteStaff(input: { kind: NotificationKind }): Promise<void> {
+  notifySiteStaff(input: { kind: NotificationKind; excludeUserIds?: string[] }): Promise<void> {
     this.logger.debug(`notifySiteStaff ${input.kind}`);
     return Promise.resolve();
   }
