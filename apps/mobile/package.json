@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "App de Garita para vigiladores (Android e iOS)",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "scripts": {
     "dev": "expo start",
     "start": "expo start",

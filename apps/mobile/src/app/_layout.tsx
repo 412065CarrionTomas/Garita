@@ -1,4 +1,3 @@
-import '@/features/panico/bloqueado/register';
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
