@@ -10,10 +10,12 @@ import {
   handleLockedPanicResponse,
   NOTIFICATION_ID,
   reconcilePanicNotification,
+  subscribeLockedPanicResponses,
 } from './notification';
 
 jest.mock('expo-task-manager', () => ({ defineTask: jest.fn() }));
 jest.mock('expo-notifications', () => ({
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
   registerTaskAsync: jest.fn(async () => null),
   getPermissionsAsync: jest.fn(async () => ({ granted: true })),
   getPresentedNotificationsAsync: jest.fn(async () => []),
@@ -162,9 +164,55 @@ it('is a complete no-op on iOS', async () => {
   await reconcilePanicNotification();
   await handleLockedPanicResponse(response('panic'));
   await dismissPanicNotification();
+  subscribeLockedPanicResponses()();
+  expect(Notifications.addNotificationResponseReceivedListener).not.toHaveBeenCalled();
   expect(createDefaultFieldRepository).not.toHaveBeenCalled();
   expect(AsyncStorage.getItem).not.toHaveBeenCalled();
   expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+});
+
+it('routes foreground actions once, deduplicates the background copy, and removes the listener', async () => {
+  await reconcilePanicNotification();
+  const stop = subscribeLockedPanicResponses();
+  const listener = jest.mocked(Notifications.addNotificationResponseReceivedListener).mock
+    .calls[0]?.[0];
+  expect(listener).toBeDefined();
+  const first = {
+    ...response('panic'),
+    notification: { ...response('panic').notification, date: 10001 },
+  };
+  listener?.(first as never);
+  await expect(handleLockedPanicResponse(first)).resolves.toBe(5000);
+  const second = {
+    ...response('confirm'),
+    notification: { ...response('confirm').notification, date: 10002 },
+  };
+  listener?.(second as never);
+  await expect(handleLockedPanicResponse(second)).resolves.toBe(10000);
+  expect(triggerPanic).toHaveBeenCalledTimes(1);
+  expect(JSON.parse((await AsyncStorage.getItem('garita:locked-panic')) ?? '{}')).toEqual({
+    shiftId: 'shift-1',
+    armedUntil: 0,
+  });
+  stop();
+  const subscription = jest.mocked(Notifications.addNotificationResponseReceivedListener).mock
+    .results[0]?.value;
+  expect(subscription.remove).toHaveBeenCalledTimes(1);
+});
+
+it('ignores shift pushes, default taps and malformed payloads in the foreground listener', () => {
+  const stop = subscribeLockedPanicResponses();
+  const listener = jest.mocked(Notifications.addNotificationResponseReceivedListener).mock
+    .calls[0]?.[0];
+  listener?.({
+    actionIdentifier: 'panic',
+    notification: { request: { identifier: 'shift-push' } },
+  } as never);
+  listener?.(response('default') as never);
+  listener?.({} as never);
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+  expect(triggerPanic).not.toHaveBeenCalled();
+  stop();
 });
 
 it('registers the task outside components', () => {

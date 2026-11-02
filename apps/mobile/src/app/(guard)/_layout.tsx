@@ -10,6 +10,7 @@ import { AppState, View } from 'react-native';
 import {
   reconcilePanicNotification,
   recordLockedPanicFailure,
+  subscribeLockedPanicResponses,
 } from '@/features/panico/bloqueado/notification';
 import { PanicOverlay } from '@/features/panico/panic-overlay';
 export default function GuardLayout() {
@@ -22,6 +23,7 @@ export default function GuardLayout() {
   const [panicShiftId, setPanicShiftId] = useState<string | null>(null);
   useEffect(() => {
     if (loading || user?.role !== 'guard') return;
+    const unsubscribeResponses = subscribeLockedPanicResponses();
     let mounted = true;
     const refresh = async () => {
       const saved = await getRunningPanicShift(await createDefaultFieldRepository());
@@ -42,6 +44,7 @@ export default function GuardLayout() {
       mounted = false;
       unsubscribe();
       appState.remove();
+      unsubscribeResponses();
     };
   }, [loading, user?.role]);
   useEffect(() => {

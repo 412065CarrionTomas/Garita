@@ -26,6 +26,8 @@ Después de un inicio exitoso se reconcilia la notificación. Se elimina despué
 
 Solo consulta el permiso existente; no solicita uno nuevo ni modifica el canal `turnos` o la navegación de pushes. Si está denegado, elimina el acceso y la pantalla del turno presenta discretamente **Activá las notificaciones para usar el pánico con el celular bloqueado**, una vez por turno, con un marcador persistido. Al concederlo en Ajustes y volver a la app se reconcilia otra vez.
 
+Mientras está activo el layout de una sesión de vigilador, `subscribeLockedPanicResponses` recibe las acciones también mediante `addNotificationResponseReceivedListener`, que es la vía de Expo con la app en primer plano. Se da de baja al desmontar el layout o perder esa sesión. Solo acepta esta notificación y las acciones `panic`/`confirm`; los toques normales y las push de `turnos` conservan su navegación. El handler compartido serializa ambas vías y deduplica por acción y fecha nativa de la notificación, guardando únicamente las 32 respuestas recientes en memoria. Así una misma respuesta recibida por listener y tarea no rearma ni dispara dos veces durante una transición de estado de la app.
+
 ## Límites conocidos y validación
 
 Se necesita una build de desarrollo o producción con el módulo instalado; Expo Go no acredita ejecución en segundo plano. La muerte forzada, las restricciones del fabricante, Doze, el ahorro de batería y la configuración de notificaciones de pantalla bloqueada pueden impedir acceso o ejecución. `sticky` expresa la intención de mantener la notificación; el sistema conserva el control sobre su presentación. La reapertura reconcilia la presencia. Los timers JS no garantizan ejecución cuando Android suspende el proceso.
@@ -49,6 +51,7 @@ El usuario registra resultados reales en Jira. No se enviaron alertas ni SMS rea
 - [ ] Cerrar sesión quita el acceso; una acción vieja no envía.
 - [ ] Reinicio del proceso entre toques conserva el plazo y valida turno.
 - [ ] App cerrada por el sistema, ahorro de batería y al menos dos fabricantes.
+- [ ] Con la app en primer plano, abrir la cortina y usar las dos acciones; repetir cambiando entre primer y segundo plano sin duplicar activaciones.
 - [ ] Sin internet con SEND_SMS y sin SEND_SMS; comprobar estados honestos y reintento posterior por internet.
 - [ ] Permiso denegado: aviso una vez por turno; habilitar en Ajustes y volver.
 - [ ] TalkBack, privacidad en pantalla bloqueada y configuración del sistema en claro/oscuro.

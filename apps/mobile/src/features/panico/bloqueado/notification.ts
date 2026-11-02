@@ -17,8 +17,12 @@ const stateSchema = z.object({
 });
 const responseSchema = z.object({
   actionIdentifier: z.enum(['panic', 'confirm']),
-  notification: z.object({ request: z.object({ identifier: z.literal(NOTIFICATION_ID) }) }),
+  notification: z.object({
+    date: z.number().finite().optional(),
+    request: z.object({ identifier: z.literal(NOTIFICATION_ID) }),
+  }),
 });
+const handledResponses = new Map<string, number>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pending: Promise<unknown> = Promise.resolve();
 
@@ -132,11 +136,28 @@ export function dismissPanicNotification(): Promise<void> {
   return serialize(dismiss);
 }
 
+export function subscribeLockedPanicResponses(): () => void {
+  if (Platform.OS !== 'android') return () => undefined;
+  const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    if (!responseSchema.safeParse(response).success) return;
+    void handleLockedPanicResponse(response).catch(recordLockedPanicFailure);
+  });
+  return () => subscription.remove();
+}
+
 export function handleLockedPanicResponse(input: unknown): Promise<number> {
   if (Platform.OS !== 'android') return Promise.resolve(0);
   const response = responseSchema.safeParse(input);
   if (!response.success) return Promise.resolve(0);
+  const responseKey =
+    response.data.notification.date === undefined
+      ? null
+      : `${response.data.actionIdentifier}:${response.data.notification.date}`;
   return serialize(async () => {
+    if (responseKey && handledResponses.has(responseKey)) {
+      // A background copy still needs to keep the transport alive if the foreground listener won.
+      return Math.max(0, (handledResponses.get(responseKey) ?? 0) - Date.now());
+    }
     const state = await readState();
     const shift = await getRunningPanicShift(await createDefaultFieldRepository());
     if (!shift || !state || state.shiftId !== shift.shift.id) {
@@ -148,6 +169,17 @@ export function handleLockedPanicResponse(input: unknown): Promise<number> {
       STATE_KEY,
       JSON.stringify({ shiftId: shift.shift.id, armedUntil: next.armedUntil }),
     );
+    if (responseKey) {
+      handledResponses.set(
+        responseKey,
+        next.fire ? Date.now() + (PANIC_SMS_FALLBACK_SECONDS + 2) * 1000 : next.armedUntil,
+      );
+      // Bound the history while deduplicating native responses shared by listener and background task.
+      if (handledResponses.size > 32) {
+        const oldest = handledResponses.keys().next().value;
+        if (oldest) handledResponses.delete(oldest);
+      }
+    }
     if (next.fire) {
       try {
         // Persists and dispatches through HU-21; its transport never blocks this on network acknowledgement.
