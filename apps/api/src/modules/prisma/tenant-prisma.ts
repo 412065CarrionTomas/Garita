@@ -32,6 +32,7 @@ export const COMPANY_ID_MODELS = [
   'RoundReviewDecision',
   'Notice',
   'NoticeView',
+  'NotificationPreference',
   'NotificationDevice',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */

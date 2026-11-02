@@ -40,6 +40,17 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('RoundWindowState');
     expect(COMPANY_ID_MODELS).toContain('RoundReviewDecision');
     expect(COMPANY_ID_MODELS).toContain('Notice');
+    expect(COMPANY_ID_MODELS).toContain('NotificationPreference');
+    expect(
+      scopeArgs('NotificationPreference', 'findMany', { where: { userId: 'me' } }, 'norte'),
+    ).toEqual({ where: { userId: 'me', companyId: 'norte' } });
+    expect(
+      addSiteAssignmentFilter(
+        'NotificationPreference',
+        { where: { userId: 'me' } },
+        { userId: 'me', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({ where: { userId: 'me' } });
     expect(scopeArgs('Checkpoint', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
       where: { status: 'active', companyId: 'norte' },
     });

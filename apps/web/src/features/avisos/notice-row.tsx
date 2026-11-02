@@ -16,7 +16,11 @@ const detailsSchema = z.object({
   severityLevel: z.enum(['grave', 'media', 'leve']).nullable().optional(),
   occurredAt: z.iso.datetime().optional(),
   closedAt: z.iso.datetime().optional(),
-  reason: z.string().optional(),
+  reason: z.string().nullable().optional(),
+  closedByName: z.string().nullable().optional(),
+  receivedAt: z.iso.datetime().optional(),
+  startsAt: z.iso.datetime().optional(),
+  late: z.boolean().optional(),
 });
 const date = (value: string) => new Date(value).toLocaleString('es-AR');
 
@@ -109,6 +113,24 @@ export function NoticeRow({
           <div id={`notice-${notice.id}`} className="space-y-3">
             {details?.severityLevel && <p>Gravedad: {details.severityLevel}</p>}
             {details?.reason && <p>Motivo: {details.reason}</p>}
+            {details?.closedByName && <p>Cerrado por: {details.closedByName}</p>}
+            {notice.kind === 'shift_not_started' && (
+              <p>Inicio programado: {date(details?.startsAt ?? notice.shift.startsAt)}</p>
+            )}
+            {details?.late && details.closedAt && details.receivedAt && (
+              <p className="tabular-nums">
+                Cerrado a las{' '}
+                {new Date(details.closedAt).toLocaleTimeString('es-AR', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                , recibido a las{' '}
+                {new Date(details.receivedAt).toLocaleTimeString('es-AR', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <Button asChild variant="outline">
                 <Link to={`/supervision/turnos/${encodeURIComponent(notice.shiftId)}`}>
