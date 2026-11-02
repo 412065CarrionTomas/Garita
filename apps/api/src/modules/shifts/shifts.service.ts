@@ -407,16 +407,19 @@ export class ShiftsService {
       at: now.toISOString(),
       assignmentId: assignment.id,
     });
+    const hadActiveGuard = Boolean(
+      current.guardId && current.guard?.status !== 'invitation_pending',
+    );
     try {
       await this.notices.resolve({
         companyId: user.companyId,
         kind: covering
           ? 'shift_closed_early'
-          : current.guardId
+          : hadActiveGuard
             ? 'shift_not_started'
             : 'shift_without_guard',
-        subjectId: covering || current.guardId ? current.id : id,
-        resolution: covering ? 'covered' : current.guardId ? 'reassigned' : 'guard_assigned',
+        subjectId: covering || hadActiveGuard ? current.id : id,
+        resolution: covering ? 'covered' : hadActiveGuard ? 'reassigned' : 'guard_assigned',
       });
     } catch (error) {
       this.logger.error({ action: 'shift.notice_resolution_failed', shiftId: id, error });

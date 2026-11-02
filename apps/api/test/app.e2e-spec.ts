@@ -291,55 +291,65 @@ describe('Aplicación (e2e)', () => {
     }
   });
 
-  it.each(['unassigned', 'invitation_pending'])(
-    'HU-35 CA8: editar %s con un vigilador activo resuelve el aviso',
-    async (mode) => {
-      const prisma = app.get(PrismaService).systemPrisma;
-      const savedNow = testNow;
-      const http = request(app.getHttpServer());
-      const notifications = jest
-        .spyOn(app.get(NotificationsService), 'notifySiteStaff')
-        .mockResolvedValue();
-      const actor = await prisma.user.findUniqueOrThrow({
-        where: { firebaseUid: 'seed-norte-admin' },
-      });
-      const pending = await prisma.user.findUniqueOrThrow({
-        where: { firebaseUid: 'seed-norte-pending' },
-      });
-      const round = await prisma.round.findUniqueOrThrow({
-        where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
-      });
-      const startsAt = new Date('2036-01-01T22:00:00Z'),
-        endsAt = new Date('2036-01-02T06:00:00Z');
-      const shift = await prisma.shift.create({
-        data: {
-          companyId: 'norte-company',
-          siteId: northAssignedSiteId,
-          startsAt,
-          endsAt,
-          serviceDate: new Date('2036-01-01'),
-          status: mode === 'unassigned' ? 'unassigned' : 'scheduled',
-          createdById: actor.id,
-          assignments: {
-            create: {
-              guardId: mode === 'unassigned' ? null : pending.id,
-              startsAt,
-              endsAt,
-              assignedById: actor.id,
-            },
+  it.each([
+    ['unassigned', 'edit'],
+    ['invitation_pending', 'edit'],
+    ['unassigned', 'reassign'],
+    ['invitation_pending', 'reassign'],
+  ])('HU-35 CA8: %s por %s con un vigilador activo resuelve el aviso', async (mode, action) => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const savedNow = testNow;
+    const http = request(app.getHttpServer());
+    const notifications = jest
+      .spyOn(app.get(NotificationsService), 'notifySiteStaff')
+      .mockResolvedValue();
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    const pending = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-pending' },
+    });
+    const round = await prisma.round.findUniqueOrThrow({
+      where: { siteId_name: { siteId: northAssignedSiteId, name: 'Perimetral' } },
+    });
+    const startsAt = new Date('2036-01-01T22:00:00Z'),
+      endsAt = new Date('2036-01-02T06:00:00Z');
+    const shift = await prisma.shift.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        startsAt,
+        endsAt,
+        serviceDate: new Date('2036-01-01'),
+        status: mode === 'unassigned' ? 'unassigned' : 'scheduled',
+        createdById: actor.id,
+        assignments: {
+          create: {
+            guardId: mode === 'unassigned' ? null : pending.id,
+            startsAt,
+            endsAt,
+            assignedById: actor.id,
           },
         },
+      },
+    });
+    try {
+      const coverage = app.get(CoverageNoticesService);
+      testNow = new Date('2036-01-01T19:30:00Z');
+      await coverage.sweep();
+      const notice = await prisma.notice.findFirstOrThrow({
+        where: { shiftId: shift.id, kind: 'shift_without_guard' },
       });
-      try {
-        const coverage = app.get(CoverageNoticesService);
-        testNow = new Date('2036-01-01T19:30:00Z');
-        await coverage.sweep();
-        const notice = await prisma.notice.findFirstOrThrow({
-          where: { shiftId: shift.id, kind: 'shift_without_guard' },
-        });
-        expect(
-          await prisma.notice.count({ where: { shiftId: shift.id, kind: 'shift_not_started' } }),
-        ).toBe(0);
+      expect(
+        await prisma.notice.count({ where: { shiftId: shift.id, kind: 'shift_not_started' } }),
+      ).toBe(0);
+      if (action === 'reassign') {
+        await http
+          .post(`/api/v1/turnos/${shift.id}/reasignar`)
+          .set('Authorization', 'Bearer token-supervisor')
+          .send({ guardId: northGuardId })
+          .expect(201);
+      } else {
         await http
           .patch(`/api/v1/turnos/${shift.id}`)
           .set('Authorization', 'Bearer token-supervisor')
@@ -351,18 +361,18 @@ describe('Aplicación (e2e)', () => {
             roundIds: [round.id],
           })
           .expect(200);
-        const result = await http
-          .get(`/api/v1/avisos/${notice.id}`)
-          .set('Authorization', 'Bearer token-supervisor')
-          .expect(200);
-        expect(result.body).toMatchObject({ status: 'resolved', resolution: 'guard_assigned' });
-      } finally {
-        notifications.mockRestore();
-        testNow = savedNow;
-        await prisma.shift.delete({ where: { id: shift.id } });
       }
-    },
-  );
+      const result = await http
+        .get(`/api/v1/avisos/${notice.id}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(200);
+      expect(result.body).toMatchObject({ status: 'resolved', resolution: 'guard_assigned' });
+    } finally {
+      notifications.mockRestore();
+      testNow = savedNow;
+      await prisma.shift.delete({ where: { id: shift.id } });
+    }
+  });
 
   it('HU-35 CA1/CA2: barrido idempotente, push personal y comienzo tardío por HTTP', async () => {
     const prisma = app.get(PrismaService).systemPrisma;
