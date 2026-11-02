@@ -99,21 +99,31 @@ export async function recordLockedPanicFailure(): Promise<void> {
 // TODO(HU-22-iOS): connect the HU-36 Live Activity extension, App Group and shift token.
 export function reconcilePanicNotification(): Promise<void> {
   if (Platform.OS !== 'android') return Promise.resolve();
+  return serialize(reconcile);
+}
+
+async function reconcile(): Promise<void> {
+  const shift = await getRunningPanicShift(await createDefaultFieldRepository());
+  const state = await readState();
+  if (!shift || !(await Notifications.getPermissionsAsync()).granted) return dismiss();
+  const armedUntil = state?.shiftId === shift.shift.id ? state.armedUntil : 0;
+  const next = panicGesture('timeout', Date.now(), armedUntil);
+  await AsyncStorage.setItem(
+    STATE_KEY,
+    JSON.stringify({ shiftId: shift.shift.id, armedUntil: next.armedUntil }),
+  );
+  const visible = await Notifications.getPresentedNotificationsAsync();
+  const existing = visible.find((item) => item.request.identifier === NOTIFICATION_ID);
+  const category = next.armedUntil ? 'panic-confirm' : 'panic-ready';
+  if (!existing || existing.request.content.categoryIdentifier !== category || next.armedUntil)
+    await publish(next.armedUntil);
+}
+
+export function expireLockedPanicArm(): Promise<void> {
+  if (Platform.OS !== 'android') return Promise.resolve();
   return serialize(async () => {
-    const shift = await getRunningPanicShift(await createDefaultFieldRepository());
     const state = await readState();
-    if (!shift || !(await Notifications.getPermissionsAsync()).granted) return dismiss();
-    const armedUntil = state?.shiftId === shift.shift.id ? state.armedUntil : 0;
-    const next = panicGesture('timeout', Date.now(), armedUntil);
-    await AsyncStorage.setItem(
-      STATE_KEY,
-      JSON.stringify({ shiftId: shift.shift.id, armedUntil: next.armedUntil }),
-    );
-    const visible = await Notifications.getPresentedNotificationsAsync();
-    const existing = visible.find((item) => item.request.identifier === NOTIFICATION_ID);
-    const category = next.armedUntil ? 'panic-confirm' : 'panic-ready';
-    if (!existing || existing.request.content.categoryIdentifier !== category || next.armedUntil)
-      await publish(next.armedUntil);
+    if (state && state.armedUntil > 0 && state.armedUntil <= Date.now()) await reconcile();
   });
 }
 
