@@ -84,14 +84,14 @@ it('publishes a silent, ongoing notification with accessible actions and no site
 
 it('two taps dispatch once; confirmation consumes the persisted arm', async () => {
   await reconcilePanicNotification();
-  await handleLockedPanicResponse(response('panic'));
+  await expect(handleLockedPanicResponse(response('panic'))).resolves.toBe(5000);
   expect(triggerPanic).not.toHaveBeenCalled();
   expect(Notifications.setNotificationCategoryAsync).toHaveBeenLastCalledWith(
     'panic-confirm',
     expect.arrayContaining([expect.objectContaining({ buttonTitle: 'Confirmar pánico' })]),
   );
   jest.setSystemTime(14900);
-  await handleLockedPanicResponse(response('confirm'));
+  await expect(handleLockedPanicResponse(response('confirm'))).resolves.toBe(10000);
   await handleLockedPanicResponse(response('confirm'));
   expect(triggerPanic).toHaveBeenCalledTimes(1);
 });

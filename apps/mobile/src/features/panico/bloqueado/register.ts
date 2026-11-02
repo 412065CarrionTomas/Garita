@@ -8,7 +8,9 @@ import { handleLockedPanicResponse, recordLockedPanicFailure } from './notificat
 if (Platform.OS === 'android') {
   const taskName = 'garita-locked-panic';
   TaskManager.defineTask<Notifications.NotificationTaskPayload>(taskName, async ({ data }) => {
-    await handleLockedPanicResponse(data).catch(recordLockedPanicFailure);
+    const keepAliveMs = await handleLockedPanicResponse(data).catch(recordLockedPanicFailure);
+    // SDK 57 TaskService pauses timers when the last task resolves; do not await network confirmation.
+    if (keepAliveMs) await new Promise<void>((resolve) => setTimeout(resolve, keepAliveMs));
   });
   void Notifications.registerTaskAsync(taskName).catch(recordLockedPanicFailure);
 }

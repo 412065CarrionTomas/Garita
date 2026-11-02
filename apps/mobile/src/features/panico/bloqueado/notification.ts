@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { z } from 'zod';
+import { PANIC_SMS_FALLBACK_SECONDS } from '@garita/shared';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { triggerPanic } from '../actions';
 import { getRunningPanicShift } from '../running-shift';
@@ -21,7 +22,7 @@ const responseSchema = z.object({
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pending: Promise<unknown> = Promise.resolve();
 
-function serialize(work: () => Promise<void>): Promise<void> {
+function serialize<T>(work: () => Promise<T>): Promise<T> {
   const next = pending.then(work);
   pending = next.catch(() => undefined);
   return next;
@@ -121,14 +122,17 @@ export function dismissPanicNotification(): Promise<void> {
   return serialize(dismiss);
 }
 
-export function handleLockedPanicResponse(input: unknown): Promise<void> {
-  if (Platform.OS !== 'android') return Promise.resolve();
+export function handleLockedPanicResponse(input: unknown): Promise<number> {
+  if (Platform.OS !== 'android') return Promise.resolve(0);
   const response = responseSchema.safeParse(input);
-  if (!response.success) return Promise.resolve();
+  if (!response.success) return Promise.resolve(0);
   return serialize(async () => {
     const state = await readState();
     const shift = await getRunningPanicShift(await createDefaultFieldRepository());
-    if (!shift || !state || state.shiftId !== shift.shift.id) return dismiss();
+    if (!shift || !state || state.shiftId !== shift.shift.id) {
+      await dismiss();
+      return 0;
+    }
     const next = panicGesture(response.data.actionIdentifier, Date.now(), state.armedUntil);
     await AsyncStorage.setItem(
       STATE_KEY,
@@ -142,7 +146,14 @@ export function handleLockedPanicResponse(input: unknown): Promise<void> {
         await recordLockedPanicFailure();
       }
     }
-    if (!(await getRunningPanicShift(await createDefaultFieldRepository()))) return dismiss();
+    if (!(await getRunningPanicShift(await createDefaultFieldRepository()))) {
+      await dismiss();
+      return 0;
+    }
     await publish(next.armedUntil);
+    // Keep TaskManager's headless context alive for the 8 s fallback plus the SMS dispatch budget.
+    return next.fire
+      ? (PANIC_SMS_FALLBACK_SECONDS + 2) * 1000
+      : Math.max(0, next.armedUntil - Date.now());
   });
 }
