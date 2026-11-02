@@ -11,7 +11,7 @@ const preferencesBody = {
   additionalProperties: false,
   properties: { shift_not_started: { type: 'boolean' as const, default: true } },
 };
-@ApiTags('Preferencias de notificaci�n')
+@ApiTags('Preferencias de notificación')
 @ApiBearerAuth()
 @Roles('admin', 'supervisor')
 @Controller('mis-preferencias/notificaciones')
@@ -24,7 +24,7 @@ export class NotificationPreferencesController {
     return this.preferences.get(user);
   }
   @Put()
-  @ApiOperation({ summary: 'Guarda �nicamente las preferencias del usuario autenticado' })
+  @ApiOperation({ summary: 'Guarda únicamente las preferencias del usuario autenticado' })
   @ApiBody({ schema: preferencesBody })
   @ApiOkResponse({ schema: preferencesBody })
   put(@Body() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
