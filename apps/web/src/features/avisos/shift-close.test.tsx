@@ -66,7 +66,9 @@ it.each([
         Promise.resolve(
           (path.startsWith('/avisos')
             ? { items: notices, openCount: 1, unseenOpenCount: 1 }
-            : detail) as never,
+            : path === '/predios'
+              ? []
+              : detail) as never,
         ),
       );
     jest.mocked(apiPost).mockImplementation(() => {

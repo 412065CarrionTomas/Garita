@@ -329,7 +329,9 @@ it('muestra la advertencia del servidor después de confirmar y evita otro enví
 
 it('actualiza el punto y la ventana al llegar un registro sin recargar la página', async () => {
   let current = detail;
-  jest.mocked(apiGet).mockImplementation(() => Promise.resolve(current as never));
+  jest
+    .mocked(apiGet)
+    .mockImplementation((path) => Promise.resolve((path === '/predios' ? [] : current) as never));
   function LiveDetail() {
     useRealtime(true);
     return <ShiftDetailPage />;
@@ -395,7 +397,9 @@ it('filtra por rondas tardías y resume las ventanas en casilleros', async () =>
 });
 
 it('arma la foja: camino, tabla de puntos con hora registrada y faltante tras el cierre', async () => {
-  jest.mocked(apiGet).mockResolvedValue(detail);
+  jest
+    .mocked(apiGet)
+    .mockImplementation((path) => Promise.resolve((path === '/predios' ? [] : detail) as never));
   renderWithQueryClient(
     <MemoryRouter>
       <ShiftDetailPage />

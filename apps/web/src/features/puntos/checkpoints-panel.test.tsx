@@ -10,6 +10,7 @@ jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
 // Mapa caído: el formulario muestra la carga manual de coordenadas.
 jest.mock('@/features/mapa/site-location-map', () => ({
   SiteMapLocation: ({ unavailable }: { unavailable: ReactNode }) => unavailable,
+  ClientSitesMap: () => null,
 }));
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn(() => Promise.resolve([])),
