@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { Marker as MapMarker, useMap } from 'react-map-gl/maplibre';
 import { env } from '@/config/env';
+import { AddressSearch } from './address-search';
 import { BaseMap } from './base-map';
 import { mapStyle, useDark, useMapStyle } from './map-style';
 
@@ -38,6 +39,7 @@ export function SiteMapLocation({ unavailable, ...props }: Props & { unavailable
   if (isError) return unavailable;
   return (
     <section aria-label="Ubicación del predio" className="min-w-0 space-y-4">
+      <AddressSearch onSelect={props.onChange} />
       <p className="text-sm text-muted-foreground">
         Seleccioná la ubicación arrastrando el marcador.
       </p>
