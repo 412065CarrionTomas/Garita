@@ -106,17 +106,18 @@ describe('<ShiftScreen />', () => {
       await Promise.resolve();
     });
     expect(await screen.findByText('Predio A')).toBeOnTheScreen();
-    expect(screen.getByText('Ventana Ventana nocturna')).toBeOnTheScreen();
     expect(
-      screen
-        .getAllByText(/Acceso|Portón/)
-        .map((item) => item.props.children.join?.('') ?? item.props.children),
-    ).toEqual(['• Acceso', '• Portón']);
+      screen.getByText(/^0 de 2 puntos · Ventana [0-9]{2}:[0-9]{2}–[0-9]{2}:[0-9]{2}$/),
+    ).toBeOnTheScreen();
+    expect(
+      screen.getAllByLabelText(/^Punto [0-9]/).map((item) => item.props.accessibilityLabel),
+    ).toEqual(['Punto 1, Acceso, Ahora', 'Punto 2, Portón, Pendiente']);
     expect(apiGet).not.toHaveBeenCalled();
-    expect(screen.getByText('En curso')).toBeOnTheScreen();
-    expect(screen.getAllByText('Pendiente')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Escanear código QR' })).toHaveStyle({
-      backgroundColor: colors.light.signal,
+    expect(screen.getAllByText('En curso').length).toBeGreaterThan(0);
+    expect(screen.getByText('Cierre de turno')).toBeOnTheScreen();
+    expect(screen.getByText('0 de 1 ventanas completas')).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Escanear Acceso' })).toHaveStyle({
+      backgroundColor: colors.light.primary,
     });
     expect(screen.queryByRole('button', { name: 'Iniciar turno' })).toBeNull();
   });
@@ -139,7 +140,7 @@ describe('<ShiftScreen />', () => {
       expect(screen.getByText('Turno cerrado, pendiente de envío.')).toBeOnTheScreen(),
     );
     expect(screen.queryByRole('button', { name: 'Cerrar turno' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Escanear código QR' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Escanear Acceso' })).toBeNull();
     expect(screen.queryByText('En curso')).toBeNull();
   });
 
@@ -148,7 +149,7 @@ describe('<ShiftScreen />', () => {
       await render(<ShiftScreen shiftId="shift-1" />);
       await Promise.resolve();
     });
-    const scanButton = screen.getByRole('button', { name: 'Escanear código QR' });
+    const scanButton = screen.getByRole('button', { name: 'Escanear Acceso' });
     expect(scanButton).toBeOnTheScreen();
     await act(async () => {
       scanButton.props.onClick?.() ?? scanButton.props.onPress?.();
@@ -180,8 +181,9 @@ describe('<ShiftScreen />', () => {
       await Promise.resolve();
     });
     // Acceso is recorded, only Portón remains pending!
-    expect(screen.queryByText('• Acceso')).toBeNull();
-    expect(screen.getByText('• Portón')).toBeOnTheScreen();
+    expect(screen.getByLabelText(/^Punto 1, Acceso, [0-9]{2}:[0-9]{2}$/)).toBeOnTheScreen();
+    expect(screen.getByLabelText('Punto 2, Portón, Ahora')).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Escanear Portón' })).toBeOnTheScreen();
   });
 
   it('displays alert for server-rejected records', async () => {
@@ -259,9 +261,9 @@ describe('<ShiftScreen />', () => {
     ]);
     await render(<ShiftScreen shiftId="shift-1" />);
     expect(await screen.findByRole('button', { name: 'Iniciar turno' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Escanear código QR' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Escanear Acceso' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Iniciar turno' })).toHaveStyle({
-      backgroundColor: colors.light.signal,
+      backgroundColor: colors.light.primary,
     });
     expect(screen.getAllByRole('button')).toHaveLength(1);
   });
@@ -290,11 +292,11 @@ describe('<ShiftScreen />', () => {
     ] as const) {
       await fireEvent.press(screen.getByLabelText(label));
       expect(screen.getByText('Predio A')).toHaveStyle({ color: palette.foreground });
-      expect(screen.getByText('• Acceso')).toHaveStyle({ color: palette.foreground });
+      expect(screen.getByText('Acceso')).toHaveStyle({ color: palette.foreground });
       expect(screen.getByText('Todavía no se envió nada')).toHaveStyle({
         color: palette.mutedForeground,
       });
-      expect(screen.getByText('En curso')).toHaveStyle({ color: palette.signalForeground });
+      expect(screen.getAllByText('En curso')[0]).toHaveStyle({ color: palette.primaryForeground });
     }
   });
 });

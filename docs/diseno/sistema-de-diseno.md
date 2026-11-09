@@ -1,133 +1,342 @@
-# Sistema de diseño de Garita
+---
+name: Garita
+description: 'Foja: papel frío, tinta azul y un único sello rojo. Cada registro lleva su hora.'
+colors:
+  paper: '#F4F6F8'
+  sheet: '#FFFFFF'
+  sheet-tint: '#ECEFF3'
+  ink: '#1B2540'
+  ink-muted: '#56607A'
+  rule: '#D7DCE5'
+  rule-strong: '#6F7891'
+  bar: '#1B2540'
+  bar-ink: '#FFFFFF'
+  bar-muted: '#B9C1D6'
+  seal: '#A61E22'
+  late-amber: '#8A5A00'
+  ok-green: '#1E6B3C'
+  info-blue: '#1B5BB0'
+  paper-dark: '#0F1626'
+  sheet-dark: '#161F34'
+  sheet-tint-dark: '#1E2944'
+  ink-dark: '#E6EAF4'
+  ink-muted-dark: '#A3ACC4'
+  rule-dark: '#2A3552'
+  rule-strong-dark: '#7A84A3'
+  bar-dark: '#0A101D'
+  bar-ink-dark: '#E6EAF4'
+  bar-muted-dark: '#A3ACC4'
+  seal-dark: '#FF8A8D'
+  late-amber-dark: '#F0B54A'
+  ok-green-dark: '#6FD39A'
+  info-blue-dark: '#8DB8FF'
+typography:
+  display:
+    fontFamily: 'Barlow Condensed, Arial Narrow, sans-serif'
+    fontSize: '32px'
+    fontWeight: 600
+    lineHeight: 1
+    letterSpacing: '0.04em'
+  headline:
+    fontFamily: 'Barlow Condensed, Arial Narrow, sans-serif'
+    fontSize: '26px'
+    fontWeight: 600
+    lineHeight: 1.1
+    letterSpacing: '0.04em'
+  title:
+    fontFamily: 'Public Sans, system-ui, sans-serif'
+    fontSize: '15px'
+    fontWeight: 600
+    lineHeight: 1.25
+  body:
+    fontFamily: 'Public Sans, system-ui, sans-serif'
+    fontSize: '14px'
+    fontWeight: 400
+    lineHeight: 1.45
+  label:
+    fontFamily: 'Barlow Condensed, Arial Narrow, sans-serif'
+    fontSize: '12px'
+    fontWeight: 600
+    lineHeight: 1.3
+    letterSpacing: '0.1em'
+  stamp:
+    fontFamily: 'Barlow Condensed, Arial Narrow, sans-serif'
+    fontSize: '13px'
+    fontWeight: 600
+    lineHeight: 1.35
+    letterSpacing: '0.07em'
+  numeral:
+    fontFamily: 'Barlow Condensed, Arial Narrow, sans-serif'
+    fontSize: '18px'
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: '0.02em'
+rounded:
+  hairline: '1px'
+  sm: '2px'
+  md: '3px'
+  lg: '4px'
+spacing:
+  xs: '4px'
+  sm: '8px'
+  md: '12px'
+  lg: '16px'
+  xl: '20px'
+  '2xl': '24px'
+  '3xl': '32px'
+components:
+  nav-bar:
+    backgroundColor: '{colors.bar}'
+    textColor: '{colors.bar-ink}'
+    height: '52px'
+    padding: '0 20px'
+  button-primary:
+    backgroundColor: '{colors.ink}'
+    textColor: '{colors.paper}'
+    typography: '{typography.title}'
+    rounded: '{rounded.md}'
+    height: '36px'
+    padding: '0 14px'
+  button-secondary:
+    backgroundColor: '{colors.sheet}'
+    textColor: '{colors.ink}'
+    rounded: '{rounded.md}'
+    height: '36px'
+    padding: '0 14px'
+  chip:
+    backgroundColor: '{colors.sheet}'
+    textColor: '{colors.ink}'
+    rounded: '{rounded.md}'
+    padding: '5px 14px'
+  chip-selected:
+    backgroundColor: '{colors.ink}'
+    textColor: '{colors.paper}'
+  stamp:
+    backgroundColor: '{colors.sheet}'
+    textColor: '{colors.ink}'
+    typography: '{typography.stamp}'
+    rounded: '{rounded.hairline}'
+    padding: '2px 9px'
+  stamp-late:
+    textColor: '{colors.late-amber}'
+  stamp-seal:
+    textColor: '{colors.seal}'
+  stamp-now:
+    backgroundColor: '{colors.ink}'
+    textColor: '{colors.paper}'
+  table-header:
+    backgroundColor: '{colors.sheet-tint}'
+    textColor: '{colors.ink-muted}'
+    typography: '{typography.label}'
+    height: '36px'
+    padding: '0 20px'
+  table-row:
+    backgroundColor: '{colors.sheet}'
+    textColor: '{colors.ink}'
+    typography: '{typography.body}'
+    height: '56px'
+    padding: '8px 20px'
+  input:
+    backgroundColor: '{colors.sheet}'
+    textColor: '{colors.ink}'
+    rounded: '{rounded.md}'
+    height: '40px'
+    padding: '8px 10px'
+---
 
-Fuente de verdad visual del panel web y de la app del vigilador. Los **valores** viven en `packages/tokens` (`@garita/tokens`); este documento dice **cómo usarlos**. Si algo no está acá, se decide con los principios y se anota en este archivo.
+# Design System: Garita
 
-## 1. Principios
+## Overview
 
-1. **Es una herramienta de trabajo, no una landing.** El panel es denso y legible (tablas, filtros, formularios claros). La app se usa de noche, con guantes, con una mano y bajo el sol: contraste alto y objetivos grandes.
-2. **El color informa, no decora.** La marca es neutra (`primary`: casi negro en claro, casi blanco en oscuro) y el único acento de color es el ámbar. El ámbar de seguridad vial (`signal`) se usa **solo** para lo que pide atención ahora: el turno en curso, el punto que falta escanear, la acción principal del vigilador, el ítem activo del menú. Si todo es ámbar, nada lo es.
-3. **El estado nunca va solo en color.** Todo estado es punto + texto (`StatusBadge` en web, `Badge` en la app). Los errores dicen qué pasó y cómo seguir.
-4. **Modo claro y oscuro son de primera clase.** Nada se diseña con un solo tema: cada pantalla se revisa en los dos.
-5. **Una acción principal por pantalla.** Un solo botón `default`/`primary` (o `signal` en la app); el resto, `outline`, `secondary` o `ghost`.
-6. **Bordes antes que sombras.** Las superficies se separan con borde y fondo (`card` sobre `background`). Sombra solo en lo flotante (menús, diálogos), que ya la trae shadcn. Detrás de diálogos, confirmaciones y el menú móvil, el fondo se oscurece y se difumina (`bg-black/70 backdrop-blur-md`, ya en `dialog`, `alert-dialog` y `sheet`) para que la tarea no se confunda con la pantalla de atrás; no se redefine por pantalla.
-7. **Español rioplatense, voseo y oraciones en minúscula** ("Guardar cambios", no "Enviar"; "Ingresá", no "Ingrese"). Un botón dice lo que hace y mantiene su nombre en todo el flujo.
+**Creative North Star: "La foja sellada"**
 
-## 2. Tokens
+Una ronda es una foja: renglones numerados, un casillero que se marca al registrar y la hora estampada en un sello. El sistema entero se apoya en esa idea. Lo normal no hace ruido (tinta sobre papel); lo que falta se marca con el único rojo del sistema. Quien mira el panel debe poder saber en segundos si un turno está en orden, y quien usa la app de noche, con una mano y sin señal, debe ver siempre cuál es el próximo punto.
 
-Se consumen por nombre semántico; **nunca hex, rgb ni `oklch` sueltos en pantallas** ni clases de color de la paleta de Tailwind (`bg-red-500`, `text-amber-800`, `border-gray-300`).
+La densidad es alta pero ordenada: tablas con filetes finos, columnas alineadas, números tabulares. No hay tarjetas flotantes ni sombras; las superficies son hojas planas sobre un papel frío con una trama diagonal casi invisible. La tipografía condensada en mayúsculas pone el tono de formulario oficial en títulos, etiquetas y sellos; el texto corrido es un grotesco sobrio y legible.
 
-| Token                                                            | Uso                                                                                               |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `background`                                                     | Fondo de la pantalla                                                                              |
-| `card` / `cardForeground`                                        | Superficies elevadas: tarjetas, tablas, paneles                                                   |
-| `popover`                                                        | Menús y diálogos                                                                                  |
-| `foreground` / `mutedForeground`                                 | Texto principal / secundario (ayudas, metadatos, encabezados de tabla)                            |
-| `primary` / `primaryForeground`                                  | Marca y acción principal                                                                          |
-| `secondary`, `muted`, `accent`                                   | Fondos tenues: botón secundario, zonas apagadas, hover                                            |
-| `border`                                                         | Separadores y bordes de tarjetas                                                                  |
-| `input`                                                          | Borde de campos (cumple 3:1)                                                                      |
-| `ring`                                                           | Foco visible                                                                                      |
-| `signal` / `signalForeground`                                    | Atención inmediata (ver principio 2)                                                              |
-| `success`, `warning`, `danger`, `info` + `*Soft` + `*Foreground` | Estados. Texto en el color pleno sobre su `*Soft`; `*Foreground` es el texto sobre el color pleno |
-| `sidebar*`                                                       | Menú lateral del panel (neutro, un escalón por encima o por debajo del fondo)                     |
+Es un sistema de herramienta, no de marketing. Rechaza lo infantil (colores saturados, formas blandas, ilustraciones), el aspecto de tablero corporativo (métricas gigantes, tarjetas iguales con ícono) y la plantilla genérica (gris y ámbar, esquinas redondeadas).
 
-`packages/tokens/src/tokens.test.ts` verifica que cada par de texto cumpla WCAG AA (4.5:1) en los dos temas. **Si cambiás un valor, corré ese test.**
+**Key Characteristics:**
 
-Escalas (`@garita/tokens`): `space` (múltiplos de 4), `radius` (`sm` 6, `md` 8, `lg` 10, `xl` 14, `2xl` 20), `fontSize` (`xs` 12, `sm` 14, `base` 16, `lg` 18, `xl` 22, `2xl` 28, `3xl` 34), `fontWeight`, `touch` (`min` 44, `action` 56), `motion`.
+- Papel frío, tinta azul y un solo rojo de sello; el ámbar solo para demora; verde y azul informativo solo en confirmaciones y avisos.
+- Estados siempre con forma y texto además de color.
+- Hora y sincronización visibles en cada registro (sello de hora).
+- Planas, con filetes de 1 px y radios de 2 a 4 px.
+- Claro y oscuro de primera clase; el oscuro es "papel de noche", no una inversión.
+- Un mismo lenguaje para el panel web y la app, con densidad distinta.
 
-### Tipografía
+## Colors
 
-**Geist** en web y en la app. Escala de uso:
+Paleta de tres valores (tinta, papel, sello) más un ámbar de demora, una barra de navegación en tinta y, por decisión del proyecto, un verde de éxito y un azul informativo de uso acotado. Los valores viven en `@garita/tokens` (`packages/tokens/src/colors.ts`), que es la fuente de verdad.
 
-| Rol                | Web                                                    | App                                   |
-| ------------------ | ------------------------------------------------------ | ------------------------------------- |
-| Título de pantalla | `text-2xl font-semibold tracking-tight` (`PageHeader`) | `Text variant="title"`                |
-| Título de sección  | `text-lg font-semibold`                                | `heading` / `subheading`              |
-| Cuerpo             | `text-sm` (tablas y formularios) o `text-base`         | `body` (16, nunca menos)              |
-| Etiquetas de campo | `Label` (`text-sm font-medium`)                        | `label`                               |
-| Metadatos, ayudas  | `text-sm text-muted-foreground` / `text-xs`            | `caption` / `color="mutedForeground"` |
+### Primary
 
-Números, horas y patentes: `tabular-nums` en web. Sin MAYÚSCULAS para etiquetas ni textos decorativos sobre los títulos.
+- **Tinta azul** (#1B2540 claro / #E6EAF4 oscuro): texto, bordes activos, botón principal, marcas de "registrado", barra de navegación y todo lo que está en orden. Es el color del sistema; lo que no pide atención va en tinta.
 
-## 3. Mapa de estados (mismo tono para el mismo estado en todo el producto)
+### Secondary
 
-| Estado                                              | Tono                              | Texto sugerido                              |
-| --------------------------------------------------- | --------------------------------- | ------------------------------------------- |
-| Turno programado                                    | `info`                            | Programado                                  |
-| Turno sin vigilador asignado                        | `warning`                         | Sin asignar                                 |
-| Turno en curso                                      | `signal`                          | En curso                                    |
-| Turno cerrado                                       | `success`                         | Cerrado                                     |
-| Turno cerrado automáticamente                       | `warning`                         | Cerrado por el sistema                      |
-| Turno cancelado                                     | `neutral`                         | Cancelado                                   |
-| Usuario activo / invitación pendiente / desactivado | `success` / `warning` / `neutral` | Activo / Invitación pendiente / Desactivado |
-| Predio, cliente, punto o ronda activo / inactivo    | `success` / `neutral`             | Activo / Inactivo                           |
-| Registro (escaneo) aceptado                         | `success`                         | Registrado                                  |
-| Registro rechazado, fuera de rango o error          | `danger`                          | (la causa, en una frase)                    |
-| Registro sospechoso grave / media / leve            | `danger` / `warning` / `info`     | Grave / Media / Leve                        |
-| Sin señal / pendiente de enviar                     | `warning`                         | Sin señal / Pendiente de envío              |
-| Enviando                                            | `info`                            | Enviando                                    |
+- **Sello rojo** (#A61E22 claro / #FF8A8D oscuro): únicamente fallas: punto sin registro, ventana no realizada, pánico, errores y "Revisar" en cumplimiento bajo. En una pantalla ocupa una fracción mínima; su rareza es lo que le da valor.
+- **Ámbar de demora** (#8A5A00 claro / #F0B54A oscuro): solo demora: ventana o punto tardío, "+17 min", incidentes sin clasificar. Nunca decora y nunca marca una falla.
 
-## 4. Panel web (React + Tailwind v4 + shadcn `radix-nova`)
+- **Verde de éxito** (#1E6B3C claro / #6FD39A oscuro): confirmaciones puntuales (registro enviado, alta exitosa, cierre de turno). No se usa para marcar "cumplido" en tablas ni ventanas: ahí manda la tinta.
+- **Azul informativo** (#1B5BB0 claro / #8DB8FF oscuro): avisos neutros y ayudas (modo sin señal, información de contexto). Nunca marca una excepción.
 
-### 4.1 Piezas disponibles
+Cada color de estado tiene un fondo tenue (`*Soft`) derivado de mezclarlo con la hoja; el texto va en el color pleno sobre ese fondo (contraste ≥ 4,5:1 verificado en `tokens.test.ts`).
 
-`src/components/ui/`: `alert`, `alert-dialog`, `badge`, `button`, `card`, `checkbox`, `dialog`, `dropdown-menu`, `input`, `label`, `native-select`, `select`, `separator`, `sheet`, `skeleton`, `switch`, `table`, `tabs`, `textarea`.
-`src/components/`: `AppShell` (ya aplicado en `RoleLayout`), `PageHeader`, `EmptyState`, `StatusBadge`, `ThemeToggle`.
-`AppShell` permite ocultar el menú lateral en pantallas de 1024 px o más (botón "Ocultar menú" / "Mostrar menú"); la elección se guarda en el navegador (`garita-sidebar-collapsed`). En pantallas chicas el menú ya es un panel lateral.
-Íconos: `lucide-react`, siempre con `aria-hidden="true"` y acompañados de texto, salvo botones de ícono con `aria-label`.
+### Neutral
 
-**Reglas de uso**
+- **Papel** (#F4F6F8 / #0F1626): fondo de pantalla. Lleva una trama diagonal de hairlines al 3% de tinta.
+- **Hoja** (#FFFFFF / #161F34): superficie de tablas, formularios y paneles.
+- **Hoja teñida** (#ECEFF3 / #1E2944): encabezados de tabla, fila seleccionada, hover.
+- **Tinta atenuada** (#56607A / #A3ACC4): texto secundario, etiquetas, metadatos.
+- **Filete** (#D7DCE5 / #2A3552): separadores de fila.
+- **Filete fuerte** (#6F7891 / #7A84A3): bordes de controles y chips; cumple 3:1 de contraste sobre las hojas.
+- **Barra** (#1B2540 / #0A101D): barra de navegación superior; sobre ella, texto #FFFFFF / #E6EAF4 y secundario #B9C1D6 / #A3ACC4.
 
-- **`<select>` nativo → `NativeSelect` + `NativeSelectOption`**, no el `Select` de Radix. Mantiene el comportamiento y los tests (`selectOptions`, `getByLabelText`). Las props (`id`, `aria-label`, `value`, `onChange`, `required`) van al `<select>` interno.
-- Campo = `Label` + `Input`/`Textarea`/`NativeSelect`, unidos con `htmlFor`/`id` **igual que hoy**. Error de campo: `<p id="x-error" className="text-sm text-danger">` con `aria-describedby` y `aria-invalid` en el campo; mensajes con `role="alert"` cuando aparecen tras enviar.
-- No se cambian textos, roles ARIA, `aria-label`, `name`, orden del foco ni la lógica. **Los tests existentes no se debilitan**: si un selector se rompe por el markup nuevo, se ajusta el selector manteniendo la aserción.
-- Nunca `className="rounded border p-3"` crudo como contenedor: usar `Card` (o `Table` para datos tabulares).
-- Clases de color solo con tokens: `bg-card`, `text-muted-foreground`, `border-border`, `text-danger`, `bg-warning-soft`, etc.
-- Responsive: mobile-first; el contenido debe usarse a 360 px sin scroll horizontal (las tablas anchas van en un contenedor `overflow-x-auto`).
+### Named Rules
 
-### 4.2 Plantillas de pantalla
+**La regla del único sello.** El rojo marca fallas y nada más. Si una pantalla lleva rojo en más de un puñado de elementos, algo está mal planteado. No se usa para botones destructivos "decorativos", títulos ni énfasis.
 
-**Estructura**: `<section aria-labelledby="…">` → `PageHeader` (título, una línea de ayuda, acción principal a la derecha) → contenido. Separación vertical `space-y-6`.
+**La regla de lo normal sin color.** Lo cumplido, registrado o en curso va en tinta con un tilde. El color aparece solo en las excepciones, para que el ojo caiga primero en ellas. El verde y el azul no rompen la regla: son para confirmaciones y avisos puntuales, nunca para marcar lo cumplido en una tabla.
 
-**Listado de datos (Personal, Clientes, Turnos, Predios)**: filtros en una fila sobre la tabla (`NativeSelect` + `Input` de búsqueda si ya existe), `Card` con `Table` adentro (encabezados en `text-muted-foreground`, filas con `hover:bg-muted/50`), estado en `StatusBadge`, acciones de fila con `Button variant="ghost" size="sm"` o `DropdownMenu` si son más de dos. Vacío → `EmptyState` con la acción que lo resuelve. Cargando → `Skeleton` de 3 a 5 filas con `role="status"` y texto accesible. Error → `Alert variant="destructive"` con `role="alert"`. Paginación: botones `outline` + "Página x de y".
+**La regla de la forma además del color.** Todo estado tiene forma y texto propios (tilde, tachado diagonal, recuadro punteado, sello invertido) para que funcione sin distinguir colores.
 
-**Alta / edición**: el formulario de alta que hoy está siempre visible pasa a un `Dialog` abierto desde el botón primario del `PageHeader` ("Agregar personal"), **conservando el mismo `<form>` y sus `aria-label`**. Si el formulario ya está en un `Dialog` (edición), solo se estiliza. Campos en grilla `grid gap-4 sm:grid-cols-2`; ancho completo para campos largos; acciones al pie alineadas a la derecha: cancelar (`outline`) y confirmar (`default`).
+## Typography
 
-**Confirmación destructiva**: `AlertDialog` con título que nombra el objeto, consecuencias en una lista, acción en `variant="destructive"` con el verbo ("Dar de baja"), cancelar primero en el orden de foco.
+**Display / Label / Stamp / Numeral:** Barlow Condensed (con Arial Narrow como respaldo)
+**Body / Title:** Public Sans (con system-ui como respaldo)
 
-**Ficha / detalle**: `PageHeader` con volver (enlace) + título + `StatusBadge`; datos en `Card` con lista de definiciones (`dl`); secciones relacionadas en `Tabs` solo si hay tres o más.
+**Character:** una condensada en mayúsculas con tracking abierto, de formulario oficial, para todo lo que es rótulo, título o dato corto, contra un grotesco sobrio para lo que se lee. Los números siempre son tabulares: las horas y los contadores deben alinear.
 
-**Pantallas de acceso (login, recuperar, activar)**: sin `AppShell`; contenedor centrado `max-w-md` sobre `bg-background`, marca arriba (logo + "Garita"), `Card` con el formulario, enlaces secundarios debajo, `ThemeToggle` no hace falta. Botón principal a todo el ancho.
+### Hierarchy
 
-**Paneles embebidos** (`CheckpointsPanel`, `RoundsPanel` dentro de la ficha del predio): `Card` con encabezado propio (`h3`) y mismo patrón de lista/alta que arriba; **no cambiar sus props ni su firma**, porque los usa `sites-page`.
+- **Display** (600, 32 px, 1, +0.04em, mayúsculas): título de cada pantalla del panel. Una vez por pantalla.
+- **Headline** (600, 24 a 28 px, 1.1, +0.04em, mayúsculas): título de panel, de foja y de diálogo; en la app, 26 px y peso 700 para el título de pantalla.
+- **Title** (600, 15 px, 1.25): nombre del predio o punto en una fila; en la app, 17 px.
+- **Body** (400, 14 px, 1.45): texto corrido y celdas. Largo de línea 65 a 75 caracteres. En la app, 16 px como mínimo.
+- **Label** (600, 12 px, +0.1em, mayúsculas): encabezados de tabla, rótulos de campo y de metadato.
+- **Stamp** (600, 13 px, +0.07em, mayúsculas, tabulares): sellos de hora y de estado.
+- **Numeral** (600, 17 a 20 px, tabulares): número de punto, contadores y horas en filas.
 
-## 5. App del vigilador (React Native propio, sin librería de UI)
+### Named Rules
 
-### 5.1 Piezas (`apps/mobile/src/ui`, import `@/ui`)
+**La regla de las cifras alineadas.** Toda hora y todo contador usan cifras tabulares. Una columna de horas que no alinea parece un error de registro.
 
-`Screen` (fondo + zona segura + margen 20; `scroll` para formularios), `Text` (variantes `display`, `title`, `heading`, `subheading`, `body`, `label`, `caption`; prop `color` = token), `Button` (`primary`, `secondary`, `outline`, `danger`, `signal`, `ghost`; `size="lg"` = 56 px para la acción principal; `loading`), `Input` (etiqueta visible + error + `trailing`), `Card`, `Badge` (`tone` + `label`), `Banner` (`tone`, `title`, rol `alert` por defecto), `ListItem` (fila tocable con `trailing`), `Loading`, `ThemeSwitch`, `useTheme()` (`colors`, `scheme`), `useStackOptions()`.
+**La regla de la condensada acotada.** La condensada en mayúsculas es para rótulos, títulos cortos, sellos y números. Nunca para párrafos ni para el nombre de una persona.
 
-No hay librería de íconos a propósito (evita problemas de versiones con Expo). Los indicadores se arman con texto, `Badge` y formas simples (`View`).
+## Layout
 
-### 5.2 Reglas
+Cada pantalla ocupa todo el ancho de la ventana; no hay columnas centradas de ancho fijo. La estructura es siempre la misma: barra de navegación superior de 52 px y, debajo, una de dos composiciones.
 
-- **Nada de colores literales ni `fontSize` sueltos**: color por token (`useTheme().colors.x` o la prop `color`), tamaños por `Text`/`fontSize` de `@garita/tokens`, espacios por `space`. `StyleSheet.create` queda solo para layout (flex, gap, padding, radios).
-- **Objetivos táctiles ≥ 44 px; acción principal 56 px.** Texto de cuerpo ≥ 16.
-- **Accesibilidad intacta**: se conservan `accessibilityRole`, `accessibilityLabel`, `accessibilityLiveRegion` y los textos que usan los tests. `Button` ya expone `accessibilityLabel = label`.
-- Una sola acción `primary`/`signal` por pantalla; "Cerrar sesión" y "Volver" son `ghost`/`outline`.
-- Los fondos de la app salen de `Screen`/`Card`; el tema oscuro funciona sin código extra si se usan los componentes.
-- Cámara/escáner (`scanner-screen`): el visor ocupa toda la pantalla; los controles flotan sobre fondo semitransparente oscuro **en los dos temas** (la cámara es siempre oscura); mensajes de resultado como `Banner`.
+- **En vivo:** un panel izquierdo de ancho `clamp(640px, 28vw, 900px)` con la lista de rondas, que al elegir una pasa a ser la foja de esa ronda, y el mapa ocupando el resto. El mapa nunca queda cubierto por paneles flotantes.
+- **Páginas:** título, filtros y hojas de ancho completo. Las pantallas anchas se parten en dos columnas (por ejemplo, tabla de cumplimiento a la izquierda y grilla ventana por ventana a la derecha) sin dejar vacíos laterales.
 
-### 5.3 Plantillas de pantalla
+El ritmo es de 4 px. Las filas de tabla miden de 46 a 64 px; los encabezados, 34 a 36 px; el relleno horizontal de hojas y filas es de 20 px; la página tiene 24 a 28 px de margen. Más aire encima de un título que debajo.
 
-- **Acceso (login, recuperar)**: `Screen scroll`, marca arriba ("Garita", `display`), `title`, campos `Input`, un `Button size="lg"`, enlace `ghost` debajo, `Banner tone="danger"` para errores del servidor, mostrar/ocultar contraseña con `trailing` (`Button variant="ghost"`).
-- **Lista (Mis turnos)**: `title` + ayuda (`mutedForeground`), `ListItem` por turno con `Badge` de estado a la derecha, `Loading` / `Banner` de error con "Reintentar" / estado vacío con texto que orienta ("No tenés turnos en los próximos 14 días").
-- **Turno en curso**: arriba una `Card` con el predio, el horario y el `Badge` "En curso" (`signal`) y el indicador de conexión (`Badge` Sin señal / Pendiente / Enviando); luego la acción principal `Button signal size="lg"` ("Escanear código QR"); debajo las ventanas con sus puntos pendientes en `Card`s (cada punto con su estado); "Cerrar turno" al final como `outline`/`danger` con confirmación como ya existe.
-- **Permisos**: título, una `Card` por permiso (ubicación, cámara) que dice para qué se usa, y dos botones (Configurar permisos primario, Continuar secundario).
-- **Configuración (admin/supervisor)**: `title`, `Banner` de NFC/mensajes, lista de predios como `ListItem` seleccionables, puntos como `Card` con su estado de etiqueta (`Badge`) y acciones; `ThemeSwitch` y "Cerrar sesión" al final.
+En la app, la ronda se muestra en una ventana de cinco filas (dos anteriores, la actual y dos siguientes) que se desliza, sirva para 6 o para 40 puntos. La acción principal mide 56 px o más y las demás zonas táctiles, 44 px como mínimo. La barra inferior tiene cuatro destinos: Ronda, Incidente, Envío y Pánico.
 
-## 6. Flujo de trabajo y verificación
+## Elevation & Depth
 
-- Antes de cerrar: `pnpm --filter <app> lint`, `typecheck`, `test` y `pnpm format:check`.
-- Cada pantalla se mira **en claro y en oscuro**. Web: `pnpm --filter web dev` y el botón de tema del menú. App: el selector de apariencia (`ThemeSwitch`) o el modo del sistema.
-- Un PR por worker, ramas desde `develop`, sin tocar archivos fuera de la propiedad asignada.
+Sin sombras. La profundidad se logra con tono (hoja blanca sobre papel; hoja teñida para lo seleccionado), con filetes de 1 px y con bordes de 1,5 px en los controles. La selección es un recuadro interior de 2 px en tinta. Las únicas excepciones son los avisos temporales (toasts) y los diálogos, que llevan borde de 2 px en tinta y un velo oscuro detrás.
+
+### Named Rules
+
+**La regla de lo plano.** Ninguna superficie lleva sombra en reposo ni en hover. El estado se expresa con tono, borde y recuadro, no con elevación.
+
+## Shapes
+
+Lenguaje rectangular de formulario: radios de 2 a 4 px (controles 3, botones de la app 4, sellos casi a escuadra). Los chips de un grupo se pegan y comparten borde, como un control segmentado. Las ventanas de una ronda son casilleros chicos (10 × 16 px en filas, 24 × 26 en grillas); los puntos en el mapa y en la tabla son cuadrados; solo el camino lineal usa círculos (estaciones). Los sellos son rectángulos con borde de 1,5 px; el sello de falla lleva un segundo contorno y una inclinación de −2°. El ícono de la app es el único elemento circular: un sello de doble aro.
+
+## Components
+
+### Barra de navegación
+
+Barra de 52 px en tinta con el logotipo (ícono y GARITA en condensada con tracking), pestañas de texto y, a la derecha, usuario y reloj en un sello. La pestaña activa lleva 3 px de subrayado y texto en peso 600; el contador de Revisión es un recuadro rojo.
+
+### Botones
+
+- **Forma:** radio de 3 px (4 px en la app), alto de 36 px en el panel, 44 px táctiles y 56 o 62 px la acción principal de la app.
+- **Primario:** fondo tinta, texto papel. En la app, el texto va en condensada mayúscula con tracking.
+- **Secundario:** fondo hoja, borde de 1,5 px en tinta.
+- **Hover / Foco:** hover aclara el fondo hacia la hoja teñida; foco visible de 3 px en tinta con 2 px de separación. En carga, el botón muestra un indicador y su etiqueta de acción en gerundio ("Creando…").
+
+### Chips y filtros
+
+Control segmentado: bordes de 1,5 px en filete fuerte, esquinas redondeadas solo en los extremos; el seleccionado se invierte (fondo tinta, texto papel). Siempre con `aria-pressed`.
+
+### Sellos
+
+La pieza distintiva. Recuadro de 1,5 px con texto condensado en mayúsculas y cifras tabulares, que acompaña a toda hora registrada y a todo estado. Variantes: **normal** (tinta), **tarde** (ámbar), **falla** (rojo, doble contorno, inclinado), **punteado** (sin señal, programado, interno) y **ahora** (invertido: fondo tinta, texto papel).
+
+### Tablas
+
+Encabezado en hoja teñida con etiquetas condensadas; filas separadas por filetes de 1 px; columnas definidas por una grilla (`grid-template-columns`) por tabla. La fila seleccionada o actual lleva el recuadro interior de 2 px. Estados vacíos con título en condensada y una línea de recuperación.
+
+### Ventanas de ronda
+
+Hilera de casilleros, uno por ventana: **a tiempo** relleno en tinta, **tardía** en ámbar, **no realizada** con borde rojo y tachado diagonal, **en curso** relleno hasta la mitad, **pendiente** vacío. En la grilla de cumplimiento se estiran (hasta 56 px de ancho) y llevan el mismo código.
+
+### Camino lineal (componente firma)
+
+La ronda dibujada como una línea que serpentea en filas de hasta 10 puntos y solo dobla a 45° y 90°. Punto registrado: círculo lleno en tinta; próximo: círculo con aro; sin registro: contorno rojo con cruz; pendiente: hueco con línea punteada. Los puntos que están a la vista en la tabla se resaltan; tocar uno lo marca en la tabla y en el mapa. Reemplaza cualquier lista larga de 40 puntos por una vista de un golpe de ojo.
+
+### Foja (detalle de ronda)
+
+Encabezado con volver, título y sello de estado; metadatos en rótulo y valor; camino lineal; barra de acciones (filtros "Todos / Pendientes / Sin registro", Llamar, Simular lectura); y la tabla de puntos: N°, punto, prevista, registrada (sello) y estado. La tabla se desliza y arranca centrada en el punto actual, dos filas antes.
+
+### Mapa
+
+Base tenue en tonos del sistema; predios con contorno punteado; marcador de predio como sello rectangular con "hechos/total" y un tallo; puntos de la ruta como cuadrados (relleno al registrar, doble borde el próximo, rojo con cruz el faltante); la ruta, línea sólida si ya se recorrió y punteada si falta.
+
+### Selector de vista
+
+Control segmentado (igual que los chips) que cambia cómo se muestra el mismo dato: tabla, grilla o gráficos. Lleva un texto por botón (nunca solo ícono), `aria-pressed`, y recuerda la última vista elegida. Vive junto al filtro de período, arriba a la derecha de la hoja.
+
+### Gráficos
+
+Cuando una vista es un gráfico, sigue las mismas reglas que el resto del sistema: marcas en tinta (lo normal), ámbar para demoras y rojo con trama diagonal para fallas, de modo que se distingan sin color; ejes, rejilla y marcos en filete, sin degradados, sombras ni esquinas redondeadas; barras de borde recto; cifras tabulares y etiquetas en condensada; leyenda y valores escritos directamente sobre las marcas cuando entran; el tooltip es un recuadro de hoja con borde de 1,5 px. Una serie que no es excepción no usa color.
+
+### Campos y diálogos
+
+Campos con rótulo condensado encima, borde de 1,5 px en filete fuerte, radio de 3 px y alto de 40 px. Diálogos de 520 px con título en condensada y acciones a la derecha. Las opciones excluyentes (por ejemplo, "Interno" o "Visible al cliente") son bloques seleccionables con recuadro interior de 2 px.
+
+### App del vigilador
+
+- **Fila de punto:** número en condensada, casillero cuadrado (con tilde al registrar, tachado si falta) y sello de hora; la actual, enmarcada y más grande, con la ventana horaria debajo del nombre.
+- **Aviso de envío:** recuadro punteado con el contador de registros por enviar.
+- **Pánico:** anillo de mantener 1,5 segundos con progreso cónico en rojo.
+
+### Motion
+
+Principios: movimiento funcional, una vez por acción, sin rebote. Estados 120 ms lineales; apariciones de 200 a 250 ms con salida exponencial; el mapa se acerca a un predio en unos 520 ms con salida exponencial fuerte; la fila recién creada resalta y se desvanece en 1,6 s. Un solo momento con énfasis: al registrar un punto, el sello "cae" (90 ms, de 1,04 a 1, sin rebote) [pendiente: no está en la maqueta]. Con `prefers-reduced-motion`, todo cambia de estado al instante y el mapa salta sin animar.
+
+## Do's and Don'ts
+
+### Do:
+
+- **Do** poner la hora en un sello junto a todo registro, y el estado de sincronización donde importe.
+- **Do** mostrar lo normal en tinta y reservar el rojo y el ámbar para excepciones.
+- **Do** acompañar cada estado con forma y texto (tilde, tachado, punteado, invertido).
+- **Do** usar cifras tabulares en horas y contadores, y alinear columnas con grilla.
+- **Do** usar el camino lineal y la tabla de puntos juntos para cualquier ronda larga.
+- **Do** dejar que el usuario elija entre tabla, grilla y gráficos con un selector de vista, sin duplicar datos entre vistas.
+- **Do** dejar que cada pantalla ocupe todo el ancho y que el panel izquierdo y las columnas crezcan con la ventana.
+- **Do** mantener 44 px mínimos de zona táctil en la app y 56 px en la acción principal.
+
+### Don't:
+
+- **Don't** usar el rojo de forma decorativa ni para algo que no sea una falla.
+- **Don't** agregar sombras, degradados, vidrio ni esquinas de más de 4 px.
+- **Don't** usar tarjetas iguales con ícono, título y texto como estructura de página.
+- **Don't** mostrar números grandes sueltos como "métrica" de portada.
+- **Don't** usar la condensada en mayúsculas para párrafos ni nombres de personas.
+- **Don't** representar estados solo con color.
+- **Don't** copiar la estética de Material 3 en Android: se imita su comportamiento, no su apariencia.
+- **Don't** reintroducir el ámbar de señal del sistema anterior ni usar el verde para marcar "cumplido" en tablas, ventanas o el camino lineal.
+- **Don't** exponer a un cliente la ubicación ni más datos del vigilador que los acordados.
+
+## Plataformas
+
+- **Android** sigue el comportamiento de Material 3 (barra inferior de cuatro destinos, gesto atrás predictivo, borde a borde con barras de sistema transparentes, zonas táctiles de 48 dp, tema del sistema) pero no su estética. **iOS** usa los equivalentes de la plataforma (insets seguros, deslizar desde el borde para volver, Reduce Motion, 44 pt).
+- La app no usa librería de íconos: los pocos íconos (tilde, cruz, cerrar, flechas) son SVG propios dibujados con `react-native-svg`.
+- Las fuentes (Public Sans y Barlow Condensed) se empaquetan con la app y el panel: no se cargan desde la red.
