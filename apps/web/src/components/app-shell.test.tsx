@@ -28,15 +28,14 @@ it('muestra la navegación del rol, los datos del usuario y cierra sesión', asy
   expect(nav).toHaveTextContent('Turnos');
   expect(nav).toHaveTextContent('Personal');
   expect(screen.getByText('Ana Pérez')).toBeInTheDocument();
-  expect(screen.getByText('Seguridad Norte')).toBeInTheDocument();
+  expect(screen.getByText(/Supervisor · Seguridad Norte/)).toBeInTheDocument();
   expect(screen.getByText('contenido')).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
   expect(onLogout).toHaveBeenCalledTimes(1);
 });
 
-it('oculta y vuelve a mostrar el menú lateral y recuerda la elección', async () => {
-  localStorage.removeItem('garita-sidebar-collapsed');
+it('muestra la hora en la barra y el menú móvil abre las mismas secciones', async () => {
   render(
     <ThemeProvider>
       <AppShell
@@ -52,11 +51,10 @@ it('oculta y vuelve a mostrar el menú lateral y recuerda la elección', async (
     </ThemeProvider>,
   );
 
-  await userEvent.click(screen.getByRole('button', { name: 'Ocultar menú' }));
-  expect(localStorage.getItem('garita-sidebar-collapsed')).toBe('1');
-  expect(screen.getByRole('button', { name: 'Mostrar menú' })).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole('button', { name: 'Mostrar menú' }));
-  expect(localStorage.getItem('garita-sidebar-collapsed')).toBe('0');
-  expect(screen.queryByRole('button', { name: 'Mostrar menú' })).not.toBeInTheDocument();
+  expect(document.querySelector('time')).toHaveTextContent(/^\d{2}:\d{2}$/);
+  await userEvent.click(screen.getByRole('button', { name: 'Abrir menú' }));
+  // El diálogo oculta (aria-hidden) la barra de fondo: queda solo la navegación del panel.
+  expect(await screen.findByRole('navigation', { name: 'Navegación principal' })).toHaveTextContent(
+    'Turnos',
+  );
 });

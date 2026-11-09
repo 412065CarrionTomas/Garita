@@ -15,7 +15,8 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
-    "@expo-google-fonts/geist": "^0.4.2",
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
+    "@expo-google-fonts/public-sans": "^0.4.2",
     "@garita/shared": "workspace:*",
     "@garita/tokens": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -50,6 +51,7 @@
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.4",
     "react-native-worklets": "0.10.1",
     "zod": "catalog:"

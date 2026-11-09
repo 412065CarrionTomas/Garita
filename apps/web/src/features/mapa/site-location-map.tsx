@@ -1,12 +1,7 @@
-import {
-  APIProvider,
-  AdvancedMarker,
-  Map,
-  useMap,
-  useMapsLibrary,
-} from '@vis.gl/react-google-maps';
+import { APIProvider, Map, Marker, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { useEffect, useRef, useId } from 'react';
 import { env } from '@/config/env';
+import { mapStyle, useDark } from './map-style';
 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +15,7 @@ interface Props {
 
 function InteractiveMap({ latitude, longitude, onChange }: Props) {
   const id = useId();
+  const dark = useDark();
   const map = useMap();
   const inputRef = useRef<HTMLInputElement>(null);
   const places = useMapsLibrary('places');
@@ -55,10 +51,10 @@ function InteractiveMap({ latitude, longitude, onChange }: Props) {
         <Map
           defaultCenter={{ lat: latitude, lng: longitude }}
           defaultZoom={14}
-          mapId="GARITA_SITES"
+          styles={mapStyle(dark)}
           className="h-72 w-full"
         >
-          <AdvancedMarker
+          <Marker
             position={{ lat: latitude, lng: longitude }}
             draggable
             onDragEnd={(event) => {
@@ -85,6 +81,7 @@ export function ClientSitesMap({
 }: {
   sites: { id: string; name: string; latitude: number | string; longitude: number | string }[];
 }) {
+  const dark = useDark();
   if (sites.length === 0) return <EmptyState title="Este cliente no tiene predios activos." />;
   const firstSite = sites[0];
   if (!firstSite) return <EmptyState title="Este cliente no tiene predios activos." />;
@@ -98,11 +95,11 @@ export function ClientSitesMap({
         <Map
           defaultCenter={position(firstSite)}
           defaultZoom={10}
-          mapId="GARITA_CLIENT_SITES"
+          styles={mapStyle(dark)}
           className="h-96 w-full"
         >
           {sites.map((site) => (
-            <AdvancedMarker key={site.id} position={position(site)} title={site.name} />
+            <Marker key={site.id} position={position(site)} title={site.name} />
           ))}
         </Map>
       </div>

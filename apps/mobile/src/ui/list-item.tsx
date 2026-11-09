@@ -15,7 +15,7 @@ export interface ListItemProps extends Omit<PressableProps, 'children' | 'style'
   trailing?: ReactNode;
 }
 
-/** Fila tocable de una lista (mis turnos, predios, puntos). Alto mínimo 56 px. */
+/** Fila tocable de una lista (mis turnos, predios, puntos): hoja plana con filete. Alto mínimo 56 px. */
 export function ListItem({ title, subtitle, detail, trailing, ...props }: ListItemProps) {
   const { colors } = useTheme();
   return (
@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
     gap: space[3],
     minHeight: touch.action,
     borderWidth: 1,
-    borderRadius: radius.xl,
+    borderRadius: radius.md,
     padding: space[4],
   },
   texts: { flex: 1, gap: space[0.5] },

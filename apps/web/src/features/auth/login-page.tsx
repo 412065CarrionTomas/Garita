@@ -4,10 +4,10 @@ import { z } from 'zod';
 
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+import { AuthLayout } from './auth-layout';
 import { useAuth } from './auth-context';
 import { homePathForRole } from './role-routes';
 
@@ -48,79 +48,68 @@ export function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
-      <div className="w-full min-w-0 max-w-md space-y-6">
-        <div className="flex items-center justify-center gap-2">
-          <img src="/logo.svg" alt="" className="size-8" />
-          <span className="text-lg font-semibold">Garita</span>
-        </div>
-        <Card>
-          <CardHeader>
-            <h1 className="text-2xl font-semibold tracking-tight">Iniciar sesión</h1>
-            <p className="text-sm text-muted-foreground">
-              Ingresá con el correo y la contraseña de tu cuenta.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <form
-              onSubmit={(event) => {
-                void submit(event);
-              }}
-              noValidate
-              className="space-y-4"
-            >
-              <div className="space-y-2">
-                <Label htmlFor="email">Correo electrónico</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                  }}
-                  aria-invalid={Boolean(fieldError)}
-                  aria-describedby={fieldError ? 'login-error' : undefined}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Contraseña</Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(event) => {
-                    setPassword(event.target.value);
-                  }}
-                  aria-invalid={Boolean(fieldError)}
-                  aria-describedby={fieldError ? 'login-error' : undefined}
-                />
-              </div>
-              {fieldError && (
-                <Alert id="login-error" role="alert" variant="destructive">
-                  {fieldError}
-                </Alert>
-              )}
-              {(message || sessionError) && (
-                <Alert role="alert" aria-live="assertive" variant="destructive">
-                  {message || sessionError}
-                </Alert>
-              )}
-              <Button type="submit" disabled={busy} size="lg" className="w-full">
-                {busy ? 'Ingresando…' : 'Ingresar'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+    <AuthLayout
+      title="Iniciar sesión"
+      description="Ingresá con el correo y la contraseña de tu cuenta."
+      footer={
         <Button variant="link" asChild className="w-full">
           <Link to="/recuperar">Olvidé mi contraseña</Link>
         </Button>
-      </div>
-    </main>
+      }
+    >
+      <form
+        onSubmit={(event) => {
+          void submit(event);
+        }}
+        noValidate
+        className="space-y-4"
+      >
+        <div className="space-y-2">
+          <Label htmlFor="email">Correo electrónico</Label>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => {
+              setEmail(event.target.value);
+            }}
+            aria-invalid={Boolean(fieldError)}
+            aria-describedby={fieldError ? 'login-error' : undefined}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">Contraseña</Label>
+          <Input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+            }}
+            aria-invalid={Boolean(fieldError)}
+            aria-describedby={fieldError ? 'login-error' : undefined}
+          />
+        </div>
+        {fieldError && (
+          <Alert id="login-error" role="alert" variant="destructive">
+            {fieldError}
+          </Alert>
+        )}
+        {(message || sessionError) && (
+          <Alert role="alert" aria-live="assertive" variant="destructive">
+            {message || sessionError}
+          </Alert>
+        )}
+        <Button type="submit" disabled={busy} size="lg" className="w-full">
+          {busy ? 'Ingresando…' : 'Ingresar'}
+        </Button>
+      </form>
+    </AuthLayout>
   );
 }

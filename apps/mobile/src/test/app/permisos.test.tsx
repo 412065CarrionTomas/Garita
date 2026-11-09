@@ -10,10 +10,11 @@ describe('permissions setup screen', () => {
     const screen = await render(<PermissionsScreen />);
     expect(screen.getByText(/Ley 25\.326/)).toBeTruthy();
     expect(screen.getByText(/códigos QR/)).toBeTruthy();
-    await user.press(screen.getByRole('button', { name: 'Permitir ubicación precisa y cámara' }));
+    await user.press(screen.getByRole('button', { name: 'Permitir ubicación precisa' }));
     expect(await screen.findByText(/permisos están listos/)).toBeTruthy();
     expect(Permissions.requestFieldPermissions).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Continuar a mis turnos' })).toBeTruthy();
+    expect(screen.getAllByText('Permitida')).toHaveLength(2);
     expect(
       screen
         .getAllByRole('text', { name: 'Los permisos están listos para iniciar tu turno.' })

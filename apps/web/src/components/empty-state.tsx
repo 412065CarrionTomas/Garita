@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
-/** Lista o tabla sin datos: dice qué falta y ofrece la acción que lo resuelve. */
+/** Lista o tabla sin datos: título en condensada, una línea de recuperación y la acción que lo resuelve. */
 export function EmptyState({
   title,
   description,
@@ -17,11 +17,13 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'flex flex-col items-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center',
+        'flex flex-col items-center gap-2 rounded-lg border border-dashed border-input px-6 py-10 text-center',
         className,
       )}
     >
-      <p className="font-medium text-foreground">{title}</p>
+      <p className="font-cond text-xl font-semibold uppercase tracking-wider text-foreground">
+        {title}
+      </p>
       {description && <p className="max-w-sm text-sm text-muted-foreground">{description}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>

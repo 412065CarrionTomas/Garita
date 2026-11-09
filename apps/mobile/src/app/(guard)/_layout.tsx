@@ -13,6 +13,7 @@ import {
   subscribeLockedPanicResponses,
 } from '@/features/panico/bloqueado/notification';
 import { PanicOverlay } from '@/features/panico/panic-overlay';
+import { GUARD_BAR_HEIGHT, GuardBar } from '@/features/navegacion/guard-bar';
 export default function GuardLayout() {
   const screenOptions = useStackOptions();
   const { user, loading } = useAuth();
@@ -90,14 +91,20 @@ export default function GuardLayout() {
   if (permissionState === null) return null;
   if (permissionState !== 'ok') return <Redirect href="/permisos" />;
   const isAllowedSubroute =
-    pathname.endsWith(`/turno/${savedShiftId}`) || pathname.includes('escaneo');
+    pathname.endsWith(`/turno/${savedShiftId}`) ||
+    pathname.includes('escaneo') ||
+    pathname.includes('envio') ||
+    pathname.includes(`/turno/${savedShiftId}/incidente`);
   if (savedShiftId && localCheckPath === pathname && !isAllowedSubroute) {
     return <Redirect href={`/turno/${savedShiftId}`} />;
   }
   return (
     <View style={{ flex: 1 }}>
-      <Stack screenOptions={screenOptions} />
-      {panicShiftId && <PanicOverlay />}
+      <View style={{ flex: 1 }}>
+        <Stack screenOptions={screenOptions} />
+      </View>
+      {savedShiftId && <GuardBar shiftId={savedShiftId} />}
+      {panicShiftId && <PanicOverlay bottomOffset={savedShiftId ? GUARD_BAR_HEIGHT : 0} />}
     </View>
   );
 }

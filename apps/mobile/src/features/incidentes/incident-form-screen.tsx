@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { radius, space, touch } from '@garita/tokens';
 import {
   INCIDENT_TYPES,
@@ -10,7 +10,7 @@ import {
 } from '@garita/shared';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { Button, Input, Screen, Text } from '@/ui';
+import { Button, Input, Screen, Text, useTheme } from '@/ui';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { readClock } from '@/lib/clock/clock';
 import { getCurrentLocation } from '@/lib/location';
@@ -37,6 +37,7 @@ export function IncidentFormScreen({
   shiftData: ShiftOfflineData;
 }) {
   const router = useRouter();
+  const { colors } = useTheme();
   const [type, setType] = useState<(typeof INCIDENT_TYPES)[number]>('intrusion');
   const [description, setDescription] = useState('');
   const [photos, setPhotos] = useState<SelectedPhoto[]>([]);
@@ -150,16 +151,35 @@ export function IncidentFormScreen({
       </Text>
       <Text>Turno en {shiftData.shift.siteName}</Text>
       <Text variant="subheading">Tipo de incidente</Text>
-      {INCIDENT_TYPES.map((item) => (
-        <Button
-          key={item}
-          label={`${type === item ? 'Seleccionado: ' : ''}${INCIDENT_TYPE_LABELS[item]}`}
-          variant={type === item ? 'signal' : 'outline'}
-          size="lg"
-          accessibilityLabel={INCIDENT_TYPE_LABELS[item]}
-          onPress={() => setType(item)}
-        />
-      ))}
+      <View style={styles.segmented}>
+        {INCIDENT_TYPES.map((item) => {
+          const selected = type === item;
+          return (
+            <Pressable
+              key={item}
+              accessibilityRole="button"
+              accessibilityLabel={INCIDENT_TYPE_LABELS[item]}
+              accessibilityState={{ selected }}
+              onPress={() => setType(item)}
+              style={[
+                styles.chip,
+                {
+                  borderColor: colors.input,
+                  backgroundColor: selected ? colors.primary : colors.card,
+                },
+              ]}
+            >
+              <Text
+                variant="label"
+                accessibilityRole="none"
+                style={{ color: selected ? colors.primaryForeground : colors.foreground }}
+              >
+                {INCIDENT_TYPE_LABELS[item]}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <Input
         label="Descripción"
         value={description}
@@ -190,18 +210,19 @@ export function IncidentFormScreen({
           onPress={() => void addPhoto(false)}
         />
       </View>
-      {photos.map((photo, index) => (
-        <Image
-          key={`${photo.uri}-${index}`}
-          source={{ uri: photo.uri }}
-          accessibilityLabel={`Foto ${index + 1}`}
-          style={styles.preview}
-        />
-      ))}
+      <View style={styles.previews}>
+        {photos.map((photo, index) => (
+          <Image
+            key={`${photo.uri}-${index}`}
+            source={{ uri: photo.uri }}
+            accessibilityLabel={`Foto ${index + 1}`}
+            style={styles.preview}
+          />
+        ))}
+      </View>
       <Button
         label="Guardar incidente"
         size="lg"
-        variant="signal"
         disabled={busy || eventSaved || (type === 'other' && !description.trim())}
         onPress={() => void submit()}
       />
@@ -215,5 +236,18 @@ export function IncidentFormScreen({
 }
 
 const styles = StyleSheet.create({
+  // Chips pegados: los bordes se solapan 1.5 px para que el control se lea como una sola pieza.
+  segmented: { flexDirection: 'row', flexWrap: 'wrap', paddingRight: 1.5, paddingBottom: 1.5 },
+  chip: {
+    minHeight: touch.min,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: space[4],
+    borderWidth: 1.5,
+    borderRadius: 0,
+    marginRight: -1.5,
+    marginBottom: -1.5,
+  },
+  previews: { flexDirection: 'row', flexWrap: 'wrap' },
   preview: { width: touch.action, height: touch.action, borderRadius: radius.md, margin: space[1] },
 });

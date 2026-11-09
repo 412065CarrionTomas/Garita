@@ -23,9 +23,9 @@ const textPairs: [ColorToken, ColorToken][] = [
   ['primaryForeground', 'primary'],
   ['secondaryForeground', 'secondary'],
   ['accentForeground', 'accent'],
-  ['signalForeground', 'signal'],
-  ['sidebarForeground', 'sidebar'],
-  ['sidebarAccentForeground', 'sidebarAccent'],
+  ['barForeground', 'bar'],
+  ['barMuted', 'bar'],
+  ['mutedForeground', 'secondary'],
   ['primary', 'background'],
   ['primary', 'card'],
   ...(['success', 'warning', 'danger', 'info'] as const).flatMap(
@@ -34,6 +34,7 @@ const textPairs: [ColorToken, ColorToken][] = [
       [name, `${name}Soft`],
       [name, 'card'],
       [name, 'background'],
+      [name, 'secondary'],
     ],
   ),
 ];
@@ -41,6 +42,7 @@ const textPairs: [ColorToken, ColorToken][] = [
 const nonText: [ColorToken, ColorToken][] = [
   ['input', 'card'],
   ['ring', 'card'],
+  ['ring', 'background'],
 ];
 
 describe.each(['light', 'dark'] as const)('tema %s', (theme) => {
@@ -62,6 +64,8 @@ it('buildCss emite :root y .dark con todas las variables', () => {
   const css = buildCss();
   expect(css).toContain(':root {');
   expect(css).toContain('.dark {');
-  expect(css).toContain('--sidebar-accent-foreground: #09090B;');
+  expect(css).toContain('--bar-foreground: #FFFFFF;');
   expect(css.match(/--primary:/g)).toHaveLength(2);
+  expect(css).not.toContain('--signal');
+  expect(css).toContain('--radius: 0.1875rem;');
 });

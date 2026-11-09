@@ -91,7 +91,7 @@ describe('SitesPage', () => {
   it('mantiene los controles de administración ocultos para el supervisor', async () => {
     jest.mocked(useAuth).mockReturnValue(profile('supervisor'));
     renderWithQueryClient(<SitesPage />);
-    expect(await screen.findByText('Sede')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sede' })).toBeInTheDocument();
     expect(screen.getByText('Supervisión')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Guardar predio' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Supervisores de Sede')).not.toBeInTheDocument();
@@ -120,7 +120,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     jest.mocked(apiGet).mockClear();
     renderWithQueryClient(<SitesPage />);
-    await screen.findByText('Sede');
+    await screen.findByRole('heading', { name: 'Sede' });
     expect(jest.mocked(apiGet).mock.calls.filter(([path]) => path === '/predios')).toHaveLength(1);
     expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).not.toContain(
       '/predios/site-1/supervisores',

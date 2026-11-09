@@ -108,7 +108,7 @@ export function CloseWithoutDataDialog({
             Confirmo el cierre sin datos de este turno
           </Label>
           {error && (
-            <Alert id="close-without-data-error" role="alert">
+            <Alert id="close-without-data-error" variant="destructive">
               {error}
             </Alert>
           )}

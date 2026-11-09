@@ -9,14 +9,14 @@ const OPTIONS: { mode: ThemeMode; label: string; Icon: typeof SunIcon }[] = [
   { mode: 'dark', label: 'Tema oscuro', Icon: MoonIcon },
 ];
 
-/** Selector de tema de tres posiciones. Se ve bien sobre el sidebar (siempre oscuro). */
+/** Selector de tema de tres posiciones, pensado para la barra de tinta (siempre oscura). */
 export function ThemeToggle({ className }: { className?: string }) {
   const { mode, setMode } = useTheme();
   return (
     <div
       role="group"
       aria-label="Tema de la interfaz"
-      className={cn('flex rounded-lg bg-sidebar-accent/60 p-0.5', className)}
+      className={cn('flex rounded-md border-[1.5px] border-bar-muted', className)}
     >
       {OPTIONS.map(({ mode: option, label, Icon }) => (
         <button
@@ -28,10 +28,8 @@ export function ThemeToggle({ className }: { className?: string }) {
             setMode(option);
           }}
           className={cn(
-            'flex h-8 flex-1 items-center justify-center rounded-md text-sidebar-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            mode === option
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-              : 'hover:text-sidebar-accent-foreground',
+            'flex size-8 items-center justify-center text-bar-muted outline-none first:rounded-l-sm last:rounded-r-sm focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-bar-foreground',
+            mode === option ? 'bg-bar-foreground text-bar' : 'hover:text-bar-foreground',
           )}
         >
           <Icon className="size-4" aria-hidden="true" />

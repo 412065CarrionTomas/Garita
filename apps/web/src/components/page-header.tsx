@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * Encabezado de toda pantalla del panel: título (h1), una línea que explica para qué sirve
- * y, a la derecha, la acción principal de la pantalla.
+ * Encabezado de toda pantalla del panel: título (h1) en condensada, una sola vez por pantalla,
+ * una línea que explica para qué sirve y, a la derecha, la acción principal.
  */
 export function PageHeader({
   title,
@@ -22,7 +22,7 @@ export function PageHeader({
   return (
     <header className={cn('flex flex-wrap items-end justify-between gap-4', className)}>
       <div className="min-w-0 space-y-1">
-        <h1 id={id} className="text-2xl font-semibold tracking-tight text-foreground">
+        <h1 id={id} className="t-headline text-foreground md:t-display">
           {title}
         </h1>
         {description && <p className="max-w-prose text-sm text-muted-foreground">{description}</p>}

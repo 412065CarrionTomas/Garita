@@ -259,7 +259,10 @@ export default function ConfigurationHome() {
           )}
         </Card>
       ))}
-      <ThemeSwitch />
+      <Card>
+        <Text variant="heading">Apariencia</Text>
+        <ThemeSwitch />
+      </Card>
       <Button
         variant="ghost"
         label="Cerrar sesión"

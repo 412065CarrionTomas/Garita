@@ -58,7 +58,7 @@ it('muestra la cola antigua con estado textual y acceso por teclado', async () =
     </MemoryRouter>,
   );
   expect(await screen.findByText('Más de 24 h pendiente')).toBeInTheDocument();
-  expect(screen.getByText('Pendiente de clasificación')).toBeInTheDocument();
+  expect(screen.getByText('Sin clasificar')).toBeInTheDocument();
   expect(screen.getByText(/Pedro Díaz \(desactivado\)/)).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Ver detalle' })).toHaveAttribute(
     'href',
@@ -218,4 +218,24 @@ it('permite reclasificar un incidente indicando motivo obligatorio', async () =>
       expect.anything(),
     );
   });
+});
+
+it('al elegir un incidente de la cola muestra su detalle al costado', async () => {
+  jest.mocked(apiGet).mockImplementation((path: string) => {
+    if (path === '/incidentes/incident-1') return Promise.resolve(detailIncident);
+    return Promise.resolve([incident]);
+  });
+  renderWithQueryClient(
+    <MemoryRouter>
+      <IncidentsQueuePage />
+    </MemoryRouter>,
+  );
+  expect(
+    await screen.findByText('Elegí un incidente de la lista para ver el detalle.'),
+  ).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: /Intrusión · Predio A/ }));
+  expect(await screen.findByText('Portón forzado en lateral este')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Clasificar' }));
+  expect(screen.getByRole('radio', { name: /Interno/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirmar clasificación' })).toBeInTheDocument();
 });

@@ -5,12 +5,23 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  Rectangle,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  type BarShapeProps,
 } from 'recharts';
-import { space, fontSize } from '@garita/tokens';
+import { space } from '@garita/tokens';
+import {
+  FailurePattern,
+  axisProps,
+  barProps,
+  chartColors,
+  gridProps,
+  tooltipProps,
+} from './chart-theme';
+import { toneFill, type ChartTone } from './compliance-tone';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +38,7 @@ export interface ComplianceChartRow {
   name: string;
   value: number | null;
   description?: string;
+  tone?: ChartTone;
 }
 export function ComplianceChart({
   title,
@@ -50,7 +62,10 @@ export function ComplianceChart({
     <Line
       dataKey="value"
       name="Cumplimiento (%)"
-      stroke="var(--info)"
+      type="linear"
+      stroke={chartColors.ink}
+      strokeWidth={2}
+      dot={{ r: 3, fill: chartColors.ink, stroke: chartColors.ink }}
       connectNulls={false}
       isAnimationActive={false}
     />
@@ -58,8 +73,11 @@ export function ComplianceChart({
     <Bar
       dataKey="value"
       name={percentage ? 'Cumplimiento (%)' : 'Ventanas'}
-      fill="var(--info)"
-      isAnimationActive={false}
+      fill={chartColors.ink}
+      {...barProps}
+      shape={(bar: BarShapeProps) => (
+        <Rectangle {...bar} fill={toneFill[data[bar.index]?.tone ?? 'ink']} />
+      )}
     />
   );
   const Chart = evolution ? LineChart : BarChart;
@@ -87,22 +105,13 @@ export function ComplianceChart({
                   if (row) onSelect?.(row.id);
                 }}
               >
-                <CartesianGrid stroke="var(--border)" />
-                <XAxis
-                  dataKey="name"
-                  tick={{ fill: 'var(--muted-foreground)', fontSize: fontSize.xs.size }}
-                />
-                <YAxis
-                  domain={percentage ? [0, 100] : [0, 'auto']}
-                  tick={{ fill: 'var(--muted-foreground)', fontSize: fontSize.xs.size }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--card)',
-                    color: 'var(--card-foreground)',
-                    borderColor: 'var(--border)',
-                  }}
-                />
+                <defs>
+                  <FailurePattern />
+                </defs>
+                <CartesianGrid {...gridProps} />
+                <XAxis dataKey="name" {...axisProps} />
+                <YAxis domain={percentage ? [0, 100] : [0, 'auto']} {...axisProps} />
+                <Tooltip {...tooltipProps} />
                 {series}
               </Chart>
             </ResponsiveContainer>

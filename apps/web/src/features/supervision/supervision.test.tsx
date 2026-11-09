@@ -142,11 +142,12 @@ it('muestra estados, hora de contacto y filtros operables con teclado', async ()
     await screen.findByText(`Sin contacto desde ${time(row.syncStatus.since)} (quedan 2 eventos)`),
   ).toBeInTheDocument();
   expect(screen.getByText('En curso', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
-  const status = screen.getByLabelText('Estado');
-  await userEvent.selectOptions(status, 'uncovered');
-  expect(screen.getByText('No hay turnos para estos filtros')).toBeInTheDocument();
-  await userEvent.selectOptions(status, 'in_progress');
-  expect(screen.getByRole('link', { name: 'Ver detalle' })).toHaveAttribute(
+  await userEvent.click(screen.getByRole('button', { name: 'Tardías' }));
+  expect(screen.getByText('Sin rondas en este estado')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Sin señal' }));
+  expect(screen.getByText('Sin señal', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Todas' }));
+  expect(screen.getByRole('link', { name: 'Depósito Ruta 9' })).toHaveAttribute(
     'href',
     '/supervision/turnos/s1',
   );
@@ -339,7 +340,7 @@ it('actualiza el punto y la ventana al llegar un registro sin recargar la págin
     </MemoryRouter>,
   );
   expect(await screen.findByText('Pendiente de sincronizar')).toBeInTheDocument();
-  expect(screen.getByText('Pendiente', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+  expect(screen.getByText('Sin registro', { selector: '[data-slot="stamp"]' })).toBeInTheDocument();
   const firstWindow = detail.windows[0];
   if (!firstWindow) throw new Error('Falta ventana en el detalle de prueba');
   current = {
@@ -361,7 +362,7 @@ it('actualiza el punto y la ventana al llegar un registro sin recargar la págin
   expect(screen.getAllByText('Registrado')).toHaveLength(2);
 });
 
-it('soporta 100 turnos simultáneos y filtra por predio', async () => {
+it('soporta 100 turnos simultáneos', async () => {
   const hundredRows = Array.from({ length: 100 }, (_, index) => ({
     ...row,
     id: `s-${index}`,
@@ -373,8 +374,41 @@ it('soporta 100 turnos simultáneos y filtra por predio', async () => {
       <SupervisionPage />
     </MemoryRouter>,
   );
-  expect(await screen.findAllByRole('heading', { level: 2 })).toHaveLength(100);
-  const siteSelect = screen.getByLabelText('Predio');
-  await userEvent.selectOptions(siteSelect, 'p-0');
-  expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(20);
+  expect(await screen.findAllByRole('link', { name: /^Predio / })).toHaveLength(100);
+});
+
+it('filtra por rondas tardías y resume las ventanas en casilleros', async () => {
+  jest.mocked(apiGet).mockResolvedValue([
+    { ...row, windows: { complete: 2, late: 1, pending: 1 } },
+    { ...row, id: 's2', site: { id: 'p2', name: 'Torre Alvear' }, windows: { complete: 4 } },
+  ] as never);
+  renderWithQueryClient(
+    <MemoryRouter>
+      <SupervisionPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole('link', { name: 'Torre Alvear' })).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: /4 de 4 ventanas a tiempo/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Tardías' }));
+  expect(screen.queryByRole('link', { name: 'Torre Alvear' })).not.toBeInTheDocument();
+  expect(screen.getByText('Tardía', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+});
+
+it('arma la foja: camino, tabla de puntos con hora registrada y faltante tras el cierre', async () => {
+  jest.mocked(apiGet).mockResolvedValue(detail);
+  renderWithQueryClient(
+    <MemoryRouter>
+      <ShiftDetailPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole('heading', { name: 'Depósito Ruta 9' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Punto 1, Portón: Registrado' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Punto 2, Patio: Sin registro' })).toBeInTheDocument();
+  const table = screen.getByRole('table');
+  expect(within(table).getByText(time(row.startsAt))).toBeInTheDocument();
+  await userEvent.click(within(table).getByRole('button', { name: 'Patio' }));
+  expect(screen.getByRole('button', { name: 'Punto 2, Patio: Sin registro' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
 });

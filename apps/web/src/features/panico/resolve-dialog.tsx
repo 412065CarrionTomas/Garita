@@ -119,7 +119,7 @@ export function ResolvePanicDialog({ id, onClose }: { id: string; onClose: () =>
               Cancelar
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
-              Guardar resolución
+              {mutation.isPending ? 'Guardando…' : 'Guardar resolución'}
             </Button>
           </div>
         </form>

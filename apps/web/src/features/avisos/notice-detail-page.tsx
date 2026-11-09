@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { noticeSchema } from '@garita/shared';
 import { apiGet } from '@/lib/api-client';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/page-header';
@@ -21,11 +22,16 @@ export function NoticeDetailPage() {
       </Button>
       <PageHeader id="notice-detail-title" title="Detalle del aviso" />
       {notice.isPending ? (
-        <p role="status">Cargando aviso…</p>
+        <div role="status" className="space-y-2">
+          <span className="sr-only">Cargando aviso…</span>
+          {[0].map((i) => (
+            <Skeleton key={i} className="h-40 w-full" />
+          ))}
+        </div>
       ) : notice.isError ? (
-        <Alert role="alert">
+        <Alert variant="destructive">
           No pudimos cargar el aviso.{' '}
-          <Button variant="outline" onClick={() => void notice.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void notice.refetch()}>
             Reintentar
           </Button>
         </Alert>

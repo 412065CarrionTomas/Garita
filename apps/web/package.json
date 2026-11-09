@@ -14,7 +14,8 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
-    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/public-sans": "^5.3.0",
+    "@fontsource/barlow-condensed": "^5.3.0",
     "@garita/shared": "workspace:*",
     "@garita/tokens": "workspace:*",
     "@tanstack/react-query": "^5.104.5",

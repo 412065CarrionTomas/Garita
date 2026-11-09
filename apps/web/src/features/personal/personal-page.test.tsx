@@ -93,7 +93,11 @@ describe('PersonalPage', () => {
   it('lista, pagina y filtra personal por rol y estado', async () => {
     setup();
     expect(await screen.findByText(/Ana Pérez/)).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('Filtrar por rol'), 'supervisor');
+    await userEvent.click(
+      within(screen.getByRole('group', { name: 'Filtrar por rol' })).getByRole('button', {
+        name: 'Supervisores',
+      }),
+    );
     await userEvent.selectOptions(screen.getByLabelText('Filtrar por estado'), 'active');
     await waitFor(() => {
       expect(apiGet).toHaveBeenLastCalledWith(
@@ -113,10 +117,10 @@ describe('PersonalPage', () => {
 
   it('abre y cancela el alta sin enviar una invitación', async () => {
     setup();
-    expect(screen.queryByRole('form', { name: 'Agregar personal' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Agregar personal' }));
-    const dialog = screen.getByRole('dialog', { name: 'Agregar personal' });
-    expect(within(dialog).getByRole('form', { name: 'Agregar personal' })).toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: 'Invitar usuario' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Invitar usuario' }));
+    const dialog = screen.getByRole('dialog', { name: 'Invitar usuario' });
+    expect(within(dialog).getByRole('form', { name: 'Invitar usuario' })).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Rol')).toHaveValue('guard');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -176,7 +180,7 @@ describe('PersonalPage', () => {
       expect(await screen.findByRole('table')).toBeInTheDocument();
       expect(
         within(screen.getByRole('table')).getByText('Activo').closest('[data-slot="badge"]'),
-      ).toHaveClass('bg-success-soft');
+      ).toHaveAttribute('data-variant', 'normal');
       const section = screen.getByRole('region', { name: 'Personal' });
       expect(section.querySelector('[data-slot="table-container"]')).toHaveClass('overflow-x-auto');
       for (const element of section.querySelectorAll('[class]')) {
@@ -194,9 +198,9 @@ describe('PersonalPage', () => {
     setup();
     expect(await screen.findByText('No hay personal para mostrar')).toBeInTheDocument();
     await userEvent.click(
-      within(screen.getByRole('banner')).getByRole('button', { name: 'Agregar personal' }),
+      within(screen.getByRole('banner')).getByRole('button', { name: 'Invitar usuario' }),
     );
-    expect(screen.getByRole('dialog', { name: 'Agregar personal' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Invitar usuario' })).toBeInTheDocument();
   });
 
   it('anuncia la carga con esqueletos y el error con una alerta', async () => {
@@ -217,7 +221,7 @@ describe('PersonalPage', () => {
 
   it('muestra errores de validación por campo y el 409 en el formulario', async () => {
     setup();
-    await userEvent.click(screen.getByRole('button', { name: 'Agregar personal' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Invitar usuario' }));
     await userEvent.click(screen.getByRole('button', { name: 'Enviar invitación' }));
     expect((await screen.findAllByText(/expected string to have/)).length).toBeGreaterThan(0);
     expect(input('firstName')).toHaveAttribute('aria-invalid', 'true');

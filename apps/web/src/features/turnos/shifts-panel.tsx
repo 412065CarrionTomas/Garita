@@ -12,15 +12,28 @@ import type { SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 
+import { cn } from '@/lib/utils';
+import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
+import { SegmentedFilter } from '@/components/segmented-filter';
+import { Stamp } from '@/components/stamp';
 import { StatusBadge } from '@/components/status-badge';
+import { WindowBar } from '@/components/window-bar';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 const shiftRowsSchema = z.array(
   z.looseObject({
@@ -105,14 +118,30 @@ interface FormValues {
   endTime: string;
   roundIds: string[];
 }
+// En curso lleva tilde; programado y cancelado, recuadro punteado; lo cerrado va en tinta.
 const shiftStates = {
-  scheduled: { label: 'Programado', tone: 'info' },
+  scheduled: { label: 'Programado', tone: 'neutral' },
   unassigned: { label: 'Sin asignar', tone: 'warning' },
-  in_progress: { label: 'En curso', tone: 'signal' },
-  closed: { label: 'Cerrado', tone: 'success' },
+  in_progress: { label: 'En curso', tone: 'success' },
+  closed: { label: 'Cerrado', tone: 'info' },
   auto_closed: { label: 'Cerrado por el sistema', tone: 'warning' },
   cancelled: { label: 'Cancelado', tone: 'neutral' },
 } as const;
+
+type StateFilter = 'all' | 'curso' | 'prog' | 'fin' | 'canc';
+const stateFilters: { value: StateFilter; label: string }[] = [
+  { value: 'all', label: 'Todos' },
+  { value: 'curso', label: 'En curso' },
+  { value: 'prog', label: 'Programados' },
+  { value: 'fin', label: 'Finalizados' },
+  { value: 'canc', label: 'Cancelados' },
+];
+const filterStatuses: Record<Exclude<StateFilter, 'all'>, readonly Shift['status'][]> = {
+  curso: ['in_progress'],
+  prog: ['scheduled', 'unassigned'],
+  fin: ['closed', 'auto_closed'],
+  canc: ['cancelled'],
+};
 
 const emptyForm: FormValues = {
   siteId: '',
@@ -139,6 +168,7 @@ export function ShiftsPanel() {
   const [formError, setFormError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflictingShift, setConflictingShift] = useState('');
+  const [stateFilter, setStateFilter] = useState<StateFilter>('all');
   useEffect(() => {
     const interval = window.setInterval(() => {
       setNow(Date.now());
@@ -165,6 +195,13 @@ export function ShiftsPanel() {
     queryKey: ['personal', 'vigiladores'],
     queryFn: () => apiGet('/usuarios?rol=guard&pagina=1', guardsSchema),
   });
+  const visibleShifts = (shifts.data ?? []).filter(
+    (shift) => stateFilter === 'all' || filterStatuses[stateFilter].includes(shift.status),
+  );
+  const windowCounts = useMemo(
+    () => new Map((shifts.data ?? []).map((shift) => [shift.id, expectedWindowCount(shift)])),
+    [shifts.data],
+  );
   const selectedSite = sites.data?.find((site) => site.id === form.siteId);
   const rounds = useQuery({
     queryKey: ['rondas', form.siteId],
@@ -332,7 +369,7 @@ export function ShiftsPanel() {
       <PageHeader
         id="shifts-title"
         title="Turnos"
-        description="Organizá los horarios, vigiladores y rondas de cada predio."
+        description={`${longDate(now)}. Organizá los horarios, vigiladores y rondas de cada predio.`}
         actions={
           <Button
             onClick={() => {
@@ -413,100 +450,171 @@ export function ShiftsPanel() {
           Incluir turnos sin vigilador
         </Label>
       </div>
+      <SegmentedFilter
+        ariaLabel="Filtrar turnos por estado"
+        options={stateFilters}
+        value={stateFilter}
+        onChange={setStateFilter}
+      />
       {message && <p role="status">{message}</p>}
       {shifts.isPending ? (
-        <p role="status">Cargando turnos…</p>
+        <div role="status" aria-label="Cargando turnos" className="space-y-2">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
       ) : shifts.isError ? (
-        <Alert variant="destructive">No se pudieron cargar los turnos.</Alert>
-      ) : null}
-      <div className="space-y-3">
-        {shifts.data?.map((shift) => {
-          const assignment = shift.assignments[0];
-          const guard = assignment?.guard;
-          const started = Date.parse(shift.startsAt) <= now;
-          return (
-            <article key={shift.id}>
-              <Card
-                className={shift.status === 'unassigned' ? 'bg-warning-soft ring-warning/30' : ''}
-              >
-                <CardContent className="space-y-3">
-                  <StatusBadge tone={shiftStates[shift.status].tone}>
-                    {shiftStates[shift.status].label}
-                  </StatusBadge>
-                  <h2 className="font-semibold tabular-nums">
-                    {shift.site.name} ·{' '}
-                    {new Date(shift.serviceDate).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
-                  </h2>
-                  <p className="tabular-nums text-muted-foreground">
+        <Alert variant="destructive">
+          No se pudieron cargar los turnos.{' '}
+          <Button type="button" variant="outline" size="sm" onClick={() => void shifts.refetch()}>
+            Reintentar
+          </Button>
+        </Alert>
+      ) : visibleShifts.length === 0 ? (
+        <EmptyState
+          title="Sin turnos en este estado"
+          description="Probá con otro filtro o creá un turno nuevo."
+        />
+      ) : (
+        <Table aria-label="Turnos">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Predio</TableHead>
+              <TableHead>Vigilador</TableHead>
+              <TableHead>Ronda</TableHead>
+              <TableHead>Horario</TableHead>
+              <TableHead>Ventanas</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead>
+                <span className="sr-only">Acciones</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleShifts.flatMap((shift) => {
+              const guard = shift.assignments[0]?.guard;
+              const started = Date.parse(shift.startsAt) <= now;
+              const cancelled = shift.status === 'cancelled';
+              const windowCount = windowCounts.get(shift.id) ?? 0;
+              const rows = [
+                <TableRow
+                  key={shift.id}
+                  className={cn(
+                    shift.status === 'unassigned' && 'bg-warning-soft',
+                    cancelled && 'text-muted-foreground',
+                  )}
+                >
+                  <TableCell>
+                    <b className={cn('block font-semibold', cancelled && 'line-through')}>
+                      {shift.site.name}
+                    </b>
+                    <small className="block tabular-nums text-muted-foreground">
+                      {new Date(shift.serviceDate).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
+                    </small>
+                  </TableCell>
+                  <TableCell>
+                    {guard ? (
+                      <span>
+                        {guard.firstName} {guard.lastName}
+                        {guard.status === 'invitation_pending' ? ' · invitación pendiente' : ''}
+                      </span>
+                    ) : (
+                      <Stamp variant="late">Sin vigilador</Stamp>
+                    )}
+                  </TableCell>
+                  <TableCell>{shift.rounds.map(({ round }) => round.name).join(', ')}</TableCell>
+                  <TableCell className="t-numeral">
                     {formatShiftTime(shift.startsAt, shift.site.company.timezone)}–
                     {formatShiftTime(shift.endsAt, shift.site.company.timezone)}
-                  </p>
-                  {guard ? (
-                    <p>
-                      {guard.firstName} {guard.lastName}
-                      {guard.status === 'invitation_pending' ? ' · invitación pendiente' : ''}
-                    </p>
-                  ) : (
-                    <p className="font-semibold">
-                      <span aria-hidden="true">⚠ </span>Sin vigilador
-                    </p>
-                  )}
-                  <p>Rondas: {shift.rounds.map(({ round }) => round.name).join(', ')}</p>
-                  {shift.status !== 'cancelled' &&
-                    (started ? (
-                      <p>Solo se puede reasignar (HU-44).</p>
+                  </TableCell>
+                  <TableCell>
+                    {windowCount === 0 || cancelled ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : shift.status === 'scheduled' || shift.status === 'unassigned' ? (
+                      <WindowBar
+                        windows={Array.from({ length: windowCount }, () => ({
+                          status: 'pending' as const,
+                        }))}
+                      />
                     ) : (
-                      <div className="flex flex-wrap gap-3">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            openForm(shift);
-                          }}
-                        >
-                          {guard ? 'Editar turno' : 'Asignar vigilador'}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghostDestructive"
-                          size="sm"
-                          onClick={() => {
-                            setCancelId(shift.id);
-                          }}
-                        >
-                          Cancelar turno
-                        </Button>
-                      </div>
-                    ))}
-                  {cancelId === shift.id && (
-                    <Alert
-                      role="alertdialog"
-                      aria-modal="true"
-                      aria-label="Confirmar cancelación"
-                      className="space-y-3 border-warning bg-warning-soft text-warning"
-                    >
-                      <p>¿Cancelar el turno de {shift.site.name}?</p>
-                      <Button type="button" variant="outline" onClick={() => void cancel(shift.id)}>
-                        Confirmar cancelación
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setCancelId('');
-                        }}
+                      // TODO(foja): el listado no trae el estado de cada ventana; solo se muestra la cantidad.
+                      <span className="tabular-nums">{windowCount} ventanas</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge tone={shiftStates[shift.status].tone}>
+                      {shiftStates[shift.status].label}
+                    </StatusBadge>
+                  </TableCell>
+                  <TableCell>
+                    {!cancelled &&
+                      (started ? (
+                        <span className="text-sm">Solo se puede reasignar (HU-44).</span>
+                      ) : (
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              openForm(shift);
+                            }}
+                          >
+                            {guard ? 'Editar turno' : 'Asignar vigilador'}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghostDestructive"
+                            size="sm"
+                            onClick={() => {
+                              setCancelId(shift.id);
+                            }}
+                          >
+                            Cancelar turno
+                          </Button>
+                        </div>
+                      ))}
+                  </TableCell>
+                </TableRow>,
+              ];
+              if (cancelId === shift.id)
+                rows.push(
+                  <TableRow key={`${shift.id}-cancel`}>
+                    <TableCell colSpan={7} className="whitespace-normal">
+                      <Alert
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-label="Confirmar cancelación"
+                        className="space-y-3 border-warning bg-warning-soft text-warning"
                       >
-                        Volver
-                      </Button>
-                    </Alert>
-                  )}
-                </CardContent>
-              </Card>
-            </article>
-          );
-        })}
-      </div>
+                        <p>¿Cancelar el turno de {shift.site.name}?</p>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void cancel(shift.id)}
+                          >
+                            Confirmar cancelación
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setCancelId('');
+                            }}
+                          >
+                            Volver
+                          </Button>
+                        </div>
+                      </Alert>
+                    </TableCell>
+                  </TableRow>,
+                );
+              return rows;
+            })}
+          </TableBody>
+        </Table>
+      )}
       <ShiftFormDialog
         open={formOpen}
         form={form}
@@ -558,10 +666,10 @@ function ShiftFormDialog(props: {
     >
       <DialogContent aria-labelledby="shift-form-title" aria-describedby="shift-form-description">
         <form className="space-y-4" onSubmit={props.onSubmit}>
-          <DialogTitle id="shift-form-title" className="text-xl font-semibold">
-            {props.editing ? 'Editar turno' : 'Crear turno'}
+          <DialogTitle id="shift-form-title">
+            {props.editing ? 'Editar turno' : 'Nuevo turno'}
           </DialogTitle>
-          <DialogDescription id="shift-form-description" className="text-sm text-muted-foreground">
+          <DialogDescription id="shift-form-description" className="tabular-nums">
             Zona horaria de la empresa: {props.timezone}
           </DialogDescription>
           <Label className="grid gap-1">
@@ -697,13 +805,14 @@ function ShiftFormDialog(props: {
             aria-describedby={props.fieldErrors.roundIds ? 'shift-rounds-error' : undefined}
             className="space-y-2"
           >
-            <legend className="font-medium">Rondas del predio</legend>
+            <legend className="t-label mb-1 text-muted-foreground">Rondas del predio</legend>
             {props.rounds
               .filter((round) => round.status === 'active')
               .map((round) => (
-                <Label key={round.id} className="block">
+                <Label key={round.id} className="flex items-center gap-2">
                   <input
                     type="checkbox"
+                    className="size-4 accent-primary"
                     checked={props.form.roundIds.includes(round.id)}
                     onChange={(event) => {
                       set({
@@ -712,7 +821,7 @@ function ShiftFormDialog(props: {
                           : props.form.roundIds.filter((id) => id !== round.id),
                       });
                     }}
-                  />{' '}
+                  />
                   {round.name}
                 </Label>
               ))}
@@ -723,17 +832,21 @@ function ShiftFormDialog(props: {
             )}
           </fieldset>
           <section aria-labelledby="expected-windows-title">
-            <h3 id="expected-windows-title" className="font-medium">
+            <h3 id="expected-windows-title" className="t-label mb-1 text-muted-foreground">
               Ventanas esperadas del turno
             </h3>
             {props.preview.expected.length ? (
-              <ul>
+              <ul className="flex flex-wrap gap-2">
                 {props.preview.expected.map((window, index) => (
-                  <li key={`${window}-${index}`}>{window}</li>
+                  <li key={`${window}-${index}`}>
+                    <Stamp>{window}</Stamp>
+                  </li>
                 ))}
               </ul>
             ) : (
-              <p>Seleccioná fechas y rondas para calcular las ventanas.</p>
+              <p className="text-sm text-muted-foreground">
+                Seleccioná fechas y rondas para calcular las ventanas.
+              </p>
             )}
           </section>
           {props.preview.uncovered.length > 0 && (
@@ -760,6 +873,34 @@ function ShiftFormDialog(props: {
   );
 }
 
+function longDate(value: number): string {
+  const text = new Date(value)
+    .toLocaleDateString('es-AR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+    .replace(',', '');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+/** Ventanas de sus rondas que terminan dentro del turno (misma cuenta que la vista previa del formulario). */
+function expectedWindowCount(shift: Shift): number {
+  const timezone = shift.site.company.timezone;
+  const startDate = formatDateTime(shift.startsAt, timezone).date;
+  return shift.rounds.reduce((total, { round }) => {
+    const version = round.currentVersion;
+    if (!version) return total;
+    const windows = [previousDate(startDate), startDate].flatMap((date) =>
+      computeRoundWindows(date, { ...version, timezone }),
+    );
+    return (
+      total +
+      windowsForShift(windows, { shiftStartUtc: shift.startsAt, shiftEndUtc: shift.endsAt })
+        .endingInShift.length
+    );
+  }, 0);
+}
 function timeToMinutes(value: string): number {
   const [hour, minute] = value.split(':').map(Number);
   return (hour ?? 0) * 60 + (minute ?? 0);

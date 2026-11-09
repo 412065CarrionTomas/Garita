@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
@@ -59,14 +59,15 @@ describe('<ShiftsPanel />', () => {
     );
   });
 
+  // La forma del sello (variante) distingue el estado además del color.
   it.each([
-    ['scheduled', 'Programado', 'info'],
-    ['unassigned', 'Sin asignar', 'warning'],
-    ['in_progress', 'En curso', 'signal'],
-    ['closed', 'Cerrado', 'success'],
-    ['auto_closed', 'Cerrado por el sistema', 'warning'],
-    ['cancelled', 'Cancelado', 'neutral'],
-  ])('valida y muestra el estado %s con tono %s', async (status, label, tone) => {
+    ['scheduled', 'Programado', 'dashed'],
+    ['unassigned', 'Sin asignar', 'late'],
+    ['in_progress', 'En curso', 'normal'],
+    ['closed', 'Cerrado', 'normal'],
+    ['auto_closed', 'Cerrado por el sistema', 'late'],
+    ['cancelled', 'Cancelado', 'dashed'],
+  ])('valida y muestra el estado %s con sello %s', async (status, label, variant) => {
     mockQueries();
     const fallback = jest.mocked(apiGet).getMockImplementation();
     jest.mocked(apiGet).mockImplementation((path, schema) => {
@@ -90,7 +91,8 @@ describe('<ShiftsPanel />', () => {
       return fallback(path, schema);
     });
     renderWithQueryClient(<ShiftsPanel />);
-    expect(await screen.findByText(label)).toHaveAttribute('data-variant', tone);
+    const table = await screen.findByRole('table', { name: 'Turnos' });
+    expect(within(table).getByText(label)).toHaveAttribute('data-variant', variant);
   });
 
   it('muestra turnos en hora local e indica una invitación pendiente', async () => {
@@ -115,10 +117,11 @@ describe('<ShiftsPanel />', () => {
       return Promise.resolve({ items: [] } as never);
     });
     renderWithQueryClient(<ShiftsPanel />);
-    expect(await screen.findByText('Predio A · 14/10/2030')).toBeInTheDocument();
+    expect(await screen.findByText('Predio A')).toBeInTheDocument();
+    expect(screen.getByText('14/10/2030')).toBeInTheDocument();
     expect(screen.getByText('20:00–08:00')).toBeInTheDocument();
     expect(screen.getByText('Pedro Díaz · invitación pendiente')).toBeInTheDocument();
-    expect(screen.getByText('Rondas: Perimetral')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Perimetral' })).toBeInTheDocument();
   });
 
   it('crea un turno válido y muestra sus cuatro ventanas esperadas', async () => {
@@ -276,10 +279,47 @@ describe('<ShiftsPanel />', () => {
     const user = userEvent.setup();
     renderWithQueryClient(<ShiftsPanel />);
     const unassigned = await screen.findByText('Sin vigilador');
-    expect(unassigned.closest('article')?.querySelector('[data-slot=card]')).toHaveClass(
-      'bg-warning-soft',
-    );
+    expect(unassigned.closest('tr')).toHaveClass('bg-warning-soft');
     await user.click(screen.getByRole('button', { name: 'Asignar vigilador' }));
     expect(screen.getByRole('dialog', { name: 'Editar turno' })).toBeInTheDocument();
+  });
+});
+
+describe('<ShiftsPanel /> filtros y estados', () => {
+  const shift = (id: string, status: string) => ({
+    id,
+    siteId: 'site-1',
+    startsAt: '2030-10-14T23:00:00.000Z',
+    endsAt: '2030-10-15T11:00:00.000Z',
+    serviceDate: '2030-10-14T00:00:00.000Z',
+    status,
+    site: { name: `Predio ${id}`, company: { timezone: 'America/Argentina/Buenos_Aires' } },
+    assignments: [],
+    rounds: [],
+  });
+
+  it('filtra por estado y avisa cuando no hay turnos', async () => {
+    mockQueries([shift('uno', 'in_progress'), shift('dos', 'cancelled')]);
+    const user = userEvent.setup();
+    renderWithQueryClient(<ShiftsPanel />);
+    expect(await screen.findByText('Predio uno')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancelados' }));
+    expect(screen.queryByText('Predio uno')).not.toBeInTheDocument();
+    expect(screen.getByText('Predio dos')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Finalizados' }));
+    expect(screen.getByText('Sin turnos en este estado')).toBeInTheDocument();
+  });
+
+  it('ofrece reintentar si falla la carga', async () => {
+    mockQueries();
+    const fallback = jest.mocked(apiGet).getMockImplementation();
+    if (!fallback) throw new Error('Falta el mock de consultas');
+    jest
+      .mocked(apiGet)
+      .mockImplementation((path, schema) =>
+        path.startsWith('/turnos') ? Promise.reject(new Error('caído')) : fallback(path, schema),
+      );
+    renderWithQueryClient(<ShiftsPanel />);
+    expect(await screen.findByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
   });
 });

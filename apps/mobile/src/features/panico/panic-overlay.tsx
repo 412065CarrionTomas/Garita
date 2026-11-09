@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Animated, Pressable, StyleSheet, View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import { space } from '@garita/tokens';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button, Text, useTheme } from '@/ui';
+import { Text, useTheme } from '@/ui';
 import {
   createDefaultFieldRepository,
   subscribePanicChanges,
@@ -11,6 +12,14 @@ import {
 import { fetchPanicState, resumePanicAlerts } from './transport';
 import { triggerPanic } from './actions';
 
+const HOLD_MS = 2000;
+// Anillo de 112 con trazo de 6: piezas de tamaño fijo, como los casilleros de `src/ui`.
+const RING = 112;
+const STROKE = 6;
+const RADIUS = (RING - STROKE) / 2;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
 const smsMessages: Partial<Record<LocalPanicAlert['smsState'], string>> = {
   sent: 'SMS enviado',
   delivered: 'SMS entregado',
@@ -18,11 +27,24 @@ const smsMessages: Partial<Record<LocalPanicAlert['smsState'], string>> = {
   failed: 'No se pudo enviar',
 };
 
-export function PanicOverlay() {
+/** `bottomOffset` sube el anillo para que no tape la barra inferior del turno. */
+export function PanicOverlay({ bottomOffset = 0 }: { bottomOffset?: number }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [progress] = useState(() => new Animated.Value(0));
   const [status, setStatus] = useState<string | null>(null);
+  const [holding, setHolding] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then(setReduceMotion)
+      .catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -87,12 +109,12 @@ export function PanicOverlay() {
         {
           backgroundColor: colors.card,
           borderColor: colors.border,
-          bottom: insets.bottom + space[5],
+          bottom: insets.bottom + bottomOffset + space[5],
         },
       ]}
     >
-      <Button
-        label="Pánico"
+      <Pressable
+        accessibilityRole="button"
         accessibilityLabel="Pánico, mantener presionado"
         accessibilityHint="Mantené presionado dos segundos para enviar una alerta silenciosa"
         accessibilityActions={[
@@ -107,24 +129,58 @@ export function PanicOverlay() {
             activate();
         }}
         onPressIn={() => {
+          setHolding(true);
           progress.setValue(0);
-          Animated.timing(progress, { toValue: 1, duration: 2000, useNativeDriver: true }).start();
+          // Con Reducir movimiento no hay barrido: el anillo solo cambia de trazo mientras se mantiene.
+          if (!reduceMotion)
+            Animated.timing(progress, {
+              toValue: 1,
+              duration: HOLD_MS,
+              useNativeDriver: false,
+            }).start();
         }}
         onPressOut={() => {
+          setHolding(false);
           progress.stopAnimation();
           progress.setValue(0);
         }}
         onLongPress={activate}
-        delayLongPress={2000}
-        variant="danger"
-        size="lg"
-      />
-      <Animated.View
-        style={[
-          styles.progress,
-          { backgroundColor: colors.danger, transform: [{ scaleX: progress }] },
-        ]}
-      />
+        delayLongPress={HOLD_MS}
+        style={styles.ring}
+      >
+        <Svg width={RING} height={RING} style={StyleSheet.absoluteFill}>
+          <Circle
+            cx={RING / 2}
+            cy={RING / 2}
+            r={RADIUS}
+            fill="none"
+            stroke={reduceMotion && holding ? colors.danger : colors.input}
+            strokeWidth={STROKE / 2}
+          />
+          <AnimatedCircle
+            cx={RING / 2}
+            cy={RING / 2}
+            r={RADIUS}
+            fill="none"
+            stroke={colors.danger}
+            strokeWidth={STROKE}
+            strokeDasharray={[CIRCUMFERENCE, CIRCUMFERENCE]}
+            strokeDashoffset={progress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [CIRCUMFERENCE, 0],
+            })}
+            rotation={-90}
+            origin={RING / 2 + ', ' + RING / 2}
+          />
+        </Svg>
+        <Text variant="heading" accessibilityRole="none">
+          Mantené
+        </Text>
+        <Text variant="caption" color="mutedForeground" accessibilityRole="none">
+          {HOLD_MS / 1000} segundos
+        </Text>
+      </Pressable>
+      {/* TODO(foja): "Cancelar alerta" y "Alerta enviada…" necesitan una acción de cancelación que hoy no existe en actions.ts. */}
       {status && (
         <Text
           variant="caption"
@@ -148,6 +204,7 @@ const styles = StyleSheet.create({
     padding: space[2],
     borderWidth: 1,
     gap: space[1],
+    alignItems: 'center',
   },
-  progress: { height: space[1] },
+  ring: { width: RING, height: RING, alignItems: 'center', justifyContent: 'center' },
 });
