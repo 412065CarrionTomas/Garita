@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Marker as MapMarker, useMap } from 'react-map-gl/maplibre';
 import { AddressSearch } from './address-search';
 import { BaseMap } from './base-map';
-import { useDark, useMapStyle } from './map-style';
+import { DEFAULT_CENTER, useDark, useMapStyle } from './map-style';
 
 import { EmptyState } from '@/components/empty-state';
 
@@ -17,7 +17,8 @@ interface Props {
 function DraggableMarker({ latitude, longitude, onChange }: Props) {
   const { current: map } = useMap();
   useEffect(() => {
-    map?.panTo([longitude, latitude]);
+    if (!map) return;
+    map.easeTo({ center: [longitude, latitude], zoom: Math.max(map.getZoom(), 15) });
   }, [latitude, longitude, map]);
   return (
     <MapMarker
@@ -35,17 +36,28 @@ export function SiteMapLocation({ unavailable, ...props }: Props & { unavailable
   // Misma consulta (en caché) que BaseMap: si el mapa no carga se reemplaza toda la sección.
   const { isError } = useMapStyle(useDark());
   if (isError) return unavailable;
+  // Un predio nuevo llega con 0, 0 (en el océano): se arranca en la zona por defecto y sin marcador.
+  const unset = props.latitude === 0 && props.longitude === 0;
   return (
     <section aria-label="Ubicación del predio" className="min-w-0 space-y-4">
       <AddressSearch onSelect={props.onChange} />
       <p className="text-sm text-muted-foreground">
-        Seleccioná la ubicación arrastrando el marcador.
+        {unset
+          ? 'Buscá la dirección o hacé clic en el mapa para ubicar el predio.'
+          : 'Ajustá la ubicación arrastrando el marcador.'}
       </p>
       <div className="h-72 overflow-hidden rounded-xl border border-border">
         <BaseMap
-          initialViewState={{ latitude: props.latitude, longitude: props.longitude, zoom: 14 }}
+          initialViewState={
+            unset
+              ? { ...DEFAULT_CENTER, zoom: 11 }
+              : { latitude: props.latitude, longitude: props.longitude, zoom: 15 }
+          }
+          onClick={(event) => {
+            props.onChange(event.lngLat.lat, event.lngLat.lng);
+          }}
         >
-          <DraggableMarker {...props} />
+          {!unset && <DraggableMarker {...props} />}
         </BaseMap>
       </div>
     </section>

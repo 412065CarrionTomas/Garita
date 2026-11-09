@@ -4,7 +4,7 @@ import { EmptyState } from '@/components/empty-state';
 import type { PointStatus } from '@/components/point-path';
 import { cn } from '@/lib/utils';
 import { BaseMap } from './base-map';
-import { useDark } from './map-style';
+import { DEFAULT_CENTER, useDark } from './map-style';
 
 export interface LiveMapSite {
   id: string;
@@ -330,7 +330,7 @@ export function LiveMapView(props: LiveMapProps) {
   const dark = useDark();
   return (
     <BaseMap
-      initialViewState={{ latitude: -31.4, longitude: -64.18, zoom: 12 }}
+      initialViewState={{ ...DEFAULT_CENTER, zoom: 12 }}
       cooperativeGestures={false}
       unavailable={
         <div className="grid size-full place-items-center bg-muted p-6">

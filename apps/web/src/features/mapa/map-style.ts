@@ -40,6 +40,9 @@ const dark: Palette = {
   label: colors.dark.mutedForeground,
 };
 
+/** Centro por defecto de los mapas (ciudad de Córdoba) cuando todavía no hay lugares que mostrar. */
+export const DEFAULT_CENTER = { latitude: -31.4, longitude: -64.18 };
+
 const HIDDEN = new Set(['poi', 'transit', 'aerodrome_label']);
 const AVENUES = ['motorway', 'trunk', 'primary'];
 
