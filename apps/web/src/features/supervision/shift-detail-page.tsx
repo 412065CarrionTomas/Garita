@@ -1,20 +1,225 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { apiGet } from '@/lib/api-client';
 import { PageHeader } from '@/components/page-header';
+import { PointPath } from '@/components/point-path';
+import { PointTable } from '@/components/point-table';
 import { StatusBadge } from '@/components/status-badge';
+import { WindowBar } from '@/components/window-bar';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { shiftDetailSchema, shiftLabels, time } from './contracts';
-import type { Severity } from './contracts';
-import { RecordsSection, RouteSection, WindowsSection } from './detail-sections';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  foja,
+  isCompleteWindow,
+  shiftDetailSchema,
+  shiftLabels,
+  shiftTones,
+  time,
+  windowBoxStatus,
+} from './contracts';
+import type { Severity, ShiftDetail } from './contracts';
+import {
+  AssignmentsSection,
+  CoverageSection,
+  RecordsSection,
+  RejectedSection,
+  RouteSection,
+  WindowsSection,
+} from './detail-sections';
+import { useOpenNotices } from '../avisos/queries';
+import { CloseWithoutDataDialog } from '../avisos/close-without-data-dialog';
+import { LiveMap } from '../mapa/live-map';
+import { LiveLayout } from './live-layout';
+import { ReassignDialog } from './reassign-dialog';
+import { useSiteCoordinates } from './use-site-coordinates';
+
+const BACK = (
+  <Link
+    to="/supervision"
+    className="inline-flex min-h-9 items-center px-1 text-sm font-semibold underline underline-offset-4"
+  >
+    ← Rondas
+  </Link>
+);
+
+function Meta({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <dt className="t-label text-muted-foreground">{label}</dt>
+      <dd className="text-sm font-semibold tabular-nums">{children}</dd>
+    </div>
+  );
+}
+
+function Foja({ detail, noticePending }: { detail: ShiftDetail; noticePending: boolean }) {
+  const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [severity, setSeverity] = useState<'' | Severity>('');
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [closeWithoutDataOpen, setCloseWithoutDataOpen] = useState(false);
+  const coordinates = useSiteCoordinates();
+  const { path, rows, done } = useMemo(() => foja(detail), [detail]);
+  const windows = [...detail.windows].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const completeWindows = windows.filter((w) => isCompleteWindow(w.status)).length;
+  const currentWindow =
+    windows.find((w) => w.status === 'in_progress' || w.status === 'late') ??
+    windows.find((w) => w.status === 'pending');
+  const guard = detail.assignments.find((a) => a.isCurrent)?.guard;
+  const roundName = detail.rounds[0]?.name;
+
+  const siteAt = coordinates.get(detail.site.id);
+  const mapPoints = detail.points.map((point, index) => ({
+    id: point.id,
+    name: point.name,
+    lat: point.latitude,
+    lng: point.longitude,
+    status: path[index]?.status ?? ('pending' as const),
+  }));
+
+  const panel = (
+    <>
+      <div className="flex items-center gap-3.5 border-b border-border px-5 py-2">
+        {BACK}
+        <p className="t-label ml-auto text-muted-foreground">
+          Foja de ronda{roundName ? ` ${roundName}` : ''} · turno {time(detail.scheduled.startsAt)}
+        </p>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="px-5 pt-4">
+          <PageHeader
+            id="detail-title"
+            title={detail.site.name}
+            actions={
+              <StatusBadge tone={shiftTones[detail.status]}>
+                {shiftLabels[detail.status]}
+              </StatusBadge>
+            }
+          />
+        </div>
+        {/* TODO(foja): "Última sincronización" no viene en el detalle (sí en la lista, como syncStatus). */}
+        <dl className="flex flex-wrap gap-x-6 gap-y-1 px-5 pt-3 pb-3.5">
+          <Meta label="Vigilador">
+            {guard ? `${guard.firstName} ${guard.lastName}` : 'Sin vigilador'}
+          </Meta>
+          <Meta label="Ventana actual">
+            {currentWindow
+              ? `${time(currentWindow.startsAt)}–${time(currentWindow.endsAt)}`
+              : 'Sin ventana en curso'}
+          </Meta>
+          <Meta label="Puntos">
+            {done} de {detail.points.length}
+          </Meta>
+        </dl>
+        <div className="px-5 pb-1.5">
+          <PointPath points={path} selectedId={selectedPointId} onSelect={setSelectedPointId} />
+        </div>
+        <div className="flex items-center gap-3.5 px-5 pb-3 text-sm text-muted-foreground">
+          <WindowBar windows={windows.map((w) => ({ status: windowBoxStatus[w.status] }))} />
+          <span>
+            {completeWindows} de {windows.length} ventanas completas
+          </span>
+        </div>
+        {(noticePending || detail.canCover) && (
+          <div className="flex flex-wrap gap-2 border-t border-border px-5 py-2.5">
+            {noticePending && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCloseWithoutDataOpen(true);
+                }}
+              >
+                Cerrar sin datos
+              </Button>
+            )}
+            {detail.canCover && (
+              <Button
+                onClick={() => {
+                  setReassignOpen(true);
+                }}
+              >
+                {detail.status === 'uncovered' ? 'Cubrir el resto' : 'Reasignar'}
+              </Button>
+            )}
+          </div>
+        )}
+        {/* TODO(foja): "Llamar" / "Enviar SMS" necesita el teléfono del vigilador, que el detalle no trae. */}
+        <div className="flex h-96 flex-col px-5">
+          <PointTable rows={rows} selectedId={selectedPointId} onSelect={setSelectedPointId} />
+        </div>
+        <div className="space-y-6 px-5 py-6">
+          <CoverageSection detail={detail} />
+          <AssignmentsSection detail={detail} />
+          <WindowsSection detail={detail} />
+          <RouteSection detail={detail} />
+          <RecordsSection
+            detail={detail}
+            flaggedOnly={flaggedOnly}
+            severity={severity}
+            onFlaggedOnly={setFlaggedOnly}
+            onSeverity={setSeverity}
+          />
+          <RejectedSection detail={detail} />
+        </div>
+      </div>
+      {closeWithoutDataOpen && (
+        <CloseWithoutDataDialog
+          shiftId={detail.id}
+          onClose={() => {
+            setCloseWithoutDataOpen(false);
+          }}
+        />
+      )}
+      {reassignOpen && (
+        <ReassignDialog
+          shiftId={detail.id}
+          endsAt={detail.scheduled.endsAt}
+          minutesToSignal={
+            detail.site.connectivityType === 'without_signal' ? detail.site.minutesToSignal : null
+          }
+          covering={detail.status === 'uncovered'}
+          open={reassignOpen}
+          onOpenChange={setReassignOpen}
+        />
+      )}
+    </>
+  );
+
+  return (
+    <LiveLayout
+      labelledBy="detail-title"
+      panel={panel}
+      map={
+        <LiveMap
+          sites={
+            siteAt
+              ? [
+                  {
+                    id: detail.site.id,
+                    name: detail.site.name,
+                    ...siteAt,
+                    label: `${done}/${detail.points.length}`,
+                    description: `${done} de ${detail.points.length} puntos registrados`,
+                    state: 'normal',
+                  },
+                ]
+              : []
+          }
+          selectedSiteId={detail.site.id}
+          points={mapPoints}
+          selectedPointId={selectedPointId}
+          onSelectPoint={setSelectedPointId}
+        />
+      }
+    />
+  );
+}
 
 export function ShiftDetailPage() {
   const { id } = useParams();
-  const [flaggedOnly, setFlaggedOnly] = useState(false);
-  const [severity, setSeverity] = useState<'' | Severity>('');
+  const notices = useOpenNotices(Boolean(id));
   const {
     data: detail,
     isPending,
@@ -25,132 +230,48 @@ export function ShiftDetailPage() {
     queryFn: () => apiGet(`/turnos/${encodeURIComponent(id ?? '')}/detalle`, shiftDetailSchema),
     enabled: Boolean(id),
   });
-  if (isPending) return <p role="status">Cargando detalle…</p>;
-  if (isError)
+  if (isPending || isError)
     return (
-      <Alert role="alert">
-        No pudimos cargar el turno.{' '}
-        <button type="button" className="underline" onClick={() => void refetch()}>
-          Reintentar
-        </button>
-      </Alert>
-    );
-  return (
-    <section className="space-y-6" aria-labelledby="detail-title">
-      <Link
-        to="/supervision"
-        className="text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        ← Volver a En vivo
-      </Link>
-      <PageHeader
-        id="detail-title"
-        title={`Turno en ${detail.site.name}`}
-        description="Detalle de cobertura, ventanas y registros"
-        actions={
-          <StatusBadge
-            tone={
-              detail.status === 'uncovered'
-                ? 'danger'
-                : detail.status === 'without_guard'
-                  ? 'warning'
-                  : 'info'
-            }
-          >
-            {shiftLabels[detail.status]}
-          </StatusBadge>
+      <LiveLayout
+        labelledBy="detail-title"
+        map={<LiveMap sites={[]} />}
+        panel={
+          <>
+            <div className="border-b border-border px-5 py-2">{BACK}</div>
+            {isError ? (
+              <Alert variant="destructive" role="alert" className="m-5 w-auto">
+                No pudimos cargar el turno.{' '}
+                <button
+                  type="button"
+                  className="font-semibold underline"
+                  onClick={() => void refetch()}
+                >
+                  Reintentar
+                </button>
+              </Alert>
+            ) : (
+              <div role="status" aria-label="Cargando detalle" className="space-y-3 p-5">
+                <h1 id="detail-title" className="sr-only">
+                  Cargando detalle
+                </h1>
+                <Skeleton className="h-9 w-2/3" />
+                <Skeleton className="h-40" />
+                <Skeleton className="h-64" />
+              </div>
+            )}
+          </>
         }
       />
-      <Card>
-        <CardHeader>
-          <CardTitle>Horario y cobertura</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p>
-            Programado:{' '}
-            <span className="tabular-nums">
-              {time(detail.scheduled.startsAt)}–{time(detail.scheduled.endsAt)}
-            </span>
-          </p>
-          <p>
-            Inicio real: {detail.actual.startedAt ? time(detail.actual.startedAt) : 'No iniciado'}
-          </p>
-          <p>Cierre real: {detail.actual.closedAt ? time(detail.actual.closedAt) : 'Sin cierre'}</p>
-          {detail.status === 'uncovered' && (
-            <p className="font-medium text-danger">
-              Sin cobertura desde{' '}
-              {detail.actual.closedAt ? time(detail.actual.closedAt) : 'hora desconocida'}
-              {detail.actual.closeReason ? ` · Motivo: ${detail.actual.closeReason}` : ''}
-            </p>
-          )}
-          {detail.actual.closedEarly && detail.status !== 'uncovered' && (
-            <p>
-              Cierre antes de hora
-              {detail.actual.closeReason ? ` · Motivo: ${detail.actual.closeReason}` : ''}
-              {detail.actual.closedBy ? ` · Cerró: ${detail.actual.closedBy}` : ''}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {detail.status === 'uncovered' && (
-              <Button disabled title="Disponible próximamente">
-                Cubrir el resto · Disponible próximamente
-              </Button>
-            )}
-            {(detail.status === 'without_guard' || detail.status === 'unassigned') && (
-              <Button disabled title="Disponible próximamente">
-                Asignarle uno · Disponible próximamente
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Historial de asignaciones</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol className="space-y-2">
-            {detail.assignments.map((assignment) => (
-              <li key={assignment.id} className="text-sm">
-                {assignment.guard
-                  ? `${assignment.guard.firstName} ${assignment.guard.lastName}`
-                  : 'Sin vigilador'}{' '}
-                · {time(assignment.startsAt)}–{time(assignment.endsAt)}
-                {assignment.isCurrent ? ' · Vigente' : ''}
-              </li>
-            ))}
-          </ol>
-          {detail.assignments.length === 0 && <p>Sin asignaciones.</p>}
-        </CardContent>
-      </Card>
-      <WindowsSection detail={detail} />
-      <RouteSection detail={detail} />
-      <RecordsSection
-        detail={detail}
-        flaggedOnly={flaggedOnly}
-        severity={severity}
-        onFlaggedOnly={setFlaggedOnly}
-        onSeverity={setSeverity}
-      />
-      <Card>
-        <CardHeader>
-          <CardTitle>Intentos rechazados</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2">
-            {detail.rejectedAttempts.map((attempt) => (
-              <li
-                key={attempt.id}
-                className={attempt.highlighted ? 'font-semibold text-danger' : ''}
-              >
-                {time(attempt.occurredAtDevice)} · {attempt.method.toUpperCase()} · {attempt.reason}
-                {attempt.highlighted ? ' · QR de versión regenerada' : ''}
-              </li>
-            ))}
-          </ul>
-          {detail.rejectedAttempts.length === 0 && <p>No hay intentos rechazados.</p>}
-        </CardContent>
-      </Card>
-    </section>
+    );
+  return (
+    <Foja
+      detail={detail}
+      noticePending={(notices.data?.items ?? []).some(
+        (notice) =>
+          notice.shiftId === detail.id &&
+          notice.kind === 'shift_unsynced' &&
+          notice.status === 'open',
+      )}
+    />
   );
 }

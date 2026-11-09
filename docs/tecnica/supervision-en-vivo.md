@@ -18,11 +18,11 @@ La API ofrece `GET /api/v1/supervision/turnos` para los turnos de la fecha local
 
 ## Sincronización
 
-La función compartida `computeSyncStatus` usa `ShiftSyncState`, el snapshot `syncDeadlineAt` y el cierre del turno. Un contacto es un aviso o lote recibido hace menos de cinco minutos. Los resultados son `al_dia`, `sincronizando` (incluye `pendingCount`), `sin_contacto` (hora y cantidad pendiente), `esperando_hasta` (plazo del predio sin señal), `sin_sincronizar`, `completo` y `cerrado_sin_datos` (reservado a la decisión HU-17). “Sin contacto” no afirma que el teléfono esté desconectado: iOS puede suspender el envío con la pantalla bloqueada.
+La función compartida `computeSyncStatus` usa `ShiftSyncState`, el snapshot `syncDeadlineAt` y el cierre del turno. Un contacto es un aviso o lote recibido hace menos de cinco minutos. Los resultados son `al_dia`, `sincronizando` (incluye `pendingCount`), `sin_contacto` (hora y cantidad pendiente), `esperando_hasta` (plazo del predio sin señal), `sin_sincronizar`, `completo` y `cerrado_sin_datos`. “Sin contacto” no afirma que el teléfono esté desconectado: iOS puede suspender el envío con la pantalla bloqueada. La evaluación de rondas no usa la edad del contacto: espera a que `syncedUntil` cubra el fin de la gracia de cada ventana.
 
 ## Ventanas
 
-`RoundWindowState` se crea al iniciar el turno con la configuración de rondas fijada en su snapshot. La clave única es turno, ronda e índice de ventana. Los registros vuelven a calcular el estado con `windowCompletion`; el barrido del job actualiza ventanas vencidas. Estados: `pending`, `in_progress`, `late`, `complete`, `complete_late`, `incomplete`, `not_done`, `pending_sync` e `in_review`. `unassigned`, `no_show` y `uncovered` sin registros terminan en `not_done`; HU-39 incorpora después gravedad y decisiones de revisión. `severityLevel` queda nullable y no se calcula en HU-16.
+`RoundWindowState` se crea al iniciar el turno o en el barrido para turnos sin inicio. La clave única es turno, ronda e índice de ventana. Los registros vuelven a calcular el estado con `windowCompletion`; el job por minuto actualiza ventanas evaluables. Estados: `pending`, `in_progress`, `late`, `complete`, `complete_late`, `incomplete`, `not_done`, `pending_sync` e `in_review`. La regla completa está en [evaluacion-de-rondas.md](evaluacion-de-rondas.md).
 
 ## Socket.IO
 
@@ -34,6 +34,7 @@ Namespace: `/tiempo-real` (`SOCKET_NAMESPACE`). El cliente envía el ID token Fi
 | `registro.nuevo`    | `site:<siteId>` | `{ shiftId, siteId, checkpointId, recordId }` |
 | `incidente.nuevo`   | `site:<siteId>` | `{ incidentId, siteId }`                      |
 | `aviso.nuevo`       | `site:<siteId>` | `{ kind, siteId, shiftId? }`                  |
+| `aviso.actualizado` | `site:<siteId>` | `{ noticeId, siteId }`                        |
 
 Los eventos solo llevan identificadores; la interfaz consulta el endpoint de detalle para los datos. `SOCKET_REDIS_ADAPTER_ENABLED=true` activa el adaptador Redis para distribuir eventos entre instancias; permanece apagado por defecto en local y pruebas.
 
@@ -45,4 +46,4 @@ Los eventos solo llevan identificadores; la interfaz consulta el endpoint de det
 
 La ruta `/supervision` muestra los turnos del día para administradores y supervisores. Consulta `GET /supervision/turnos` con TanStack Query y aplica los filtros de estado y predio sobre los datos recibidos. El detalle está en `/supervision/turnos/:id` y consulta `GET /turnos/:id/detalle`. Sus secciones de ventanas, recorrido y registros son independientes para que HU-39 incorpore acciones de revisión sin rehacer la ficha. El filtro de marcas actúa sobre la lista de registros en el cliente para que el recorrido completo siga visible.
 
-`apps/web/src/lib/realtime.ts` conecta con el token Firebase al namespace `/tiempo-real`. Los eventos `turno.actualizado`, `registro.nuevo` y `aviso.nuevo` invalidan las consultas de supervisión; el panel vuelve a pedir el estado completo al reconectar. `incidente.nuevo` muestra un aviso dentro del panel. El estado de conexión se ve en el layout y los cambios se anuncian con `aria-live`. El mapa usa Google Maps cuando hay clave; la lista ordenada del recorrido, con hora y distancia al punto configurado, queda siempre disponible.
+`apps/web/src/lib/realtime.ts` conecta con el token Firebase al namespace `/tiempo-real`. Los eventos `turno.actualizado`, `registro.nuevo` y `aviso.nuevo` invalidan las consultas de supervisión; el panel vuelve a pedir el estado completo al reconectar. `incidente.nuevo` muestra un aviso dentro del panel. El estado de conexión se ve en el layout y los cambios se anuncian con `aria-live`. El mapa usa MapLibre con tiles de OpenFreeMap (sin clave); si el proveedor no responde muestra un aviso y la lista ordenada del recorrido, con hora y distancia al punto configurado, queda siempre disponible.

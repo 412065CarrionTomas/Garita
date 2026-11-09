@@ -1,12 +1,13 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { apiGet } from '@/lib/api-client';
+import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
 import { SupervisionPage } from './supervision-page';
 import { ShiftDetailPage } from './shift-detail-page';
 import { time } from './contracts';
 import { useRealtime } from '@/lib/realtime';
+import { ReassignDialog } from './reassign-dialog';
 
 const mockListeners = new Map<string, (value?: unknown) => void>();
 const mockSocket = {
@@ -19,7 +20,19 @@ const mockSocket = {
 };
 jest.mock('socket.io-client', () => ({ io: jest.fn(() => mockSocket) }));
 
-jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+jest.mock('@/lib/api-client', () => ({
+  apiGet: jest.fn(),
+  apiPost: jest.fn(),
+  ApiError: class extends Error {
+    status?: number;
+    body: unknown;
+    constructor(message: string, status?: number, body?: unknown) {
+      super(message);
+      this.status = status;
+      this.body = body;
+    }
+  },
+}));
 jest.mock('react-router', () => ({
   ...jest.requireActual<Record<string, unknown>>('@/test/react-router'),
   useParams: () => ({ id: 's1' }),
@@ -37,7 +50,7 @@ const row = {
 };
 const detail = {
   id: 's1',
-  site: row.site,
+  site: { ...row.site, connectivityType: 'without_signal', minutesToSignal: 200 },
   status: 'uncovered',
   scheduled: { startsAt: row.startsAt, endsAt: row.endsAt },
   actual: {
@@ -54,7 +67,10 @@ const detail = {
       startsAt: row.startsAt,
       endsAt: row.endsAt,
       isCurrent: true,
+      result: 'closed_early',
+      reassignedAt: null,
       guard: row.assignment.guard,
+      assignedBy: { firstName: 'Ana', lastName: 'López' },
     },
   ],
   rounds: [{ id: 'r1', name: 'Perimetral' }],
@@ -99,14 +115,20 @@ const detail = {
       highlighted: true,
     },
   ],
-  canCover: false,
+  canCover: true,
 };
 
 beforeEach(() => {
   jest
     .mocked(apiGet)
     .mockImplementation((path) =>
-      Promise.resolve((path.includes('/detalle') ? detail : [row]) as never),
+      Promise.resolve(
+        (path.includes('/detalle')
+          ? detail
+          : path.includes('/reemplazos')
+            ? [{ id: 'u2', firstName: 'Juan', lastName: 'Pérez' }]
+            : [row]) as never,
+      ),
     );
 });
 
@@ -120,11 +142,12 @@ it('muestra estados, hora de contacto y filtros operables con teclado', async ()
     await screen.findByText(`Sin contacto desde ${time(row.syncStatus.since)} (quedan 2 eventos)`),
   ).toBeInTheDocument();
   expect(screen.getByText('En curso', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
-  const status = screen.getByLabelText('Estado');
-  await userEvent.selectOptions(status, 'uncovered');
-  expect(screen.getByText('No hay turnos para estos filtros')).toBeInTheDocument();
-  await userEvent.selectOptions(status, 'in_progress');
-  expect(screen.getByRole('link', { name: 'Ver detalle' })).toHaveAttribute(
+  await userEvent.click(screen.getByRole('button', { name: 'Tardías' }));
+  expect(screen.getByText('Sin rondas en este estado')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Sin señal' }));
+  expect(screen.getByText('Sin señal', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Todas' }));
+  expect(screen.getByRole('link', { name: 'Depósito Ruta 9' })).toHaveAttribute(
     'href',
     '/supervision/turnos/s1',
   );
@@ -186,12 +209,129 @@ it('muestra ventanas, recorrido, rechazos y filtra marcas por gravedad', async (
     expect(screen.getByText(/Fuera de rango/)).toBeInTheDocument();
   });
   expect(screen.queryByText(/Ubicación simulada/)).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /Cubrir el resto/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cubrir el resto' })).toBeEnabled();
+  expect(screen.getByText(/Cerrada antes de hora/)).toBeInTheDocument();
+});
+
+it('permite elegir reemplazo con teclado y advierte sobre el predio sin señal', async () => {
+  jest.mocked(apiPost).mockResolvedValue({ shiftId: 's1', assignmentId: 'a2' });
+  renderWithQueryClient(
+    <MemoryRouter>
+      <ShiftDetailPage />
+    </MemoryRouter>,
+  );
+  await userEvent.click(await screen.findByRole('button', { name: 'Cubrir el resto' }));
+  const replacementStart = new Date('2030-01-02T07:00:00Z');
+  const localStart = new Date(
+    replacementStart.getTime() - replacementStart.getTimezoneOffset() * 60_000,
+  )
+    .toISOString()
+    .slice(0, 16);
+  fireEvent.change(screen.getByLabelText('Inicio del reemplazo (opcional: ahora)'), {
+    target: { value: localStart },
+  });
+  await screen.findByRole('option', { name: 'Juan Pérez' });
+  await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
+  expect(screen.getByText(/podría no llegar al predio/)).toBeInTheDocument();
+  expect(screen.getByText(/Podés confirmar igual/)).toBeInTheDocument();
+  await userEvent.click(
+    within(screen.getByRole('dialog')).getByRole('button', { name: 'Cubrir el resto' }),
+  );
+  await waitFor(() => {
+    expect(apiPost).toHaveBeenCalledWith(
+      '/turnos/s1/reasignar',
+      { guardId: 'u2', startsAt: replacementStart.toISOString() },
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});
+
+it('valida el horario, mantiene el foco en el diálogo y permite cancelar con Escape', async () => {
+  const onOpenChange = jest.fn();
+  renderWithQueryClient(
+    <ReassignDialog
+      shiftId="s1"
+      endsAt={row.endsAt}
+      minutesToSignal={null}
+      covering={false}
+      open
+      onOpenChange={onOpenChange}
+    />,
+  );
+  const guard = await screen.findByLabelText('Vigilador');
+  await waitFor(() => {
+    expect(guard).toBeEnabled();
+  });
+  guard.focus();
+  expect(guard).toHaveFocus();
+  await userEvent.selectOptions(guard, 'u2');
+  await userEvent.tab();
+  const start = screen.getByLabelText('Inicio del reemplazo (opcional: ahora)');
+  expect(start).toHaveFocus();
+  fireEvent.change(start, { target: { value: '2030-01-02T09:00' } });
+  expect(start).toHaveAttribute('aria-invalid', 'true');
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Elegí una hora entre ahora y el fin del turno.',
+  );
+  expect(screen.getByRole('button', { name: 'Reasignar' })).toBeDisabled();
+  await userEvent.keyboard('{Escape}');
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+it('muestra el motivo de la carrera y conserva el formulario', async () => {
+  jest
+    .mocked(apiPost)
+    .mockRejectedValueOnce(
+      new ApiError('conflicto', 409, { message: 'El vigilador acaba de iniciar el turno' }),
+    );
+  renderWithQueryClient(
+    <ReassignDialog
+      shiftId="s1"
+      endsAt={row.endsAt}
+      minutesToSignal={null}
+      covering={false}
+      open
+      onOpenChange={jest.fn()}
+    />,
+  );
+  await screen.findByRole('option', { name: 'Juan Pérez' });
+  await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
+  await userEvent.click(screen.getByRole('button', { name: 'Reasignar' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'El vigilador acaba de iniciar el turno',
+  );
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+
+it('muestra la advertencia del servidor después de confirmar y evita otro envío', async () => {
+  jest
+    .mocked(apiPost)
+    .mockResolvedValueOnce({ shiftId: 's1', assignmentId: 'a2', warning: 'replacement_late' });
+  renderWithQueryClient(
+    <ReassignDialog
+      shiftId="s1"
+      endsAt={row.endsAt}
+      minutesToSignal={null}
+      covering={false}
+      open
+      onOpenChange={jest.fn()}
+    />,
+  );
+  await screen.findByRole('option', { name: 'Juan Pérez' });
+  await userEvent.selectOptions(await screen.findByLabelText('Vigilador'), 'u2');
+  await userEvent.click(screen.getByRole('button', { name: 'Reasignar' }));
+  expect(await screen.findByText(/Turno reasignado/)).toHaveTextContent('podría no llegar');
+  expect(screen.queryByText(/Podés confirmar igual/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Cerrar' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Reasignar' })).toBeDisabled();
 });
 
 it('actualiza el punto y la ventana al llegar un registro sin recargar la página', async () => {
   let current = detail;
-  jest.mocked(apiGet).mockImplementation(() => Promise.resolve(current as never));
+  jest
+    .mocked(apiGet)
+    .mockImplementation((path) => Promise.resolve((path === '/predios' ? [] : current) as never));
   function LiveDetail() {
     useRealtime(true);
     return <ShiftDetailPage />;
@@ -202,7 +342,7 @@ it('actualiza el punto y la ventana al llegar un registro sin recargar la págin
     </MemoryRouter>,
   );
   expect(await screen.findByText('Pendiente de sincronizar')).toBeInTheDocument();
-  expect(screen.getByText('Pendiente', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+  expect(screen.getByText('Sin registro', { selector: '[data-slot="stamp"]' })).toBeInTheDocument();
   const firstWindow = detail.windows[0];
   if (!firstWindow) throw new Error('Falta ventana en el detalle de prueba');
   current = {
@@ -224,7 +364,7 @@ it('actualiza el punto y la ventana al llegar un registro sin recargar la págin
   expect(screen.getAllByText('Registrado')).toHaveLength(2);
 });
 
-it('soporta 100 turnos simultáneos y filtra por predio', async () => {
+it('soporta 100 turnos simultáneos', async () => {
   const hundredRows = Array.from({ length: 100 }, (_, index) => ({
     ...row,
     id: `s-${index}`,
@@ -236,8 +376,43 @@ it('soporta 100 turnos simultáneos y filtra por predio', async () => {
       <SupervisionPage />
     </MemoryRouter>,
   );
-  expect(await screen.findAllByRole('heading', { level: 2 })).toHaveLength(100);
-  const siteSelect = screen.getByLabelText('Predio');
-  await userEvent.selectOptions(siteSelect, 'p-0');
-  expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(20);
+  expect(await screen.findAllByRole('link', { name: /^Predio / })).toHaveLength(100);
+});
+
+it('filtra por rondas tardías y resume las ventanas en casilleros', async () => {
+  jest.mocked(apiGet).mockResolvedValue([
+    { ...row, windows: { complete: 2, late: 1, pending: 1 } },
+    { ...row, id: 's2', site: { id: 'p2', name: 'Torre Alvear' }, windows: { complete: 4 } },
+  ] as never);
+  renderWithQueryClient(
+    <MemoryRouter>
+      <SupervisionPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole('link', { name: 'Torre Alvear' })).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: /4 de 4 ventanas a tiempo/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Tardías' }));
+  expect(screen.queryByRole('link', { name: 'Torre Alvear' })).not.toBeInTheDocument();
+  expect(screen.getByText('Tardía', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+});
+
+it('arma la foja: camino, tabla de puntos con hora registrada y faltante tras el cierre', async () => {
+  jest
+    .mocked(apiGet)
+    .mockImplementation((path) => Promise.resolve((path === '/predios' ? [] : detail) as never));
+  renderWithQueryClient(
+    <MemoryRouter>
+      <ShiftDetailPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole('heading', { name: 'Depósito Ruta 9' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Punto 1, Portón: Registrado' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Punto 2, Patio: Sin registro' })).toBeInTheDocument();
+  const table = screen.getByRole('table');
+  expect(within(table).getByText(time(row.startsAt))).toBeInTheDocument();
+  await userEvent.click(within(table).getByRole('button', { name: 'Patio' }));
+  expect(screen.getByRole('button', { name: 'Punto 2, Patio: Sin registro' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
 });

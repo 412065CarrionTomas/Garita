@@ -1,5 +1,9 @@
-import { ROUND_WINDOW_STATUSES } from '@garita/shared';
+import { ASSIGNMENT_RESULTS, ROUND_WINDOW_STATUSES } from '@garita/shared';
 import { z } from 'zod';
+import type { StatusTone } from '@/components/status-badge';
+import type { PathPoint } from '@/components/point-path';
+import type { PointTableRow } from '@/components/point-table';
+import type { WindowStatus } from '@/components/window-bar';
 
 export const shiftStatusSchema = z.enum([
   'scheduled',
@@ -40,7 +44,7 @@ export const shiftListSchema = z.array(
 const severitySchema = z.enum(['grave', 'media', 'leve']);
 export const shiftDetailSchema = z.object({
   id: z.string(),
-  site: siteSchema,
+  site: siteSchema.extend({ connectivityType: z.string(), minutesToSignal: z.number().nullable() }),
   status: shiftStatusSchema,
   scheduled: z.object({ startsAt: z.string(), endsAt: z.string() }),
   actual: z.object({
@@ -57,7 +61,10 @@ export const shiftDetailSchema = z.object({
       startsAt: z.string(),
       endsAt: z.string(),
       isCurrent: z.boolean(),
+      result: z.enum(ASSIGNMENT_RESULTS),
+      reassignedAt: z.string().nullable(),
       guard: z.object({ firstName: z.string(), lastName: z.string() }).nullable(),
+      assignedBy: z.object({ firstName: z.string(), lastName: z.string() }),
     }),
   ),
   rounds: z.array(z.object({ id: z.string(), name: z.string() })),
@@ -126,6 +133,18 @@ export const shiftLabels: Record<z.infer<typeof shiftStatusSchema>, string> = {
   cancelled: 'Cancelado',
   cancelled_by_suspension: 'Cancelado por suspensión',
 };
+export const shiftTones: Record<keyof typeof shiftLabels, StatusTone> = {
+  scheduled: 'info',
+  in_progress: 'success',
+  uncovered: 'danger',
+  closed: 'success',
+  auto_closed: 'warning',
+  no_show: 'warning',
+  without_guard: 'warning',
+  unassigned: 'warning',
+  cancelled: 'neutral',
+  cancelled_by_suspension: 'neutral',
+};
 export const windowLabels: Record<(typeof ROUND_WINDOW_STATUSES)[number], string> = {
   pending: 'Pendiente',
   in_progress: 'En curso',
@@ -162,4 +181,70 @@ export function syncLabel(value: ShiftRow['syncStatus']) {
     case 'cerrado_sin_datos':
       return 'Cerrado sin datos';
   }
+}
+
+type WindowApiStatus = (typeof ROUND_WINDOW_STATUSES)[number];
+
+/** Casillero de cada estado de ventana; el orden es el de lectura de la hilera (hechas primero). */
+export const windowBoxStatus: Record<WindowApiStatus, WindowStatus> = {
+  complete: 'ontime',
+  complete_late: 'late',
+  late: 'late',
+  incomplete: 'missed',
+  not_done: 'missed',
+  in_progress: 'current',
+  pending: 'pending',
+  pending_sync: 'pending',
+  in_review: 'pending',
+};
+
+/** Casilleros de una lista de turnos, a partir del conteo por estado (la lista no trae cada ventana). */
+export function windowBoxes(counts: Record<string, number>) {
+  return (Object.keys(windowBoxStatus) as WindowApiStatus[]).flatMap((key) =>
+    Array.from({ length: counts[key] ?? 0 }, () => ({ status: windowBoxStatus[key] })),
+  );
+}
+
+export const isCompleteWindow = (status: string) =>
+  status === 'complete' || status === 'complete_late';
+
+/**
+ * Puntos de la ronda para el camino, la tabla y el mapa. El detalle no trae hora prevista ni
+ * demora por punto: la registrada sale del primer registro del punto. Sin registro = el turno
+ * ya terminó y el punto sigue sin registrarse; próximo = el primero pendiente de un turno en curso.
+ */
+export function foja(detail: ShiftDetail) {
+  const finished = ['closed', 'auto_closed', 'uncovered'].includes(detail.status);
+  const firstSeen = new Map<string, string>();
+  for (const record of detail.records) {
+    const seen = firstSeen.get(record.checkpointId);
+    if (!seen || record.occurredAtDevice < seen)
+      firstSeen.set(record.checkpointId, record.occurredAtDevice);
+  }
+  let nextTaken = detail.status !== 'in_progress';
+  const items = detail.points.map((point) => {
+    let status: PathPoint['status'] = 'pending';
+    if (point.registered) status = 'done';
+    else if (finished) status = 'missed';
+    else if (!nextTaken) {
+      status = 'next';
+      nextTaken = true;
+    }
+    const seen = firstSeen.get(point.id);
+    return { point, status, registeredAt: seen ? time(seen) : null };
+  });
+  const path: PathPoint[] = items.map(({ point, status }) => ({
+    id: point.id,
+    label: point.name,
+    status,
+  }));
+  // TODO(foja): la API no da hora prevista por punto ni demora; hoy la columna Prevista va con guion.
+  const rows: PointTableRow[] = items.map(({ point, status, registeredAt }) => ({
+    id: point.id,
+    label: point.name,
+    scheduledAt: '—',
+    registeredAt: point.registered ? registeredAt : null,
+    status,
+  }));
+  return { path, rows, done: items.filter((item) => item.status === 'done').length };
 }

@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, UnprocessableEntityException } from '@nestjs/common';
 import { SyncBatchService } from './sync-batch.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { Clock } from '../../common/clock';
@@ -194,6 +194,11 @@ describe('SyncBatchService', () => {
   });
 
   it('procesa exitosamente un lote con registros y cierre', async () => {
+    updateSyncStateMock.mockImplementation(() => {
+      // La evaluación no puede ver la marca nueva antes que los datos del lote.
+      expect(checkpointRecords.size).toBe(1);
+      expect(shiftEvents.size).toBe(1);
+    });
     const input: SyncBatchRequest = {
       shiftId: 'shift-1',
       pendingCount: 0,
@@ -366,7 +371,7 @@ describe('SyncBatchService', () => {
 
   it('un evento inválido y otro de otro turno son rechazados sin frenar al resto', async () => {
     (checkpointRecordsService.processRecord as jest.Mock).mockRejectedValueOnce(
-      new Error('Datos corruptos'),
+      new UnprocessableEntityException('Datos corruptos'),
     );
 
     const input: SyncBatchRequest = {
@@ -433,6 +438,9 @@ describe('SyncBatchService', () => {
     const response = await service.processBatch(input, credential, guardUser);
 
     expect(response.results).toHaveLength(3);
+    expect(updateSyncStateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ syncedUntil: null }),
+    );
     expect(response.results[0]).toEqual({
       status: 'rejected',
       eventId: '11111111-1111-4111-8111-111111111111',
@@ -451,6 +459,43 @@ describe('SyncBatchService', () => {
         eventId: '22222222-2222-4222-8222-222222222222',
       }),
     );
+  });
+
+  it('un error del servidor falla el lote para que el celular lo reintente', async () => {
+    (checkpointRecordsService.processRecord as jest.Mock).mockRejectedValueOnce(
+      new Error('Connection terminated unexpectedly'),
+    );
+    const input: SyncBatchRequest = {
+      shiftId: 'shift-1',
+      pendingCount: 0,
+      syncedUntil: null,
+      events: [
+        {
+          type: 'checkpoint_record',
+          payload: {
+            recordId: '44444444-4444-4444-8444-444444444444',
+            shiftId: 'shift-1',
+            method: 'qr',
+            scannedValue: 'valid-qr',
+            occurredAtDevice: '2026-10-14T10:00:00.000Z',
+            location: {
+              status: 'ok',
+              latitude: -34.6,
+              longitude: -58.4,
+              accuracyMeters: 10,
+              simulation: 'not_simulated',
+              takenAt: '2026-10-14T10:00:00.000Z',
+            },
+            phoneNfc: 'on',
+          },
+        },
+      ],
+    };
+
+    await expect(service.processBatch(input, credential, guardUser)).rejects.toThrow(
+      'Connection terminated unexpectedly',
+    );
+    expect(updateSyncStateMock).not.toHaveBeenCalled();
   });
 
   it('rechaza con SHIFT_ID_MISMATCH si el turno del lote difiere de la credencial', async () => {

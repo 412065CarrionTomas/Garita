@@ -38,6 +38,19 @@ describe('registro del aislamiento tenant', () => {
   it('registra puntos y limita las lecturas del supervisor a predios asignados', () => {
     expect(COMPANY_ID_MODELS).toContain('Checkpoint');
     expect(COMPANY_ID_MODELS).toContain('RoundWindowState');
+    expect(COMPANY_ID_MODELS).toContain('RoundReviewDecision');
+    expect(COMPANY_ID_MODELS).toContain('Notice');
+    expect(COMPANY_ID_MODELS).toContain('NotificationPreference');
+    expect(
+      scopeArgs('NotificationPreference', 'findMany', { where: { userId: 'me' } }, 'norte'),
+    ).toEqual({ where: { userId: 'me', companyId: 'norte' } });
+    expect(
+      addSiteAssignmentFilter(
+        'NotificationPreference',
+        { where: { userId: 'me' } },
+        { userId: 'me', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({ where: { userId: 'me' } });
     expect(scopeArgs('Checkpoint', 'findMany', { where: { status: 'active' } }, 'norte')).toEqual({
       where: { status: 'active', companyId: 'norte' },
     });
@@ -117,6 +130,40 @@ describe('registro del aislamiento tenant', () => {
     expect(COMPANY_ID_MODELS).toContain('InvalidScanAttempt');
     expect(COMPANY_ID_MODELS).toContain('RecordFlag');
     expect(COMPANY_ID_MODELS).toContain('Incident');
+    expect(COMPANY_ID_MODELS).toContain('PanicAlert');
+    expect(COMPANY_ID_MODELS).toContain('PanicSmsDelivery');
+    expect(scopeArgs('PanicSmsDelivery', 'findMany', {}, 'norte')).toEqual({
+      where: { companyId: 'norte' },
+    });
+    expect(
+      addSiteAssignmentFilter(
+        'PanicSmsDelivery',
+        { where: { alertId: 'panic-1' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { alertId: 'panic-1' },
+          { alert: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+    expect(INDIRECT_TENANT_MODELS).toHaveProperty('PanicAlertEvent');
+    expect(
+      addSiteAssignmentFilter(
+        'PanicAlert',
+        { where: { status: 'active' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { status: 'active' },
+          { site: { supervisors: { some: { userId: 'supervisor-1' } } } },
+        ],
+      },
+    });
     expect(COMPANY_ID_MODELS).toContain('IncidentClassification');
     expect(
       addSiteAssignmentFilter(
@@ -232,6 +279,18 @@ describe('registro del aislamiento tenant', () => {
         },
       },
     );
+    expect(
+      addSiteAssignmentFilter('RoundReviewDecision', { where: { id: 'decision-1' } }, user),
+    ).toEqual({
+      where: {
+        AND: [
+          { id: 'decision-1' },
+          {
+            windowState: { shift: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+          },
+        ],
+      },
+    });
     expect(addSiteAssignmentFilter('SyncBatch', { where: { shiftId: 's-1' } }, user)).toEqual({
       where: {
         AND: [
@@ -258,6 +317,42 @@ describe('registro del aislamiento tenant', () => {
         ],
       },
     });
+    expect(addSiteAssignmentFilter('Notice', { where: { status: 'open' } }, user)).toEqual({
+      where: {
+        AND: [{ status: 'open' }, { site: { supervisors: { some: { userId: 'supervisor-1' } } } }],
+      },
+    });
+  });
+
+  it('aísla NoticeView por empresa y predio conservando su clave compuesta', () => {
+    const user = {
+      userId: 's1',
+      companyId: 'norte',
+      role: 'supervisor' as const,
+      status: 'active' as const,
+    };
+    expect(COMPANY_ID_MODELS).toContain('NoticeView');
+    const args = scopeArgs(
+      'NoticeView',
+      'findUnique',
+      { where: { noticeId_userId: { noticeId: 'n1', userId: 's1' } } },
+      'norte',
+    );
+    expect(applySiteAssignmentFilter('NoticeView', 'findUnique', args, user)).toEqual({
+      where: {
+        noticeId_userId: { noticeId: 'n1', userId: 's1' },
+        companyId: 'norte',
+        AND: [
+          { noticeId_userId: { noticeId: 'n1', userId: 's1' }, companyId: 'norte' },
+          { notice: { site: { supervisors: { some: { userId: 's1' } } } } },
+        ],
+      },
+    });
+    const create = { data: { noticeId: 'n1', userId: 's1', companyId: 'sur' } };
+    expect(scopeArgs('NoticeView', 'create', create, 'norte')).toEqual({
+      data: { ...create.data, companyId: 'norte' },
+    });
+    expect(applySiteAssignmentFilter('NoticeView', 'createMany', create, user)).toBe(create);
   });
 
   it('aplica el filtro del supervisor sin romper create ni las operaciones por clave única', () => {

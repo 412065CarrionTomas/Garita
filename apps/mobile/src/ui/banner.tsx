@@ -33,7 +33,12 @@ export function Banner({
       accessible
       accessibilityRole={role}
       {...props}
-      style={[styles.banner, { backgroundColor: bg, borderLeftColor: fg }]}
+      style={[
+        styles.banner,
+        // Recuadro punteado para lo informativo o neutro; sólido para lo que pide acción.
+        { backgroundColor: bg, borderColor: fg },
+        (tone === 'info' || tone === 'neutral') && styles.dashed,
+      ]}
     >
       {title ? (
         <Text variant="label" style={{ color: fg }} accessibilityRole="none">
@@ -54,9 +59,10 @@ export function Banner({
 
 const styles = StyleSheet.create({
   banner: {
-    borderLeftWidth: 4,
-    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderRadius: radius.md,
     padding: space[3],
     gap: space[1.5],
   },
+  dashed: { borderStyle: 'dashed' },
 });

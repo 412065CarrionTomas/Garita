@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { SyncBatchRequest, SyncBatchResponse, SyncEventResult } from '@garita/shared';
 import { computeSyncedUntil } from '@garita/shared';
@@ -15,6 +15,15 @@ import { ShiftExecutionService } from '../shift-execution/shift-execution.servic
 import { ShiftSyncStateService } from './shift-sync-state.service';
 import type { ShiftCredentialPayload } from './shift-credential.service';
 import { IncidentsService } from '../incidents/incidents.service';
+
+/**
+ * The phone never resends a `rejected` event, so only business rejections (4xx) may become one.
+ * Anything else fails the whole batch: the phone retries it and accepted events come back as duplicates.
+ */
+function businessRejection(error: unknown): string {
+  if (error instanceof HttpException && error.getStatus() < 500) return error.message;
+  throw error;
+}
 
 function computeCloseRequestHash(payload: object): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -61,15 +70,6 @@ export class SyncBatchService {
         pendingCount: input.pendingCount,
         syncedUntil: syncedUntil ? new Date(syncedUntil) : null,
       },
-    });
-
-    await this.syncStateService.updateSyncState({
-      companyId: credential.companyId,
-      shiftId: credential.shiftId,
-      pendingCount: input.pendingCount,
-      syncedUntil: syncedUntil ? new Date(syncedUntil) : null,
-      contactAt: receivedAt,
-      isBatch: true,
     });
 
     // Precarga de contexto de turno para optimizar procesamiento por lote
@@ -179,8 +179,7 @@ export class SyncBatchService {
             outcome,
           });
         } catch (error: unknown) {
-          const errorMessage =
-            error instanceof Error ? error.message : 'Datos del registro no válidos';
+          const errorMessage = businessRejection(error);
           this.logger.warn({
             event: 'sync_batch.checkpoint_error',
             recordId,
@@ -244,8 +243,7 @@ export class SyncBatchService {
             outcome,
           });
         } catch (error: unknown) {
-          const errorMessage =
-            error instanceof Error ? error.message : 'Datos de cierre de turno no válidos';
+          const errorMessage = businessRejection(error);
           this.logger.warn({
             event: 'sync_batch.shift_close_error',
             eventId,
@@ -286,11 +284,24 @@ export class SyncBatchService {
             status: 'rejected',
             eventId: incidentId,
             reason: 'invalid_data',
-            message: error instanceof Error ? error.message : 'No se pudo guardar el incidente',
+            message: businessRejection(error),
           });
         }
       }
     }
+
+    // Publicar la marca antes de persistir el lote produciría avisos falsos; un rechazo no certifica datos completos.
+    await this.syncStateService.updateSyncState({
+      companyId: credential.companyId,
+      shiftId: credential.shiftId,
+      pendingCount: input.pendingCount,
+      syncedUntil:
+        syncedUntil && !results.some((result) => result.status === 'rejected')
+          ? new Date(syncedUntil)
+          : null,
+      contactAt: receivedAt,
+      isBatch: true,
+    });
 
     this.logger.log({
       event: 'sync_batch.processed',

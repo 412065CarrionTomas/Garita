@@ -13,6 +13,7 @@ import {
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
+import { SegmentedFilter } from '@/components/segmented-filter';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import {
@@ -67,6 +68,12 @@ const guardHasShiftInProgressConflictSchema = z.looseObject({
   shiftId: z.string().optional(),
   shift: inProgressShiftSchema.optional(),
 });
+
+const ROLE_FILTERS = [
+  { value: '', label: 'Todos' },
+  { value: 'guard', label: 'Vigiladores' },
+  { value: 'supervisor', label: 'Supervisores' },
+];
 
 function formatInCompanyTimezone(value: string, timezone?: string): string {
   if (!value) return '';
@@ -289,7 +296,7 @@ export function PersonalPage() {
       <PageHeader
         id="personal-title"
         title="Personal"
-        description="Supervisores y vigiladores de tu empresa."
+        description="Usuarios de tu empresa. Los clientes solo ven su predio."
         actions={
           user?.role === 'admin' && (
             <Button
@@ -299,28 +306,21 @@ export function PersonalPage() {
                 setFormError('');
               }}
             >
-              Agregar personal
+              Invitar usuario
             </Button>
           )
         }
       />
-      <div className="flex flex-wrap gap-3">
-        <Label className="grid gap-2">
-          Rol
-          <NativeSelect
-            aria-label="Filtrar por rol"
-            className="w-full"
-            value={role}
-            onChange={(event) => {
-              setRole(event.target.value);
-              setPage(1);
-            }}
-          >
-            <NativeSelectOption value="">Todos</NativeSelectOption>
-            <NativeSelectOption value="supervisor">Supervisor</NativeSelectOption>
-            <NativeSelectOption value="guard">Vigilador</NativeSelectOption>
-          </NativeSelect>
-        </Label>
+      <div className="flex flex-wrap items-end gap-3">
+        <SegmentedFilter
+          ariaLabel="Filtrar por rol"
+          options={ROLE_FILTERS}
+          value={role}
+          onChange={(value) => {
+            setRole(value);
+            setPage(1);
+          }}
+        />
         <Label className="grid gap-2">
           Estado
           <NativeSelect
@@ -333,7 +333,7 @@ export function PersonalPage() {
             }}
           >
             <NativeSelectOption value="">Todos</NativeSelectOption>
-            <NativeSelectOption value="invitation_pending">Invitación pendiente</NativeSelectOption>
+            <NativeSelectOption value="invitation_pending">Invitación enviada</NativeSelectOption>
             <NativeSelectOption value="active">Activo</NativeSelectOption>
             <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
           </NativeSelect>
@@ -341,12 +341,12 @@ export function PersonalPage() {
       </div>
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="space-y-4">
-          <DialogTitle className="text-lg font-semibold">Agregar personal</DialogTitle>
+          <DialogTitle className="text-lg font-semibold">Invitar usuario</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            Completá los datos para enviar una invitación.
+            Completá los datos y enviamos la invitación por correo.
           </DialogDescription>
           <form
-            aria-label="Agregar personal"
+            aria-label="Invitar usuario"
             className="grid gap-4 sm:grid-cols-2"
             onSubmit={(event) => {
               event.preventDefault();
@@ -457,7 +457,7 @@ export function PersonalPage() {
                       setCreating(true);
                     }}
                   >
-                    Agregar personal
+                    Invitar usuario
                   </Button>
                 ) : undefined
               }
@@ -558,14 +558,16 @@ export function PersonalPage() {
                               person.status === 'active'
                                 ? 'success'
                                 : person.status === 'invitation_pending'
-                                  ? 'warning'
+                                  ? person.invitationStatus === 'failed'
+                                    ? 'danger'
+                                    : 'warning'
                                   : 'neutral'
                             }
                           >
                             {person.status === 'invitation_pending'
                               ? person.invitationStatus === 'failed'
                                 ? 'Envío fallido'
-                                : 'Invitación pendiente'
+                                : 'Invitación enviada'
                               : person.status === 'active'
                                 ? 'Activo'
                                 : 'Desactivado'}

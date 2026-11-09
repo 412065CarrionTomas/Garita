@@ -1,34 +1,86 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
-import { AlertTriangleIcon, ArrowRightIcon, ClockIcon } from 'lucide-react';
+import { Link, useNavigate } from 'react-router';
 import { apiGet } from '@/lib/api-client';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { SegmentedFilter } from '@/components/segmented-filter';
 import { StatusBadge } from '@/components/status-badge';
-import type { StatusTone } from '@/components/status-badge';
+import { WindowBar } from '@/components/window-bar';
 import { Alert } from '@/components/ui/alert';
-import { Card, CardContent } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { shiftLabels, shiftListSchema, syncLabel, time } from './contracts';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { LiveMap } from '../mapa/live-map';
+import type { LiveMapSite } from '../mapa/live-map';
+import {
+  isCompleteWindow,
+  shiftLabels,
+  shiftListSchema,
+  shiftTones,
+  syncLabel,
+  time,
+  windowBoxes,
+} from './contracts';
+import type { ShiftRow } from './contracts';
+import { LiveLayout } from './live-layout';
+import { useSiteCoordinates } from './use-site-coordinates';
 
-const tones: Record<keyof typeof shiftLabels, StatusTone> = {
-  scheduled: 'info',
-  in_progress: 'signal',
-  uncovered: 'danger',
-  closed: 'success',
-  auto_closed: 'warning',
-  no_show: 'warning',
-  without_guard: 'warning',
-  unassigned: 'warning',
-  cancelled: 'neutral',
-  cancelled_by_suspension: 'neutral',
+type Filter = 'all' | 'late' | 'off';
+
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: 'all', label: 'Todas' },
+  { value: 'late', label: 'Tardías' },
+  { value: 'off', label: 'Sin señal' },
+];
+
+const isLate = (row: ShiftRow) => (row.windows.late ?? 0) > 0;
+const isOff = (row: ShiftRow) =>
+  row.syncStatus?.status === 'sin_contacto' || row.syncStatus?.status === 'esperando_hasta';
+const matches: Record<Filter, (row: ShiftRow) => boolean> = {
+  all: () => true,
+  late: isLate,
+  off: isOff,
 };
 
+const guardName = (row: ShiftRow) =>
+  row.assignment?.guard
+    ? `${row.assignment.guard.firstName} ${row.assignment.guard.lastName}`
+    : 'Sin vigilador asignado';
+
+// TODO(foja): la lista no trae puntos hechos/total ni la demora en minutos; hoy el sello del
+// predio cuenta ventanas completas y "Tardía" sale de que haya ventanas atrasadas.
+function windowCount(row: ShiftRow) {
+  const entries = Object.entries(row.windows);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  const done = entries.reduce(
+    (sum, [status, count]) => sum + (isCompleteWindow(status) ? count : 0),
+    0,
+  );
+  return { done, total };
+}
+
+function RowsSkeleton() {
+  return (
+    <div role="status" aria-label="Cargando turnos" className="space-y-px">
+      {Array.from({ length: 6 }, (_, i) => (
+        <Skeleton key={i} className="h-16 rounded-none" />
+      ))}
+    </div>
+  );
+}
+
 export function SupervisionPage() {
-  const [status, setStatus] = useState('');
-  const [site, setSite] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [hovered, setHovered] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const coordinates = useSiteCoordinates();
   const {
     data: rows = [],
     isPending,
@@ -38,119 +90,157 @@ export function SupervisionPage() {
     queryKey: ['supervision', 'turnos'],
     queryFn: () => apiGet('/supervision/turnos', shiftListSchema),
   });
-  const sites = useMemo(
-    () => [...new Map(rows.map((row) => [row.site.id, row.site])).values()],
-    [rows],
-  );
-  const visible = useMemo(
-    () =>
-      rows.filter((row) => (!status || row.status === status) && (!site || row.site.id === site)),
-    [rows, status, site],
-  );
-  return (
-    <section aria-labelledby="supervision-title" className="space-y-6">
-      <PageHeader
-        id="supervision-title"
-        title="En vivo"
-        description="Estado de los turnos de tus predios, actualizado automáticamente."
-      />
-      <div className="flex flex-wrap gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="status-filter">Estado</Label>
-          <NativeSelect
-            id="status-filter"
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value);
-            }}
-          >
-            <NativeSelectOption value="">Todos los estados</NativeSelectOption>
-            {Object.entries(shiftLabels)
-              .filter(([key]) => key !== 'unassigned')
-              .map(([key, label]) => (
-                <NativeSelectOption key={key} value={key}>
-                  {label}
-                </NativeSelectOption>
-              ))}
-          </NativeSelect>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="site-filter">Predio</Label>
-          <NativeSelect
-            id="site-filter"
-            value={site}
-            onChange={(event) => {
-              setSite(event.target.value);
-            }}
-          >
-            <NativeSelectOption value="">Todos los predios</NativeSelectOption>
-            {sites.map((item) => (
-              <NativeSelectOption key={item.id} value={item.id}>
-                {item.name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </div>
+  const visible = useMemo(() => rows.filter(matches[filter]), [rows, filter]);
+
+  // Un marcador por predio; si tiene varios turnos, gana el que está en curso.
+  const { sites, shiftBySite } = useMemo(() => {
+    const bySite = new Map<string, ShiftRow>();
+    for (const row of visible) {
+      const known = bySite.get(row.site.id);
+      if (!known || (known.status !== 'in_progress' && row.status === 'in_progress'))
+        bySite.set(row.site.id, row);
+    }
+    const list: LiveMapSite[] = [];
+    for (const [siteId, row] of bySite) {
+      const at = coordinates.get(siteId);
+      if (!at) continue;
+      const { done, total } = windowCount(row);
+      list.push({
+        id: siteId,
+        name: row.site.name,
+        ...at,
+        label: total ? `${done}/${total}` : '–',
+        description: `${done} de ${total} ventanas completas`,
+        state: isOff(row) ? 'off' : isLate(row) ? 'late' : 'normal',
+      });
+    }
+    return { sites: list, shiftBySite: bySite };
+  }, [visible, coordinates]);
+
+  const panel = (
+    <>
+      <div className="space-y-3 px-5 pt-4 pb-3">
+        <PageHeader
+          id="supervision-title"
+          title="En vivo"
+          description={`${rows.length} ${rows.length === 1 ? 'turno' : 'turnos'} de hoy, actualizado automáticamente.`}
+        />
+        <SegmentedFilter
+          ariaLabel="Filtrar rondas"
+          options={FILTERS}
+          value={filter}
+          onChange={setFilter}
+        />
       </div>
-      {isPending ? (
-        <p role="status">Cargando turnos…</p>
-      ) : isError ? (
-        <Alert role="alert">
-          No pudimos cargar los turnos.{' '}
-          <button type="button" className="underline" onClick={() => void refetch()}>
-            Reintentar
-          </button>
-        </Alert>
-      ) : visible.length === 0 ? (
-        <EmptyState title="No hay turnos para estos filtros" />
-      ) : (
-        <ul className="grid gap-3 md:grid-cols-2" aria-label="Turnos en vivo">
-          {visible.map((row) => (
-            <li key={row.id}>
-              <Card
-                className={
-                  row.status === 'without_guard' ||
-                  row.status === 'uncovered' ||
-                  row.status === 'unassigned'
-                    ? 'border-warning'
-                    : undefined
-                }
-              >
-                <CardContent className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h2 className="font-semibold">{row.site.name}</h2>
-                      <p className="text-sm text-muted-foreground tabular-nums">
-                        {time(row.startsAt)}–{time(row.endsAt)}
-                      </p>
-                    </div>
-                    <StatusBadge tone={tones[row.status]}>{shiftLabels[row.status]}</StatusBadge>
-                  </div>
-                  <p className="flex items-center gap-2 text-sm">
-                    {row.status === 'without_guard' ||
-                    row.status === 'unassigned' ||
-                    row.status === 'uncovered' ? (
-                      <AlertTriangleIcon aria-hidden="true" className="size-4" />
-                    ) : (
-                      <ClockIcon aria-hidden="true" className="size-4" />
-                    )}
-                    {syncLabel(row.syncStatus) ??
-                      (row.assignment?.guard
-                        ? `${row.assignment.guard.firstName} ${row.assignment.guard.lastName}`
-                        : 'Sin vigilador asignado')}
-                  </p>
-                  <Link
-                    to={`/supervision/turnos/${row.id}`}
-                    className="inline-flex items-center gap-2 rounded-md text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      <div className="min-h-0 flex-1 overflow-y-auto border-t border-input">
+        {isPending ? (
+          <RowsSkeleton />
+        ) : isError ? (
+          <Alert variant="destructive" role="alert" className="m-5 w-auto">
+            No pudimos cargar los turnos.{' '}
+            <button
+              type="button"
+              className="font-semibold underline"
+              onClick={() => void refetch()}
+            >
+              Reintentar
+            </button>
+          </Alert>
+        ) : rows.length === 0 ? (
+          <EmptyState
+            className="m-5"
+            title="Sin turnos en curso"
+            description="Cuando empiece un turno, lo vas a ver acá con su ronda y sus ventanas."
+          />
+        ) : visible.length === 0 ? (
+          <EmptyState
+            className="m-5"
+            title="Sin rondas en este estado"
+            description="Probá con otro filtro."
+          />
+        ) : (
+          <Table aria-label="Turnos en vivo">
+            <TableHeader className="sticky top-0 z-10">
+              <TableRow className="hover:bg-muted">
+                <TableHead>Predio y vigilador</TableHead>
+                <TableHead>Ventanas</TableHead>
+                <TableHead>Estado</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((row) => {
+                const sync = syncLabel(row.syncStatus);
+                return (
+                  <TableRow
+                    key={row.id}
+                    data-state={hovered === row.site.id ? 'selected' : undefined}
+                    className="relative"
+                    onMouseEnter={() => {
+                      setHovered(row.site.id);
+                    }}
+                    onMouseLeave={() => {
+                      setHovered(null);
+                    }}
                   >
-                    Ver detalle <ArrowRightIcon aria-hidden="true" className="size-4" />
-                  </Link>
-                </CardContent>
-              </Card>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+                    <TableCell className="h-16 whitespace-normal">
+                      <Link
+                        to={`/supervision/turnos/${row.id}`}
+                        className="font-semibold after:absolute after:inset-0"
+                      >
+                        {row.site.name}
+                      </Link>
+                      <p className="text-sm text-muted-foreground tabular-nums">
+                        {time(row.startsAt)}–{time(row.endsAt)} · {guardName(row)}
+                      </p>
+                      {sync && <p className="text-sm text-muted-foreground">{sync}</p>}
+                    </TableCell>
+                    <TableCell>
+                      {Object.keys(row.windows).length ? (
+                        <WindowBar windows={windowBoxes(row.windows)} />
+                      ) : (
+                        <span aria-label="Sin ventanas" className="text-muted-foreground">
+                          —
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge tone={shiftTones[row.status]}>
+                          {shiftLabels[row.status]}
+                        </StatusBadge>
+                        {row.status === 'in_progress' && isLate(row) && (
+                          <StatusBadge tone="warning">Tardía</StatusBadge>
+                        )}
+                        {row.status === 'in_progress' && isOff(row) && (
+                          <StatusBadge tone="neutral">Sin señal</StatusBadge>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <LiveLayout
+      labelledBy="supervision-title"
+      panel={panel}
+      map={
+        <LiveMap
+          sites={sites}
+          hoveredSiteId={hovered}
+          onHoverSite={setHovered}
+          onSelectSite={(siteId) => {
+            const shift = shiftBySite.get(siteId);
+            if (shift) void navigate(`/supervision/turnos/${shift.id}`);
+          }}
+        />
+      }
+    />
   );
 }

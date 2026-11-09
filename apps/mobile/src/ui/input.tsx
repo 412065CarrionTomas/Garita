@@ -37,7 +37,7 @@ export function Input({
           {
             backgroundColor: colors.card,
             borderColor: error ? colors.danger : focused ? colors.ring : colors.input,
-            borderWidth: focused ? 2 : 1,
+            borderWidth: focused ? 2 : 1.5,
           },
         ]}
       >
@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: touch.min + 4,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     paddingHorizontal: space[3],
   },
   input: { flex: 1, fontSize: fontSize.base.size, paddingVertical: space[2] },

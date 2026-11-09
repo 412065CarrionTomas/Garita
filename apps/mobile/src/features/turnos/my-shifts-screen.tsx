@@ -14,6 +14,7 @@ const shiftsSchema = z.array(
     serviceDate: z.string(),
     site: z.looseObject({ name: z.string(), company: z.looseObject({ timezone: z.string() }) }),
     rounds: z.array(z.looseObject({ round: z.looseObject({ name: z.string() }) })),
+    assignments: z.array(z.looseObject({ startsAt: z.string() })),
   }),
 );
 
@@ -97,11 +98,12 @@ export function MyShiftsScreen() {
         <ListItem
           key={shift.id}
           title={`Día del turno: ${formatDay(shift.serviceDate)}`}
-          subtitle={`${formatTime(shift.startsAt, shift.site.company.timezone)}–${formatTime(shift.endsAt, shift.site.company.timezone)}`}
+          subtitle={`${formatTime(shift.assignments[0]?.startsAt ?? shift.startsAt, shift.site.company.timezone)}–${formatTime(shift.endsAt, shift.site.company.timezone)}`}
           detail={`${shift.site.name}\nRondas: ${shift.rounds.map(({ round }) => round.name).join(', ')}`}
           trailing={
             <Badge
-              tone={shift.status === 'in_progress' ? 'signal' : 'info'}
+              tone="neutral"
+              variant={shift.status === 'in_progress' ? 'now' : 'dashed'}
               label={shift.status === 'in_progress' ? 'En curso' : 'Programado'}
             />
           }

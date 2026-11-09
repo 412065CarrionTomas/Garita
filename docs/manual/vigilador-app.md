@@ -31,11 +31,42 @@ Tocá **Escanear código QR** desde la pantalla del turno en curso para abrir el
    - **Códigos QR inválidos o ajenos:** si escaneás un código QR que no corresponde al predio o turno asignado, la app muestra «Este punto no pertenece a tu turno». Si el código fue reemplazado por una versión nueva, indica «Código QR desactualizado». El intento queda guardado localmente y se reporta al servidor para conocimiento de la supervisión.
    - **Permiso de cámara ausente:** si la cámara no cuenta con permiso, la app explica el motivo y muestra el botón para otorgarlo. Si el teléfono posee lector NFC, se ofrece la opción de registrar por NFC como alternativa.
 
+## Pedir ayuda con el botón de pánico
+
+Durante un turno en curso, el botón **Pánico** está disponible en las pantallas del vigilador. Mantenelo presionado dos segundos; un toque breve no activa nada. La app confirma el gesto con una vibración corta, sin sonido. La alerta queda guardada en el teléfono y se intenta enviar de inmediato, incluso si hay otros registros pendientes. Si no hay internet, queda pendiente de envío y se reintenta cuando vuelva la conexión.
+
+El texto **Alerta recibida por la central** aparece solamente cuando el servidor registró la alerta. **Confirmada por el supervisor** aparece solamente después de que un supervisor confirmó su lectura. Sin esos textos, no supongas que la central ya recibió el pedido: buscá ayuda por otra vía disponible. No podés cancelar la alerta desde la app; avisá al supervisor si fue una falsa alarma. Una segunda activación de una alerta abierta queda registrada en la misma alerta. La práctica guiada y la resolución como «prueba» quedarán disponibles con HU-24.
+
+## Con el celular bloqueado
+
+En Android, mientras haya un turno en curso y estén habilitadas las notificaciones, aparece **Turno en curso**, sin datos del predio. Encendé la pantalla y tocá **Pánico**; luego tocá **Confirmar pánico** dentro de cinco segundos. Un solo toque no envía. Sin confirmación vuelve a **Pánico**; si el teléfono suspendió la app y quedó la etiqueta anterior, el toque vencido solo vuelve a armarla. La activación usa la misma alerta de la app, con vibración breve y sin sonido.
+
+Al cerrar el turno, incluso sin internet, o cerrar sesión, desaparece el acceso. Si ves **Activá las notificaciones para usar el pánico con el celular bloqueado**, habilitalas en Ajustes del celular y volvé a Garita. La configuración de pantalla bloqueada y el ahorro de batería del fabricante pueden impedir que aparezca: practicá el gesto en tu teléfono con tu supervisor.
+
+Sin internet, Android necesita el permiso SMS para enviarlo sin desbloquear. Sin ese permiso, la pantalla de envío del sistema no se puede usar con el celular bloqueado; no supongas que salió el SMS. La alerta queda pendiente para internet. Revisá en la app los estados confirmados y buscá ayuda por otra vía si no hay recepción.
+
+En iPhone este acceso todavía está pendiente. Se prevé una actividad en vivo; hoy se usa el botón dentro de la app, desbloqueando el celular.
+
 ## Cerrar el turno
 
 Tocá **Cerrar turno**. Si todavía no llegó el fin programado, escribí un motivo de al menos tres caracteres para habilitar el cierre. Garita registra un identificador único, la hora y una lectura puntual de ubicación. Con conexión, envía el cierre al servidor y elimina los datos activos del turno local cuando recibe confirmación.
 
 ## Qué pasa sin señal
+
+### Sin datos: pánico por SMS
+
+Al iniciar el turno en Android, Garita explica el permiso SMS: únicamente para emergencias sin datos o sin confirmación de la central. Podés rechazarlo; no se vuelve a pedir en ese turno.
+
+Sin internet, el pánico intenta el SMS inmediatamente; con datos sin confirmación de la central, a los ocho segundos. Va a un solo número configurado por la empresa. Repetir una alerta abierta no envía otro SMS.
+
+En Android con permiso se envía en segundo plano. En iPhone o Android sin permiso se abre la pantalla del sistema: **tocá enviar** y volvé a Garita. Si cancelás, el SMS no se envía.
+
+- **SMS enviado**: Android confirmó salida hacia la red; no confirma recepción por la central.
+- **SMS entregado**: la operadora informó entrega al teléfono; no significa lectura de un supervisor.
+- **SMS preparado, sin confirmación de entrega**: se usó la pantalla del sistema; Garita no tiene confirmación de entrega.
+- **No se pudo enviar**: falló, cancelaste o no hay destino. Sigue pendiente por internet; buscá ayuda por otra vía disponible.
+
+Necesitás cobertura celular y una línea habilitada para SMS. Al volver internet, la alerta se reintenta: **Alerta recibida por la central** aparece cuando el servidor confirma; **Confirmada por el supervisor**, cuando confirma lectura. Esos textos tienen prioridad. El teléfono y el código se borran con los datos activos al confirmar el cierre y terminar de sincronizar. La recepción automática en la plataforma está prevista para HU-37: mientras se usa el teléfono de guardia, quien lo recibe debe actuar según el procedimiento de la empresa.
 
 El inicio requiere conexión y no se guarda como iniciado si el teléfono está sin red. El registro de puntos y el cierre sí pueden realizarse sin conexión: los eventos quedan guardados en el teléfono como pendientes de envío, junto con los datos que HU-13 usará para sincronizar de forma idempotente. La pantalla del turno se actualiza inmediatamente sin red con los registros locales. Cuando vuelva la conexión, mantené la app instalada hasta que la sincronización envíe los eventos pendientes.
 

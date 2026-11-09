@@ -136,14 +136,14 @@ describe('field database', () => {
   it('migrates an empty database and upgrades the previous version', async () => {
     const fresh = new MemoryDatabase();
     await migrateDatabase(fresh);
-    expect(fresh.version).toBe(6);
-    expect(fresh.tables).toHaveLength(14);
+    expect(fresh.version).toBe(7);
+    expect(fresh.tables).toHaveLength(15);
     const prior = new MemoryDatabase();
     prior.version = 0;
     await migrateDatabase(prior);
-    expect(prior.version).toBe(6);
+    expect(prior.version).toBe(7);
     await migrateDatabase(prior);
-    expect(prior.tables).toHaveLength(14);
+    expect(prior.tables).toHaveLength(15);
   });
   it('saves, reopens, replaces, clears, and validates pending events and checkpoint records', async () => {
     const disk = new MemoryDatabase();
@@ -236,7 +236,7 @@ describe('field database', () => {
     const db = new MemoryDatabase();
     db.version = 4;
     await migrateDatabase(db);
-    expect(db.version).toBe(6);
+    expect(db.version).toBe(7);
     expect(
       db.tables.some((sql) => sql.includes("UPDATE pending_events SET type = 'checkpoint_record'")),
     ).toBe(true);

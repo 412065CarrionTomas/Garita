@@ -1,3 +1,5 @@
+import { CoverageNoticesModule } from './modules/coverage-notices/coverage-notices.module';
+import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -21,6 +23,11 @@ import { MarcasModule } from './modules/marcas/marcas.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { ServerTimeModule } from './modules/server-time/server-time.module';
 import { SupervisionModule } from './modules/supervision/supervision.module';
+import { RoundReviewModule } from './modules/round-review/round-review.module';
+import { PanicModule } from './modules/panic/panic.module';
+import { NoticesModule } from './modules/notices/notices.module';
+import { CompanyModule } from './modules/company/company.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -50,6 +57,13 @@ import { SupervisionModule } from './modules/supervision/supervision.module';
     SyncModule,
     ServerTimeModule,
     SupervisionModule,
+    RoundReviewModule,
+    PanicModule,
+    NoticesModule,
+    CompanyModule,
+    ReportsModule,
+    CoverageNoticesModule,
+    NotificationPreferencesModule,
   ],
 })
 export class AppModule {}

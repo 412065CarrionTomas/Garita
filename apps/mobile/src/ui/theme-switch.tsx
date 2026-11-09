@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, View } from 'react-native';
-import { radius, space, touch } from '@garita/tokens';
+import { radius, touch } from '@garita/tokens';
 
 import { Text } from './text';
 import { useTheme } from './theme';
@@ -18,7 +18,7 @@ export function ThemeSwitch() {
     <View
       accessibilityRole="radiogroup"
       accessibilityLabel="Apariencia"
-      style={[styles.group, { backgroundColor: colors.muted }]}
+      style={[styles.group, { borderColor: colors.input }]}
     >
       {OPTIONS.map((option) => {
         const selected = mode === option.mode;
@@ -31,9 +31,9 @@ export function ThemeSwitch() {
             onPress={() => {
               setMode(option.mode);
             }}
-            style={[styles.option, selected && { backgroundColor: colors.card }]}
+            style={[styles.option, selected && { backgroundColor: colors.primary }]}
           >
-            <Text variant="label" color={selected ? 'foreground' : 'mutedForeground'}>
+            <Text variant="label" color={selected ? 'primaryForeground' : 'foreground'}>
               {option.label}
             </Text>
           </Pressable>
@@ -44,12 +44,11 @@ export function ThemeSwitch() {
 }
 
 const styles = StyleSheet.create({
-  group: { flexDirection: 'row', borderRadius: radius.lg, padding: space[1] },
+  group: { flexDirection: 'row', borderWidth: 1.5, borderRadius: radius.lg, overflow: 'hidden' },
   option: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: touch.min,
-    borderRadius: radius.md,
   },
 });

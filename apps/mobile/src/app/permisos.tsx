@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
-import { Banner, Button, Card, Screen, Text } from '@/ui';
+import { Badge, Banner, Button, Card, Screen, Text } from '@/ui';
 import {
   requestFieldPermissions,
   type FieldPermissionState,
@@ -29,36 +29,56 @@ export default function PermissionsScreen() {
       setLoading(false);
     }
   };
+  // location_* se evalúa antes que la cámara: sin ubicación no sabemos el estado de la cámara.
+  const locationOk = state === 'ok' || state === 'camera_denied';
+  const permissions = [
+    {
+      key: 'location',
+      title: 'Ubicación precisa',
+      granted: locationOk,
+      action: 'Permitir ubicación precisa',
+      text: 'Se usa únicamente al iniciar y cerrar el turno y al registrar un punto. Se utiliza para verificar el recorrido informado, conforme a la finalidad comunicada bajo la Ley 25.326.',
+    },
+    {
+      key: 'camera',
+      title: 'Cámara',
+      granted: state === 'ok',
+      action: 'Permitir cámara',
+      text: 'Se usa para leer los códigos QR de los puntos de control.',
+    },
+    // TODO(foja): notificaciones; hoy se configuran más adelante y no se piden acá.
+  ];
   return (
     <Screen scroll style={styles.container}>
       <Text variant="title" accessibilityRole="header">
         Permisos para trabajar
       </Text>
-      <Card>
-        <Text variant="heading">Ubicación precisa</Text>
-        <Text>
-          La ubicación precisa se usa únicamente al iniciar y cerrar el turno y al registrar un
-          punto. Se utiliza para verificar el recorrido informado, conforme a la finalidad
-          comunicada bajo la Ley 25.326.
-        </Text>
-      </Card>
-      <Card>
-        <Text variant="heading">Cámara</Text>
-        <Text>
-          La cámara se usa para leer los códigos QR de los puntos de control. Las notificaciones se
-          configurarán más adelante.
-        </Text>
-      </Card>
-      <Button
-        size="lg"
-        label="Configurar permisos"
-        accessibilityLabel="Permitir ubicación precisa y cámara"
-        onPress={request}
-        loading={loading}
-      />
+      {permissions.map((permission) => (
+        <Card key={permission.key}>
+          <View style={styles.head}>
+            <Text variant="heading" style={styles.title}>
+              {permission.title}
+            </Text>
+            {permission.granted ? (
+              <Badge tone="success" label="Permitida" />
+            ) : (
+              <Button
+                label="Permitir"
+                accessibilityLabel={permission.action}
+                onPress={request}
+                disabled={loading}
+              />
+            )}
+          </View>
+          <Text>{permission.text}</Text>
+        </Card>
+      ))}
+      <Banner tone="info" role="text">
+        Sin señal el celular guarda todo y lo envía después. La hora se verifica contra el servidor.
+      </Banner>
       {state === 'ok' && (
         <Button
-          variant="outline"
+          size="lg"
           label="Continuar"
           accessibilityLabel="Continuar a mis turnos"
           onPress={() => router.replace('/(guard)')}
@@ -78,5 +98,12 @@ export default function PermissionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, justifyContent: 'center', gap: space[5] },
+  container: { flexGrow: 1, justifyContent: 'center', gap: space[4] },
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  title: { flex: 1 },
 });

@@ -16,16 +16,16 @@ Garita es un sistema de gestión de vigilancia compuesto por:
 
 ## 2. Stack tecnológico
 
-| Capa               | Tecnologías                                                                                                                                        |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Base de datos      | PostgreSQL + Prisma ORM · SQLite en el celular (modo sin señal) · Redis (tareas programadas)                                                       |
-| Frontend web       | React + TypeScript (Vite), Tailwind CSS, shadcn/ui, PWA instalable (vite-plugin-pwa), TanStack Query, Recharts                                     |
-| App móvil          | React Native + Expo: Expo Camera (QR), React Native NFC Manager (NFC), Expo Location, Expo SQLite, Expo Notifications, Expo SMS, React Native Maps |
-| Backend            | Node.js + NestJS (TypeScript), monolito modular, API REST + WebSockets (Socket.IO), BullMQ, Zod                                                    |
-| APIs externas      | Firebase Authentication, Firebase Cloud Messaging, Google Maps Platform, Mercado Pago (suscripciones y webhooks), Cloudinary                       |
-| Testing            | Jest (unitarios), Supertest (integración de la API), React Testing Library                                                                         |
-| CI/CD y despliegue | GitHub Actions · Render (API) · Vercel (web) · Neon (PostgreSQL) · EAS Build (app)                                                                 |
-| Monorepo           | pnpm workspaces + Turborepo                                                                                                                        |
+| Capa               | Tecnologías                                                                                                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Base de datos      | PostgreSQL + Prisma ORM · SQLite en el celular (modo sin señal) · Redis (tareas programadas)                                                                      |
+| Frontend web       | React + TypeScript (Vite), Tailwind CSS, shadcn/ui, PWA instalable (vite-plugin-pwa), TanStack Query, Recharts                                                    |
+| App móvil          | React Native + Expo: Expo Camera (QR), React Native NFC Manager (NFC), Expo Location, Expo SQLite, Expo Notifications, Expo SMS, React Native Maps                |
+| Backend            | Node.js + NestJS (TypeScript), monolito modular, API REST + WebSockets (Socket.IO), BullMQ, Zod                                                                   |
+| APIs externas      | Firebase Authentication, Firebase Cloud Messaging, MapLibre + OpenFreeMap (mapas web) y Photon (direcciones), Mercado Pago (suscripciones y webhooks), Cloudinary |
+| Testing            | Jest (unitarios), Supertest (integración de la API), React Testing Library                                                                                        |
+| CI/CD y despliegue | GitHub Actions · Render (API) · Vercel (web) · Neon (PostgreSQL) · EAS Build (app)                                                                                |
+| Monorepo           | pnpm workspaces + Turborepo                                                                                                                                       |
 
 ## 3. Estructura del monorepo
 
@@ -127,7 +127,7 @@ Antes de dar una tarea por terminada: `pnpm lint`, `pnpm typecheck` y `pnpm test
 - **Supertest** para tests de integración de endpoints de la API.
 - **React Testing Library** para componentes; testear comportamiento, no implementación.
 - Todo fix de bug incluye un test que lo reproduzca.
-- Mockear servicios externos (Firebase, Mercado Pago, Cloudinary, Google Maps) en los tests; nunca llamar a servicios reales.
+- Mockear servicios externos (Firebase, Mercado Pago, Cloudinary, MapLibre) en los tests; nunca llamar a servicios reales.
 
 ## 7. Flujo de ramas (Git Flow)
 
@@ -209,7 +209,7 @@ chore(deps): actualiza dependencias de Expo
 
 ## 9. Seguridad
 
-- Nunca exponer claves de Firebase Admin, Mercado Pago, Cloudinary ni Google Maps del lado del cliente (salvo las claves públicas restringidas por dominio/app).
+- Nunca exponer claves de Firebase Admin, Mercado Pago ni Cloudinary del lado del cliente (salvo las claves públicas restringidas por dominio/app).
 - Validar el rol y la pertenencia del recurso en cada endpoint (un cliente solo ve sus puestos; un supervisor solo sus vigiladores).
 - Los datos de ubicación de los vigiladores son sensibles: no loguearlos ni exponerlos fuera de los roles autorizados.
 

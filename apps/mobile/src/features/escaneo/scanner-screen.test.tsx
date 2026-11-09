@@ -186,7 +186,7 @@ describe('<ScannerScreen />', () => {
     expect(screen.getByRole('button', { name: 'Apagar linterna' })).toBeOnTheScreen();
 
     // Back button
-    const backButton = screen.getByRole('button', { name: 'Volver al turno' });
+    const backButton = screen.getByRole('button', { name: 'Volver a la ronda' });
     await act(async () => {
       backButton.props.onClick?.() ?? backButton.props.onPress?.();
     });
@@ -254,7 +254,7 @@ describe('<ScannerScreen />', () => {
         color: colors.dark.foreground,
         backgroundColor: `${colors.dark.background}D9`,
       });
-      for (const name of ['Volver al turno', 'Encender linterna']) {
+      for (const name of ['Volver a la ronda', 'Encender linterna']) {
         expect(screen.getByRole('button', { name })).toHaveStyle({
           minHeight: touch.min,
           backgroundColor: `${colors.dark.background}D9`,
@@ -284,7 +284,7 @@ describe('<ScannerScreen />', () => {
       expect(screen.getByRole('alert')).toHaveProp('accessibilityLiveRegion', 'assertive');
       expect(screen.getByRole('alert')).toHaveStyle({ backgroundColor: colors[scheme].dangerSoft });
       expect(screen.getByRole('button', { name: 'Escanear otro punto' })).toBeOnTheScreen();
-      expect(screen.getAllByRole('button', { name: 'Volver al turno' })).toHaveLength(2);
+      expect(screen.getAllByRole('button', { name: 'Volver a la ronda' })).toHaveLength(2);
     },
   );
 

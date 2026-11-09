@@ -1,8 +1,6 @@
-import { useEffect } from 'react';
-import { APIProvider, Map as GoogleMap, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
+import type { ReactNode } from 'react';
+import { Link } from 'react-router';
 import { haversineMeters } from '@garita/shared';
-import { env } from '@/config/env';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatusBadge } from '@/components/status-badge';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -10,23 +8,93 @@ import { Checkbox } from '@/components/ui/checkbox';
 import type { Severity, ShiftDetail } from './contracts';
 import { time, windowLabels } from './contracts';
 
+const assignmentResults = {
+  scheduled: 'Programada',
+  started: 'Iniciada',
+  absent: 'Ausente',
+  replaced: 'Reemplazada',
+  closed_early: 'Cerrada antes de hora',
+};
+
+/** Bloque de la foja bajo la tabla de puntos: rótulo en condensada y filete encima. */
+export function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3 border-t border-border pt-4">
+      <h2 className="t-label text-muted-foreground">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+export function CoverageSection({ detail }: { detail: ShiftDetail }) {
+  return (
+    <Section title="Horario y cobertura">
+      <div className="space-y-1.5 text-sm">
+        <p>
+          Programado:{' '}
+          <span className="tabular-nums">
+            {time(detail.scheduled.startsAt)}–{time(detail.scheduled.endsAt)}
+          </span>
+        </p>
+        <p>
+          Inicio real: {detail.actual.startedAt ? time(detail.actual.startedAt) : 'No iniciado'}
+        </p>
+        <p>Cierre real: {detail.actual.closedAt ? time(detail.actual.closedAt) : 'Sin cierre'}</p>
+        {detail.status === 'uncovered' && (
+          <p className="font-semibold text-danger">
+            Sin cobertura desde{' '}
+            {detail.actual.closedAt ? time(detail.actual.closedAt) : 'hora desconocida'}
+            {detail.actual.closeReason ? ` · Motivo: ${detail.actual.closeReason}` : ''}
+          </p>
+        )}
+        {detail.actual.closedEarly && detail.status !== 'uncovered' && (
+          <p>
+            Cierre antes de hora
+            {detail.actual.closeReason ? ` · Motivo: ${detail.actual.closeReason}` : ''}
+            {detail.actual.closedBy ? ` · Cerró: ${detail.actual.closedBy}` : ''}
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+export function AssignmentsSection({ detail }: { detail: ShiftDetail }) {
+  return (
+    <Section title="Historial de asignaciones">
+      <ol className="space-y-2">
+        {detail.assignments.map((assignment) => (
+          <li key={assignment.id} className="text-sm">
+            {assignment.guard
+              ? `${assignment.guard.firstName} ${assignment.guard.lastName}`
+              : 'Sin vigilador'}{' '}
+            · {time(assignment.startsAt)}–{time(assignment.endsAt)}
+            {' · '}
+            {assignmentResults[assignment.result]}
+            {assignment.isCurrent ? ' · Vigente' : ''}
+            {' · Asignó: '}
+            {assignment.assignedBy.firstName} {assignment.assignedBy.lastName}
+            {assignment.reassignedAt ? ` · Reasignó a las ${time(assignment.reassignedAt)}` : ''}
+          </li>
+        ))}
+      </ol>
+      {detail.assignments.length === 0 && <p className="text-sm">Sin asignaciones.</p>}
+    </Section>
+  );
+}
+
 export function WindowsSection({ detail }: { detail: ShiftDetail }) {
   const names = new Map(detail.rounds.map((round) => [round.id, round.name]));
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle role="heading" aria-level={2}>
-          Rondas y ventanas
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {detail.windows.length === 0 ? (
-          <p>No hay ventanas para este turno.</p>
-        ) : (
-          detail.windows.map((window) => (
-            <div key={window.id} className="border-b border-border pb-3 last:border-0">
+    <Section title="Rondas y ventanas">
+      {detail.windows.length === 0 ? (
+        <p className="text-sm">No hay ventanas para este turno.</p>
+      ) : (
+        <div className="divide-y divide-border">
+          {detail.windows.map((window) => (
+            <div key={window.id} className="space-y-1 py-3 first:pt-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium">
+                <p className="font-semibold">
                   {names.get(window.roundId) ?? 'Ronda'} · ventana {window.windowIndex + 1}
                 </p>
                 <StatusBadge
@@ -35,7 +103,9 @@ export function WindowsSection({ detail }: { detail: ShiftDetail }) {
                       ? 'success'
                       : window.status === 'not_done'
                         ? 'danger'
-                        : 'warning'
+                        : window.status === 'late' || window.status === 'complete_late'
+                          ? 'warning'
+                          : 'neutral'
                   }
                 >
                   {windowLabels[window.status]}
@@ -45,87 +115,47 @@ export function WindowsSection({ detail }: { detail: ShiftDetail }) {
                 {time(window.startsAt)}–{time(window.endsAt)} · {window.recordedCount} de{' '}
                 {window.expectedCount} puntos registrados
               </p>
-              {window.severityLevel && <p className="text-sm">Gravedad: {window.severityLevel}</p>}
+              {window.severityLevel && (
+                <p className="text-sm">⚠ Gravedad: {window.severityLevel}</p>
+              )}
+              {(window.status === 'in_review' || window.severityLevel) && (
+                <Link
+                  to={`/revision/${window.id}`}
+                  className="text-sm font-semibold underline underline-offset-4"
+                >
+                  Revisar ventana
+                </Link>
+              )}
             </div>
-          ))
-        )}
-        <h3 className="font-semibold">Puntos</h3>
-        <ul className="space-y-2">
-          {detail.points.map((point) => (
-            <li key={point.id} className="flex justify-between gap-2">
-              <span>{point.name}</span>
-              <StatusBadge tone={point.registered ? 'success' : 'warning'}>
-                {point.registered ? 'Registrado' : 'Pendiente'}
-              </StatusBadge>
-            </li>
           ))}
-        </ul>
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </Section>
   );
 }
 
-function RouteLine({ route }: { route: ShiftDetail['route'] }) {
-  const map = useMap();
-  const maps = useMapsLibrary('maps');
-  useEffect(() => {
-    if (!map || !maps || route.length < 2) return;
-    const line = new maps.Polyline({
-      map,
-      path: route.map((point) => ({ lat: point.latitude, lng: point.longitude })),
-    });
-    return () => {
-      line.setMap(null);
-    };
-  }, [map, maps, route]);
-  return null;
-}
-
+/** Recorrido registrado, en texto. El mapa de la ruta vive en el panel derecho de la pantalla. */
 export function RouteSection({ detail }: { detail: ShiftDetail }) {
   const points = new Map(detail.points.map((point) => [point.id, point]));
-  const first = detail.route[0];
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle role="heading" aria-level={2}>
-          Recorrido
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {env.VITE_GOOGLE_MAPS_API_KEY && first && (
-          <div
-            className="h-72 overflow-hidden rounded-xl border border-border"
-            role="img"
-            aria-label="Mapa del recorrido registrado"
-          >
-            <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY}>
-              <GoogleMap
-                defaultCenter={{ lat: first.latitude, lng: first.longitude }}
-                defaultZoom={14}
-                mapId="GARITA_SHIFT_ROUTE"
-                className="h-72 w-full"
-              >
-                <RouteLine route={detail.route} />
-              </GoogleMap>
-            </APIProvider>
-          </div>
-        )}
-        <ol className="list-inside list-decimal space-y-2" aria-label="Puntos del recorrido">
-          {detail.route.map((item, index) => {
-            const point = points.get(item.checkpointId);
-            return (
-              <li key={`${item.checkpointId}-${index}`} className="text-sm">
-                {point?.name ?? 'Punto'} · {time(item.occurredAtDevice)} ·{' '}
-                {point
-                  ? `${Math.round(haversineMeters(item.latitude, item.longitude, point.latitude, point.longitude))} m del punto configurado`
-                  : 'Distancia no disponible'}
-              </li>
-            );
-          })}
-        </ol>
-        {detail.route.length === 0 && <p>No hay puntos registrados en el recorrido.</p>}
-      </CardContent>
-    </Card>
+    <Section title="Recorrido">
+      <ol className="list-inside list-decimal space-y-2" aria-label="Puntos del recorrido">
+        {detail.route.map((item, index) => {
+          const point = points.get(item.checkpointId);
+          return (
+            <li key={`${item.checkpointId}-${index}`} className="text-sm">
+              {point?.name ?? 'Punto'} · {time(item.occurredAtDevice)} ·{' '}
+              {point
+                ? `${Math.round(haversineMeters(item.latitude, item.longitude, point.latitude, point.longitude))} m del punto configurado`
+                : 'Distancia no disponible'}
+            </li>
+          );
+        })}
+      </ol>
+      {detail.route.length === 0 && (
+        <p className="text-sm">No hay puntos registrados en el recorrido.</p>
+      )}
+    </Section>
   );
 }
 
@@ -149,64 +179,80 @@ export function RecordsSection({
       (!severity || record.flags.some((flag) => flag.severity === severity)),
   );
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle role="heading" aria-level={2}>
-          Registros
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-end gap-4">
-          <Label className="flex items-center gap-2">
-            <Checkbox
-              checked={flaggedOnly}
-              onCheckedChange={(checked) => {
-                onFlaggedOnly(checked === true);
-              }}
-            />
-            Solo marcados
-          </Label>
-          <div className="space-y-2">
-            <Label htmlFor="severity-filter">Gravedad</Label>
-            <NativeSelect
-              id="severity-filter"
-              value={severity}
-              onChange={(event) => {
-                onSeverity(event.target.value as '' | Severity);
-              }}
-            >
-              <NativeSelectOption value="">Todas</NativeSelectOption>
-              <NativeSelectOption value="grave">Grave</NativeSelectOption>
-              <NativeSelectOption value="media">Media</NativeSelectOption>
-              <NativeSelectOption value="leve">Leve</NativeSelectOption>
-            </NativeSelect>
-          </div>
+    <Section title="Registros">
+      <div className="flex flex-wrap items-end gap-4">
+        <Label className="flex items-center gap-2">
+          <Checkbox
+            checked={flaggedOnly}
+            onCheckedChange={(checked) => {
+              onFlaggedOnly(checked === true);
+            }}
+          />
+          Solo marcados
+        </Label>
+        <div className="space-y-2">
+          <Label htmlFor="severity-filter">Gravedad</Label>
+          <NativeSelect
+            id="severity-filter"
+            value={severity}
+            onChange={(event) => {
+              onSeverity(event.target.value as '' | Severity);
+            }}
+          >
+            <NativeSelectOption value="">Todas</NativeSelectOption>
+            <NativeSelectOption value="grave">Grave</NativeSelectOption>
+            <NativeSelectOption value="media">Media</NativeSelectOption>
+            <NativeSelectOption value="leve">Leve</NativeSelectOption>
+          </NativeSelect>
         </div>
-        <ul className="space-y-3">
-          {records.map((record) => (
-            <li key={record.id} className="border-b border-border pb-2 last:border-0">
-              <p className="font-medium">
-                {points.get(record.checkpointId) ?? 'Punto'} · {time(record.occurredAtDevice)}
-              </p>
-              {record.flags.length ? (
-                <ul>
-                  {record.flags
-                    .filter((flag) => !severity || flag.severity === severity)
-                    .map((flag) => (
-                      <li key={flag.id} className="text-sm">
-                        {flag.severity}: {flag.reason}
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">Sin marcas</p>
-              )}
-            </li>
-          ))}
-        </ul>
-        {records.length === 0 && <p>No hay registros para este filtro.</p>}
-        {detail.phoneWithoutNfc && <p>Celular sin NFC</p>}
-      </CardContent>
-    </Card>
+      </div>
+      <ul className="divide-y divide-border">
+        {records.map((record) => (
+          <li key={record.id} className="py-2 first:pt-0">
+            <p className="font-semibold">
+              {points.get(record.checkpointId) ?? 'Punto'} ·{' '}
+              <span className="tabular-nums">{time(record.occurredAtDevice)}</span>
+            </p>
+            {record.flags.length ? (
+              <ul>
+                {record.flags
+                  .filter((flag) => !severity || flag.severity === severity)
+                  .map((flag) => (
+                    <li key={flag.id} className="text-sm">
+                      {flag.severity}: {flag.reason}
+                    </li>
+                  ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">Sin marcas</p>
+            )}
+          </li>
+        ))}
+      </ul>
+      {records.length === 0 && <p className="text-sm">No hay registros para este filtro.</p>}
+      {detail.phoneWithoutNfc && <p className="text-sm">Celular sin NFC</p>}
+    </Section>
+  );
+}
+
+export function RejectedSection({ detail }: { detail: ShiftDetail }) {
+  return (
+    <Section title="Intentos rechazados">
+      <ul className="space-y-2">
+        {detail.rejectedAttempts.map((attempt) => (
+          <li
+            key={attempt.id}
+            className={attempt.highlighted ? 'text-sm font-semibold text-danger' : 'text-sm'}
+          >
+            <span className="tabular-nums">{time(attempt.occurredAtDevice)}</span> ·{' '}
+            {attempt.method.toUpperCase()} · {attempt.reason}
+            {attempt.highlighted ? ' · QR de versión regenerada' : ''}
+          </li>
+        ))}
+      </ul>
+      {detail.rejectedAttempts.length === 0 && (
+        <p className="text-sm">No hay intentos rechazados.</p>
+      )}
+    </Section>
   );
 }

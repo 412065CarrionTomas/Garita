@@ -28,6 +28,16 @@ const shiftData = {
 } satisfies ShiftOfflineData;
 
 describe('<IncidentFormScreen />', () => {
+  it('marks exactly one incident type as selected', async () => {
+    const { getByLabelText } = await render(
+      <IncidentFormScreen shiftId="shift-1" shiftData={shiftData} />,
+    );
+    expect(getByLabelText('Intrusión').props.accessibilityState.selected).toBe(true);
+    await fireEvent.press(getByLabelText('Otro'));
+    expect(getByLabelText('Intrusión').props.accessibilityState.selected).toBe(false);
+    expect(getByLabelText('Otro').props.accessibilityState.selected).toBe(true);
+  });
+
   it('requires a description for Otro and enables saving when supplied', async () => {
     const { getByLabelText, getByText, queryByText } = await render(
       <IncidentFormScreen shiftId="shift-1" shiftData={shiftData} />,

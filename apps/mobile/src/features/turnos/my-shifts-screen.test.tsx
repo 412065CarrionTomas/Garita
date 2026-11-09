@@ -29,6 +29,7 @@ describe('<MyShiftsScreen />', () => {
         serviceDate: '2030-10-14T00:00:00.000Z',
         site: { name: 'Predio A', company: { timezone: 'America/Argentina/Buenos_Aires' } },
         rounds: [{ round: { name: 'Perimetral' } }],
+        assignments: [{ startsAt: '2030-10-14T23:00:00.000Z' }],
       },
     ];
     const resolveRequests: (() => void)[] = [];
@@ -93,6 +94,7 @@ it('distingue un turno en curso y conserva sus datos', async () => {
       serviceDate: '2030-10-14',
       site: { name: 'Predio B', company: { timezone: 'America/Argentina/Buenos_Aires' } },
       rounds: [],
+      assignments: [{ startsAt: '2030-10-14T23:00:00.000Z' }],
     },
   ] as never);
   await render(<MyShiftsScreen />);

@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import type { ShiftOfflineData } from '@garita/shared';
 import { colors as palettes, radius, space, touch } from '@garita/tokens';
 import { Banner, Button, Card, Loading, Screen, Text } from '@/ui';
+import type { Tone } from '@/ui';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 import { NfcReader } from './nfc-reader';
@@ -13,6 +22,68 @@ import { processScan, type ScanActionResult } from './scan-action';
 export interface ScannerScreenProps {
   shiftData?: ShiftOfflineData | null;
   onScanComplete?: (result: ScanActionResult) => void;
+}
+
+const LINE = 2; // grosor de la línea de barrido (borde fino, como los de src/ui)
+const CORNERS = [
+  { top: 0, left: 0, borderTopWidth: space[1], borderLeftWidth: space[1] },
+  { top: 0, right: 0, borderTopWidth: space[1], borderRightWidth: space[1] },
+  { bottom: 0, left: 0, borderBottomWidth: space[1], borderLeftWidth: space[1] },
+  { bottom: 0, right: 0, borderBottomWidth: space[1], borderRightWidth: space[1] },
+] as const;
+
+/** Visor: cuatro esquinas en L y una línea de barrido (quieta si el sistema pide reducir movimiento). */
+function Viewfinder() {
+  const [height, setHeight] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(true);
+  const [sweep] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    let mounted = true;
+    void Promise.resolve(AccessibilityInfo.isReduceMotionEnabled?.())
+      .then((enabled) => mounted && setReduceMotion(enabled !== false))
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion || height === 0) return;
+    const loop = Animated.loop(
+      Animated.timing(sweep, {
+        toValue: height,
+        duration: 2200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [height, reduceMotion, sweep]);
+
+  return (
+    <View
+      style={styles.reticle}
+      onLayout={(event) => setHeight(event.nativeEvent.layout.height - LINE)}
+      importantForAccessibility="no-hide-descendants"
+      accessibilityElementsHidden
+    >
+      {CORNERS.map((corner, index) => (
+        <View
+          key={index}
+          style={[styles.corner, corner, { borderColor: cameraColors.foreground }]}
+        />
+      ))}
+      <Animated.View
+        style={[
+          styles.scanLine,
+          { backgroundColor: cameraColors.foreground },
+          reduceMotion ? { top: '50%' } : { transform: [{ translateY: sweep }] },
+        ]}
+      />
+    </View>
+  );
 }
 
 export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: ScannerScreenProps) {
@@ -142,7 +213,7 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
         />
         {shiftData && <NfcReader shiftData={shiftData} />}
         {feedbackMessage !== '' && <Banner tone="info">{feedbackMessage}</Banner>}
-        <Button label="Volver al turno" variant="outline" size="lg" onPress={goBack} />
+        <Button label="Volver a la ronda" variant="outline" size="lg" onPress={goBack} />
       </Screen>
     );
   }
@@ -161,7 +232,7 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
         <View style={styles.topBar}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Volver al turno"
+            accessibilityLabel="Volver a la ronda"
             onPress={goBack}
             style={[styles.topButton, cameraControlStyle]}
           >
@@ -181,30 +252,30 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
         </View>
 
         <View style={styles.reticleContainer}>
-          <View style={[styles.reticle, { borderColor: cameraColors.signal }]} />
+          <Viewfinder />
           <Text style={[styles.reticleHint, cameraControlStyle]}>
             Apuntá al código QR del punto
+          </Text>
+          <Text style={[styles.reticleHint, cameraControlStyle]}>
+            ¿Tiene etiqueta NFC? Acercá la parte de atrás del celular.
           </Text>
         </View>
 
         <View style={styles.bottomBar}>
           {processing && (
             <View style={[styles.processingBox, cameraControlStyle]}>
-              <ActivityIndicator size="small" color={cameraColors.signal} />
+              <ActivityIndicator size="small" color={cameraColors.foreground} />
               <Text style={{ color: cameraColors.foreground }}>Procesando escaneo...</Text>
             </View>
           )}
 
           {result && (
             <Card>
-              <Banner
-                tone={result.status === 'counted' ? 'success' : 'danger'}
-                accessibilityLiveRegion="assertive"
-              >
+              <Banner tone={resultTone(result.status)} accessibilityLiveRegion="assertive">
                 {result.message}
               </Banner>
               <Button label="Escanear otro punto" size="lg" onPress={resetScanner} />
-              <Button label="Volver al turno" variant="outline" size="lg" onPress={goBack} />
+              <Button label="Volver a la ronda" variant="outline" size="lg" onPress={goBack} />
             </Card>
           )}
         </View>
@@ -215,6 +286,14 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
 
 // La cámara conserva la paleta oscura aunque la app use el tema claro.
 const cameraColors = palettes.dark;
+/** Éxito en verde, demora en ámbar, repetido en azul; lo rechazado o fallido, en rojo. */
+function resultTone(status: ScanActionResult['status']): Tone {
+  if (status === 'counted') return 'success';
+  if (status === 'out_of_window' || status === 'too_soon') return 'warning';
+  if (status === 'already_recorded') return 'info';
+  return 'danger';
+}
+
 const cameraControlStyle = {
   backgroundColor: `${cameraColors.background}D9`,
   color: cameraColors.foreground,
@@ -239,27 +318,22 @@ const styles = StyleSheet.create({
   topButton: {
     minHeight: touch.min,
     minWidth: touch.min,
-    borderRadius: radius.lg,
+    borderRadius: 0,
     paddingHorizontal: space[4],
     paddingVertical: space[3],
     justifyContent: 'center',
     alignItems: 'center',
   },
   reticleContainer: { alignItems: 'center', justifyContent: 'center', flexShrink: 1 },
-  reticle: {
-    width: '75%',
-    maxWidth: space[16] * 4,
-    aspectRatio: 1,
-    flexShrink: 1,
-    borderWidth: space[1],
-    borderRadius: radius['2xl'],
-  },
+  reticle: { width: '75%', maxWidth: space[16] * 4, aspectRatio: 1, flexShrink: 1 },
+  corner: { position: 'absolute', width: space[8], height: space[8] },
+  scanLine: { position: 'absolute', left: space[2], right: space[2], height: LINE },
   reticleHint: {
     textAlign: 'center',
-    marginTop: space[4],
+    marginTop: space[3],
     paddingHorizontal: space[3],
     paddingVertical: space[2],
-    borderRadius: radius.sm,
+    borderRadius: 0,
   },
   bottomBar: { gap: space[3] },
   processingBox: {

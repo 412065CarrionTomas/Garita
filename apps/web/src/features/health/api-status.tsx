@@ -14,7 +14,7 @@ export function ApiStatus() {
   const { label, dot } = STATUS[status];
 
   return (
-    <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+    <p role="status" className="flex items-center gap-2 t-label text-muted-foreground">
       <span className={cn('size-2 rounded-full', dot)} aria-hidden="true" />
       {label}
     </p>

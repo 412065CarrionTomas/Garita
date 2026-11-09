@@ -83,7 +83,6 @@ type ShiftChange =
 
 export function buildShiftNotification(change: ShiftChange) {
   // TODO(HU-32): emit the schedule summary when weekly scheduling exists.
-  // TODO(HU-44): emit reassignment events from its dedicated flow.
   if (change.kind === 'shift_schedule_summary') {
     const day = (date: Date) =>
       new Intl.DateTimeFormat('es-AR', { day: 'numeric', timeZone: change.timezone }).format(date);
@@ -132,7 +131,7 @@ export function buildShiftNotification(change: ShiftChange) {
     },
     body: `${labels[change.kind]} del ${day} a las ${time}`,
     priority:
-      change.kind === 'shift_reassigned_to_you' &&
+      (change.kind === 'shift_reassigned_to_you' || change.kind === 'shift_reassigned_from_you') &&
       change.startsAt.getTime() - (change.now ?? new Date()).getTime() < 2 * 60 * 60 * 1000
         ? ('high' as const)
         : ('normal' as const),

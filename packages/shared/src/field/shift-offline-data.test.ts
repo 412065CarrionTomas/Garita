@@ -35,6 +35,32 @@ const valid = {
   serverTime: { serverNowUtc: '2026-10-13T10:00:00.000Z' },
 };
 describe('offline field contracts', () => {
+  it('accepts optional SMS data for older caches and validates one destination and six-digit code', () => {
+    const panicSms = { destination: '+5493511234567', shiftCode: '004839', backup: true };
+    expect(
+      shiftOfflineDataSchema.parse({ ...valid, shift: { ...valid.shift, panicSms } }).shift
+        .panicSms,
+    ).toEqual(panicSms);
+    for (const destination of ['123', '+5493511234567,+541100000000'])
+      expect(
+        shiftOfflineDataSchema.safeParse({
+          ...valid,
+          shift: { ...valid.shift, panicSms: { ...panicSms, destination } },
+        }).success,
+      ).toBe(false);
+    expect(
+      shiftOfflineDataSchema.safeParse({
+        ...valid,
+        shift: { ...valid.shift, panicSms: { ...panicSms, shiftCode: '12345' } },
+      }).success,
+    ).toBe(false);
+    expect(
+      shiftOfflineDataSchema.parse({
+        ...valid,
+        shift: { ...valid.shift, panicSms: { ...panicSms, destination: null } },
+      }).shift.panicSms?.destination,
+    ).toBeNull();
+  });
   it('accepts complete shift data and a pending event', () => {
     expect(shiftOfflineDataSchema.parse(valid)).toEqual(valid);
     expect(

@@ -3,7 +3,8 @@ import { NoopRealtime } from './realtime.port';
 import type { RealtimePort } from './realtime.port';
 import { SocketRealtimeService } from '../../modules/realtime/socket-realtime.service';
 import { NotificationsService } from '../../modules/notifications/notifications.service';
-import { NoopSms } from './sms.port';
+import { NoopSms, type SmsPort } from './sms.port';
+import { NoopNotices, type NoticesPort } from './notices.port';
 
 describe('RealtimePort provider', () => {
   it('implements the typed realtime port without throwing before a gateway connects', async () => {
@@ -55,6 +56,40 @@ describe('SmsPort provider', () => {
         shiftId: 'shift-1',
         guardId: 'guard-1',
         message: 'Tu turno terminó',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not send the panic sms until a provider exists', async () => {
+    await expect(
+      (new NoopSms() as SmsPort).sendPanicAlert({
+        phone: '+541100000000',
+        companyId: 'c',
+        alertId: 'a',
+        message: 'GARITA PANICO',
+      }),
+    ).resolves.toEqual({ sent: false });
+  });
+});
+
+describe('NoticesPort provider', () => {
+  it('keeps the noop notices implementation harmless', async () => {
+    const notices: NoticesPort = new NoopNotices();
+    await expect(
+      notices.raise({
+        companyId: 'c',
+        siteId: 's',
+        kind: 'round_missed',
+        subjectId: 'w',
+        shiftId: 'sh',
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      notices.resolve({
+        companyId: 'c',
+        kind: 'round_missed',
+        subjectId: 'w',
+        resolution: 'data_arrived',
       }),
     ).resolves.toBeUndefined();
   });

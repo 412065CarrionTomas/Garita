@@ -8,7 +8,7 @@ const declarations = (values: Record<ColorToken, string>) =>
 
 /** Variables CSS del panel web: `:root` es el tema claro y `.dark` el oscuro. */
 export function buildCss(): string {
-  const root = [...declarations(colors.light), `  --radius: ${radius.lg / 16}rem;`];
+  const root = [...declarations(colors.light), `  --radius: ${radius.md / 16}rem;`];
   return [
     '/* Generado por scripts/build-css.mjs desde src/colors.ts. No editar a mano. */',
     `:root {\n${root.join('\n')}\n}\n`,

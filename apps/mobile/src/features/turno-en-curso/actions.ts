@@ -7,7 +7,13 @@ import {
   type ShiftOfflineData,
 } from '@garita/shared';
 import * as Network from 'expo-network';
+import {
+  dismissPanicNotification,
+  reconcilePanicNotification,
+  recordLockedPanicFailure,
+} from '@/features/panico/bloqueado/notification';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
+import { requestPanicSmsPermission } from '@/features/permisos/sms-permission';
 import { ApiError } from '@/lib/api-client';
 import { deleteShiftCredential, processSyncQueue, saveShiftCredential } from '@/lib/cola';
 import { createDefaultFieldRepository } from '@/lib/db/database';
@@ -121,6 +127,22 @@ export async function beginShift(
     d.redirectToPermissions();
     return { status: 'permissions', permission };
   }
+  // The phone keeps one credential: starting another shift would orphan the previous queue.
+  const repository = await d.repository();
+  const previous = await repository.getShiftData();
+  if (
+    previous &&
+    previous.shift.id !== id &&
+    ((await repository.countPendingEvents()) > 0 ||
+      (await repository.listIncidentPhotos()).length > 0)
+  ) {
+    void d.triggerSync();
+    return {
+      status: 'error',
+      message:
+        'Todavía hay registros del turno anterior sin enviar. Esperá a que se envíen e intentá de nuevo',
+    };
+  }
   const now = d.now();
   if (now.getTime() > Date.parse(scheduledEnd))
     return {
@@ -162,6 +184,11 @@ export async function beginShift(
     await d.saveCredential(result.credential);
   }
   await d.repository().then((repository) => repository.saveShiftData(result.data));
+  await reconcilePanicNotification().catch(recordLockedPanicFailure);
+  void d
+    .repository()
+    .then((repository) => requestPanicSmsPermission(repository, id))
+    .catch(() => undefined);
   return { status: 'started', data: result.data, late: result.lateStartMinutes !== null };
 }
 
@@ -194,6 +221,7 @@ export async function finishShift(
     occurredAtDevice,
     createdAt: new Date().toISOString(),
   });
+  await dismissPanicNotification().catch(recordLockedPanicFailure);
   if (!(await d.online())) return { status: 'closed_pending' };
   try {
     await d.triggerSync();

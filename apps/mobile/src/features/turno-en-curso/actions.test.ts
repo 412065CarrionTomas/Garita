@@ -1,6 +1,15 @@
 import { SHIFT_EXECUTION_ERROR_CODES, type ShiftOfflineData } from '@garita/shared';
 import { ShiftExecutionApiError } from './api';
 import {
+  dismissPanicNotification,
+  reconcilePanicNotification,
+} from '@/features/panico/bloqueado/notification';
+jest.mock('@/features/panico/bloqueado/notification', () => ({
+  dismissPanicNotification: jest.fn(async () => undefined),
+  reconcilePanicNotification: jest.fn(async () => undefined),
+  recordLockedPanicFailure: jest.fn(),
+}));
+import {
   beginShift,
   finishShift,
   resetShiftActionsForTesting,
@@ -110,6 +119,7 @@ describe('shift execution actions', () => {
       message: 'Necesitás conexión para iniciar el turno',
     });
     expect(start).not.toHaveBeenCalled();
+    expect(reconcilePanicNotification).not.toHaveBeenCalled();
   });
 
   it('redirects when permissions are missing and never starts', async () => {
@@ -119,6 +129,23 @@ describe('shift execution actions', () => {
     ).resolves.toMatchObject({ status: 'permissions', permission: 'location_approximate' });
     expect(redirectToPermissions).toHaveBeenCalled();
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it('does not start another shift while the previous queue still has unsent events', async () => {
+    setup({
+      repository: async () =>
+        ({
+          ...repo,
+          countPendingEvents: jest.fn(async () => 2),
+          listIncidentPhotos: jest.fn(async () => []),
+        }) as never,
+    });
+    await expect(
+      beginShift('shift-2', shiftData.shift.startsAt, shiftData.shift.endsAt),
+    ).resolves.toMatchObject({ status: 'error' });
+    expect(start).not.toHaveBeenCalled();
+    expect(saveCredential).not.toHaveBeenCalled();
+    expect(triggerSync).toHaveBeenCalled();
   });
 
   it('starts online, validates and saves the offline shift data and credential', async () => {
@@ -137,6 +164,7 @@ describe('shift execution actions', () => {
     ).resolves.toMatchObject({ status: 'started', data: shiftData, late: false });
     expect(repo.saveShiftData).toHaveBeenCalledWith(shiftData);
     expect(saveCredential).toHaveBeenCalledWith(cred);
+    expect(reconcilePanicNotification).toHaveBeenCalledTimes(1);
   });
 
   it('maps reassigned errors and keeps the local expired-end check', async () => {
@@ -189,6 +217,7 @@ describe('shift execution actions', () => {
       }),
     );
     expect(close).not.toHaveBeenCalled();
+    expect(dismissPanicNotification).toHaveBeenCalledTimes(1);
   });
 
   it('H-1: enqueues shift_close and triggers sync without direct close or premature deletion', async () => {
@@ -208,6 +237,7 @@ describe('shift execution actions', () => {
     );
     // Triggered synchronization
     expect(triggerSync).toHaveBeenCalledTimes(1);
+    expect(dismissPanicNotification).toHaveBeenCalledTimes(1);
     // Does not prematurely delete credentials or shift data directly in finishShift
     expect(deleteCredential).not.toHaveBeenCalled();
     expect(repo.clearShiftData).not.toHaveBeenCalled();

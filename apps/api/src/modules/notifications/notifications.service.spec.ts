@@ -43,6 +43,31 @@ describe('NotificationsService', () => {
     );
   });
 
+  it('excluye solo los IDs silenciados y conserva los otros destinatarios', async () => {
+    userFindMany.mockResolvedValue([{ id: 'supervisor-2' }]);
+    await service.notifySiteStaff({
+      companyId: 'company-1',
+      siteId: 'site-1',
+      kind: 'shift_not_started',
+      excludeUserIds: ['supervisor-1'],
+      payload: { kind: 'shift_not_started', link: '/avisos/1' },
+    });
+    expect(userFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { notIn: ['supervisor-1'] },
+          companyId: 'company-1',
+          status: 'active',
+        }) as unknown,
+      }),
+    );
+    expect(queueAdd).toHaveBeenCalledWith(
+      'send-notification',
+      expect.objectContaining({ userIds: ['supervisor-2'] }),
+      expect.any(Object),
+    );
+  });
+
   it('rejects payload fields outside the shared strict schema', async () => {
     await expect(
       service.notifyUsers({

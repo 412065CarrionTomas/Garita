@@ -4,11 +4,11 @@ import { z } from 'zod';
 
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 import { RESET_MESSAGE, useAuth } from './auth-context';
+import { AuthLayout } from './auth-layout';
 
 export function RecoveryPage() {
   const { recover } = useAuth();
@@ -36,64 +36,53 @@ export function RecoveryPage() {
     setBusy(false);
   }
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
-      <div className="w-full min-w-0 max-w-md space-y-6">
-        <div className="flex items-center justify-center gap-2">
-          <img src="/logo.svg" alt="" className="size-8" />
-          <span className="text-lg font-semibold">Garita</span>
-        </div>
-        <Card>
-          <CardHeader>
-            <h1 className="text-2xl font-semibold tracking-tight">Recuperar contraseña</h1>
-            <p className="text-sm text-muted-foreground">
-              Te enviaremos un enlace para crear una nueva contraseña.
-            </p>
-          </CardHeader>
-          <CardContent>
-            {sent ? (
-              <Alert role="status" className="space-y-2 border-info/30 bg-info-soft text-info">
-                <p>{RESET_MESSAGE}</p>
-                <p className="text-sm text-muted-foreground">Revisá también la carpeta de spam.</p>
-              </Alert>
-            ) : (
-              <form
-                onSubmit={(event) => {
-                  void submit(event);
-                }}
-                noValidate
-                className="space-y-4"
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="reset-email">Correo electrónico</Label>
-                  <Input
-                    id="reset-email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={email}
-                    onChange={(event) => {
-                      setEmail(event.target.value);
-                    }}
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={error ? 'reset-error' : undefined}
-                  />
-                </div>
-                {error && (
-                  <Alert id="reset-error" role="alert" variant="destructive">
-                    {error}
-                  </Alert>
-                )}
-                <Button disabled={busy} size="lg" className="w-full">
-                  Enviar enlace
-                </Button>
-              </form>
-            )}
-          </CardContent>
-        </Card>
+    <AuthLayout
+      title="Recuperar contraseña"
+      description="Te enviaremos un enlace para crear una nueva contraseña."
+      footer={
         <Button variant="link" asChild className="w-full">
           <Link to="/ingresar">Volver a ingresar</Link>
         </Button>
-      </div>
-    </main>
+      }
+    >
+      {sent ? (
+        <Alert role="status" className="space-y-2 border-info/30 bg-info-soft text-info">
+          <p>{RESET_MESSAGE}</p>
+          <p className="text-sm text-muted-foreground">Revisá también la carpeta de spam.</p>
+        </Alert>
+      ) : (
+        <form
+          onSubmit={(event) => {
+            void submit(event);
+          }}
+          noValidate
+          className="space-y-4"
+        >
+          <div className="space-y-2">
+            <Label htmlFor="reset-email">Correo electrónico</Label>
+            <Input
+              id="reset-email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+              }}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'reset-error' : undefined}
+            />
+          </div>
+          {error && (
+            <Alert id="reset-error" role="alert" variant="destructive">
+              {error}
+            </Alert>
+          )}
+          <Button disabled={busy} size="lg" className="w-full">
+            Enviar enlace
+          </Button>
+        </form>
+      )}
+    </AuthLayout>
   );
 }

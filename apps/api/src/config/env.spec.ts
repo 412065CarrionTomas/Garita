@@ -11,6 +11,22 @@ const REQUIRED = {
 };
 
 describe('validateEnv', () => {
+  it('validates the SMS destination flag and one E.164 platform number', () => {
+    expect(
+      validateEnv({
+        ...REQUIRED,
+        PANIC_SMS_DESTINATION_TYPE: 'PLATFORM_GATEWAY',
+        PANIC_SMS_PLATFORM_NUMBER: '+541100000000',
+      }).PANIC_SMS_PLATFORM_NUMBER,
+    ).toBe('+541100000000');
+    expect(
+      validateEnv({ ...REQUIRED, PANIC_SMS_DESTINATION_TYPE: 'PLATFORM_GATEWAY' })
+        .PANIC_SMS_PLATFORM_NUMBER,
+    ).toBeUndefined();
+    for (const number of ['', '1234', '+541100000000,+5493511234567'])
+      expect(() => validateEnv({ ...REQUIRED, PANIC_SMS_PLATFORM_NUMBER: number })).toThrow();
+    expect(() => validateEnv({ ...REQUIRED, PANIC_SMS_DESTINATION_TYPE: 'OTHER' })).toThrow();
+  });
   it('aplica valores por defecto en desarrollo', () => {
     const env = validateEnv(REQUIRED);
 
@@ -22,6 +38,7 @@ describe('validateEnv', () => {
       REDIS_URL: REQUIRED.REDIS_URL,
       SOCKET_REDIS_ADAPTER_ENABLED: false,
       WEB_APP_URL: 'http://localhost:5173',
+      PANIC_SMS_DESTINATION_TYPE: 'GUARD_PHONE',
       FIREBASE_PROJECT_ID: REQUIRED.FIREBASE_PROJECT_ID,
       FIREBASE_CLIENT_EMAIL: REQUIRED.FIREBASE_CLIENT_EMAIL,
       FIREBASE_PRIVATE_KEY: REQUIRED.FIREBASE_PRIVATE_KEY,

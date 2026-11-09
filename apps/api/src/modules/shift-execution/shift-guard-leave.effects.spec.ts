@@ -5,12 +5,14 @@ describe('ShiftGuardLeaveEffects', () => {
   const findGuard = jest.fn();
   const notifyUsers = jest.fn();
   const sendShiftClosed = jest.fn();
+  const emitToSite = jest.fn();
   const effects = new ShiftGuardLeaveEffects(
     {
       tenantPrisma: { shift: { findUnique: findShift }, user: { findUnique: findGuard } },
     } as never,
     { notifyUsers } as never,
-    { sendShiftClosed },
+    { sendShiftClosed, sendPanicAlert: jest.fn() },
+    { emitToSite },
   );
 
   beforeEach(() => {
@@ -51,5 +53,31 @@ describe('ShiftGuardLeaveEffects', () => {
     await effects.notifyGuardToLeave(undefined, 'shift-1', 'guard-1');
     expect(notifyUsers).not.toHaveBeenCalled();
     expect(sendShiftClosed).not.toHaveBeenCalled();
+  });
+
+  it('offers coverage in the live detail after an early close', async () => {
+    findShift.mockResolvedValue({
+      companyId: 'company-1',
+      siteId: 'site-1',
+      status: 'closed',
+      closedEarly: true,
+      closeReason: 'Me descompuse',
+    });
+    await effects.offerCoverage('shift-1');
+    expect(emitToSite).toHaveBeenCalledWith('company-1', 'site-1', 'turno.actualizado', {
+      shiftId: 'shift-1',
+      siteId: 'site-1',
+    });
+    expect(notifyUsers).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { status: 'closed', closedEarly: true, closeReason: 'baja del predio' },
+    { status: 'closed', closedEarly: false, closeReason: null },
+    { status: 'in_progress', closedEarly: false, closeReason: null },
+  ])('does not offer coverage for %j', async (shift) => {
+    findShift.mockResolvedValue(shift);
+    await effects.offerCoverage('shift-1');
+    expect(emitToSite).not.toHaveBeenCalled();
   });
 });

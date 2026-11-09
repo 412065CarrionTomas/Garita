@@ -1,7 +1,9 @@
+import { CoverageNoticesService } from '../coverage-notices/coverage-notices.service';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { buildShiftNotification } from '@garita/shared';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
 import { SMS_PORT, type SmsPort } from '../../common/ports/sms.port';
+import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoopShiftExecutionEffects } from './shift-execution-effects.port';
 
@@ -13,8 +15,34 @@ export class ShiftGuardLeaveEffects extends NoopShiftExecutionEffects {
     private readonly prisma: PrismaService,
     @Inject(NOTIFICATIONS_PORT) private readonly notifications: NotificationsPort,
     @Inject(SMS_PORT) private readonly sms: SmsPort,
+    @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
   ) {
     super();
+  }
+
+  @Inject(CoverageNoticesService) private readonly coverage!: CoverageNoticesService;
+
+  override async notifyEarlyClose(
+    shiftId?: string,
+    guardId?: string,
+    reason: string | null = null,
+  ): Promise<void> {
+    if (!shiftId || !guardId) return;
+    await this.coverage.notifyEarlyClose(shiftId, guardId, reason);
+  }
+
+  override async offerCoverage(shiftId?: string): Promise<void> {
+    if (!shiftId) return;
+    const shift = await this.prisma.tenantPrisma.shift.findUnique({
+      where: { id: shiftId },
+      select: { companyId: true, siteId: true, status: true, closedEarly: true, closeReason: true },
+    });
+    if (shift?.status !== 'closed' || !shift.closedEarly || shift.closeReason === 'baja del predio')
+      return;
+    this.realtime.emitToSite(shift.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId,
+      siteId: shift.siteId,
+    });
   }
 
   override async notifyGuardToLeave(

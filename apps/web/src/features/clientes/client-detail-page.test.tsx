@@ -57,7 +57,6 @@ describe('ClientDetailPage', () => {
     );
     expect(screen.getByRole('cell', { name: 'Predio activo' })).toBeInTheDocument();
     expect(screen.queryByText('Predio inactivo')).not.toBeInTheDocument();
-    expect(screen.getByText(/El mapa no está configurado/)).toHaveAttribute('role', 'status');
     expect(screen.getByRole('heading', { name: 'Usuarios del portal' })).toBeInTheDocument();
   });
 

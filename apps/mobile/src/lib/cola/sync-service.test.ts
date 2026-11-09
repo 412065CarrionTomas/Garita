@@ -11,15 +11,21 @@ import {
   type FieldDatabase,
   type LocalCheckpointRecord,
   type MigrationDatabase,
+  type LocalPanicAlert,
 } from '@/lib/db/database';
 import {
   processSyncQueue,
   resetSyncServiceForTesting,
   sendConnectionNoticeIfNeeded,
   setSyncServiceForTesting,
+  initSyncService,
 } from './sync-service';
+import { dispatchPanicAlert } from '@/features/panico/transport';
+import * as Network from 'expo-network';
+import { AppState } from 'react-native';
 
 jest.mock('@/lib/fotos/photo-queue', () => ({ processIncidentPhotos: jest.fn() }));
+jest.mock('@/features/panico/transport', () => ({ dispatchPanicAlert: jest.fn() }));
 
 class MockMemoryDatabase implements FieldDatabase, MigrationDatabase {
   version = 4;
@@ -29,6 +35,18 @@ class MockMemoryDatabase implements FieldDatabase, MigrationDatabase {
   rejected = new Map<string, string>();
   records: LocalCheckpointRecord[] = [];
   meta = new Map<string, string>();
+  panics: LocalPanicAlert[] = [];
+  async readPanicAlerts() {
+    return this.panics;
+  }
+  async insertPanicAlert(alert: LocalPanicAlert) {
+    this.panics.push(alert);
+  }
+  async updatePanicAlert(alert: LocalPanicAlert) {
+    this.panics = this.panics.map((saved) =>
+      saved.request.alertId === alert.request.alertId ? alert : saved,
+    );
+  }
 
   async getVersion() {
     return this.version;
@@ -223,6 +241,159 @@ describe('SyncService (HU-13)', () => {
       createdAt: occurredAtDevice,
     });
   }
+
+  async function addPanic() {
+    return repo.savePanicAlert({
+      request: {
+        alertId: '00000000-0000-4000-8000-000000000999',
+        shiftId: 'shift-100',
+        occurredAtDevice: '2026-10-14T10:00:00.000Z',
+        location: {
+          status: 'disabled',
+          latitude: null,
+          longitude: null,
+          accuracyMeters: null,
+          simulation: 'unavailable',
+          takenAt: null,
+        },
+      },
+      state: null,
+      smsState: 'pending',
+      attempts: 0,
+    });
+  }
+
+  it('sends panic before 300 pending events through its own request', async () => {
+    const panic = await addPanic();
+    for (let index = 0; index < 300; index++)
+      await addCheckpointEvent(
+        `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        '2026-10-14T08:10:00.000Z',
+      );
+    jest.mocked(dispatchPanicAlert).mockImplementation(async (alert) => {
+      expect(sendBatchMock).not.toHaveBeenCalled();
+      await repo.updatePanicAlert({
+        ...alert,
+        state: {
+          alertId: alert.request.alertId,
+          status: 'active',
+          receivedAt: '2026-10-14T10:00:00Z',
+          confirmedAt: null,
+        },
+      });
+    });
+    const start = Date.now();
+    await processSyncQueue();
+    expect(dispatchPanicAlert).toHaveBeenCalledWith(panic);
+    expect(Date.now() - start).toBeLessThan(3000);
+    expect(sendBatchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the close event and credential while panic is pending', async () => {
+    await addPanic();
+    await repo.addPendingEvent({
+      id: '00000000-0000-4000-8000-000000000998',
+      type: 'shift_close',
+      payload: { shiftId: 'shift-100' },
+      occurredAtDevice: '2026-10-14T10:01:00Z',
+      createdAt: '2026-10-14T10:01:00Z',
+    });
+    jest.mocked(dispatchPanicAlert).mockResolvedValue(undefined);
+    await processSyncQueue();
+    expect(sendBatchMock).not.toHaveBeenCalled();
+    expect(deleteCredentialMock).not.toHaveBeenCalled();
+    expect(await repo.getShiftData()).not.toBeNull();
+  });
+
+  it('H1: sends a panic occurring before the offline close, then sends the close', async () => {
+    await addPanic();
+    const closeId = '00000000-0000-4000-8000-000000000998';
+    await repo.addPendingEvent({
+      id: closeId,
+      type: 'shift_close',
+      payload: { shiftId: 'shift-100' },
+      occurredAtDevice: '2026-10-14T10:01:00Z',
+      createdAt: '2026-10-14T10:01:00Z',
+    });
+    const order: string[] = [];
+    jest.mocked(dispatchPanicAlert).mockImplementation(async (alert) => {
+      order.push('panic');
+      await repo.patchPanicAlert(alert.request.alertId, {
+        state: {
+          alertId: alert.request.alertId,
+          status: 'active',
+          receivedAt: '2026-10-14T10:00:01Z',
+          confirmedAt: null,
+        },
+      });
+    });
+    sendBatchMock.mockImplementation(async () => {
+      order.push('close');
+      return {
+        results: [{ eventId: closeId, status: 'duplicate' }],
+        receivedAt: '2026-10-14T10:02:00Z',
+      };
+    });
+    await processSyncQueue();
+    expect(order).toEqual(['panic', 'close']);
+    expect(deleteCredentialMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('H1: preserves a legacy panic after local close without sending or blocking the close', async () => {
+    const panic = await addPanic();
+    const closeId = '00000000-0000-4000-8000-000000000998';
+    await repo.addPendingEvent({
+      id: closeId,
+      type: 'shift_close',
+      payload: { shiftId: 'shift-100' },
+      occurredAtDevice: '2026-10-14T09:59:00Z',
+      createdAt: '2026-10-14T09:59:00Z',
+    });
+    jest.mocked(dispatchPanicAlert).mockClear();
+    sendBatchMock.mockResolvedValue({
+      results: [{ eventId: closeId, status: 'duplicate' }],
+      receivedAt: '2026-10-14T10:02:00Z',
+    });
+    await processSyncQueue();
+    expect(dispatchPanicAlert).not.toHaveBeenCalled();
+    expect(sendBatchMock).toHaveBeenCalledTimes(1);
+    expect((await repo.listPanicAlerts())[0]).toMatchObject({
+      state: null,
+      blockedReason: 'shift_closed',
+    });
+    expect(await repo.getSyncMeta(`panic_after_close:${panic.request.alertId}`)).toBe(
+      'Turno cerrado localmente',
+    );
+    expect(deleteCredentialMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes pending panic on network recovery and foreground', async () => {
+    await addPanic();
+    jest.mocked(dispatchPanicAlert).mockResolvedValue(undefined);
+    const network = jest
+      .spyOn(Network, 'addNetworkStateListener')
+      .mockReturnValue({ remove: jest.fn() });
+    const foreground = jest
+      .spyOn(AppState, 'addEventListener')
+      .mockReturnValue({ remove: jest.fn() });
+    const stop = initSyncService();
+    const onNetwork = network.mock.calls[0]![0];
+    const onState = foreground.mock.calls[0]![1];
+    await onNetwork({
+      isConnected: true,
+      isInternetReachable: true,
+      type: Network.NetworkStateType.WIFI,
+    });
+    for (let index = 0; index < 30; index++) await Promise.resolve();
+    expect(dispatchPanicAlert).toHaveBeenCalled();
+    jest.mocked(dispatchPanicAlert).mockClear();
+    onState('active');
+    for (let index = 0; index < 30; index++) await Promise.resolve();
+    expect(dispatchPanicAlert).toHaveBeenCalled();
+    stop();
+    network.mockRestore();
+    foreground.mockRestore();
+  });
 
   it('sends pending events in batches of up to 100 in order of occurredAtDevice (CA1, CA2)', async () => {
     // Add 120 checkpoint records with different times

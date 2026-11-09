@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppState, StyleSheet, View } from 'react-native';
-import { space } from '@garita/tokens';
-import { Badge, Banner, Button, Card, Input, Screen, Text } from '@/ui';
+import { radius, space } from '@garita/tokens';
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  Input,
+  PointWindowList,
+  Screen,
+  Text,
+  WindowBar,
+  useTheme,
+} from '@/ui';
+import type { PointItem, PointStatus, WindowStatus } from '@/ui';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { currentRoundProgress, lateStartMinutes, type ShiftOfflineData } from '@garita/shared';
 import { z } from 'zod';
@@ -11,6 +23,7 @@ import { createDefaultFieldRepository, type LocalCheckpointRecord } from '@/lib/
 import { beginShift, finishShift } from './actions';
 import { NfcReader } from '@/features/escaneo/nfc-reader';
 import { readClock } from '@/lib/clock/clock';
+import { LockedPanicPermissionNotice } from '@/features/panico/bloqueado/permission-notice';
 
 const shiftsSchema = z.array(
   z.looseObject({
@@ -18,12 +31,25 @@ const shiftsSchema = z.array(
     startsAt: z.string(),
     endsAt: z.string(),
     site: z.looseObject({ name: z.string() }),
+    assignments: z.array(z.looseObject({ startsAt: z.string() })),
   }),
 );
 type ScheduledShift = z.infer<typeof shiftsSchema>[number];
 
+const WINDOW_STAMPS = {
+  ontime: { tone: 'neutral', label: 'A tiempo', variant: 'solid' },
+  late: { tone: 'warning', label: 'Tarde', variant: 'solid' },
+  missed: { tone: 'danger', label: 'No realizada', variant: 'solid' },
+  current: { tone: 'neutral', label: 'En curso', variant: 'now' },
+  pending: { tone: 'neutral', label: 'Pendiente', variant: 'dashed' },
+} as const satisfies Record<
+  WindowStatus,
+  { tone: 'neutral' | 'warning' | 'danger'; label: string; variant: 'solid' | 'dashed' | 'now' }
+>;
+
 export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const router = useRouter();
+  const { colors } = useTheme();
   const [scheduled, setScheduled] = useState<ScheduledShift | null>(null);
   const [data, setData] = useState<ShiftOfflineData | null>(null);
   const [checkpointRecords, setCheckpointRecords] = useState<LocalCheckpointRecord[]>([]);
@@ -78,7 +104,10 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
     if (await refreshLocal()) return;
     try {
       const shifts = await apiGet('/mis-turnos', shiftsSchema);
-      setScheduled(shifts.find((shift) => shift.id === shiftId) ?? null);
+      const found = shifts.find((shift) => shift.id === shiftId);
+      setScheduled(
+        found ? { ...found, startsAt: found.assignments[0]?.startsAt ?? found.startsAt } : null,
+      );
     } catch {
       setMessage('No pudimos cargar este turno. Revisá tu conexión.');
     }
@@ -158,6 +187,9 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const startAllowed = scheduled ? now.getTime() <= Date.parse(scheduled.endsAt) : false;
   const early = shift ? now.getTime() < Date.parse(shift.endsAt) : false;
   const recordedMap = new Map<string, Set<string>>();
+  const lateWindows = new Set<string>();
+  // Registro por punto y ventana, para mostrar la hora real y si fue tarde.
+  const recordOf = new Map<string, { late: boolean; at: string }>();
   for (const record of checkpointRecords) {
     if (record.serverResult === 'rejected') continue;
     for (const item of record.countedFor) {
@@ -168,6 +200,11 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
         recordedMap.set(key, set);
       }
       set.add(record.checkpointId);
+      if (item.late) lateWindows.add(key);
+      recordOf.set(`${key}:${record.checkpointId}`, {
+        late: item.late,
+        at: record.occurredAtUtc,
+      });
     }
   }
   const progress = data ? currentRoundProgress(data, now.toISOString(), recordedMap) : [];
@@ -175,6 +212,41 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const checkpointNames = new Map(
     data?.checkpoints.map((checkpoint) => [checkpoint.id, checkpoint.name]) ?? [],
   );
+  const timezone = data?.shift.timezone;
+  const windowStatusOf = (
+    window: ShiftOfflineData['windows'][number],
+    required: number,
+  ): WindowStatus => {
+    const at = now.getTime();
+    if (at < Date.parse(window.startUtc)) return 'pending';
+    if (at < Date.parse(window.endUtc)) return 'current';
+    const key = `${window.roundId}:${window.index}`;
+    if ((recordedMap.get(key)?.size ?? 0) < required) return 'missed';
+    return lateWindows.has(key) ? 'late' : 'ontime';
+  };
+  const roundWindows = (roundId: string, required: number) =>
+    (data?.windows ?? [])
+      .filter((window) => window.roundId === roundId)
+      .map((window) => ({ window, status: windowStatusOf(window, required) }));
+  const nextPoint = progress
+    .map((round) => round.pendingCheckpointIds[0])
+    .find((id): id is string => id !== undefined);
+  const roundComplete =
+    progress.length > 0 &&
+    progress.every((round) => round.currentWindow && round.pendingCheckpointIds.length === 0);
+  const closureRows = (data?.windows ?? [])
+    .map((window) => {
+      const definition = data?.rounds.find((item) => item.roundId === window.roundId);
+      return {
+        window,
+        round: definition,
+        status: windowStatusOf(window, definition?.checkpointIds.length ?? 0),
+      };
+    })
+    .sort((a, b) => Date.parse(a.window.startUtc) - Date.parse(b.window.startUtc));
+  const completedWindows = closureRows.filter(
+    (row) => row.status === 'ontime' || row.status === 'late',
+  ).length;
   return (
     <Screen scroll>
       <Text variant="heading" accessibilityRole="header">
@@ -189,7 +261,8 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           {data && (
             <>
               <Badge
-                tone={pendingClose ? 'warning' : 'signal'}
+                tone={pendingClose ? 'warning' : 'neutral'}
+                variant={pendingClose ? 'solid' : 'now'}
                 label={pendingClose ? 'Cerrado, pendiente de envío' : 'En curso'}
               />
               {isOffline && (
@@ -224,7 +297,6 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
       {!data && scheduled && (
         <Button
           label="Iniciar turno"
-          variant="signal"
           size="lg"
           disabled={busy || !startAllowed}
           onPress={() => void start()}
@@ -244,11 +316,91 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           )}
           {!pendingClose && (
             <>
-              <NfcReader shiftData={data} onQr={() => router.push('/escaneo')} />
+              <LockedPanicPermissionNotice shiftId={shiftId} />
+              <NfcReader shiftData={data} />
+              {progress.map((round) => {
+                const definition = data.rounds.find((item) => item.roundId === round.roundId);
+                const ids = definition?.checkpointIds ?? [];
+                const pending = new Set(round.pendingCheckpointIds);
+                const windowKey = round.currentWindow
+                  ? `${round.roundId}:${round.currentWindow.index}`
+                  : null;
+                const windowRange = round.currentWindow
+                  ? `${formatTime(round.currentWindow.startUtc, timezone)}–${formatTime(round.currentWindow.endUtc, timezone)}`
+                  : null;
+                let currentIndex = -1;
+                const points: PointItem[] = ids.map((id, index) => {
+                  const record = windowKey ? recordOf.get(`${windowKey}:${id}`) : undefined;
+                  let status: PointStatus = 'pending';
+                  if (round.currentWindow) {
+                    if (!pending.has(id)) status = record?.late ? 'late' : 'done';
+                    else if (currentIndex === -1) {
+                      status = 'current';
+                      currentIndex = index;
+                    }
+                  }
+                  return {
+                    id,
+                    number: index + 1,
+                    name: checkpointNames.get(id) ?? id,
+                    status,
+                    time: record ? formatTime(record.at, timezone) : undefined,
+                    window: status === 'current' ? (windowRange ?? undefined) : undefined,
+                  };
+                });
+                const done = round.currentWindow ? ids.length - pending.size : 0;
+                return (
+                  <View key={round.roundId} style={styles.round}>
+                    <View style={styles.roundHead}>
+                      <View style={[styles.initial, { borderColor: colors.foreground }]}>
+                        <Text variant="title" accessibilityRole="none">
+                          {(definition?.name ?? 'R').charAt(0)}
+                        </Text>
+                      </View>
+                      <View style={styles.roundTitle}>
+                        <Text variant="heading" accessibilityRole="header">
+                          {definition?.name ?? 'Ronda'}
+                        </Text>
+                        <Text color="mutedForeground">
+                          {data.shift.siteName} · {formatTime(data.shift.startsAt, timezone)}–
+                          {formatTime(data.shift.endsAt, timezone)}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text>
+                      {round.currentWindow
+                        ? `${done} de ${ids.length} puntos · Ventana ${windowRange}`
+                        : 'Sin ventana activa'}
+                    </Text>
+                    <WindowBar
+                      windows={roundWindows(round.roundId, ids.length).map((item) => item.status)}
+                    />
+                    {/* TODO(foja): la lista anidada en el scroll de la pantalla puede pelear con el gesto en Android. */}
+                    <PointWindowList
+                      points={points}
+                      currentIndex={currentIndex === -1 ? Math.max(0, done - 1) : currentIndex}
+                    />
+                  </View>
+                );
+              })}
+              {roundComplete ? (
+                <Banner tone="success" role="text" accessibilityLiveRegion="polite">
+                  Ronda completa. Se enviará a supervisión apenas recuperes señal.
+                </Banner>
+              ) : (
+                <Button
+                  label={
+                    nextPoint
+                      ? `Escanear ${checkpointNames.get(nextPoint) ?? nextPoint}`
+                      : 'Escanear código QR'
+                  }
+                  size="lg"
+                  onPress={() => router.push('/escaneo')}
+                />
+              )}
               <Button
                 label="Reportar incidente"
-                variant="signal"
-                size="lg"
+                variant="secondary"
                 onPress={() =>
                   router.push({ pathname: '/turno/[id]/incidente', params: { id: shiftId } })
                 }
@@ -262,36 +414,26 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
                   ))}
                 </Banner>
               )}
-              <Text variant="heading">Ventanas y puntos pendientes</Text>
-              {progress.map((round) => {
-                const definition = data.rounds.find((item) => item.roundId === round.roundId);
+              <Text variant="heading" accessibilityRole="header">
+                Cierre de turno
+              </Text>
+              <Text color="mutedForeground">
+                {completedWindows} de {closureRows.length} ventanas completas
+              </Text>
+              {closureRows.map(({ window, round, status }) => {
+                const stamp = WINDOW_STAMPS[status];
+                const name = `${data.rounds.length > 1 && round ? `${round.name} · ` : ''}Ventana ${window.index + 1}`;
                 return (
-                  <Card key={round.roundId}>
-                    <Text variant="subheading">{definition?.name ?? 'Ronda'}</Text>
-                    <Text>
-                      {round.currentWindow
-                        ? `Ventana ${round.currentWindow.label}`
-                        : 'Sin ventana activa'}
-                    </Text>
-                    {round.currentWindow && (
-                      <Text color="mutedForeground">
-                        {formatTime(round.currentWindow.startUtc, data.shift.timezone)}–
-                        {formatTime(round.currentWindow.endUtc, data.shift.timezone)}
-                      </Text>
-                    )}
-                    {round.pendingCheckpointIds.length ? (
-                      round.pendingCheckpointIds.map((id) => (
-                        <View key={id} style={styles.checkpoint}>
-                          <Text style={styles.checkpointName}>
-                            • {checkpointNames.get(id) ?? id}
-                          </Text>
-                          <Badge tone="warning" label="Pendiente" />
-                        </View>
-                      ))
-                    ) : (
-                      <Text color="mutedForeground">Sin puntos pendientes en esta ventana.</Text>
-                    )}
-                  </Card>
+                  <View
+                    key={`${window.roundId}:${window.index}`}
+                    accessible
+                    accessibilityLabel={`${formatTime(window.startUtc, timezone)}, ${name}, ${stamp.label}`}
+                    style={[styles.closureRow, { borderColor: colors.border }]}
+                  >
+                    <Text variant="numeral">{formatTime(window.startUtc, timezone)}</Text>
+                    <Text style={styles.closureName}>{name}</Text>
+                    <Badge {...stamp} />
+                  </View>
                 );
               })}
               {early && (
@@ -362,6 +504,23 @@ function formatServerReason(reason?: string | null): string {
   }
 }
 const styles = StyleSheet.create({
-  checkpoint: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
-  checkpointName: { flexShrink: 1 },
+  round: { gap: space[3] },
+  roundHead: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
+  roundTitle: { flex: 1 },
+  initial: {
+    width: space[12],
+    height: space[12],
+    borderWidth: 2,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    borderBottomWidth: 1,
+    paddingVertical: space[2],
+  },
+  closureName: { flex: 1 },
 });

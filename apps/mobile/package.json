@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "App de Garita para vigiladores (Android e iOS)",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "scripts": {
     "dev": "expo start",
     "start": "expo start",
@@ -15,7 +15,8 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
-    "@expo-google-fonts/geist": "^0.4.2",
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
+    "@expo-google-fonts/public-sans": "^0.4.2",
     "@garita/shared": "workspace:*",
     "@garita/tokens": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -36,10 +37,12 @@
     "expo-notifications": "~57.0.24",
     "expo-router": "~57.0.25",
     "expo-secure-store": "~57.0.4",
+    "expo-sms": "~57.0.2",
     "expo-splash-screen": "~57.0.9",
     "expo-sqlite": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
+    "expo-task-manager": "~57.0.21",
     "firebase": "12.10.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -48,6 +51,7 @@
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.4",
     "react-native-worklets": "0.10.1",
     "zod": "catalog:"
@@ -55,7 +59,7 @@
   "devDependencies": {
     "@garita/typescript-config": "workspace:*",
     "@react-native/metro-config": "0.86.3",
-    "@testing-library/react-native": "^14.0.1",
+    "@testing-library/react-native": "^14.1.0",
     "@types/jest": "29.5.14",
     "@types/react": "~19.2.2",
     "eslint": "^9.39.5",
@@ -63,7 +67,7 @@
     "eslint-config-prettier": "catalog:",
     "jest": "~29.7.0",
     "jest-expo": "~57.0.5",
-    "test-renderer": "~1.2.0",
+    "test-renderer": "~1.3.1",
     "typescript": "catalog:"
   }
 }

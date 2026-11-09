@@ -11,6 +11,9 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { ShiftCredentialService } from '../sync/shift-credential.service';
+import { randomInt } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env';
 import { Prisma } from '../../generated/prisma/client';
 import {
   computeRoundWindows,
@@ -38,6 +41,7 @@ import {
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
+import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { RoundWindowStateService } from '../supervision/round-window-state.service';
 
 export const SHIFT_AUTO_CLOSE_QUEUE = 'shift-auto-close';
@@ -71,6 +75,8 @@ export class ShiftExecutionService {
     private readonly shiftCredentialService?: ShiftCredentialService,
     @Optional() private readonly windowStates?: RoundWindowStateService,
     @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
+    @Optional() private readonly config?: ConfigService<Env, true>,
+    @Optional() @Inject(NOTICES_PORT) private readonly notices?: NoticesPort,
   ) {}
 
   async start(id: string, input: StartShiftRequest, user: AuthenticatedUser) {
@@ -82,6 +88,9 @@ export class ShiftExecutionService {
       if (replay.shiftId !== id)
         throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
       await this.assertCurrentGuard(id, user);
+      const current = await this.currentAssignment(id);
+      if (current?.id !== replay.assignmentId)
+        throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.reassigned });
       return this.startResponse(replay.shift.id);
     }
     const shift = await this.ownedShift(id);
@@ -128,6 +137,27 @@ export class ShiftExecutionService {
     const late = lateStartMinutes(assignment.startsAt.toISOString(), now.toISOString());
     try {
       await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        const claimed = await tx.shiftAssignment.updateMany({
+          where: { id: assignment.id, isCurrent: true, result: 'scheduled' },
+          data: { result: 'started' },
+        });
+        if (claimed.count !== 1)
+          throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.reassigned });
+        const changed = await tx.shift.updateMany({
+          where: { id, status: 'scheduled' },
+          data: {
+            status: 'in_progress',
+            startedAt: now,
+            panicSmsCode: shift.panicSmsCode ?? randomInt(0, 1_000_000).toString().padStart(6, '0'),
+            lateStartMinutes: late,
+            connectivityType: connectivity.type,
+            minutesToSignal: connectivity.minutesToSignal,
+            marginMinutes: connectivity.marginMinutes,
+            syncDeadlineAt: computeSyncDeadline(shift.endsAt, connectivity),
+          },
+        });
+        if (changed.count !== 1)
+          throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
         const rounds = await tx.shiftRound.findMany({
           where: { shiftId: id },
           include: { round: { select: { currentVersionId: true } } },
@@ -140,18 +170,6 @@ export class ShiftExecutionService {
             data: { roundVersionId: round.round.currentVersionId },
           });
         }
-        await tx.shift.update({
-          where: { id },
-          data: {
-            status: 'in_progress',
-            startedAt: now,
-            lateStartMinutes: late,
-            connectivityType: connectivity.type,
-            minutesToSignal: connectivity.minutesToSignal,
-            marginMinutes: connectivity.marginMinutes,
-            syncDeadlineAt: computeSyncDeadline(shift.endsAt, connectivity),
-          },
-        });
         await tx.shiftEvent.create({
           data: {
             companyId: shift.companyId,
@@ -177,6 +195,16 @@ export class ShiftExecutionService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
         return this.startResponse(id);
       throw error;
+    }
+    try {
+      await this.notices?.resolve({
+        companyId: shift.companyId,
+        kind: 'shift_not_started',
+        subjectId: assignment.id,
+        resolution: 'late_start',
+      });
+    } catch (error) {
+      this.logger.error({ event: 'shift.notice_resolution_failed', shiftId: id, error });
     }
     const data = await this.buildData(id);
     await this.windowStates?.createForShift(data);
@@ -232,6 +260,52 @@ export class ShiftExecutionService {
     if (shift.status !== 'in_progress')
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
     return this.buildData(id);
+  }
+
+  async closeWithoutData(id: string, reason: string, user: AuthenticatedUser) {
+    const shift = await this.ownedShift(id);
+    if (
+      user.role === 'supervisor' &&
+      !(await this.prisma.tenantPrisma.siteSupervisor.findFirst({
+        where: { siteId: shift.siteId, userId: user.userId },
+      }))
+    )
+      throw new NotFoundException('Turno no encontrado');
+    const now = this.clock.now();
+    const notice = await this.prisma.tenantPrisma.notice.findFirst({
+      where: { shiftId: id, kind: 'shift_unsynced', status: 'open' },
+      select: { id: true },
+    });
+    if (!notice) throw new ConflictException('El turno no está sin sincronizar');
+    await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const changed = await tx.notice.updateMany({
+        where: { id: notice.id, status: 'open' },
+        data: { status: 'resolved', resolution: 'closed_without_data', resolvedAt: now },
+      });
+      if (!changed.count) throw new ConflictException('El turno ya fue cerrado sin datos');
+      await tx.shift.update({
+        where: { id },
+        data: {
+          closedWithoutDataAt: now,
+          closedWithoutDataById: user.userId,
+          closedWithoutDataReason: reason,
+        },
+      });
+      await tx.roundWindowState.updateMany({
+        where: { shiftId: id, status: 'pending_sync' },
+        data: { status: 'not_done' },
+      });
+    });
+    this.realtime?.emitToSite(user.companyId, shift.siteId, 'aviso.actualizado', {
+      noticeId: notice.id,
+      siteId: shift.siteId,
+    });
+    this.realtime?.emitToSite(user.companyId, shift.siteId, 'turno.actualizado', {
+      shiftId: id,
+      siteId: shift.siteId,
+    });
+    this.logger.log({ event: 'shift.closed_without_data', shiftId: id, userId: user.userId });
+    return { shiftId: id, closedWithoutDataAt: now, closedWithoutDataById: user.userId, reason };
   }
 
   async state(id: string, user: AuthenticatedUser) {
@@ -341,8 +415,9 @@ export class ShiftExecutionService {
     if (early && !input.reason)
       throw new BadRequestException({ code: SHIFT_EXECUTION_ERROR_CODES.earlyCloseReasonRequired });
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await tx.shift.update({
-        where: { id },
+      // Conditional so a concurrent admin or automatic close is not overwritten.
+      const changed = await tx.shift.updateMany({
+        where: { id, status: 'in_progress' },
         data: {
           status: 'closed',
           closedAt: occurredAt,
@@ -351,6 +426,12 @@ export class ShiftExecutionService {
           closedBy: 'guard',
           closedByUserId: user.userId,
         },
+      });
+      if (changed.count !== 1)
+        throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notInProgress });
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: { result: early ? 'closed_early' : 'started' },
       });
       await tx.shiftEvent.create({
         data: {
@@ -461,8 +542,8 @@ export class ShiftExecutionService {
     for (const shift of shifts) {
       const assignment = shift.assignments[0];
       if (!assignment) continue;
-      await tx.shift.update({
-        where: { id: shift.id },
+      const changed = await tx.shift.updateMany({
+        where: { id: shift.id, status: 'in_progress' },
         data: {
           status: 'closed',
           closedAt: now,
@@ -470,6 +551,16 @@ export class ShiftExecutionService {
           closeReason: 'baja del predio',
           closedBy: 'admin',
           closedByUserId: adminId,
+        },
+      });
+      // The guard or the auto-close may have closed it after the read above.
+      if (changed.count !== 1) continue;
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          result: isEarlyClose(shift.endsAt.toISOString(), now.toISOString())
+            ? 'closed_early'
+            : 'started',
         },
       });
       await tx.shiftEvent.create({
@@ -511,9 +602,9 @@ export class ShiftExecutionService {
     const assignment = shift.assignments[0];
     if (!assignment) return null;
     const now = this.clock.now();
-    await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await tx.shift.update({
-        where: { id: shift.id },
+    const closed = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const changed = await tx.shift.updateMany({
+        where: { id: shift.id, status: 'in_progress' },
         data: {
           status: 'closed',
           closedAt: now,
@@ -521,6 +612,16 @@ export class ShiftExecutionService {
           closeReason: reason,
           closedBy: 'admin',
           closedByUserId: adminId,
+        },
+      });
+      // The guard or the auto-close may have closed it after the read above.
+      if (changed.count !== 1) return false;
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          result: isEarlyClose(shift.endsAt.toISOString(), now.toISOString())
+            ? 'closed_early'
+            : 'started',
         },
       });
       await tx.shiftEvent.create({
@@ -535,7 +636,9 @@ export class ShiftExecutionService {
           actorUserId: adminId,
         },
       });
+      return true;
     });
+    if (!closed) return null;
     if (isEarlyClose(shift.endsAt.toISOString(), now.toISOString())) {
       await this.effects.notifyEarlyClose(shift.id, id, reason);
       await this.effects.offerCoverage(shift.id, id);
@@ -590,7 +693,6 @@ export class ShiftExecutionService {
     for (const shift of noShows) {
       noShowCount += await this.setNoShow(shift, now);
     }
-    await this.windowStates?.recalculateExpired();
     return shifts.length + noShowCount;
   }
 
@@ -662,8 +764,8 @@ export class ShiftExecutionService {
     if (early && !input.reason)
       throw new BadRequestException({ code: SHIFT_EXECUTION_ERROR_CODES.earlyCloseReasonRequired });
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await tx.shift.update({
-        where: { id },
+      const changed = await tx.shift.updateMany({
+        where: { id, status: 'auto_closed' },
         data: {
           status: 'closed',
           closedAt: occurredAt,
@@ -672,6 +774,12 @@ export class ShiftExecutionService {
           closedBy: 'guard',
           closedByUserId: user.userId,
         },
+      });
+      if (changed.count !== 1)
+        throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notInProgress });
+      await tx.shiftAssignment.update({
+        where: { id: assignment.id },
+        data: { result: early ? 'closed_early' : 'started' },
       });
       await tx.shiftEvent.create({
         data: {
@@ -704,8 +812,9 @@ export class ShiftExecutionService {
 
   private async startResponse(id: string) {
     const shift = await this.prisma.tenantPrisma.shift.findFirstOrThrow({ where: { id } });
+    const current = await this.currentAssignment(id);
     const event = await this.prisma.tenantPrisma.shiftEvent.findFirst({
-      where: { shiftId: id, type: 'start' },
+      where: { shiftId: id, assignmentId: current?.id, type: 'start' },
       orderBy: { receivedAt: 'asc' },
     });
     let credential: { token: string; expiresAt: string } | undefined;
@@ -725,6 +834,7 @@ export class ShiftExecutionService {
       const parsed = startShiftResponseSchema.parse(event.response);
       return {
         ...parsed,
+        ...(!parsed.data.shift.panicSms ? { data: await this.buildData(id) } : {}),
         serverTime: this.clock.now().toISOString(),
         credential: parsed.credential ?? credential,
       };
@@ -777,6 +887,22 @@ export class ShiftExecutionService {
     const assignment = shift.assignments[0];
     if (!assignment)
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
+    // Older running shifts acquire the code once, even when two downloads race.
+    if (!shift.panicSmsCode && shift.status === 'in_progress') {
+      await this.prisma.tenantPrisma.shift.updateMany({
+        where: { id, panicSmsCode: null },
+        data: { panicSmsCode: randomInt(0, 1_000_000).toString().padStart(6, '0') },
+      });
+      shift.panicSmsCode = (
+        await this.prisma.tenantPrisma.shift.findUniqueOrThrow({ where: { id } })
+      ).panicSmsCode;
+    }
+    const backup =
+      this.config?.get('PANIC_SMS_DESTINATION_TYPE', { infer: true }) !== 'PLATFORM_GATEWAY';
+    const phone = backup
+      ? shift.site.company.guardPhone
+      : this.config.get('PANIC_SMS_PLATFORM_NUMBER', { infer: true });
+    const destination = typeof phone === 'string' && /^\+[1-9]\d{1,14}$/.test(phone) ? phone : null;
     const rounds = await Promise.all(
       shift.rounds.map(async ({ roundId, roundVersion, round }) => {
         if (!roundVersion) return null;
@@ -830,11 +956,14 @@ export class ShiftExecutionService {
         id,
         siteId: shift.siteId,
         siteName: shift.site.name,
-        startsAt: shift.startsAt.toISOString(),
+        startsAt: assignment.startsAt.toISOString(),
         endsAt: shift.endsAt.toISOString(),
         timezone: shift.site.company.timezone,
         assignmentId: assignment.id,
         syncDeadlineAt: (await this.syncDeadline.deadlineForShift(id))?.toISOString(),
+        ...(shift.panicSmsCode
+          ? { panicSms: { destination, shiftCode: shift.panicSmsCode, backup } }
+          : {}),
       },
       rounds: rounds.map(({ version: _version, ...round }) => round),
       windows: selected.map(({ roundId, startUtc, endUtc, label }) => ({
