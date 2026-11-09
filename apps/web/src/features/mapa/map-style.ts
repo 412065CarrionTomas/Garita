@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { ExpressionSpecification, LayerSpecification, StyleSpecification } from 'maplibre-gl';
 import { colors } from '@garita/tokens';
+import { env } from '@/config/env';
 
 interface Palette {
   land: string;
@@ -67,6 +70,76 @@ function build(p: Palette): google.maps.MapTypeStyle[] {
 export const lightMapStyle = build(light);
 export const darkMapStyle = build(dark);
 
+/** Estilo del mapa según el tema; se pasa como `styles` (JSON local, sin mapId de la nube). */
+export const mapStyle = (isDark: boolean) => (isDark ? darkMapStyle : lightMapStyle);
+
+const HIDDEN = new Set(['poi', 'transit', 'aerodrome_label']);
+const AVENUES = ['motorway', 'trunk', 'primary'];
+
+/** Recolorea un estilo del esquema OpenMapTiles por source-layer (los ids cambian entre estilos). */
+export function recolor(base: StyleSpecification, isDark: boolean): StyleSpecification {
+  const p = isDark ? dark : light;
+  const layers = base.layers.flatMap((layer): LayerSpecification[] => {
+    const src = 'source-layer' in layer ? layer['source-layer'] : undefined;
+    if (src && HIDDEN.has(src)) return []; // igual que con Google: sin comercios ni transporte
+    if (layer.type === 'background')
+      return [{ ...layer, paint: { ...layer.paint, 'background-color': p.land } }];
+    if (layer.type === 'fill') {
+      const fill =
+        src === 'water'
+          ? p.water
+          : src === 'park' || src === 'landcover'
+            ? p.park
+            : src === 'building'
+              ? p.building
+              : p.land;
+      const outline = src === 'water' ? p.bank : fill;
+      return [
+        { ...layer, paint: { ...layer.paint, 'fill-color': fill, 'fill-outline-color': outline } },
+      ];
+    }
+    if (layer.type === 'line' && src === 'transportation') {
+      const road: ExpressionSpecification = ['match', ['get', 'class'], AVENUES, p.avenue, p.road];
+      return [{ ...layer, paint: { ...layer.paint, 'line-color': road } }];
+    }
+    if (layer.type === 'line' && src === 'waterway')
+      return [{ ...layer, paint: { ...layer.paint, 'line-color': p.water } }];
+    if (layer.type === 'symbol' && layer.layout?.['text-field'] !== undefined) {
+      return [
+        {
+          ...layer,
+          layout: {
+            ...layer.layout,
+            'text-field': ['coalesce', ['get', 'name:es'], ['get', 'name']],
+          },
+          paint: { ...layer.paint, 'text-color': p.label, 'text-halo-color': p.land },
+        },
+      ];
+    }
+    return [layer];
+  });
+  return { ...base, layers };
+}
+
+/** Descarga el estilo base una sola vez (VITE_MAP_STYLE_URL) y lo recolorea según el tema. */
+export function useMapStyle(isDark: boolean) {
+  const query = useQuery({
+    queryKey: ['map-style', env.VITE_MAP_STYLE_URL],
+    queryFn: async () => {
+      const res = await fetch(env.VITE_MAP_STYLE_URL);
+      if (!res.ok) throw new Error(`Estilo del mapa: HTTP ${String(res.status)}`);
+      return (await res.json()) as StyleSpecification;
+    },
+    staleTime: Infinity,
+    retry: 1,
+  });
+  const style = useMemo(
+    () => (query.data ? recolor(query.data, isDark) : undefined),
+    [query.data, isDark],
+  );
+  return { style, isError: query.isError };
+}
+
 /** Tema según la clase `.dark` del documento (la pone ThemeProvider). */
 export function useDark() {
   const read = () => document.documentElement.classList.contains('dark');
@@ -82,6 +155,3 @@ export function useDark() {
   }, []);
   return dark;
 }
-
-/** Estilo del mapa según el tema; se pasa como `styles` (JSON local, sin mapId de la nube). */
-export const mapStyle = (isDark: boolean) => (isDark ? darkMapStyle : lightMapStyle);
