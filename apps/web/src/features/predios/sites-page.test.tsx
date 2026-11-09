@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
@@ -6,6 +7,10 @@ import { apiGet, apiPut, apiPatch, apiPost } from '@/lib/api-client';
 import { SitesPage } from './sites-page';
 
 jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
+// Mapa caído: el formulario muestra la carga manual de coordenadas.
+jest.mock('@/features/mapa/site-location-map', () => ({
+  SiteMapLocation: ({ unavailable }: { unavailable: ReactNode }) => unavailable,
+}));
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn((path: string) => {
     if (path.endsWith('/impacto-baja'))
@@ -79,7 +84,7 @@ describe('SitesPage', () => {
     expect(within(dialog).getByLabelText('Cliente')).toBeRequired();
     expect(within(dialog).getByLabelText('Nombre')).toBeRequired();
     expect(within(dialog).getByLabelText('Dirección')).toBeRequired();
-    expect(within(dialog).getByLabelText('Latitud')).toBeRequired();
+    expect(await within(dialog).findByLabelText('Latitud')).toBeRequired();
     expect(within(dialog).getByLabelText('Longitud')).toBeRequired();
     expect(within(dialog).getByLabelText('Instrucciones de acceso')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Observaciones')).toBeInTheDocument();

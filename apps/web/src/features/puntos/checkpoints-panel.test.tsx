@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
@@ -6,6 +7,10 @@ import { useAuth } from '../auth/auth-context';
 import { CheckpointsPanel } from './checkpoints-panel';
 
 jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
+// Mapa caído: el formulario muestra la carga manual de coordenadas.
+jest.mock('@/features/mapa/site-location-map', () => ({
+  SiteMapLocation: ({ unavailable }: { unavailable: ReactNode }) => unavailable,
+}));
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn(() => Promise.resolve([])),
   apiPost: jest.fn(() => Promise.resolve({ id: 'point-1' })),
@@ -90,7 +95,7 @@ describe('CheckpointsPanel', () => {
     renderWithQueryClient(<CheckpointsPanel site={site} />);
     await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
     await user.type(await screen.findByLabelText('Nombre del punto'), 'Torre');
-    fireEvent.change(screen.getByLabelText('Latitud'), { target: { value: '-34' } });
+    fireEvent.change(await screen.findByLabelText('Latitud'), { target: { value: '-34' } });
     fireEvent.change(screen.getByLabelText('Longitud'), { target: { value: '-58' } });
     await user.click(screen.getByRole('button', { name: 'Crear punto' }));
     const dialog = await screen.findByRole('alertdialog');

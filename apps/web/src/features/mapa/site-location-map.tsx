@@ -1,10 +1,11 @@
-import { APIProvider, Map, Marker, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
-import { useEffect, useRef, useId } from 'react';
+import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
+import { useEffect } from 'react';
+import type { ReactNode } from 'react';
+import { Marker as MapMarker, useMap } from 'react-map-gl/maplibre';
 import { env } from '@/config/env';
-import { mapStyle, useDark } from './map-style';
+import { BaseMap } from './base-map';
+import { mapStyle, useDark, useMapStyle } from './map-style';
 
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/empty-state';
 
 interface Props {
@@ -13,66 +14,41 @@ interface Props {
   onChange: (latitude: number, longitude: number) => void;
 }
 
-function InteractiveMap({ latitude, longitude, onChange }: Props) {
-  const id = useId();
-  const dark = useDark();
-  const map = useMap();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const places = useMapsLibrary('places');
+/** Marcador arrastrable; el mapa sigue al punto cuando cambia desde afuera. */
+function DraggableMarker({ latitude, longitude, onChange }: Props) {
+  const { current: map } = useMap();
   useEffect(() => {
-    if (!places || !inputRef.current) return;
-    const autocomplete = new places.Autocomplete(inputRef.current, {
-      fields: ['geometry', 'formatted_address'],
-    });
-    const listener = autocomplete.addListener('place_changed', () => {
-      const point = autocomplete.getPlace().geometry?.location?.toJSON();
-      if (point) onChange(point.lat, point.lng);
-    });
-    return () => {
-      listener.remove();
-    };
-  }, [onChange, places]);
-  useEffect(() => {
-    map?.panTo({ lat: latitude, lng: longitude });
+    map?.panTo([longitude, latitude]);
   }, [latitude, longitude, map]);
   return (
+    <MapMarker
+      latitude={latitude}
+      longitude={longitude}
+      draggable
+      onDragEnd={(event) => {
+        onChange(event.lngLat.lat, event.lngLat.lng);
+      }}
+    />
+  );
+}
+
+export function SiteMapLocation({ unavailable, ...props }: Props & { unavailable?: ReactNode }) {
+  // Misma consulta (en caché) que BaseMap: si el mapa no carga se reemplaza toda la sección.
+  const { isError } = useMapStyle(useDark());
+  if (isError) return unavailable;
+  return (
     <section aria-label="Ubicación del predio" className="min-w-0 space-y-4">
-      <Label htmlFor={`${id}-site-address-search`}>Buscar dirección (Google Places)</Label>
-      <Input
-        id={`${id}-site-address-search`}
-        ref={inputRef}
-        placeholder="Escribí una dirección"
-        className="w-full"
-      />
       <p className="text-sm text-muted-foreground">
         Seleccioná la ubicación arrastrando el marcador.
       </p>
       <div className="h-72 overflow-hidden rounded-xl border border-border">
-        <Map
-          defaultCenter={{ lat: latitude, lng: longitude }}
-          defaultZoom={14}
-          styles={mapStyle(dark)}
-          className="h-72 w-full"
+        <BaseMap
+          initialViewState={{ latitude: props.latitude, longitude: props.longitude, zoom: 14 }}
         >
-          <Marker
-            position={{ lat: latitude, lng: longitude }}
-            draggable
-            onDragEnd={(event) => {
-              const point = event.latLng?.toJSON();
-              if (point) onChange(point.lat, point.lng);
-            }}
-          />
-        </Map>
+          <DraggableMarker {...props} />
+        </BaseMap>
       </div>
     </section>
-  );
-}
-
-export function SiteMapLocation(props: Props) {
-  return (
-    <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY} libraries={['places']}>
-      <InteractiveMap {...props} />
-    </APIProvider>
   );
 }
 
