@@ -7,7 +7,6 @@ export const env = {
   VITE_FIREBASE_APP_ID: 'test-app',
   VITE_FIREBASE_MESSAGING_SENDER_ID: '',
   VITE_FIREBASE_VAPID_KEY: '',
-  VITE_GOOGLE_MAPS_API_KEY: '',
   VITE_MAP_STYLE_URL: 'https://tiles.openfreemap.org/styles/positron',
   VITE_GEOCODER_URL: 'https://photon.komoot.io/api/',
 };

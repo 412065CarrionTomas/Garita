@@ -48,7 +48,7 @@ export function recolor(base: StyleSpecification, isDark: boolean): StyleSpecifi
   const p = isDark ? dark : light;
   const layers = base.layers.flatMap((layer): LayerSpecification[] => {
     const src = 'source-layer' in layer ? layer['source-layer'] : undefined;
-    if (src && HIDDEN.has(src)) return []; // igual que con Google: sin comercios ni transporte
+    if (src && HIDDEN.has(src)) return []; // sin comercios ni transporte: no aportan a la vigilancia
     if (layer.type === 'background')
       return [{ ...layer, paint: { ...layer.paint, 'background-color': p.land } }];
     if (layer.type === 'fill') {
