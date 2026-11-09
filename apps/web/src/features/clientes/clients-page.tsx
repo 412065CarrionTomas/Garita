@@ -471,7 +471,7 @@ export function ClientDetailPage() {
           <h2 className="text-lg font-semibold">Predios activos</h2>
         </CardHeader>
         <CardContent className="space-y-4">
-          <SitesMap sites={activeSites} />
+          {activeSites.length > 0 && <SitesMap sites={activeSites} />}
           {activeSites.length === 0 ? (
             <EmptyState
               title="Este cliente no tiene predios activos."
