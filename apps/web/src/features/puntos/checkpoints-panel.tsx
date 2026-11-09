@@ -1,12 +1,11 @@
-import { APIProvider, AdvancedMarker, Map } from '@vis.gl/react-google-maps';
 import { useQuery } from '@tanstack/react-query';
 import { checkpointInputSchema, checkpointsResponseSchema } from '@garita/shared';
 import { useState, type SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { apiDownload, apiGet, apiPatch, apiPost, ApiError } from '@/lib/api-client';
-import { env } from '@/config/env';
 import { useAuth } from '../auth/auth-context';
 import { SiteLocation } from '../mapa/site-location';
+import { SitesMap } from '../mapa/sites-map';
 
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
@@ -273,28 +272,9 @@ export function CheckpointsPanel({ site }: SiteProps) {
             <Alert variant="destructive">No se pudieron cargar los puntos.</Alert>
           ) : (
             <>
-              {points.data.length > 0 && env.VITE_GOOGLE_MAPS_API_KEY && (
+              {points.data.length > 0 && (
                 <div aria-label={`Mapa de puntos de ${site.name}`}>
-                  <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY}>
-                    <Map
-                      defaultCenter={{ lat: Number(site.latitude), lng: Number(site.longitude) }}
-                      defaultZoom={15}
-                      mapId="GARITA_CHECKPOINTS"
-                      className="h-72 w-full"
-                    >
-                      <AdvancedMarker
-                        position={{ lat: Number(site.latitude), lng: Number(site.longitude) }}
-                        title={site.name}
-                      />
-                      {points.data.map((point) => (
-                        <AdvancedMarker
-                          key={point.id}
-                          position={{ lat: Number(point.latitude), lng: Number(point.longitude) }}
-                          title={`${point.name}${point.isIndoor ? ' · Interior' : ''}`}
-                        />
-                      ))}
-                    </Map>
-                  </APIProvider>
+                  <SitesMap sites={[site, ...points.data]} />
                 </div>
               )}
               <Table>

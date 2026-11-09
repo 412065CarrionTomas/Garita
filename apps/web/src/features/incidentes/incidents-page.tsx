@@ -23,7 +23,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { apiGet, apiPost } from '@/lib/api-client';
-import { env } from '@/config/env';
+import { SitesMap } from '@/features/mapa/sites-map';
 import { cn } from '@/lib/utils';
 
 const rowSchema = z.object({
@@ -616,17 +616,11 @@ function IncidentDetail({ id, embedded = false }: { id: string; embedded?: boole
             <p className="tabular-nums">
               Coordenadas: {lat}, {lng}
             </p>
-            {env.VITE_GOOGLE_MAPS_API_KEY ? (
-              <iframe
-                title="Mapa de ubicación del incidente"
-                className="h-64 w-full rounded-lg border-[1.5px] border-input"
-                src={`https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(env.VITE_GOOGLE_MAPS_API_KEY)}&q=${lat},${lng}`}
-              />
-            ) : (
-              <Alert variant="neutral" role="status">
-                El mapa no está configurado; consultá las coordenadas indicadas.
-              </Alert>
-            )}
+            <SitesMap
+              sites={[
+                { id: incident.id, name: 'Ubicación del incidente', latitude: lat, longitude: lng },
+              ]}
+            />
           </>
         )}
       </section>

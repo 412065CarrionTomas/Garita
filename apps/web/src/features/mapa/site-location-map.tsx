@@ -1,11 +1,9 @@
-import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { Marker as MapMarker, useMap } from 'react-map-gl/maplibre';
-import { env } from '@/config/env';
 import { AddressSearch } from './address-search';
 import { BaseMap } from './base-map';
-import { mapStyle, useDark, useMapStyle } from './map-style';
+import { useDark, useMapStyle } from './map-style';
 
 import { EmptyState } from '@/components/empty-state';
 
@@ -54,33 +52,40 @@ export function SiteMapLocation({ unavailable, ...props }: Props & { unavailable
   );
 }
 
-export function ClientSitesMap({
-  sites,
-}: {
+export interface ClientSitesMapProps {
   sites: { id: string; name: string; latitude: number | string; longitude: number | string }[];
-}) {
-  const dark = useDark();
-  if (sites.length === 0) return <EmptyState title="Este cliente no tiene predios activos." />;
-  const firstSite = sites[0];
-  if (!firstSite) return <EmptyState title="Este cliente no tiene predios activos." />;
-  const position = (site: (typeof sites)[number]) => ({
+}
+
+/** Uno o varios lugares con un marcador cada uno; con varios, encuadra todos al abrir. */
+export function ClientSitesMap({ sites }: ClientSitesMapProps) {
+  const points = sites.map((site) => ({
+    id: site.id,
     lat: Number(site.latitude),
     lng: Number(site.longitude),
-  });
+  }));
+  const [first] = points;
+  if (!first) return <EmptyState title="Este cliente no tiene predios activos." />;
+  const lngs = points.map((p) => p.lng);
+  const lats = points.map((p) => p.lat);
   return (
-    <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY}>
-      <div className="h-96 overflow-hidden rounded-xl border border-border">
-        <Map
-          defaultCenter={position(firstSite)}
-          defaultZoom={10}
-          styles={mapStyle(dark)}
-          className="h-96 w-full"
-        >
-          {sites.map((site) => (
-            <Marker key={site.id} position={position(site)} title={site.name} />
-          ))}
-        </Map>
-      </div>
-    </APIProvider>
+    <div className="h-96 overflow-hidden rounded-xl border border-border">
+      <BaseMap
+        initialViewState={
+          points.length === 1
+            ? { latitude: first.lat, longitude: first.lng, zoom: 15 }
+            : {
+                bounds: [
+                  [Math.min(...lngs), Math.min(...lats)],
+                  [Math.max(...lngs), Math.max(...lats)],
+                ],
+                fitBoundsOptions: { padding: 48, maxZoom: 16 },
+              }
+        }
+      >
+        {points.map((point) => (
+          <MapMarker key={point.id} latitude={point.lat} longitude={point.lng} />
+        ))}
+      </BaseMap>
+    </div>
   );
 }

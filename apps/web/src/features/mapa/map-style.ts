@@ -40,39 +40,6 @@ const dark: Palette = {
   label: colors.dark.mutedForeground,
 };
 
-const color = (value: string) => [{ color: value }];
-
-function build(p: Palette): google.maps.MapTypeStyle[] {
-  return [
-    { elementType: 'geometry', stylers: color(p.land) },
-    { elementType: 'labels.text.fill', stylers: color(p.label) },
-    { elementType: 'labels.text.stroke', stylers: color(p.land) },
-    { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-    { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-    { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-    { featureType: 'administrative', elementType: 'geometry', stylers: [{ visibility: 'off' }] },
-    { featureType: 'poi.park', elementType: 'geometry', stylers: color(p.park) },
-    { featureType: 'landscape.man_made', elementType: 'geometry', stylers: color(p.building) },
-    {
-      featureType: 'landscape.natural.terrain',
-      elementType: 'geometry',
-      stylers: color(p.contour),
-    },
-    { featureType: 'water', elementType: 'geometry.fill', stylers: color(p.water) },
-    { featureType: 'water', elementType: 'geometry.stroke', stylers: color(p.bank) },
-    { featureType: 'road.local', elementType: 'geometry', stylers: color(p.road) },
-    { featureType: 'road.arterial', elementType: 'geometry', stylers: color(p.avenue) },
-    { featureType: 'road.highway', elementType: 'geometry', stylers: color(p.avenue) },
-    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ visibility: 'off' }] },
-  ];
-}
-
-export const lightMapStyle = build(light);
-export const darkMapStyle = build(dark);
-
-/** Estilo del mapa según el tema; se pasa como `styles` (JSON local, sin mapId de la nube). */
-export const mapStyle = (isDark: boolean) => (isDark ? darkMapStyle : lightMapStyle);
-
 const HIDDEN = new Set(['poi', 'transit', 'aerodrome_label']);
 const AVENUES = ['motorway', 'trunk', 'primary'];
 

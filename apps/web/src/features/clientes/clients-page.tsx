@@ -1,11 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { clientInputSchema, clientsResponseSchema, clientResponseSchema } from '@garita/shared';
-import { lazy, Suspense, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { ClientUsersPanel } from './client-users-panel';
-import { env } from '@/config/env';
+import { SitesMap } from '../mapa/sites-map';
 import { errorMessage } from '@/lib/error-message';
 import { z } from 'zod';
 import {
@@ -44,9 +44,6 @@ import {
 } from '@/components/ui/table';
 
 const response = z.looseObject({ id: z.string() });
-const ClientSitesMap = lazy(() =>
-  import('../mapa/site-location-map').then((module) => ({ default: module.ClientSitesMap })),
-);
 export function ClientsPage() {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
@@ -474,15 +471,7 @@ export function ClientDetailPage() {
           <h2 className="text-lg font-semibold">Predios activos</h2>
         </CardHeader>
         <CardContent className="space-y-4">
-          {env.VITE_GOOGLE_MAPS_API_KEY ? (
-            <Suspense fallback={<p role="status">Cargando mapa…</p>}>
-              <ClientSitesMap sites={activeSites} />
-            </Suspense>
-          ) : (
-            <Alert role="status" className="bg-info-soft text-info">
-              El mapa no está configurado; coordenadas disponibles para carga y consulta manual.
-            </Alert>
-          )}
+          <SitesMap sites={activeSites} />
           {activeSites.length === 0 ? (
             <EmptyState
               title="Este cliente no tiene predios activos."
