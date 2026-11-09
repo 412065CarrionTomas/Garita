@@ -415,8 +415,9 @@ export class ShiftExecutionService {
     if (early && !input.reason)
       throw new BadRequestException({ code: SHIFT_EXECUTION_ERROR_CODES.earlyCloseReasonRequired });
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await tx.shift.update({
-        where: { id },
+      // Conditional so a concurrent admin or automatic close is not overwritten.
+      const changed = await tx.shift.updateMany({
+        where: { id, status: 'in_progress' },
         data: {
           status: 'closed',
           closedAt: occurredAt,
@@ -426,6 +427,8 @@ export class ShiftExecutionService {
           closedByUserId: user.userId,
         },
       });
+      if (changed.count !== 1)
+        throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notInProgress });
       await tx.shiftAssignment.update({
         where: { id: assignment.id },
         data: { result: early ? 'closed_early' : 'started' },
@@ -539,8 +542,8 @@ export class ShiftExecutionService {
     for (const shift of shifts) {
       const assignment = shift.assignments[0];
       if (!assignment) continue;
-      await tx.shift.update({
-        where: { id: shift.id },
+      const changed = await tx.shift.updateMany({
+        where: { id: shift.id, status: 'in_progress' },
         data: {
           status: 'closed',
           closedAt: now,
@@ -550,6 +553,8 @@ export class ShiftExecutionService {
           closedByUserId: adminId,
         },
       });
+      // The guard or the auto-close may have closed it after the read above.
+      if (changed.count !== 1) continue;
       await tx.shiftAssignment.update({
         where: { id: assignment.id },
         data: {
@@ -597,9 +602,9 @@ export class ShiftExecutionService {
     const assignment = shift.assignments[0];
     if (!assignment) return null;
     const now = this.clock.now();
-    await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await tx.shift.update({
-        where: { id: shift.id },
+    const closed = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const changed = await tx.shift.updateMany({
+        where: { id: shift.id, status: 'in_progress' },
         data: {
           status: 'closed',
           closedAt: now,
@@ -609,6 +614,8 @@ export class ShiftExecutionService {
           closedByUserId: adminId,
         },
       });
+      // The guard or the auto-close may have closed it after the read above.
+      if (changed.count !== 1) return false;
       await tx.shiftAssignment.update({
         where: { id: assignment.id },
         data: {
@@ -629,7 +636,9 @@ export class ShiftExecutionService {
           actorUserId: adminId,
         },
       });
+      return true;
     });
+    if (!closed) return null;
     if (isEarlyClose(shift.endsAt.toISOString(), now.toISOString())) {
       await this.effects.notifyEarlyClose(shift.id, id, reason);
       await this.effects.offerCoverage(shift.id, id);
@@ -755,8 +764,8 @@ export class ShiftExecutionService {
     if (early && !input.reason)
       throw new BadRequestException({ code: SHIFT_EXECUTION_ERROR_CODES.earlyCloseReasonRequired });
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await tx.shift.update({
-        where: { id },
+      const changed = await tx.shift.updateMany({
+        where: { id, status: 'auto_closed' },
         data: {
           status: 'closed',
           closedAt: occurredAt,
@@ -766,6 +775,8 @@ export class ShiftExecutionService {
           closedByUserId: user.userId,
         },
       });
+      if (changed.count !== 1)
+        throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notInProgress });
       await tx.shiftAssignment.update({
         where: { id: assignment.id },
         data: { result: early ? 'closed_early' : 'started' },

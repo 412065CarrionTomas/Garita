@@ -18,6 +18,7 @@ import {
   Roles,
 } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { parseOrBadRequest } from '../../common/parse-or-bad-request';
 import { ShiftExecutionService } from './shift-execution.service';
 
 @ApiTags('Ejecución de turnos')
@@ -32,7 +33,7 @@ export class ShiftExecutionController {
   @ApiBody({ schema: { type: 'object' } })
   @ApiConflictResponse({ description: 'El turno no se puede iniciar' })
   start(@Param('id') id: string, @Body() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
-    return this.execution.start(id, startShiftRequestSchema.parse(raw), user);
+    return this.execution.start(id, parseOrBadRequest(startShiftRequestSchema, raw), user);
   }
   @Get('datos') @Roles('guard', 'supervisor') data(
     @Param('id') id: string,
@@ -52,7 +53,7 @@ export class ShiftExecutionController {
   @ApiOperation({ summary: 'Cierra el turno desde la app del vigilador' })
   @ApiBody({ schema: { type: 'object' } })
   close(@Param('id') id: string, @Body() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
-    return this.execution.close(id, closeShiftRequestSchema.parse(raw), user);
+    return this.execution.close(id, parseOrBadRequest(closeShiftRequestSchema, raw), user);
   }
 
   @Post('cerrar-sin-datos')

@@ -14,6 +14,12 @@ import { CorsIoAdapter } from './modules/realtime/cors-io-adapter';
 export function setupApp(app: INestApplication): void {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
+  // shortcut: trusts exactly one proxy hop (Render's), revisit if another proxy/CDN is added in front.
+  // Without it every request shares the proxy IP and per-IP rate limits become global.
+  (app.getHttpAdapter().getInstance() as { set(setting: string, value: unknown): void }).set(
+    'trust proxy',
+    1,
+  );
   app.use(helmet());
   const origins = config.get('CORS_ORIGINS', { infer: true });
   app.enableCors({ origin: origins });

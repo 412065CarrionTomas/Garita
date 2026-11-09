@@ -40,36 +40,40 @@ export class RoundsService {
     if (site.status !== 'active') throw new NotFoundException('Recurso no encontrado');
     await this.assertCheckpoints(siteId, input.checkpointIds);
     try {
-      const round = await this.prisma.tenantPrisma.round.create({
-        data: {
-          companyId: user.companyId,
-          siteId,
-          name: input.name,
-          versions: {
-            create: {
-              versionNumber: 1,
-              frequencyMinutes: input.frequencyMinutes,
-              windowStartLocal: input.windowStartLocal,
-              windowEndLocal: input.windowEndLocal,
-              graceMinutes: input.graceMinutes,
-              createdById: user.userId,
-              checkpoints: {
-                create: input.checkpointIds.map((checkpointId, position) => ({
-                  companyId: user.companyId,
-                  checkpointId,
-                  position,
-                })),
+      // One transaction: a round left without currentVersion would block every shift using it.
+      const { round, updated } = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        const round = await tx.round.create({
+          data: {
+            companyId: user.companyId,
+            siteId,
+            name: input.name,
+            versions: {
+              create: {
+                versionNumber: 1,
+                frequencyMinutes: input.frequencyMinutes,
+                windowStartLocal: input.windowStartLocal,
+                windowEndLocal: input.windowEndLocal,
+                graceMinutes: input.graceMinutes,
+                createdById: user.userId,
+                checkpoints: {
+                  create: input.checkpointIds.map((checkpointId, position) => ({
+                    companyId: user.companyId,
+                    checkpointId,
+                    position,
+                  })),
+                },
               },
             },
           },
-        },
-      });
-      const version = await this.prisma.tenantPrisma.roundVersion.findFirstOrThrow({
-        where: { roundId: round.id, versionNumber: 1 },
-      });
-      const updated = await this.prisma.tenantPrisma.round.update({
-        where: { id: round.id },
-        data: { currentVersionId: version.id },
+        });
+        const version = await tx.roundVersion.findFirstOrThrow({
+          where: { roundId: round.id, versionNumber: 1 },
+        });
+        const updated = await tx.round.update({
+          where: { id: round.id },
+          data: { currentVersionId: version.id },
+        });
+        return { round, updated };
       });
       this.logger.log({ action: 'round.created', roundId: round.id, userId: user.userId });
       return updated;

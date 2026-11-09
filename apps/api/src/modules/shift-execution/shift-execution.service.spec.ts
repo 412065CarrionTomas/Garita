@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { NoopShiftExecutionEffects } from './shift-execution-effects.port';
 import { ShiftExecutionService } from './shift-execution.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -30,6 +31,7 @@ describe('ShiftExecutionService assignment closure result', () => {
             findFirst: jest.fn().mockResolvedValue(shift),
             findMany: jest.fn().mockResolvedValue([shift]),
             update: jest.fn(),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           },
           shiftAssignment: {
             findFirst: jest.fn().mockResolvedValue(assignment),
@@ -80,6 +82,69 @@ describe('ShiftExecutionService assignment closure result', () => {
       }
     },
   );
+});
+
+describe('ShiftExecutionService close race', () => {
+  it('does not overwrite an admin or automatic close that won the race', async () => {
+    const assignment = { id: 'assignment-1', guardId: 'guard-1', startsAt: now };
+    const shift = {
+      id: 'shift-1',
+      companyId: 'company-1',
+      siteId: 'site-1',
+      status: 'in_progress',
+      startedAt: now,
+      endsAt: now,
+    };
+    const tx = {
+      shift: {
+        findFirst: jest.fn().mockResolvedValue(shift),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      shiftAssignment: {
+        findFirst: jest.fn().mockResolvedValue(assignment),
+        update: jest.fn(),
+      },
+      shiftEvent: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
+    };
+    const service = new ShiftExecutionService(
+      {
+        tenantPrisma: {
+          ...tx,
+          $transaction: (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
+        },
+      } as unknown as PrismaService,
+      { now: () => now },
+      {} as Queue,
+      {
+        deadlineForSite: () => Promise.resolve(null),
+        deadlineForShift: () => Promise.resolve(null),
+      },
+      new NoopShiftExecutionEffects(),
+    );
+    await expect(
+      service.close(
+        'shift-1',
+        {
+          eventId: '00000000-0000-4000-8000-000000000002',
+          occurredAtDevice: now.toISOString(),
+          location: {
+            status: 'disabled',
+            latitude: null,
+            longitude: null,
+            accuracyMeters: null,
+            simulation: 'unavailable',
+            takenAt: null,
+          },
+        },
+        { userId: 'guard-1', companyId: 'company-1', role: 'guard', status: 'active' },
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.shift.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'shift-1', status: 'in_progress' } }),
+    );
+    expect(tx.shiftAssignment.update).not.toHaveBeenCalled();
+    expect(tx.shiftEvent.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('ShiftExecutionService.autoClose', () => {

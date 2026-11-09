@@ -7,6 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { IncidentReport } from '@garita/shared';
+import { Prisma } from '../../generated/prisma/client';
 import {
   INCIDENT_PHOTO_MAX_BYTES,
   PHOTO_STORAGE_PORT,
@@ -18,6 +19,8 @@ import { clockFields } from '../server-time/clock-fields';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import type { ShiftCredentialPayload } from '../sync/shift-credential.service';
+
+const INCIDENT_ACCEPTING_STATUSES = new Set(['in_progress', 'closed', 'auto_closed']);
 
 @Injectable()
 export class IncidentsService {
@@ -64,28 +67,45 @@ export class IncidentsService {
       },
     });
     const assignment = shift?.assignments[0];
-    if (!shift || !assignment || shift.status !== 'in_progress') return null;
+    // Offline incidents may sync after the shift closed (guard, admin or auto), like records do.
+    if (!shift || !assignment || !INCIDENT_ACCEPTING_STATUSES.has(shift.status)) return null;
     const receivedAt = this.clock.now();
-    const incident = await this.prisma.systemPrisma.incident.create({
-      data: {
-        companyId: credential.companyId,
-        siteId: shift.siteId,
-        shiftId: shift.id,
-        assignmentId: assignment.id,
-        guardId: credential.userId,
-        incidentId: input.incidentId,
-        type: input.type,
-        description: input.description,
-        occurredAtDevice: new Date(input.occurredAtDevice),
-        receivedAt,
-        ...clockFields(input.clock),
-        locationStatus: input.location.status,
-        latitude: input.location.latitude,
-        longitude: input.location.longitude,
-        accuracyMeters: input.location.accuracyMeters,
-        simulation: input.location.simulation,
-      },
-    });
+    const incident = await this.prisma.systemPrisma.incident
+      .create({
+        data: {
+          companyId: credential.companyId,
+          siteId: shift.siteId,
+          shiftId: shift.id,
+          assignmentId: assignment.id,
+          guardId: credential.userId,
+          incidentId: input.incidentId,
+          type: input.type,
+          description: input.description,
+          occurredAtDevice: new Date(input.occurredAtDevice),
+          receivedAt,
+          ...clockFields(input.clock),
+          locationStatus: input.location.status,
+          latitude: input.location.latitude,
+          longitude: input.location.longitude,
+          accuracyMeters: input.location.accuracyMeters,
+          simulation: input.location.simulation,
+        },
+      })
+      .catch((error: unknown) => {
+        // Two deliveries of the same offline incident can race past the lookup above.
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002')
+          throw error;
+        return null;
+      });
+    if (!incident) {
+      const stored = await this.prisma.systemPrisma.incident.findUnique({
+        where: { incidentId: input.incidentId },
+      });
+      return {
+        duplicate: true,
+        same: stored?.companyId === credential.companyId && stored.shiftId === input.shiftId,
+      };
+    }
     const portResults = await Promise.allSettled([
       this.notifications.notifySiteStaff({
         companyId: credential.companyId,

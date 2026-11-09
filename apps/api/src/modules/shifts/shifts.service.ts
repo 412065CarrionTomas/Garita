@@ -157,11 +157,9 @@ export class ShiftsService {
       select: { guardId: true, guard: { select: { status: true } } },
     });
     if (shift.status === 'cancelled') throw new ConflictException('El turno está cancelado');
-    if (shift.startsAt <= this.clock.now())
-      throw new ConflictException({
-        code: 'SHIFT_STARTED',
-        message: 'Solo se puede reasignar el turno',
-      });
+    // Un vigilador puede iniciar antes de startsAt (margen de inicio): el estado manda.
+    if (shift.startsAt <= this.clock.now() || !isEditableStatus(shift.status))
+      throw shiftStartedError();
     const validation = await this.validateInput(input, user);
     const conflict = input.guardId
       ? await this.findConflict(input.guardId, input.startsAt, input.endsAt, id)
@@ -176,10 +174,12 @@ export class ShiftsService {
     const serviceDate = localDate(new Date(input.startsAt), timezone);
     try {
       const updated = await this.prisma.tenantPrisma.$transaction(async (tx) => {
-        await tx.shiftAssignment.updateMany({
-          where: { shiftId: id, isCurrent: true },
+        // Condicionado a `scheduled` para no pisar un inicio concurrente del vigilador.
+        const replaced = await tx.shiftAssignment.updateMany({
+          where: { shiftId: id, isCurrent: true, result: 'scheduled' },
           data: { isCurrent: false, active: false, result: 'replaced' },
         });
+        if (!replaced.count) throw shiftStartedError();
         await tx.shiftRound.deleteMany({ where: { shiftId: id } });
         return tx.shift.update({
           where: { id },
@@ -465,12 +465,15 @@ export class ShiftsService {
       select: { guardId: true },
     });
     if (shift.status === 'cancelled') throw new ConflictException('El turno ya está cancelado');
-    if (shift.startsAt <= this.clock.now())
-      throw new ConflictException({
-        code: 'SHIFT_STARTED',
-        message: 'Solo se puede reasignar el turno',
-      });
+    // Un vigilador puede iniciar antes de startsAt (margen de inicio): el estado manda.
+    if (shift.startsAt <= this.clock.now() || !isEditableStatus(shift.status))
+      throw shiftStartedError();
     const result = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const current = await tx.shiftAssignment.updateMany({
+        where: { shiftId: id, isCurrent: true, result: 'scheduled' },
+        data: { active: false },
+      });
+      if (!current.count) throw shiftStartedError();
       await tx.shiftAssignment.updateMany({
         where: { shiftId: id, active: true },
         data: { active: false },
@@ -606,10 +609,21 @@ export class ShiftsService {
         }).map((window) => ({ ...window, roundId })),
       );
     });
-    const other = await this.prisma.tenantPrisma.shift.findMany({
-      where: { siteId: shift.siteId, status: { not: 'cancelled' }, id: { not: shift.id } },
-      include: { rounds: true },
-    });
+    // Only shifts touching this shift's windows can cover them; the site history is unbounded.
+    const windowStarts = ownWindows.map((window) => Date.parse(window.startUtc));
+    const windowEnds = ownWindows.map((window) => Date.parse(window.endUtc));
+    const other = ownWindows.length
+      ? await this.prisma.tenantPrisma.shift.findMany({
+          where: {
+            siteId: shift.siteId,
+            status: { not: 'cancelled' },
+            id: { not: shift.id },
+            startsAt: { lte: new Date(Math.max(...windowEnds)) },
+            endsAt: { gte: new Date(Math.min(...windowStarts)) },
+          },
+          include: { rounds: true },
+        })
+      : [];
     const candidates = [
       {
         id: shift.id,
@@ -736,6 +750,17 @@ export class ShiftsService {
       this.logger.error({ event: 'shift_notification_failed', shiftId, guardId, kind, error });
     }
   }
+}
+
+function isEditableStatus(status: string): boolean {
+  return status === 'scheduled' || status === 'unassigned';
+}
+
+function shiftStartedError(): ConflictException {
+  return new ConflictException({
+    code: 'SHIFT_STARTED',
+    message: 'Solo se puede reasignar el turno',
+  });
 }
 
 function localDate(date: Date, timezone: string): string {

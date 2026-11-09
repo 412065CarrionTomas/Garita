@@ -127,6 +127,22 @@ export async function beginShift(
     d.redirectToPermissions();
     return { status: 'permissions', permission };
   }
+  // The phone keeps one credential: starting another shift would orphan the previous queue.
+  const repository = await d.repository();
+  const previous = await repository.getShiftData();
+  if (
+    previous &&
+    previous.shift.id !== id &&
+    ((await repository.countPendingEvents()) > 0 ||
+      (await repository.listIncidentPhotos()).length > 0)
+  ) {
+    void d.triggerSync();
+    return {
+      status: 'error',
+      message:
+        'Todavía hay registros del turno anterior sin enviar. Esperá a que se envíen e intentá de nuevo',
+    };
+  }
   const now = d.now();
   if (now.getTime() > Date.parse(scheduledEnd))
     return {

@@ -999,6 +999,49 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
   });
 
   describe('ID-245 a ID-247 — incidentes y fotos privadas', () => {
+    it('acepta un incidente sin señal que llega después del cierre automático del turno', async () => {
+      const client = request(app.getHttpServer());
+      const shift = await createTestShift({ status: 'auto_closed' });
+      const assignment = await prisma.shiftAssignment.findFirstOrThrow({
+        where: { shiftId: shift.id, isCurrent: true },
+      });
+      const { token } = await shiftCredentialService.issueCredential({
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        userId: northGuardId,
+        companyId: 'norte-company',
+        scheduledEnd: shift.endsAt,
+      });
+      const incidentId = randomUUID();
+      const occurredAtDevice = new Date(shift.startsAt.getTime() + 10 * 60_000).toISOString();
+      const res = await client
+        .post('/api/v1/sincronizacion/eventos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          shiftId: shift.id,
+          pendingCount: 0,
+          syncedUntil: null,
+          events: [
+            {
+              type: 'incident',
+              payload: {
+                incidentId,
+                shiftId: shift.id,
+                type: 'intrusion',
+                occurredAtDevice,
+                location: { ...defaultLocation, takenAt: occurredAtDevice },
+                photoCount: 0,
+              },
+            },
+          ],
+        })
+        .expect(200);
+      expect(syncBatchResponseSchema.parse(res.body).results[0]).toMatchObject({
+        status: 'accepted',
+        eventId: incidentId,
+      });
+    });
+
     it('guarda hora confiable y ubicación una vez, rechaza un turno sin iniciar y limita la autorización a cinco fotos', async () => {
       const client = request(app.getHttpServer());
       notificationPort.notifySiteStaff.mockClear();

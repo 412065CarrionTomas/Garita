@@ -27,6 +27,7 @@ import {
 } from '@garita/shared';
 import { CurrentUser, Public, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { parseOrBadRequest } from '../../common/parse-or-bad-request';
 import { UsersService } from './users.service';
 
 const deactivateSchema = z.union([
@@ -67,7 +68,7 @@ export class UsersController {
   @Get()
   @Roles('admin', 'supervisor')
   list(@Query() raw: unknown) {
-    return this.users.list(listUsersQuerySchema.parse(raw));
+    return this.users.list(parseOrBadRequest(listUsersQuerySchema, raw));
   }
 
   @Get(':id')
@@ -82,13 +83,17 @@ export class UsersController {
   @Post()
   @Roles('admin')
   create(@Body() raw: unknown, @CurrentUser() admin: AuthenticatedUser) {
-    return this.users.create(createUserRequestSchema.parse(raw), admin.userId, admin.companyId);
+    return this.users.create(
+      parseOrBadRequest(createUserRequestSchema, raw),
+      admin.userId,
+      admin.companyId,
+    );
   }
 
   @Patch(':id')
   @Roles('admin')
   update(@Param('id') id: string, @Body() raw: unknown, @CurrentUser() admin: AuthenticatedUser) {
-    return this.users.update(id, updateUserRequestSchema.parse(raw), admin.userId);
+    return this.users.update(id, parseOrBadRequest(updateUserRequestSchema, raw), admin.userId);
   }
 
   @Post(':id/desactivar')
@@ -153,7 +158,7 @@ export class InvitationsController {
   @Post('canjear')
   @Public()
   redeem(@Body() raw: unknown, @Ip() ip: string) {
-    return this.users.redeem(invitationRedeemRequestSchema.parse(raw).token, ip);
+    return this.users.redeem(parseOrBadRequest(invitationRedeemRequestSchema, raw).token, ip);
   }
 }
 
