@@ -3,25 +3,35 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from 'cn';
 import { Slot } from 'radix-ui';
 
+// Sello Foja (estados con fondo *-soft tenue): rectángulo casi a escuadra, borde 1.5px en el color del texto, condensada tabular.
+// Mapeo de variantes (nombres previos -> forma):
+//   normal (tinta)   : default, secondary, outline, success, info   (success/info: confirmaciones puntuales)
+//   tarde (ámbar)    : warning, tarde
+//   falla (rojo)     : danger, destructive, falla
+//   punteado         : neutral, punteado        (borde discontinuo, texto atenuado)
+//   ahora (invertido): signal, ahora            (bg-primary text-primary-foreground)
 const badgeVariants = cva(
-  'group/badge inline-flex h-6 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!',
+  't-stamp group/badge inline-flex h-6 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm border-[1.5px] border-current px-2 whitespace-nowrap transition-colors aria-invalid:border-danger has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&>svg]:pointer-events-none [&>svg]:size-3!',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground [a]:hover:bg-primary/80',
-        secondary: 'bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80',
-        destructive:
-          'bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20',
-        outline: 'border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground',
-        ghost: 'hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50',
-        link: 'text-primary underline-offset-4 hover:underline',
-        // Estados de turnos, rondas y registros: siempre con texto (y punto), nunca solo color.
+        default: 'text-foreground [a]:hover:bg-muted',
+        secondary: 'bg-muted text-foreground [a]:hover:bg-muted/70',
+        outline: 'bg-card text-foreground [a]:hover:bg-muted',
+        ghost: 'border-transparent text-foreground hover:bg-muted',
+        link: 'border-transparent text-foreground underline underline-offset-4 hover:bg-muted',
         success: 'bg-success-soft text-success',
-        warning: 'bg-warning-soft text-warning',
-        danger: 'bg-danger-soft text-danger',
         info: 'bg-info-soft text-info',
-        signal: 'bg-signal text-signal-foreground',
-        neutral: 'bg-muted text-muted-foreground',
+        normal: 'text-foreground',
+        warning: 'bg-warning-soft text-warning',
+        tarde: 'bg-warning-soft text-warning',
+        danger: 'bg-danger-soft text-danger',
+        destructive: 'bg-danger-soft text-danger',
+        falla: 'bg-danger-soft text-danger',
+        neutral: 'border-dashed text-muted-foreground',
+        punteado: 'border-dashed text-muted-foreground',
+        signal: 'border-primary bg-primary text-primary-foreground',
+        ahora: 'border-primary bg-primary text-primary-foreground',
       },
     },
     defaultVariants: {
