@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { Text } from '@/ui';
+import { Banner } from '@/ui';
 
 export function LockedPanicPermissionNotice({ shiftId }: { shiftId: string }) {
   const [visible, setVisible] = useState(false);
@@ -22,8 +22,8 @@ export function LockedPanicPermissionNotice({ shiftId }: { shiftId: string }) {
     };
   }, [shiftId]);
   return visible ? (
-    <Text variant="caption" color="mutedForeground" accessibilityLiveRegion="polite">
+    <Banner tone="info" role="text" accessibilityLiveRegion="polite">
       Activá las notificaciones para usar el pánico con el celular bloqueado
-    </Text>
+    </Banner>
   ) : null;
 }

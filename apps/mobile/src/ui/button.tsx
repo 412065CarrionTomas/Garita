@@ -5,7 +5,7 @@ import { radius, space, touch } from '@garita/tokens';
 import { Text } from './text';
 import { useTheme } from './theme';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'danger' | 'signal' | 'ghost';
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'danger' | 'ghost';
 
 export interface ButtonProps extends Omit<PressableProps, 'children' | 'style'> {
   label: string;
@@ -16,7 +16,10 @@ export interface ButtonProps extends Omit<PressableProps, 'children' | 'style'> 
   style?: StyleProp<ViewStyle>;
 }
 
-/** Botón de la app. Un solo `primary` o `signal` por pantalla. */
+/**
+ * Botón de la app. Un solo `primary` por pantalla. `secondary` y `outline` son hoja con borde de
+ * tinta; `danger` es borde y texto rojos (el relleno rojo se reserva a las fallas).
+ */
 export function Button({
   label,
   variant = 'primary',
@@ -30,11 +33,10 @@ export function Button({
   const { colors } = useTheme();
   const palette = {
     primary: { bg: colors.primary, fg: colors.primaryForeground, border: colors.primary },
-    secondary: { bg: colors.secondary, fg: colors.secondaryForeground, border: colors.secondary },
-    outline: { bg: 'transparent', fg: colors.foreground, border: colors.input },
-    danger: { bg: colors.danger, fg: colors.dangerForeground, border: colors.danger },
-    signal: { bg: colors.signal, fg: colors.signalForeground, border: colors.signal },
-    ghost: { bg: 'transparent', fg: colors.primary, border: 'transparent' },
+    secondary: { bg: colors.card, fg: colors.foreground, border: colors.foreground },
+    outline: { bg: colors.card, fg: colors.foreground, border: colors.input },
+    danger: { bg: colors.card, fg: colors.danger, border: colors.danger },
+    ghost: { bg: 'transparent', fg: colors.foreground, border: 'transparent' },
   }[variant];
   const inactive = disabled === true || loading;
   return (
@@ -46,7 +48,7 @@ export function Button({
       {...props}
       style={({ pressed }) => [
         styles.base,
-        { minHeight: size === 'lg' ? touch.action : touch.min + 4 },
+        { minHeight: size === 'lg' ? touch.action : touch.min },
         { backgroundColor: palette.bg, borderColor: palette.border },
         inactive && styles.inactive,
         pressed && styles.pressed,
@@ -57,8 +59,8 @@ export function Button({
         <ActivityIndicator color={palette.fg} />
       ) : (
         <Text
-          variant={size === 'lg' ? 'subheading' : 'label'}
-          style={{ color: palette.fg, fontSize: size === 'lg' ? 18 : 16 }}
+          variant="label"
+          style={{ color: palette.fg, fontSize: size === 'lg' ? 18 : 16, lineHeight: 22 }}
           accessibilityRole="none"
         >
           {label}
@@ -72,7 +74,7 @@ const styles = StyleSheet.create({
   base: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderRadius: radius.lg,
     paddingHorizontal: space[5],
   },

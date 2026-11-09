@@ -6,31 +6,57 @@ import { toneColors, useTheme } from './theme';
 import type { Tone } from './theme';
 
 /**
- * Estado de un turno, ventana o registro: punto + texto. El color refuerza, pero el texto
- * siempre dice el estado. Mismo tono para el mismo estado en todas las pantallas.
+ * Sello de estado u hora (la pieza distintiva de Foja): recuadro de 1,5 px con texto condensado.
+ * `solid` es el normal, `dashed` marca lo programado o sin señal, `now` invierte (tinta sobre papel).
+ * El de falla (`danger`) lleva un segundo contorno y −2° de inclinación. El texto siempre dice el
+ * estado: el color solo refuerza.
  */
-export function Badge({ tone, label }: { tone: Tone; label: string }) {
+export function Badge({
+  tone = 'neutral',
+  label,
+  variant = 'solid',
+}: {
+  tone?: Tone;
+  label: string;
+  variant?: 'solid' | 'dashed' | 'now';
+}) {
   const { colors } = useTheme();
-  const { fg, bg } = toneColors(colors, tone);
-  return (
-    <View style={[styles.badge, { backgroundColor: bg }]}>
-      <View style={[styles.dot, { backgroundColor: fg }]} />
-      <Text variant="caption" style={{ color: fg }}>
+  // El neutro va en tinta (lo normal no hace ruido); los demás en el color pleno de su tono.
+  const fg = tone === 'neutral' ? colors.foreground : toneColors(colors, tone).fg;
+  const inverted = variant === 'now';
+  const border = {
+    borderColor: fg,
+    borderStyle: variant === 'dashed' ? ('dashed' as const) : ('solid' as const),
+  };
+  const inner = (
+    <View
+      style={[styles.stamp, border, { backgroundColor: inverted ? colors.primary : colors.card }]}
+    >
+      <Text
+        variant="stamp"
+        style={{ color: inverted ? colors.primaryForeground : fg }}
+        accessibilityRole="none"
+      >
         {label}
       </Text>
     </View>
   );
+  if (tone !== 'danger') return <View style={styles.outer}>{inner}</View>;
+  return <View style={[styles.outer, styles.failure, border]}>{inner}</View>;
 }
 
 const styles = StyleSheet.create({
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: space[1.5],
-    borderRadius: radius.full,
-    paddingHorizontal: space[3],
-    paddingVertical: space[1],
+  outer: { alignSelf: 'flex-start' },
+  stamp: {
+    borderWidth: 1.5,
+    borderRadius: radius.sm,
+    paddingHorizontal: space[2],
+    paddingVertical: space[0.5],
   },
-  dot: { width: 6, height: 6, borderRadius: radius.full },
+  failure: {
+    borderWidth: 1.5,
+    borderRadius: radius.sm,
+    padding: space[0.5],
+    transform: [{ rotate: '-2deg' }],
+  },
 });

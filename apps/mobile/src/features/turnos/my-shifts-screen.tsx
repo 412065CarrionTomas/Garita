@@ -102,7 +102,8 @@ export function MyShiftsScreen() {
           detail={`${shift.site.name}\nRondas: ${shift.rounds.map(({ round }) => round.name).join(', ')}`}
           trailing={
             <Badge
-              tone={shift.status === 'in_progress' ? 'signal' : 'info'}
+              tone="neutral"
+              variant={shift.status === 'in_progress' ? 'now' : 'dashed'}
               label={shift.status === 'in_progress' ? 'En curso' : 'Programado'}
             />
           }

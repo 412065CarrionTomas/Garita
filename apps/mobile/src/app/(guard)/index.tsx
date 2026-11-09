@@ -4,6 +4,11 @@ import { useAuth } from '@/features/auth/auth-context';
 import { MyShiftsScreen } from '@/features/turnos/my-shifts-screen';
 import { createDefaultFieldRepository } from '@/lib/db/database';
 
+function greeting(hour: number) {
+  if (hour >= 6 && hour < 12) return 'Buenos días';
+  return hour >= 12 && hour < 20 ? 'Buenas tardes' : 'Buenas noches';
+}
+
 export default function GuardHome() {
   const { logout } = useAuth();
 
@@ -36,8 +41,8 @@ export default function GuardHome() {
 
   return (
     <Screen>
-      <Text variant="caption" color="mutedForeground">
-        Vigilador
+      <Text variant="display" accessibilityRole="header">
+        {greeting(new Date().getHours())}
       </Text>
       <MyShiftsScreen />
       <ThemeSwitch />

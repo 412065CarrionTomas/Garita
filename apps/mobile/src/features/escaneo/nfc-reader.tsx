@@ -109,7 +109,7 @@ export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; on
       variant={
         availability === 'ready' && shiftData.checkpoints.some((point) => point.nfcUid)
           ? 'secondary'
-          : 'signal'
+          : 'primary'
       }
       onPress={onQr}
     />

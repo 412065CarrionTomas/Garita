@@ -8,9 +8,11 @@ import {
   Input,
   ListItem,
   Loading,
+  PointWindowList,
   Text,
   ThemeProvider,
   ThemeSwitch,
+  WindowBar,
 } from '.';
 
 it('Button se anuncia por su etiqueta y no dispara onPress mientras carga', async () => {
@@ -59,4 +61,29 @@ it('ThemeSwitch cambia la apariencia a oscuro', async () => {
   );
   await fireEvent.press(view.getByLabelText('Oscuro'));
   expect(view.getByText('Hola')).toHaveStyle({ color: colors.dark.foreground });
+});
+
+it('WindowBar se anuncia como una imagen con el conteo por estado', async () => {
+  const view = await render(
+    <WindowBar windows={['ontime', 'ontime', 'late', 'missed', 'pending']} />,
+  );
+  expect(
+    view.getByLabelText('5 ventanas: 2 a tiempo, 1 tardía, 1 no realizada, 1 pendiente'),
+  ).toBeTruthy();
+});
+
+it('PointWindowList nombra cada punto con su estado y marca el actual', async () => {
+  const view = await render(
+    <PointWindowList
+      currentIndex={1}
+      points={[
+        { id: 'a', number: 1, name: 'Portón', status: 'done', time: '21:03' },
+        { id: 'b', number: 2, name: 'Galpón', status: 'current', window: '21:00–22:00' },
+        { id: 'c', number: 3, name: 'Tanque', status: 'pending', time: '21:20' },
+      ]}
+    />,
+  );
+  expect(view.getByLabelText('Punto 1, Portón, 21:03')).toBeTruthy();
+  expect(view.getByLabelText('Punto 2, Galpón, Ahora')).toBeTruthy();
+  expect(view.getByText('Ventana 21:00–22:00')).toBeTruthy();
 });

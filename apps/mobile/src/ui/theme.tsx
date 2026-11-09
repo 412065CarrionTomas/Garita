@@ -7,16 +7,19 @@ import type { ColorToken } from '@garita/tokens';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type Scheme = 'light' | 'dark';
-export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'signal' | 'neutral';
+export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
 const STORAGE_KEY = 'garita-theme';
 
-/** Familias de Geist cargadas en el layout raíz (ver `fonts.ts`), una por peso. */
+/** Familias cargadas en el layout raíz (ver `fonts.ts`): Public Sans para texto y Barlow Condensed para rótulos, sellos y números. */
 export const fontFamily = {
-  regular: 'Geist_400Regular',
-  medium: 'Geist_500Medium',
-  semibold: 'Geist_600SemiBold',
-  bold: 'Geist_700Bold',
+  regular: 'PublicSans_400Regular',
+  medium: 'PublicSans_500Medium',
+  semibold: 'PublicSans_600SemiBold',
+  bold: 'PublicSans_700Bold',
+  condMedium: 'BarlowCondensed_500Medium',
+  condSemibold: 'BarlowCondensed_600SemiBold',
+  condBold: 'BarlowCondensed_700Bold',
 } as const;
 
 interface ThemeValue {
@@ -80,8 +83,6 @@ export function toneColors(colors: Record<ColorToken, string>, tone: Tone) {
       return { fg: colors.danger, bg: colors.dangerSoft };
     case 'info':
       return { fg: colors.info, bg: colors.infoSoft };
-    case 'signal':
-      return { fg: colors.signalForeground, bg: colors.signal };
     case 'neutral':
       return { fg: colors.mutedForeground, bg: colors.muted };
   }
