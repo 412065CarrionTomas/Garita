@@ -8,8 +8,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ClientSitesMap } from '@/features/mapa/site-location-map';
-import { env } from '@/config/env';
+import { SitesMap } from '@/features/mapa/sites-map';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { panicOutcomes, panicStatuses } from './queries';
 import { ResolvePanicDialog } from './resolve-dialog';
@@ -201,20 +200,16 @@ export function PanicDetailPage() {
               Coordenadas: {alert.latitude}, {alert.longitude}
               {alert.accuracyMeters !== null ? ` · Precisión: ${alert.accuracyMeters} m` : ''}
             </p>
-            {env.VITE_GOOGLE_MAPS_API_KEY ? (
-              <ClientSitesMap
-                sites={[
-                  {
-                    id: alert.id,
-                    name: 'Ubicación de la alerta',
-                    latitude: alert.latitude,
-                    longitude: alert.longitude,
-                  },
-                ]}
-              />
-            ) : (
-              <p>El mapa no está configurado; consultá las coordenadas.</p>
-            )}
+            <SitesMap
+              sites={[
+                {
+                  id: alert.id,
+                  name: 'Ubicación de la alerta',
+                  latitude: alert.latitude,
+                  longitude: alert.longitude,
+                },
+              ]}
+            />
           </>
         )}
       </section>

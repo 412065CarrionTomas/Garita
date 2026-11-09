@@ -1,10 +1,10 @@
-import { APIProvider, Map, Marker, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
-import { useEffect, useRef, useId } from 'react';
-import { env } from '@/config/env';
-import { mapStyle, useDark } from './map-style';
+import { useEffect } from 'react';
+import type { ReactNode } from 'react';
+import { Marker as MapMarker, useMap } from 'react-map-gl/maplibre';
+import { AddressSearch } from './address-search';
+import { BaseMap } from './base-map';
+import { DEFAULT_CENTER, useDark, useMapStyle } from './map-style';
 
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/empty-state';
 
 interface Props {
@@ -13,96 +13,91 @@ interface Props {
   onChange: (latitude: number, longitude: number) => void;
 }
 
-function InteractiveMap({ latitude, longitude, onChange }: Props) {
-  const id = useId();
-  const dark = useDark();
-  const map = useMap();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const places = useMapsLibrary('places');
+/** Marcador arrastrable; el mapa sigue al punto cuando cambia desde afuera. */
+function DraggableMarker({ latitude, longitude, onChange }: Props) {
+  const { current: map } = useMap();
   useEffect(() => {
-    if (!places || !inputRef.current) return;
-    const autocomplete = new places.Autocomplete(inputRef.current, {
-      fields: ['geometry', 'formatted_address'],
-    });
-    const listener = autocomplete.addListener('place_changed', () => {
-      const point = autocomplete.getPlace().geometry?.location?.toJSON();
-      if (point) onChange(point.lat, point.lng);
-    });
-    return () => {
-      listener.remove();
-    };
-  }, [onChange, places]);
-  useEffect(() => {
-    map?.panTo({ lat: latitude, lng: longitude });
+    if (!map) return;
+    map.easeTo({ center: [longitude, latitude], zoom: Math.max(map.getZoom(), 15) });
   }, [latitude, longitude, map]);
   return (
+    <MapMarker
+      latitude={latitude}
+      longitude={longitude}
+      draggable
+      onDragEnd={(event) => {
+        onChange(event.lngLat.lat, event.lngLat.lng);
+      }}
+    />
+  );
+}
+
+export function SiteMapLocation({ unavailable, ...props }: Props & { unavailable?: ReactNode }) {
+  // Misma consulta (en caché) que BaseMap: si el mapa no carga se reemplaza toda la sección.
+  const { isError } = useMapStyle(useDark());
+  if (isError) return unavailable;
+  // Un predio nuevo llega con 0, 0 (en el océano): se arranca en la zona por defecto y sin marcador.
+  const unset = props.latitude === 0 && props.longitude === 0;
+  return (
     <section aria-label="Ubicación del predio" className="min-w-0 space-y-4">
-      <Label htmlFor={`${id}-site-address-search`}>Buscar dirección (Google Places)</Label>
-      <Input
-        id={`${id}-site-address-search`}
-        ref={inputRef}
-        placeholder="Escribí una dirección"
-        className="w-full"
-      />
+      <AddressSearch onSelect={props.onChange} />
       <p className="text-sm text-muted-foreground">
-        Seleccioná la ubicación arrastrando el marcador.
+        {unset
+          ? 'Buscá la dirección o hacé clic en el mapa para ubicar el predio.'
+          : 'Ajustá la ubicación arrastrando el marcador.'}
       </p>
       <div className="h-72 overflow-hidden rounded-xl border border-border">
-        <Map
-          defaultCenter={{ lat: latitude, lng: longitude }}
-          defaultZoom={14}
-          styles={mapStyle(dark)}
-          className="h-72 w-full"
+        <BaseMap
+          initialViewState={
+            unset
+              ? { ...DEFAULT_CENTER, zoom: 11 }
+              : { latitude: props.latitude, longitude: props.longitude, zoom: 15 }
+          }
+          onClick={(event) => {
+            props.onChange(event.lngLat.lat, event.lngLat.lng);
+          }}
         >
-          <Marker
-            position={{ lat: latitude, lng: longitude }}
-            draggable
-            onDragEnd={(event) => {
-              const point = event.latLng?.toJSON();
-              if (point) onChange(point.lat, point.lng);
-            }}
-          />
-        </Map>
+          {!unset && <DraggableMarker {...props} />}
+        </BaseMap>
       </div>
     </section>
   );
 }
 
-export function SiteMapLocation(props: Props) {
-  return (
-    <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY} libraries={['places']}>
-      <InteractiveMap {...props} />
-    </APIProvider>
-  );
+export interface ClientSitesMapProps {
+  sites: { id: string; name: string; latitude: number | string; longitude: number | string }[];
 }
 
-export function ClientSitesMap({
-  sites,
-}: {
-  sites: { id: string; name: string; latitude: number | string; longitude: number | string }[];
-}) {
-  const dark = useDark();
-  if (sites.length === 0) return <EmptyState title="Este cliente no tiene predios activos." />;
-  const firstSite = sites[0];
-  if (!firstSite) return <EmptyState title="Este cliente no tiene predios activos." />;
-  const position = (site: (typeof sites)[number]) => ({
+/** Uno o varios lugares con un marcador cada uno; con varios, encuadra todos al abrir. */
+export function ClientSitesMap({ sites }: ClientSitesMapProps) {
+  const points = sites.map((site) => ({
+    id: site.id,
     lat: Number(site.latitude),
     lng: Number(site.longitude),
-  });
+  }));
+  const [first] = points;
+  if (!first) return <EmptyState title="Este cliente no tiene predios activos." />;
+  const lngs = points.map((p) => p.lng);
+  const lats = points.map((p) => p.lat);
   return (
-    <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY}>
-      <div className="h-96 overflow-hidden rounded-xl border border-border">
-        <Map
-          defaultCenter={position(firstSite)}
-          defaultZoom={10}
-          styles={mapStyle(dark)}
-          className="h-96 w-full"
-        >
-          {sites.map((site) => (
-            <Marker key={site.id} position={position(site)} title={site.name} />
-          ))}
-        </Map>
-      </div>
-    </APIProvider>
+    <div className="h-96 overflow-hidden rounded-xl border border-border">
+      <BaseMap
+        initialViewState={
+          points.length === 1
+            ? { latitude: first.lat, longitude: first.lng, zoom: 15 }
+            : {
+                bounds: [
+                  [Math.min(...lngs), Math.min(...lats)],
+                  [Math.max(...lngs), Math.max(...lats)],
+                ],
+                fitBoundsOptions: { padding: 48, maxZoom: 16 },
+              }
+        }
+      >
+        {points.map((point) => (
+          <MapMarker key={point.id} latitude={point.lat} longitude={point.lng} />
+        ))}
+      </BaseMap>
+    </div>
   );
 }

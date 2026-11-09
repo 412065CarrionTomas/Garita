@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import { APIProvider, Map as GoogleMap, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
-import { env } from '@/config/env';
+import { useCallback, useEffect, useMemo } from 'react';
+import { Layer, Marker, Source, useMap } from 'react-map-gl/maplibre';
+import { EmptyState } from '@/components/empty-state';
 import type { PointStatus } from '@/components/point-path';
 import { cn } from '@/lib/utils';
-import { mapStyle, useDark } from './map-style';
+import { BaseMap } from './base-map';
+import { DEFAULT_CENTER, useDark } from './map-style';
 
 export interface LiveMapSite {
   id: string;
@@ -46,53 +45,6 @@ const POINT_LABEL: Record<PointStatus, string> = {
   missed: 'Sin registro',
   pending: 'Pendiente',
 };
-
-/** Marcador HTML sobre el mapa (no usa mapId: el estilo es JSON local y los marcadores avanzados lo exigen). */
-function Overlay({
-  lat,
-  lng,
-  zIndex,
-  children,
-}: {
-  lat: number;
-  lng: number;
-  zIndex?: number;
-  children: ReactNode;
-}) {
-  const map = useMap();
-  const maps = useMapsLibrary('maps');
-  const [anchor] = useState(() => {
-    const el = document.createElement('div');
-    el.style.position = 'absolute';
-    return el;
-  });
-  useEffect(() => {
-    Object.assign(anchor.style, { zIndex: String(zIndex ?? 0) });
-  }, [anchor, zIndex]);
-  useEffect(() => {
-    if (!map || !maps) return;
-    const overlay = new maps.OverlayView();
-    overlay.onAdd = () => {
-      overlay.getPanes()?.overlayMouseTarget.appendChild(anchor);
-    };
-    overlay.draw = () => {
-      // getProjection() es undefined hasta que el overlay se agrega; los tipos no lo reflejan.
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      const pixel = overlay.getProjection()?.fromLatLngToDivPixel({ lat, lng });
-      if (!pixel) return;
-      anchor.style.left = `${pixel.x}px`;
-      anchor.style.top = `${pixel.y}px`;
-    };
-    overlay.onRemove = () => {
-      anchor.remove();
-    };
-    overlay.setMap(map);
-    return () => {
-      overlay.setMap(null);
-    };
-  }, [map, maps, anchor, lat, lng]);
-  return createPortal(children, anchor);
-}
 
 const SITE_TONE = {
   normal: 'border-foreground text-foreground',
@@ -210,57 +162,56 @@ function PointMarker({
 
 /** Ruta: sólida hasta donde se llegó, punteada lo que falta (mismo criterio que el camino lineal). */
 function RoutePath({ points, dark }: { points: LiveMapPoint[]; dark: boolean }) {
-  const map = useMap();
-  const maps = useMapsLibrary('maps');
-  useEffect(() => {
-    if (!map || !maps || points.length < 2) return;
-    // Los tokens son hex en :root/.dark; se leen del documento para no repetir colores acá.
+  // Los tokens son hex en :root/.dark; se leen del documento para no repetir colores acá.
+  const [ink, muted] = useMemo(() => {
     const css = getComputedStyle(document.documentElement);
-    const ink = css.getPropertyValue('--foreground').trim();
-    const muted = css.getPropertyValue('--muted-foreground').trim();
-    const lines = points.flatMap((to, i) => {
-      const from = points[i - 1];
-      if (!from) return [];
-      const path = [from, to].map((p) => ({ lat: p.lat, lng: p.lng }));
-      const solid = to.status === 'done' || to.status === 'missed';
-      return [
-        new maps.Polyline({
-          map,
-          path,
-          strokeColor: solid ? ink : muted,
-          strokeWeight: solid ? 2.2 : 1.5,
-          strokeOpacity: solid ? 1 : 0,
-          icons: solid
-            ? undefined
-            : [
-                {
-                  icon: {
-                    path: 'M 0,-1 0,1',
-                    strokeOpacity: 1,
-                    strokeColor: muted,
-                    scale: 1.5,
-                  },
-                  offset: '0',
-                  repeat: '10px',
-                },
-              ],
-        }),
-      ];
-    });
-    return () => {
-      lines.forEach((line) => {
-        line.setMap(null);
-      });
-    };
-  }, [map, maps, points, dark]);
-  return null;
+    return [
+      css.getPropertyValue('--foreground').trim(),
+      css.getPropertyValue('--muted-foreground').trim(),
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dark]);
+  // Cada tramo toma el estado de su destino: registrado o faltante = sólido; el resto, punteado.
+  const segments = (solid: boolean) => ({
+    type: 'FeatureCollection' as const,
+    features: points.slice(1).flatMap((to, i) => {
+      const from = points[i];
+      const isSolid = to.status === 'done' || to.status === 'missed';
+      return from && isSolid === solid
+        ? [
+            {
+              type: 'Feature' as const,
+              properties: {},
+              geometry: {
+                type: 'LineString' as const,
+                coordinates: [
+                  [from.lng, from.lat],
+                  [to.lng, to.lat],
+                ],
+              },
+            },
+          ]
+        : [];
+    }),
+  });
+  return (
+    <>
+      <Source id="route-solid" type="geojson" data={segments(true)}>
+        <Layer id="route-solid" type="line" paint={{ 'line-color': ink, 'line-width': 2.2 }} />
+      </Source>
+      <Source id="route-dashed" type="geojson" data={segments(false)}>
+        <Layer
+          id="route-dashed"
+          type="line"
+          paint={{ 'line-color': muted, 'line-width': 1.5, 'line-dasharray': [2, 4] }}
+        />
+      </Source>
+    </>
+  );
 }
 
 function Controls({ onFit }: { onFit: () => void }) {
-  const map = useMap();
-  const zoom = (delta: number) => {
-    map?.setZoom((map.getZoom() ?? 14) + delta);
-  };
+  const { current: map } = useMap();
   const base =
     'grid h-10 min-w-10 place-items-center rounded-md border-[1.5px] border-primary bg-card text-xl font-semibold text-foreground hover:bg-muted';
   return (
@@ -270,7 +221,7 @@ function Controls({ onFit }: { onFit: () => void }) {
         aria-label="Acercar"
         className={base}
         onClick={() => {
-          zoom(1);
+          map?.zoomIn();
         }}
       >
         +
@@ -280,7 +231,7 @@ function Controls({ onFit }: { onFit: () => void }) {
         aria-label="Alejar"
         className={base}
         onClick={() => {
-          zoom(-1);
+          map?.zoomOut();
         }}
       >
         −
@@ -303,7 +254,7 @@ function MapContent({
   onSelectPoint,
   dark,
 }: LiveMapProps & { dark: boolean }) {
-  const map = useMap();
+  const { current: map } = useMap();
   const selected = sites.find((site) => site.id === selectedSiteId);
   const targets = useMemo(
     () => (points.length ? points : selected ? [selected] : sites),
@@ -315,15 +266,19 @@ function MapContent({
     const [only, ...rest] = targets;
     if (!map || !only) return;
     if (rest.length === 0) {
-      map.panTo({ lat: only.lat, lng: only.lng });
-      map.setZoom(17);
+      map.flyTo({ center: [only.lng, only.lat], zoom: 17 });
       return;
     }
-    const bounds = new google.maps.LatLngBounds();
-    targets.forEach((t) => {
-      bounds.extend({ lat: t.lat, lng: t.lng });
-    });
-    map.fitBounds(bounds, 72);
+    // MapLibre usa [lng, lat].
+    const lngs = targets.map((t) => t.lng);
+    const lats = targets.map((t) => t.lat);
+    map.fitBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      { padding: 72 },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, key]);
   useEffect(fit, [fit]);
@@ -332,11 +287,12 @@ function MapContent({
     <>
       <RoutePath points={points} dark={dark} />
       {sites.map((site) => (
-        <Overlay
+        <Marker
           key={site.id}
-          lat={site.lat}
-          lng={site.lng}
-          zIndex={site.id === selectedSiteId ? 3 : site.id === hoveredSiteId ? 2 : 1}
+          latitude={site.lat}
+          longitude={site.lng}
+          anchor="center"
+          style={{ zIndex: site.id === selectedSiteId ? 3 : site.id === hoveredSiteId ? 2 : 1 }}
         >
           <SiteMarker
             site={site}
@@ -346,38 +302,47 @@ function MapContent({
             onSelect={onSelectSite}
             onHover={onHoverSite}
           />
-        </Overlay>
+        </Marker>
       ))}
       {points.map((point, index) => (
-        <Overlay key={point.id} lat={point.lat} lng={point.lng} zIndex={4}>
+        <Marker
+          key={point.id}
+          latitude={point.lat}
+          longitude={point.lng}
+          anchor="center"
+          style={{ zIndex: 4 }}
+        >
           <PointMarker
             point={point}
             index={index}
             selected={point.id === selectedPointId}
             onSelect={onSelectPoint}
           />
-        </Overlay>
+        </Marker>
       ))}
       <Controls onFit={fit} />
     </>
   );
 }
 
-/** Mapa de Google con estilo propio claro/oscuro, predios como sellos y la ruta de la ronda. */
+/** Mapa MapLibre con estilo propio claro/oscuro, predios como sellos y la ruta de la ronda. */
 export function LiveMapView(props: LiveMapProps) {
   const dark = useDark();
   return (
-    <APIProvider apiKey={env.VITE_GOOGLE_MAPS_API_KEY}>
-      <GoogleMap
-        defaultCenter={{ lat: -31.4, lng: -64.18 }}
-        defaultZoom={12}
-        styles={mapStyle(dark)}
-        disableDefaultUI
-        gestureHandling="greedy"
-        className="size-full"
-      >
-        <MapContent {...props} dark={dark} />
-      </GoogleMap>
-    </APIProvider>
+    <BaseMap
+      initialViewState={{ ...DEFAULT_CENTER, zoom: 12 }}
+      cooperativeGestures={false}
+      unavailable={
+        <div className="grid size-full place-items-center bg-muted p-6">
+          <EmptyState
+            title="No se pudo cargar el mapa"
+            description="Probá de nuevo en unos minutos."
+            className="bg-card"
+          />
+        </div>
+      }
+    >
+      <MapContent {...props} dark={dark} />
+    </BaseMap>
   );
 }
