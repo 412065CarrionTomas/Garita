@@ -15,6 +15,14 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 const idResponse = z.looseObject({ id: z.string() });
 const emptyInput = z.object({});
@@ -152,9 +160,12 @@ export function CheckpointsPanel({ site }: SiteProps) {
 
   return (
     <section aria-labelledby={`points-${site.id}`} className="mt-4">
-      <Card>
+      <Card className="border-0 py-0">
         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-          <h3 id={`points-${site.id}`} className="text-lg font-semibold">
+          <h3
+            id={`points-${site.id}`}
+            className="font-cond text-xl font-semibold uppercase tracking-wider"
+          >
             Puntos de control
           </h3>
           {admin && site.status === 'active' && (
@@ -286,93 +297,135 @@ export function CheckpointsPanel({ site }: SiteProps) {
                   </APIProvider>
                 </div>
               )}
-              <ul className="divide-y">
-                {points.data.map((point) => (
-                  <li key={point.id} className="space-y-2 py-3">
-                    <div className="font-medium">
-                      {point.name}
-                      {point.isIndoor ? ' · Interior' : ''}
-                    </div>
-                    <StatusBadge tone={point.status === 'active' ? 'success' : 'neutral'}>
-                      {point.status === 'active' ? 'Activo' : 'Inactivo'}
-                    </StatusBadge>
-                    {point.stickerLocation && <p>{point.stickerLocation}</p>}
-                    <p className="text-sm">
-                      Radio: {point.toleranceRadiusMeters} m · {point.latitude}, {point.longitude}
-                    </p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col" className="t-label w-12">
+                      N°
+                    </TableHead>
+                    <TableHead scope="col" className="t-label">
+                      Punto
+                    </TableHead>
+                    <TableHead scope="col" className="t-label">
+                      Estado
+                    </TableHead>
+                    <TableHead scope="col" className="t-label">
+                      Ubicación
+                    </TableHead>
                     {admin && (
-                      <div className="flex flex-wrap gap-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            edit(point);
-                          }}
-                        >
-                          Editar
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
-                              )
-                            )
-                              void apiPost(
-                                `/puntos/${point.id}/regenerar-qr`,
-                                {},
-                                emptyInput,
-                                z.looseObject({ checkpoint: idResponse, qrPayload: z.string() }),
-                              )
-                                .then(() => {
-                                  setMessage('QR regenerado. Imprimí un sticker nuevo.');
-                                })
-                                .catch(() => {
-                                  setMessage('No se pudo regenerar el QR. Intentá de nuevo.');
-                                });
-                          }}
-                        >
-                          Regenerar QR
-                        </Button>
-                        <Button
-                          variant="ghostDestructive"
-                          size="sm"
-                          onClick={() => {
-                            setPendingAction(() => async () => {
-                              try {
-                                await apiPost(
-                                  `/puntos/${point.id}/baja`,
-                                  {},
-                                  emptyInput,
-                                  idResponse,
-                                );
-                              } catch (error) {
-                                if (error instanceof ApiError && error.status === 409) {
-                                  const names = roundNames(error);
-                                  setMessage(
-                                    names.length
-                                      ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
-                                      : 'No se puede dar de baja: está incluida en rondas activas.',
-                                  );
-                                  return;
-                                }
-                                setMessage('No se pudo dar de baja el punto. Intentá de nuevo.');
-                              }
-                            });
-                          }}
-                        >
-                          Dar de baja
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => void download(point.id)}>
-                          Descargar sticker
-                        </Button>
-                      </div>
+                      <TableHead scope="col" className="t-label">
+                        Acciones
+                      </TableHead>
                     )}
-                  </li>
-                ))}
-              </ul>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {points.data.map((point, index) => (
+                    <TableRow key={point.id}>
+                      <TableCell className="t-numeral text-muted-foreground">{index + 1}</TableCell>
+                      <TableCell className="font-semibold">
+                        {point.name}
+                        {point.isIndoor ? ' · Interior' : ''}
+                        {point.stickerLocation && (
+                          <p className="text-sm font-normal text-muted-foreground">
+                            {point.stickerLocation}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {/* TODO(foja): la maqueta muestra Instalada / Falta imprimir; la API aún no expone si el QR se imprimió. */}
+                        <StatusBadge tone={point.status === 'active' ? 'success' : 'neutral'}>
+                          {point.status === 'active' ? 'Activo' : 'Inactivo'}
+                        </StatusBadge>
+                      </TableCell>
+                      <TableCell className="text-sm tabular-nums">
+                        Radio: {point.toleranceRadiusMeters} m · {point.latitude}, {point.longitude}
+                      </TableCell>
+                      {admin && (
+                        <TableCell>
+                          <div className="flex flex-wrap gap-3">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                edit(point);
+                              }}
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
+                                  )
+                                )
+                                  void apiPost(
+                                    `/puntos/${point.id}/regenerar-qr`,
+                                    {},
+                                    emptyInput,
+                                    z.looseObject({
+                                      checkpoint: idResponse,
+                                      qrPayload: z.string(),
+                                    }),
+                                  )
+                                    .then(() => {
+                                      setMessage('QR regenerado. Imprimí un sticker nuevo.');
+                                    })
+                                    .catch(() => {
+                                      setMessage('No se pudo regenerar el QR. Intentá de nuevo.');
+                                    });
+                              }}
+                            >
+                              Regenerar QR
+                            </Button>
+                            <Button
+                              variant="ghostDestructive"
+                              size="sm"
+                              onClick={() => {
+                                setPendingAction(() => async () => {
+                                  try {
+                                    await apiPost(
+                                      `/puntos/${point.id}/baja`,
+                                      {},
+                                      emptyInput,
+                                      idResponse,
+                                    );
+                                  } catch (error) {
+                                    if (error instanceof ApiError && error.status === 409) {
+                                      const names = roundNames(error);
+                                      setMessage(
+                                        names.length
+                                          ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
+                                          : 'No se puede dar de baja: está incluida en rondas activas.',
+                                      );
+                                      return;
+                                    }
+                                    setMessage(
+                                      'No se pudo dar de baja el punto. Intentá de nuevo.',
+                                    );
+                                  }
+                                });
+                              }}
+                            >
+                              Dar de baja
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => void download(point.id)}
+                            >
+                              Descargar sticker
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </>
           )}
           {confirmFar && (

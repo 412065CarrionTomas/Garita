@@ -7,7 +7,7 @@ import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { apiGet } from '@/lib/api-client';
@@ -70,41 +70,50 @@ export function PanicListPage() {
         </div>
       </div>
       {list.isPending ? (
-        <p role="status">Cargando alertas…</p>
+        <div role="status" className="space-y-2">
+          <span className="sr-only">Cargando alertas…</span>
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-16 w-full" />
+          ))}
+        </div>
       ) : list.isError ? (
-        <Alert variant="destructive">No se pudieron cargar las alertas.</Alert>
+        <Alert variant="destructive">
+          No se pudieron cargar las alertas.{' '}
+          <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
+            Reintentar
+          </Button>
+        </Alert>
       ) : (
         <>
           {list.data.items.length ? (
-            <ul className="space-y-3">
+            <ul className="divide-y divide-border border-[1.5px] border-input">
               {list.data.items.map((alert) => (
-                <li key={alert.id}>
-                  <Card>
-                    <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-                      <div className="space-y-2">
-                        <p className="font-medium">
-                          {alert.site.name} · {alert.guard.name}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Recibida: {new Date(alert.receivedAt).toLocaleString('es-AR')}
-                        </p>
-                        <StatusBadge
-                          tone={
-                            alert.status === 'active'
-                              ? 'danger'
-                              : alert.status === 'confirmed'
-                                ? 'warning'
-                                : 'success'
-                          }
-                        >
-                          {panicStatuses[alert.status]}
-                        </StatusBadge>
-                      </div>
-                      <Button variant="outline" asChild>
-                        <Link to={`/alertas-panico/${alert.id}`}>Ver alerta</Link>
-                      </Button>
-                    </CardContent>
-                  </Card>
+                <li
+                  key={alert.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
+                >
+                  <div className="space-y-1">
+                    <p className="font-semibold">
+                      {alert.site.name} · {alert.guard.name}
+                    </p>
+                    <p className="text-sm text-muted-foreground tabular-nums">
+                      Recibida: {new Date(alert.receivedAt).toLocaleString('es-AR')}
+                    </p>
+                    <StatusBadge
+                      tone={
+                        alert.status === 'active'
+                          ? 'danger'
+                          : alert.status === 'confirmed'
+                            ? 'info'
+                            : 'success'
+                      }
+                    >
+                      {panicStatuses[alert.status]}
+                    </StatusBadge>
+                  </div>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/alertas-panico/${alert.id}`}>Ver alerta</Link>
+                  </Button>
                 </li>
               ))}
             </ul>

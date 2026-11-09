@@ -3,8 +3,10 @@ import { Link } from 'react-router';
 import { notificationPreferencesSchema, type NotificationPreferences } from '@garita/shared';
 import { apiGet, apiPut } from '@/lib/api-client';
 import { PageHeader } from '@/components/page-header';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/status-badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -36,11 +38,14 @@ export function NotificationPreferencesPage() {
         description="Elegí las notificaciones push que querés recibir. Los avisos siempre aparecen en el panel."
       />
       {preferences.isPending ? (
-        <p role="status">Cargando preferencias…</p>
+        <div role="status">
+          <span className="sr-only">Cargando preferencias…</span>
+          <Skeleton className="h-24 w-full" />
+        </div>
       ) : preferences.isError ? (
-        <Alert role="alert">
+        <Alert variant="destructive">
           No pudimos cargar tus preferencias.{' '}
-          <Button variant="outline" onClick={() => void preferences.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void preferences.refetch()}>
             Reintentar
           </Button>
         </Alert>
@@ -61,9 +66,13 @@ export function NotificationPreferencesPage() {
             <p className="text-sm text-muted-foreground">
               Los demás avisos no se pueden silenciar porque el predio queda sin vigilancia.
             </p>
-            {save.isSuccess && <p role="status">Preferencia guardada.</p>}
+            {save.isSuccess && (
+              <p role="status">
+                <StatusBadge tone="success">Preferencia guardada.</StatusBadge>
+              </p>
+            )}
             {save.isError && (
-              <Alert role="alert">
+              <Alert variant="destructive">
                 No pudimos guardar la preferencia. Volvé a intentar con el interruptor.
               </Alert>
             )}

@@ -39,7 +39,7 @@ describe('ActivationPage', () => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(410, { message: 'expired' }));
     render(<ActivationPage />);
     expect(await screen.findByText(/Esta invitación venció/i)).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveClass('text-destructive');
+    expect(screen.getByRole('status')).toHaveClass('text-danger');
   });
 
   it('ofrece al supervisor el enlace para definir la contraseña', async () => {

@@ -99,9 +99,12 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
   };
   return (
     <section className="mt-4" aria-labelledby={`rounds-${site.id}`}>
-      <Card>
+      <Card className="border-0 py-0">
         <CardHeader>
-          <h3 id={`rounds-${site.id}`} className="text-lg font-semibold">
+          <h3
+            id={`rounds-${site.id}`}
+            className="font-cond text-xl font-semibold uppercase tracking-wider"
+          >
             Rondas
           </h3>
         </CardHeader>
@@ -198,7 +201,7 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
                 void save();
               }}
             >
-              <h4 className="text-lg font-semibold">
+              <h4 className="font-cond text-xl font-semibold uppercase tracking-wider">
                 {editingId ? 'Editar ronda' : 'Nueva ronda'}
               </h4>
               <Label className="grid min-w-0 gap-2" htmlFor="round-name">

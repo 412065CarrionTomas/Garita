@@ -11,6 +11,7 @@ jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
 jest.mock('recharts', () => ({
   ResponsiveContainer: () => null,
   Bar: () => null,
+  Rectangle: () => null,
   BarChart: () => null,
   Line: () => null,
   LineChart: () => null,
@@ -43,6 +44,7 @@ report.daily = [{ id: '2026-10-01', name: '2026-10-01', totals: report.totals }]
 report.bySite = [{ id: 'p1', name: 'Depósito Ruta 9', totals: report.totals }];
 report.byGuard = [{ id: 'g1', name: 'Pedro', deactivated: true, totals: report.totals }];
 beforeEach(() => {
+  localStorage.clear();
   jest.mocked(apiGet).mockImplementation((path) => {
     if (path.includes('/rondas/detalle'))
       return Promise.resolve({
@@ -89,6 +91,7 @@ beforeEach(() => {
   });
 });
 it('cada gráfico tiene título y tabla equivalente, aviso y pendientes con accesos', async () => {
+  const user = userEvent.setup();
   renderWithQueryClient(
     <MemoryRouter>
       <ReportsPage />
@@ -97,6 +100,7 @@ it('cada gráfico tiene título y tabla equivalente, aviso y pendientes con acce
   expect(
     await screen.findByText('2 rondas en revisión: el cliente las ve como en verificación'),
   ).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Gráficos' }));
   for (const title of [
     'Porcentaje de cumplimiento',
     'Rondas por estado',
@@ -123,10 +127,16 @@ it('selecciona un segmento con teclado y muestra las ventanas y el enlace al tur
       <ReportsPage />
     </MemoryRouter>,
   );
+  await user.click(await screen.findByRole('button', { name: 'Gráficos' }));
   const button = await screen.findByRole('button', { name: 'Ver ventanas: Completas sin demora' });
   button.focus();
   await user.keyboard('{Enter}');
   expect(await screen.findByRole('link', { name: 'Ver turno' })).toHaveAttribute(
+    'href',
+    '/supervision/turnos/s1',
+  );
+  // La lista de no realizadas pide solo ese estado y enlaza a la foja del turno.
+  expect(await screen.findByRole('link', { name: /Ver foja/ })).toHaveAttribute(
     'href',
     '/supervision/turnos/s1',
   );
@@ -170,4 +180,80 @@ it('rechaza un período invertido antes de consultar la API', async () => {
   await user.keyboard('{Enter}');
   expect(await screen.findByRole('alert')).toHaveTextContent('Ingresá un período válido');
   expect(apiGet).not.toHaveBeenCalled();
+});
+
+describe('vistas del cumplimiento', () => {
+  function renderPage() {
+    return renderWithQueryClient(
+      <MemoryRouter>
+        <ReportsPage />
+      </MemoryRouter>,
+    );
+  }
+  beforeEach(() => {
+    report.bySite = [
+      { id: 'p1', name: 'Depósito Ruta 9', totals: report.totals },
+      { id: 'p2', name: 'Torre Alvear', totals: { ...report.totals, percentage: 80 } },
+    ];
+  });
+
+  it('muestra por defecto la tabla por predio y sella REVISAR bajo 90%', async () => {
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'Cumplimiento por predio' });
+    const rows = within(table).getAllByRole('row');
+    const row = (index: number) => {
+      const found = rows[index];
+      if (!found) throw new Error(`Falta la fila ${index}`);
+      return found;
+    };
+    expect(within(row(1)).queryByText('REVISAR')).not.toBeInTheDocument();
+    expect(within(row(2)).getByText('REVISAR')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tabla' })).toHaveAttribute('aria-pressed', 'true');
+    await user_clickVer(row(2));
+  });
+
+  async function user_clickVer(row: HTMLElement) {
+    await userEvent.click(within(row).getByRole('button', { name: /Ver ventanas/ }));
+    expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('predio=p2'), expect.anything());
+  }
+
+  it('muestra la grilla por día y recuerda la última vista', async () => {
+    const user = userEvent.setup();
+    const first = renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Grilla' }));
+    expect(screen.getByRole('list', { name: 'Ventanas por día' })).toBeInTheDocument();
+    expect(localStorage.getItem('garita-cumplimiento-vista')).toBe('grilla');
+    first.unmount();
+    renderPage();
+    expect(await screen.findByRole('list', { name: 'Ventanas por día' })).toBeInTheDocument();
+  });
+
+  it('sigue funcionando si el almacenamiento falla', async () => {
+    const user = userEvent.setup();
+    jest.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('bloqueado');
+    });
+    jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('bloqueado');
+    });
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Grilla' }));
+    expect(screen.getByRole('button', { name: 'Grilla' })).toHaveAttribute('aria-pressed', 'true');
+    jest.restoreAllMocks();
+  });
+
+  it('el período rápido consulta el rango elegido', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole('table', { name: 'Cumplimiento por predio' });
+    jest.mocked(apiGet).mockClear();
+    await user.click(screen.getByRole('button', { name: '7 días' }));
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenCalledWith(
+        expect.stringMatching(/\/reportes\/rondas\?desde=\d{4}-\d{2}-\d{2}&hasta=/),
+        expect.anything(),
+      );
+    });
+    expect(screen.getByRole('button', { name: '7 días' })).toHaveAttribute('aria-pressed', 'true');
+  });
 });

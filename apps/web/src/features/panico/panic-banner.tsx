@@ -98,15 +98,10 @@ export function PanicBanner({
       )}
       {error && <Alert variant="destructive">{error}</Alert>}
       {active && (
-        <Alert
-          role="alert"
-          aria-live="assertive"
-          aria-atomic="true"
-          className="border-danger bg-danger-soft text-danger"
-        >
+        <Alert role="alert" aria-live="assertive" aria-atomic="true" variant="destructive">
           <Siren aria-hidden="true" />
           <div className="space-y-2">
-            <p className="font-semibold">
+            <p className="t-headline">
               Alerta de pánico · {count} {count === 1 ? 'activa' : 'activas'}
             </p>
             <p>
@@ -114,7 +109,7 @@ export function PanicBanner({
               recepción para detener el sonido.
             </p>
             <Link
-              className="underline"
+              className="font-semibold underline underline-offset-4"
               to={first ? `/alertas-panico/${first.id}` : '/alertas-panico'}
             >
               Atender alerta

@@ -178,6 +178,7 @@ function SiteSpeedConfig({
 export function SitesPage() {
   const { user } = useAuth();
   const [creating, setCreating] = useState(false);
+  const [selectedId, setSelectedId] = useState<string>();
   const sites = useQuery({
     queryKey: ['predios'],
     queryFn: () => apiGet('/predios', sitesResponseSchema),
@@ -253,6 +254,7 @@ export function SitesPage() {
       setCreateError(errorMessage(caught, 'Ya existe un predio con ese nombre en el cliente'));
     }
   };
+  const selected = sites.data?.find((site) => site.id === selectedId) ?? sites.data?.[0];
   return (
     <section aria-labelledby="sites-title" className="space-y-6">
       <Dialog open={creating} onOpenChange={setCreating}>
@@ -394,159 +396,183 @@ export function SitesPage() {
           }
         />
       ) : (
-        <ul className="space-y-6">
-          {sites.data.map((site) => (
-            <li key={site.id}>
-              <Card>
-                <CardHeader className="border-b">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-lg font-semibold break-words">{site.name}</h2>
-                    <StatusBadge tone={site.status === 'active' ? 'success' : 'neutral'}>
-                      {site.status === 'active' ? 'Activo' : 'Inactivo'}
-                    </StatusBadge>
-                  </div>
-                  <p className="text-muted-foreground">
-                    Cliente: {clients.data?.find((client) => client.id === site.clientId)?.name}
-                  </p>
-                  <p>
-                    {site.address} · {site.latitude}, {site.longitude}
-                  </p>
-                  {site.status === 'active' && (
-                    <span className="text-sm">
-                      {user?.role === 'supervisor' ? 'Supervisión' : 'Administración'}
+        <div className="grid items-start gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
+          <nav aria-label="Lista de predios">
+            <ul className="border-y border-input">
+              {sites.data.map((site) => (
+                <li key={site.id} className="border-b border-border last:border-b-0">
+                  <button
+                    type="button"
+                    aria-pressed={site.id === selected?.id}
+                    onClick={() => {
+                      setSelectedId(site.id);
+                    }}
+                    className="flex min-h-14 w-full flex-col items-start justify-center px-3 py-2 text-left hover:bg-muted aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+                  >
+                    <span className="font-semibold break-words">{site.name}</span>
+                    <span className="text-sm opacity-80">
+                      {clients.data?.find((client) => client.id === site.clientId)?.name}
+                      {site.status === 'active' ? '' : ' · Inactivo'}
                     </span>
-                  )}
-                  {user?.role === 'admin' && site.status === 'active' && (
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEditError('');
-                          setEditing(site);
-                          setEditForm({
-                            clientId: site.clientId,
-                            name: site.name,
-                            address: site.address,
-                            latitude: Number(site.latitude),
-                            longitude: Number(site.longitude),
-                            accessInstructions: site.accessInstructions ?? '',
-                            observations: site.observations ?? '',
-                          });
-                        }}
-                      >
-                        Editar predio
-                      </Button>
-                      <Button
-                        variant="ghostDestructive"
-                        size="sm"
-                        onClick={() => {
-                          setDeleting({ id: site.id, name: site.name });
-                        }}
-                      >
-                        Dar de baja
-                      </Button>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          {sites.data
+            .filter((site) => site.id === selected?.id)
+            .map((site) => (
+              <div key={site.id} className="min-w-0">
+                <Card>
+                  <CardHeader className="border-b">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h2 className="t-headline break-words">{site.name}</h2>
+                      <StatusBadge tone={site.status === 'active' ? 'success' : 'neutral'}>
+                        {site.status === 'active' ? 'Activo' : 'Inactivo'}
+                      </StatusBadge>
                     </div>
-                  )}
-                </CardHeader>
-                <CardContent className="min-w-0 space-y-6">
-                  <Tabs defaultValue="puntos">
-                    <TabsList>
-                      <TabsTrigger value="puntos">Puntos de control</TabsTrigger>
-                      <TabsTrigger value="rondas">Rondas</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="puntos">
-                      <CheckpointsPanel site={site} />
-                    </TabsContent>
-                    <TabsContent value="rondas">
-                      <RoundsPanel site={site} />
-                    </TabsContent>
-                  </Tabs>
-                  {site.status === 'active' &&
-                    (user?.role === 'admin' ||
-                      (user?.role === 'supervisor' &&
-                        site.supervisors?.some(
-                          ({ user: assigned }) => assigned.id === user.id,
-                        ))) && (
-                      <SiteConnectivityForm
-                        key={`${site.id}-${String(site.connectivityType)}-${String(site.minutesToSignal)}-${String(site.marginMinutes)}`}
-                        siteId={site.id}
-                        initial={siteConnectivitySchema.parse({
-                          type: site.connectivityType ?? 'with_signal',
-                          minutesToSignal: site.minutesToSignal ?? 0,
-                          marginMinutes: site.marginMinutes ?? 30,
-                        })}
-                        onSaved={() => void sites.refetch()}
-                      />
+                    <p className="text-muted-foreground">
+                      Cliente: {clients.data?.find((client) => client.id === site.clientId)?.name}
+                    </p>
+                    <p>
+                      {site.address} · {site.latitude}, {site.longitude}
+                    </p>
+                    {site.status === 'active' && (
+                      <span className="text-sm">
+                        {user?.role === 'supervisor' ? 'Supervisión' : 'Administración'}
+                      </span>
                     )}
-                  <SiteSpeedConfig
-                    site={site}
-                    canConfigure={
-                      site.status === 'active' &&
+                    {user?.role === 'admin' && site.status === 'active' && (
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditError('');
+                            setEditing(site);
+                            setEditForm({
+                              clientId: site.clientId,
+                              name: site.name,
+                              address: site.address,
+                              latitude: Number(site.latitude),
+                              longitude: Number(site.longitude),
+                              accessInstructions: site.accessInstructions ?? '',
+                              observations: site.observations ?? '',
+                            });
+                          }}
+                        >
+                          Editar predio
+                        </Button>
+                        <Button
+                          variant="ghostDestructive"
+                          size="sm"
+                          onClick={() => {
+                            setDeleting({ id: site.id, name: site.name });
+                          }}
+                        >
+                          Dar de baja
+                        </Button>
+                      </div>
+                    )}
+                  </CardHeader>
+                  <CardContent className="min-w-0 space-y-6">
+                    <Tabs defaultValue="puntos">
+                      <TabsList>
+                        <TabsTrigger value="puntos">Puntos de control</TabsTrigger>
+                        <TabsTrigger value="rondas">Rondas</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="puntos">
+                        <CheckpointsPanel site={site} />
+                      </TabsContent>
+                      <TabsContent value="rondas">
+                        <RoundsPanel site={site} />
+                      </TabsContent>
+                    </Tabs>
+                    {site.status === 'active' &&
                       (user?.role === 'admin' ||
                         (user?.role === 'supervisor' &&
-                          Boolean(site.supervisors?.some(({ user: u }) => u.id === user.id))))
-                    }
-                    onSaved={() => void sites.refetch()}
-                  />
-                  {user?.role === 'admin' && !site.hasActiveSupervisor && (
-                    <p role="status">Sin supervisor activo</p>
-                  )}
-                  {user?.role === 'admin' && site.status === 'active' && (
-                    <div className="mt-2 space-y-2">
-                      <div className="grid gap-2">
-                        <Label htmlFor={`supervisors-${site.id}`}>Supervisores asignados</Label>
-                        <NativeSelect
-                          id={`supervisors-${site.id}`}
-                          multiple
-                          aria-label={`Supervisores de ${site.name}`}
-                          value={
-                            supervisorIds[site.id] ??
-                            site.supervisors?.map(({ user }) => user.id) ??
-                            []
-                          }
-                          onChange={(event) => {
-                            const selected = [...event.currentTarget.selectedOptions].map(
-                              (option) => option.value,
-                            );
-                            const previous =
+                          site.supervisors?.some(
+                            ({ user: assigned }) => assigned.id === user.id,
+                          ))) && (
+                        <SiteConnectivityForm
+                          key={`${site.id}-${String(site.connectivityType)}-${String(site.minutesToSignal)}-${String(site.marginMinutes)}`}
+                          siteId={site.id}
+                          initial={siteConnectivitySchema.parse({
+                            type: site.connectivityType ?? 'with_signal',
+                            minutesToSignal: site.minutesToSignal ?? 0,
+                            marginMinutes: site.marginMinutes ?? 30,
+                          })}
+                          onSaved={() => void sites.refetch()}
+                        />
+                      )}
+                    <SiteSpeedConfig
+                      site={site}
+                      canConfigure={
+                        site.status === 'active' &&
+                        (user?.role === 'admin' ||
+                          (user?.role === 'supervisor' &&
+                            Boolean(site.supervisors?.some(({ user: u }) => u.id === user.id))))
+                      }
+                      onSaved={() => void sites.refetch()}
+                    />
+                    {user?.role === 'admin' && !site.hasActiveSupervisor && (
+                      <p role="status">Sin supervisor activo</p>
+                    )}
+                    {user?.role === 'admin' && site.status === 'active' && (
+                      <div className="mt-2 space-y-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor={`supervisors-${site.id}`}>Supervisores asignados</Label>
+                          <NativeSelect
+                            id={`supervisors-${site.id}`}
+                            multiple
+                            aria-label={`Supervisores de ${site.name}`}
+                            value={
                               supervisorIds[site.id] ??
                               site.supervisors?.map(({ user }) => user.id) ??
-                              [];
-                            // Muestra la selección al instante y la revierte si el guardado falla.
-                            setSupervisorIds((current) => ({ ...current, [site.id]: selected }));
-                            setActionError('');
-                            void apiPut(
-                              `/predios/${site.id}/supervisores`,
-                              { supervisorIds: selected },
-                              z.object({ supervisorIds: z.array(z.string()) }),
-                              z.array(z.unknown()),
-                            )
-                              .then(() => sites.refetch())
-                              .catch((caught: unknown) => {
-                                setSupervisorIds((current) => ({
-                                  ...current,
-                                  [site.id]: previous,
-                                }));
-                                setActionError(errorMessage(caught));
-                              });
-                          }}
-                          className="w-full [&>select]:h-24 [&>svg]:hidden"
-                        >
-                          {supervisors.data?.map((supervisor) => (
-                            <NativeSelectOption key={supervisor.id} value={supervisor.id}>
-                              {supervisor.firstName} {supervisor.lastName}
-                            </NativeSelectOption>
-                          ))}
-                        </NativeSelect>
+                              []
+                            }
+                            onChange={(event) => {
+                              const selected = [...event.currentTarget.selectedOptions].map(
+                                (option) => option.value,
+                              );
+                              const previous =
+                                supervisorIds[site.id] ??
+                                site.supervisors?.map(({ user }) => user.id) ??
+                                [];
+                              // Muestra la selección al instante y la revierte si el guardado falla.
+                              setSupervisorIds((current) => ({ ...current, [site.id]: selected }));
+                              setActionError('');
+                              void apiPut(
+                                `/predios/${site.id}/supervisores`,
+                                { supervisorIds: selected },
+                                z.object({ supervisorIds: z.array(z.string()) }),
+                                z.array(z.unknown()),
+                              )
+                                .then(() => sites.refetch())
+                                .catch((caught: unknown) => {
+                                  setSupervisorIds((current) => ({
+                                    ...current,
+                                    [site.id]: previous,
+                                  }));
+                                  setActionError(errorMessage(caught));
+                                });
+                            }}
+                            className="w-full [&>select]:h-24 [&>svg]:hidden"
+                          >
+                            {supervisors.data?.map((supervisor) => (
+                              <NativeSelectOption key={supervisor.id} value={supervisor.id}>
+                                {supervisor.firstName} {supervisor.lastName}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </li>
-          ))}
-        </ul>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            ))}
+        </div>
       )}
       <Dialog
         open={editing !== null}

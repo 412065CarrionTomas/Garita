@@ -104,7 +104,7 @@ export function RoleLayout() {
       onLogout={() => void logout()}
     >
       {(user.role === 'admin' || user.role === 'supervisor') && (
-        <p role="status" className="text-sm text-muted-foreground">
+        <p role="status" className="t-label text-muted-foreground">
           ● {realtime.connected ? 'Conectado' : 'Reconectando…'}
         </p>
       )}
@@ -112,9 +112,16 @@ export function RoleLayout() {
         {realtime.announcement}
       </p>
       {realtime.incident && (
-        <div role="status" className="rounded-lg border border-info bg-info-soft p-3 text-sm">
+        <div
+          role="status"
+          className="rounded-md border-[1.5px] border-info bg-info-soft p-3 text-sm text-info"
+        >
           <span>{realtime.incident}</span>{' '}
-          <button type="button" className="underline" onClick={realtime.dismissIncident}>
+          <button
+            type="button"
+            className="font-semibold underline"
+            onClick={realtime.dismissIncident}
+          >
             Cerrar
           </button>
         </div>

@@ -7,6 +7,14 @@ export const noticeLabels: Record<NoticeKind, string> = {
   shift_closed_early: 'Turno cerrado antes de hora',
   shift_without_guard: 'Turno sin vigilador',
 };
+// Rojo = falla de cobertura, ámbar = demora, punteado = falta de datos (no es una falla comprobada).
+export const noticeTone: Record<NoticeKind, 'danger' | 'warning' | 'neutral'> = {
+  round_missed: 'danger',
+  shift_unsynced: 'neutral',
+  shift_not_started: 'warning',
+  shift_closed_early: 'danger',
+  shift_without_guard: 'danger',
+};
 export const resolutionLabels: Record<NoticeResolution, string> = {
   data_arrived: 'Llegaron los datos',
   late_start: 'Inicio tardío',

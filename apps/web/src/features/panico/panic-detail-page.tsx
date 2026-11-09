@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ClientSitesMap } from '@/features/mapa/site-location-map';
 import { env } from '@/config/env';
 import { apiGet, apiPost } from '@/lib/api-client';
@@ -29,11 +29,22 @@ export function PanicDetailPage() {
       apiPost(`/alertas-panico/${id}/confirmar`, {}, z.object({}), panicAlertDetailSchema),
     onSettled: () => client.invalidateQueries({ queryKey: ['panico'] }),
   });
-  if (detail.isPending) return <p role="status">Cargando alerta…</p>;
+  if (detail.isPending)
+    return (
+      <div role="status" className="space-y-2">
+        <span className="sr-only">Cargando alerta…</span>
+        {[0].map((i) => (
+          <Skeleton key={i} className="h-48 w-full" />
+        ))}
+      </div>
+    );
   if (detail.isError)
     return (
       <Alert variant="destructive">
-        No se pudo cargar la alerta. Revisá tus permisos e intentá nuevamente.
+        No se pudo cargar la alerta. Revisá tus permisos e intentá nuevamente.{' '}
+        <Button variant="outline" size="sm" onClick={() => void detail.refetch()}>
+          Reintentar
+        </Button>
       </Alert>
     );
   const alert = detail.data;
@@ -54,98 +65,100 @@ export function PanicDetailPage() {
   };
   return (
     <section className="space-y-6" aria-label="Detalle de alerta de pánico">
-      <PageHeader title="Alerta de pánico" description={alert.site.name} />
-      <Link className="underline" to="/alertas-panico">
-        Volver a alertas
-      </Link>
+      <PageHeader
+        title="Alerta de pánico"
+        description={alert.site.name}
+        actions={
+          <Button asChild variant="outline">
+            <Link to="/alertas-panico">Volver a alertas</Link>
+          </Button>
+        }
+      />
       <StatusBadge
         tone={
-          alert.status === 'active'
-            ? 'danger'
-            : alert.status === 'confirmed'
-              ? 'warning'
-              : 'success'
+          alert.status === 'active' ? 'danger' : alert.status === 'confirmed' ? 'info' : 'success'
         }
       >
         {panicStatuses[alert.status]}
       </StatusBadge>
       {/* TODO(HU-37): SMS ingestion will provide authenticated=false for unverified alerts. */}
       {alert.channel === 'sms' && !alert.authenticated && (
-        <Alert>No verificada. Atendé la alerta igualmente.</Alert>
+        <Alert variant="destructive">No verificada. Atendé la alerta igualmente.</Alert>
       )}
       {delayed && (
-        <Alert>
+        <Alert variant="neutral">
           Enviada por {alert.channel === 'sms' ? 'SMS' : 'internet'} a las{' '}
           {localTime(alert.triggeredAt)}, recibida por la plataforma a las{' '}
           {localTime(alert.receivedAt)}
         </Alert>
       )}
-      <Card>
-        <CardContent className="space-y-4 py-4">
-          <dl className="grid gap-4 sm:grid-cols-2">
+      <div className="border-[1.5px] border-input p-4">
+        <dl className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <dt className="t-label text-muted-foreground">Vigilador</dt>
+            <dd>{alert.guard.name}</dd>
+          </div>
+          <div>
+            <dt className="t-label text-muted-foreground">Teléfono</dt>
+            <dd>
+              {alert.guard.phone ? (
+                <a
+                  className="font-semibold underline underline-offset-4"
+                  href={`tel:${alert.guard.phone}`}
+                >
+                  Llamar al vigilador: {alert.guard.phone}
+                </a>
+              ) : (
+                'Sin teléfono registrado'
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="t-label text-muted-foreground">Canal de origen</dt>
+            <dd>{alert.channel === 'sms' ? 'SMS' : 'Internet'}</dd>
+          </div>
+          <div>
+            <dt className="t-label text-muted-foreground">Enviada</dt>
+            <dd className="tabular-nums">{timestamp(alert.triggeredAt)}</dd>
+          </div>
+          <div>
+            <dt className="t-label text-muted-foreground">Recibida por la plataforma</dt>
+            <dd className="tabular-nums">{timestamp(alert.receivedAt)}</dd>
+          </div>
+          <div>
+            <dt className="t-label text-muted-foreground">Escalada</dt>
+            <dd>{alert.escalatedAt ? `Sí · ${timestamp(alert.escalatedAt)}` : 'No'}</dd>
+          </div>
+          <div>
+            <dt className="t-label text-muted-foreground">Confirmación</dt>
+            <dd>
+              {alert.confirmedAt
+                ? `${alert.confirmedBy?.name ?? 'Usuario'} · ${timestamp(alert.confirmedAt)}`
+                : 'Pendiente'}
+            </dd>
+          </div>
+          <div>
+            <dt className="t-label text-muted-foreground">Resolución</dt>
+            <dd>
+              {alert.resolvedAt
+                ? `${alert.resolvedBy?.name ?? 'Usuario'} · ${timestamp(alert.resolvedAt)}`
+                : 'Pendiente'}
+            </dd>
+          </div>
+          {alert.outcome && (
             <div>
-              <dt className="text-sm text-muted-foreground">Vigilador</dt>
-              <dd>{alert.guard.name}</dd>
+              <dt className="t-label text-muted-foreground">Resultado</dt>
+              <dd>{panicOutcomes[alert.outcome]}</dd>
             </div>
+          )}
+          {alert.resolutionComment && (
             <div>
-              <dt className="text-sm text-muted-foreground">Teléfono</dt>
-              <dd>
-                {alert.guard.phone ? (
-                  <a className="underline" href={`tel:${alert.guard.phone}`}>
-                    Llamar al vigilador: {alert.guard.phone}
-                  </a>
-                ) : (
-                  'Sin teléfono registrado'
-                )}
-              </dd>
+              <dt className="t-label text-muted-foreground">Comentario</dt>
+              <dd className="whitespace-pre-wrap break-words">{alert.resolutionComment}</dd>
             </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">Canal de origen</dt>
-              <dd>{alert.channel === 'sms' ? 'SMS' : 'Internet'}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">Enviada</dt>
-              <dd className="tabular-nums">{timestamp(alert.triggeredAt)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">Recibida por la plataforma</dt>
-              <dd className="tabular-nums">{timestamp(alert.receivedAt)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">Escalada</dt>
-              <dd>{alert.escalatedAt ? `Sí · ${timestamp(alert.escalatedAt)}` : 'No'}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">Confirmación</dt>
-              <dd>
-                {alert.confirmedAt
-                  ? `${alert.confirmedBy?.name ?? 'Usuario'} · ${timestamp(alert.confirmedAt)}`
-                  : 'Pendiente'}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">Resolución</dt>
-              <dd>
-                {alert.resolvedAt
-                  ? `${alert.resolvedBy?.name ?? 'Usuario'} · ${timestamp(alert.resolvedAt)}`
-                  : 'Pendiente'}
-              </dd>
-            </div>
-            {alert.outcome && (
-              <div>
-                <dt className="text-sm text-muted-foreground">Resultado</dt>
-                <dd>{panicOutcomes[alert.outcome]}</dd>
-              </div>
-            )}
-            {alert.resolutionComment && (
-              <div>
-                <dt className="text-sm text-muted-foreground">Comentario</dt>
-                <dd className="whitespace-pre-wrap break-words">{alert.resolutionComment}</dd>
-              </div>
-            )}
-          </dl>
-        </CardContent>
-      </Card>
+          )}
+        </dl>
+      </div>
       {confirm.isError && (
         <Alert variant="destructive">
           No se pudo confirmar. Revisá si alguien ya atendió la alerta.
@@ -179,7 +192,7 @@ export function PanicDetailPage() {
             : 'Podés resolverla aunque la haya confirmado otra persona.'}
       </p>
       <section aria-label="Ubicación de la alerta" className="space-y-3">
-        <h2 className="text-lg font-semibold">Ubicación</h2>
+        <h2 className="t-label text-muted-foreground">Ubicación</h2>
         {alert.latitude === null || alert.longitude === null ? (
           <p>No se registró ubicación.</p>
         ) : (
@@ -206,11 +219,11 @@ export function PanicDetailPage() {
         )}
       </section>
       <section aria-label="SMS a destinatarios" className="space-y-3">
-        <h2 className="text-lg font-semibold">SMS a destinatarios</h2>
+        <h2 className="t-label text-muted-foreground">SMS a destinatarios</h2>
         {alert.smsDeliveries.length ? (
-          <ul>
+          <ul className="divide-y divide-border border-[1.5px] border-input">
             {alert.smsDeliveries.map((delivery) => (
-              <li key={delivery.id}>
+              <li key={delivery.id} className="px-3 py-2 tabular-nums">
                 {delivery.reason === 'initial' ? 'Inicial' : 'Escalamiento'} ·{' '}
                 {smsStatus[delivery.status]} · {timestamp(delivery.createdAt)}
               </li>

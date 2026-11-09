@@ -83,7 +83,7 @@ it.each([
         <ShiftDetailPage />
       </MemoryRouter>,
     );
-    await screen.findByRole('heading', { name: 'Turno en Campo Los Álamos' });
+    await screen.findByRole('heading', { name: 'Campo Los Álamos' });
     if (!visible) {
       expect(screen.queryByRole('button', { name: 'Cerrar sin datos' })).not.toBeInTheDocument();
       return;

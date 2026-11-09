@@ -11,10 +11,11 @@ import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 const severitySchema = z.enum(['grave', 'media', 'leve']).nullable();
 const rowSchema = z.object({
@@ -97,49 +98,55 @@ export function ReviewPage() {
         title="Rondas en revisión"
         description="Ventanas que necesitan una decisión del supervisor."
       />
-      {isPending && <p role="status">Cargando rondas…</p>}
+      {isPending && (
+        <div role="status" className="space-y-2">
+          <span className="sr-only">Cargando rondas…</span>
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-16 w-full" />
+          ))}
+        </div>
+      )}
       {isError && (
-        <Alert role="alert">
+        <Alert variant="destructive">
           No pudimos cargar las rondas.{' '}
-          <Button variant="outline" onClick={() => void refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
             Reintentar
           </Button>
         </Alert>
       )}
       {data && (
-        <p aria-live="polite">
+        <p aria-live="polite" className="t-label text-muted-foreground tabular-nums">
           {data.count} {data.count === 1 ? 'ventana pendiente' : 'ventanas pendientes'}
         </p>
       )}
       {data?.count === 0 && <EmptyState title="No hay rondas en revisión" />}
-      <ul className="space-y-3">
-        {data?.items.map((item) => (
-          <li key={item.id}>
-            <Card>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-                <div className="space-y-2">
-                  <p className="font-medium">
-                    {item.round.name} · {item.shift.site.name} · ventana {item.windowIndex + 1}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Desde {new Date(item.startsAt).toLocaleString('es-AR')} · {item.recordedCount}{' '}
-                    de {item.expectedCount} puntos
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Severity level={item.severityLevel} />
-                    {item.overdue && (
-                      <StatusBadge tone="warning">Más de 24 h pendiente</StatusBadge>
-                    )}
-                  </div>
+      {data && data.count > 0 && (
+        <ul className="divide-y divide-border border-[1.5px] border-input">
+          {data.items.map((item) => (
+            <li
+              key={item.id}
+              className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
+            >
+              <div className="min-w-0 space-y-1">
+                <p className="font-semibold">
+                  {item.round.name} · {item.shift.site.name} · ventana {item.windowIndex + 1}
+                </p>
+                <p className="text-sm text-muted-foreground tabular-nums">
+                  Desde {new Date(item.startsAt).toLocaleString('es-AR')} · {item.recordedCount} de{' '}
+                  {item.expectedCount} puntos
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Severity level={item.severityLevel} />
+                  {item.overdue && <StatusBadge tone="warning">Más de 24 h pendiente</StatusBadge>}
                 </div>
-                <Button asChild variant="outline">
-                  <Link to={`/revision/${item.id}`}>Ver detalle</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          </li>
-        ))}
-      </ul>
+              </div>
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/revision/${item.id}`}>Ver detalle</Link>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -183,15 +190,21 @@ export function ReviewDetailPage() {
     <section className="space-y-6" aria-labelledby="review-detail-title">
       <Link
         to="/revision"
-        className="text-sm text-primary underline focus-visible:ring-2 focus-visible:ring-ring"
+        className="text-sm font-semibold text-foreground underline underline-offset-4"
       >
         ← Volver a rondas en revisión
       </Link>
-      {isPending && <p role="status">Cargando ventana…</p>}
+      {isPending && (
+        <div role="status" className="space-y-2">
+          <span className="sr-only">Cargando ventana…</span>
+          <Skeleton className="h-10 w-2/3" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      )}
       {isError && (
-        <Alert role="alert">
+        <Alert variant="destructive">
           No pudimos cargar la ventana.{' '}
-          <Button variant="outline" onClick={() => void refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
             Reintentar
           </Button>
         </Alert>
@@ -204,79 +217,76 @@ export function ReviewDetailPage() {
             description={`${data.recordedCount} de ${data.expectedCount} puntos registrados`}
             actions={<Severity level={data.severityLevel} />}
           />
-          <Card>
-            <CardContent className="space-y-4 py-4">
-              <p>
-                Estado:{' '}
-                {data.status === 'in_review'
-                  ? 'En revisión'
-                  : data.status === 'not_done'
-                    ? 'No realizada'
-                    : data.status === 'incomplete'
-                      ? 'Incompleta'
-                      : 'Completa'}
-              </p>
-              {data.status === 'in_review' && (
-                <Button
-                  onClick={() => {
-                    setAction({
-                      path: `/ventanas-ronda/${data.id}/validar`,
-                      title: 'Validar ventana',
-                    });
-                  }}
-                >
-                  Validar ventana
-                </Button>
-              )}
-              <h2 className="font-semibold">Registros</h2>
-              <ul className="space-y-3">
-                {data.records.map((record) => (
-                  <li key={record.id} className="border-b border-border pb-3">
-                    <p>
-                      {record.checkpointName} ·{' '}
-                      {new Date(record.occurredAtDevice).toLocaleString('es-AR')} ·{' '}
-                      {record.invalidated ? 'Invalidado' : 'Válido'}
+          <section className="space-y-4 border-[1.5px] border-input p-4">
+            <p>
+              Estado:{' '}
+              {data.status === 'in_review'
+                ? 'En revisión'
+                : data.status === 'not_done'
+                  ? 'No realizada'
+                  : data.status === 'incomplete'
+                    ? 'Incompleta'
+                    : 'Completa'}
+            </p>
+            {data.status === 'in_review' && (
+              <Button
+                onClick={() => {
+                  setAction({
+                    path: `/ventanas-ronda/${data.id}/validar`,
+                    title: 'Validar ventana',
+                  });
+                }}
+              >
+                Validar ventana
+              </Button>
+            )}
+            <h2 className="t-label text-muted-foreground">Registros</h2>
+            <ul className="space-y-3">
+              {data.records.map((record) => (
+                <li key={record.id} className="space-y-2 border-b border-border pb-3">
+                  <p className={cn('tabular-nums', record.invalidated && 'line-through')}>
+                    {record.checkpointName} ·{' '}
+                    {new Date(record.occurredAtDevice).toLocaleString('es-AR')} ·{' '}
+                    {record.invalidated ? 'Invalidado' : 'Válido'}
+                  </p>
+                  {record.flags.map((flag) => (
+                    <p key={flag.type} className="text-sm">
+                      ⚠ {flag.severity}: {flag.reason ?? flag.type}
                     </p>
-                    {record.flags.map((flag) => (
-                      <p key={flag.type} className="text-sm">
-                        ⚠ {flag.severity}: {flag.reason ?? flag.type}
-                      </p>
-                    ))}
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setAction({
-                          path: `/registros-puntos/${record.id}/${record.invalidated ? 'restituir' : 'invalidar'}`,
-                          title: record.invalidated ? 'Restituir registro' : 'Invalidar registro',
-                        });
-                      }}
-                    >
-                      {record.invalidated ? 'Restituir' : 'Invalidar'}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="space-y-3 py-4">
-              <h2 className="font-semibold">Historial de decisiones</h2>
-              {data.decisions.length === 0 && <p>Sin decisiones todavía.</p>}
-              <ol className="space-y-2">
-                {data.decisions.map((decision) => (
-                  <li key={decision.id}>
-                    {decision.kind === 'validate'
-                      ? 'Validó'
-                      : decision.kind === 'invalidate'
-                        ? 'Invalidó'
-                        : 'Restituyó'}{' '}
-                    · {decision.decidedBy} · {new Date(decision.decidedAt).toLocaleString('es-AR')}{' '}
-                    · {decision.comment}
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAction({
+                        path: `/registros-puntos/${record.id}/${record.invalidated ? 'restituir' : 'invalidar'}`,
+                        title: record.invalidated ? 'Restituir registro' : 'Invalidar registro',
+                      });
+                    }}
+                  >
+                    {record.invalidated ? 'Restituir' : 'Invalidar'}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="space-y-3 border-[1.5px] border-input p-4">
+            <h2 className="t-label text-muted-foreground">Historial de decisiones</h2>
+            {data.decisions.length === 0 && <p>Sin decisiones todavía.</p>}
+            <ol className="space-y-2">
+              {data.decisions.map((decision) => (
+                <li key={decision.id} className="tabular-nums">
+                  {decision.kind === 'validate'
+                    ? 'Validó'
+                    : decision.kind === 'invalidate'
+                      ? 'Invalidó'
+                      : 'Restituyó'}{' '}
+                  · {decision.decidedBy} · {new Date(decision.decidedAt).toLocaleString('es-AR')} ·{' '}
+                  {decision.comment}
+                </li>
+              ))}
+            </ol>
+          </section>
         </>
       )}
       <Dialog
@@ -323,7 +333,7 @@ export function ReviewDetailPage() {
                 Cancelar
               </Button>
               <Button type="submit" disabled={mutation.isPending}>
-                {action?.title}
+                {mutation.isPending ? 'Guardando…' : action?.title}
               </Button>
             </div>
           </form>

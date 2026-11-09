@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { apiGet } from '@/lib/api-client';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -93,19 +94,24 @@ export function NoticesPage() {
         </div>
       </div>
       {sites.isError && (
-        <Alert role="alert">
+        <Alert variant="destructive">
           No pudimos cargar los predios.{' '}
-          <Button variant="outline" onClick={() => void sites.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void sites.refetch()}>
             Reintentar
           </Button>
         </Alert>
       )}
       {notices.isPending ? (
-        <p role="status">Cargando avisos…</p>
+        <div role="status" className="space-y-2">
+          <span className="sr-only">Cargando avisos…</span>
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))}
+        </div>
       ) : notices.isError ? (
-        <Alert role="alert">
+        <Alert variant="destructive">
           No pudimos cargar los avisos.{' '}
-          <Button variant="outline" onClick={() => void notices.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void notices.refetch()}>
             Reintentar
           </Button>
         </Alert>
