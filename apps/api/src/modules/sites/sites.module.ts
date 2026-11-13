@@ -1,6 +1,7 @@
 import { SiteConnectivityService } from './site-connectivity.service';
 import { SiteConnectivityController } from './site-connectivity.controller';
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { SitesController } from './sites.controller';
@@ -15,7 +16,7 @@ import { ShiftExecutionModule } from '../shift-execution/shift-execution.module'
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 
 @Module({
-  imports: [PrismaModule, ClockModule, ShiftExecutionModule],
+  imports: [AuthModule, PrismaModule, ClockModule, ShiftExecutionModule],
   controllers: [SitesController, SiteConnectivityController],
   providers: [
     TenantResourceService,

@@ -154,3 +154,24 @@ Las etiquetas NTAG 424 DNA tienen un costo unitario superior al de las etiquetas
 
 1. **Puntos exteriores y perimetrales**: utilizar etiquetas NTAG 424 DNA anti-metal. Estos puntos presentan mayor riesgo de intentos de clonado remoto o simulación de rondas.
 2. **Puntos interiores de paso frecuente**: pueden utilizar etiquetas básicas (UID) o códigos QR protegidos por la presencia de vigiladores en garita.
+
+## Correcciones de configuracion y recuperacion (auditoria WD)
+
+Una etiqueta `configured` con `masterKeyVersion` vigente pasa directamente a la lectura de prueba, tanto si estaba activa en ese punto como retirada o reemplazada. Restablecer una etiqueta retirada la marca `incomplete` y obliga a reconfigurarla. Una version distinta responde 409: queda pendiente un keyring para recuperar claves maestras anteriores; no se sobrescribe esa version ni se intenta usar la maestra actual como si fuera la anterior.
+
+La recuperacion comienza con fabrica en slot 0. Solo `91AE` en `auth_2` inicia otra autenticacion con la derivada vigente. En ambos casos se reescriben NDEF y ajustes. Para slots 1 a 4, `ChangeKey` usa `(newKey XOR oldKey) || version || CRC32(newKey)`; el CRC no lleva complemento final ([NXP AN12196, tabla 25](https://www.nxp.com/docs/en/application-note/AN12196.pdf)). Primero se prueba fabrica; ante `911E` se inicia una nueva autenticacion EV2 y se reintenta ese slot una sola vez con la derivada. El contador EV2 reinicia en cero y luego avanza por comando confirmado. El relevo admite hasta 23 respuestas, incluyendo cuatro reautenticaciones y el fallback inicial de slot 0.
+
+Confirmar verifica el SUN contra `lastCounter` persistido y actualiza con comparacion atomica de ese valor previo. Una lectura repetida o una carrera no puede retroceder el historico. La baja del punto o del predio retira sus etiquetas activas, conservando claves e historico; un punto fijado en un turno en curso no puede darse de baja.
+
+### Prueba manual pendiente con etiqueta real (Android)
+
+- [ ] Configurar una etiqueta nueva y confirmar SUN; repetir la lectura y comprobar rechazo de replay.
+- [ ] Interrumpir antes de `key_0`, incluyendo despues de cada slot 1 a 4; volver a acercar y completar.
+- [ ] Interrumpir despues de `key_0` y antes de confirmar; recuperar con la clave derivada.
+- [ ] Retirar y reasociar en otro punto; comprobar que no reconfigura sin reset y conserva contador.
+- [ ] Restablecer una retirada y comprobar reconfiguracion completa y lectura de prueba.
+- [ ] Probar etiqueta basica, UID invalido y GetVersion no compatible; verificar feedback y fallback.
+- [ ] Retirar una NTAG 424 DNA durante la deteccion; verificar que pide volver a acercarla y no la asocia como basica.
+- [ ] Durante lectura, comprobar botones y cambio de predio bloqueados; probar red alcanzable desconocida y sin conexion.
+
+Estas pruebas requieren hardware y no fueron ejecutadas por la auditoria automatizada.

@@ -1,4 +1,4 @@
-import { associateNfcTagSchema, normalizeNfcUid } from './nfc-tags';
+import { associateNfcTagSchema, normalizeNfcUid, nfcTagUidSchema } from './nfc-tags';
 
 describe('UID NFC', () => {
   it('normaliza minúsculas y separadores', () => {
@@ -14,6 +14,7 @@ describe('UID NFC', () => {
     'rechaza UID inválido %s',
     (uid) => {
       expect(() => normalizeNfcUid(uid)).toThrow('El identificador NFC no es válido');
+      expect(nfcTagUidSchema.safeParse(uid).success).toBe(false);
     },
   );
 });

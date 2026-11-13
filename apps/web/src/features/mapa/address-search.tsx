@@ -24,12 +24,12 @@ export function AddressSearch({
   const [active, setActive] = useState(-1);
   useEffect(() => {
     const timer = setTimeout(() => {
-      setTerm(text.trim());
+      if (open) setTerm(text.trim());
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
     };
-  }, [text]);
+  }, [text, open]);
   const search = useQuery({
     queryKey: ['geocoder', env.VITE_GEOCODER_URL, term],
     queryFn: async ({ signal }) => {
@@ -46,6 +46,7 @@ export function AddressSearch({
   const expanded = open && suggestions.length > 0;
   const choose = (suggestion: AddressSuggestion) => {
     setText(suggestion.label);
+    setTerm('');
     setOpen(false);
     setActive(-1);
     onSelect(suggestion.latitude, suggestion.longitude);
@@ -74,6 +75,7 @@ export function AddressSearch({
           setOpen(false);
         }}
         onKeyDown={(event) => {
+          if (event.key === 'Enter') event.preventDefault();
           if (event.key === 'Escape') {
             setOpen(false);
             return;
@@ -82,7 +84,11 @@ export function AddressSearch({
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             const step = event.key === 'ArrowDown' ? 1 : -1;
-            setActive((current) => (current + step + suggestions.length) % suggestions.length);
+            setActive((current) =>
+              current === -1 && step === -1
+                ? suggestions.length - 1
+                : (current + step + suggestions.length) % suggestions.length,
+            );
           } else if (event.key === 'Enter') {
             const suggestion = suggestions[active];
             if (!suggestion) return;

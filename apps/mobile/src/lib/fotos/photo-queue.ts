@@ -36,11 +36,17 @@ export function resetIncidentPhotoQueueForTesting(): void {
 export async function processIncidentPhotos(): Promise<void> {
   if (running) return;
   running = true;
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
   try {
     const repository = await createDefaultFieldRepository();
     const photos = await repository.listIncidentPhotos();
+    let nextRetryAt = Infinity;
     for (const photo of photos) {
-      if (photo.nextAttemptAt && Date.parse(photo.nextAttemptAt) > Date.now()) continue;
+      if (photo.nextAttemptAt && Date.parse(photo.nextAttemptAt) > Date.now()) {
+        nextRetryAt = Math.min(nextRetryAt, Date.parse(photo.nextAttemptAt));
+        continue;
+      }
       const token = await getShiftCredentialToken();
       if (!token) continue;
       try {
@@ -88,18 +94,23 @@ export async function processIncidentPhotos(): Promise<void> {
       } catch {
         const attempts = photo.attempts + 1;
         const waitSeconds = computeSyncBackoff(attempts - 1);
+        const retryAt = Date.now() + waitSeconds * 1000;
         await repository.retryIncidentPhoto(
           photo.photoId,
           attempts,
-          new Date(Date.now() + waitSeconds * 1000).toISOString(),
+          new Date(retryAt).toISOString(),
         );
-        if (retryTimer) clearTimeout(retryTimer);
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          void processIncidentPhotos();
-        }, waitSeconds * 1000);
+        nextRetryAt = Math.min(nextRetryAt, retryAt);
       }
     }
+    if (Number.isFinite(nextRetryAt))
+      retryTimer = setTimeout(
+        () => {
+          retryTimer = null;
+          void processIncidentPhotos();
+        },
+        Math.max(0, nextRetryAt - Date.now()),
+      );
   } finally {
     running = false;
   }

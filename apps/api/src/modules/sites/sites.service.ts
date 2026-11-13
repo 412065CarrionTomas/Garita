@@ -12,6 +12,7 @@ import type {
   InProgressShiftClosurePort,
   WeeklyScheduleTerminationPort,
 } from './deactivation-ports';
+import { FIREBASE_IDENTITY_PROVIDER, type FirebaseIdentityProvider } from '../auth/auth.types';
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 
 /** Datos mínimos de un supervisor visibles en las respuestas de predios. */
@@ -29,6 +30,7 @@ export class SitesService {
     @Inject(IN_PROGRESS_SHIFT_CLOSURE_PORT)
     private readonly inProgress: InProgressShiftClosurePort,
     private readonly shiftExecution: ShiftExecutionService,
+    @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly firebase: FirebaseIdentityProvider,
   ) {}
 
   async listClients(status?: 'active' | 'inactive', page = 1, user?: AuthenticatedUser) {
@@ -94,7 +96,7 @@ export class SitesService {
       })
     ).map((site) => site.id);
     const guardsToNotify = await this.guardsInProgress(siteIds);
-    const client = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+    const { client, users } = await this.prisma.tenantPrisma.$transaction(async (tx) => {
       await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
       await this.weeklySchedules.terminateForSites(tx, siteIds);
       await this.inProgress.closeForSites(tx, siteIds, adminId);
@@ -102,8 +104,9 @@ export class SitesService {
       await tx.client.update({ where: { id }, data: { status: 'inactive' } });
       const users = await tx.user.findMany({
         where: { clientId: id, status: { not: 'deactivated' } },
-        select: { id: true },
+        select: { id: true, firebaseUid: true },
       });
+      await tx.notificationDevice.deleteMany({ where: { user: { clientId: id } } });
       await tx.user.updateMany({ where: { clientId: id }, data: { status: 'deactivated' } });
       await tx.invitation.updateMany({
         where: { user: { clientId: id }, usedAt: null, replacedAt: null },
@@ -119,8 +122,27 @@ export class SitesService {
         });
       await tx.siteSupervisor.deleteMany({ where: { site: { clientId: id } } });
       await tx.site.updateMany({ where: { clientId: id }, data: { status: 'inactive' } });
-      return tx.client.update({ where: { id }, data: { status: 'inactive' } });
+      await this.removeSiteTags(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
+      return {
+        client: await tx.client.update({ where: { id }, data: { status: 'inactive' } }),
+        users,
+      };
     });
+    for (const user of users) {
+      const results = await Promise.allSettled([
+        this.firebase.setDisabled(user.firebaseUid, true),
+        this.firebase.revokeRefreshTokens(user.firebaseUid),
+      ]);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected')
+          this.logger.error({
+            event: 'client_user_firebase_deactivation_failed',
+            userId: user.id,
+            clientId: id,
+            operation: index === 0 ? 'disable' : 'revoke_sessions',
+          });
+      });
+    }
     await this.notifyClosedGuards(guardsToNotify);
     return client;
   }
@@ -182,7 +204,7 @@ export class SitesService {
   }
 
   async createSite(data: Prisma.SiteUncheckedCreateInput) {
-    await this.resources.findOwnedOrThrow('Client', data.clientId);
+    await this.assertActiveClient(data.clientId);
     try {
       return await this.prisma.tenantPrisma.site.create({ data });
     } catch (error) {
@@ -193,9 +215,10 @@ export class SitesService {
   }
 
   async updateSite(id: string, data: Prisma.SiteUncheckedUpdateInput) {
-    await this.resources.findOwnedOrThrow('Site', id);
-    if (typeof data.clientId === 'string')
-      await this.resources.findOwnedOrThrow('Client', data.clientId);
+    const site = await this.resources.findOwnedOrThrow('Site', id);
+    await this.assertActiveClient(
+      typeof data.clientId === 'string' ? data.clientId : String(site.clientId),
+    );
     try {
       return await this.prisma.tenantPrisma.site.update({ where: { id }, data });
     } catch (error) {
@@ -219,6 +242,7 @@ export class SitesService {
       await this.weeklySchedules.terminateForSites(tx, [id]);
       await this.inProgress.closeForSites(tx, [id], adminId);
       await tx.siteSupervisor.deleteMany({ where: { siteId: id } });
+      await this.removeSiteTags(tx as unknown as Prisma.TransactionClient, [id], adminId);
       return tx.site.update({ where: { id }, data: { status: 'inactive' } });
     });
     await this.notifyClosedGuards(guardsToNotify);
@@ -244,13 +268,11 @@ export class SitesService {
   }
 
   private async deactivationImpact(siteIds: string[]) {
-    const now = this.clock.now();
     const shifts = siteIds.length
       ? await this.prisma.tenantPrisma.shift.findMany({
           where: {
             siteId: { in: siteIds },
-            status: { in: ['scheduled', 'unassigned'] },
-            OR: [{ startsAt: { gt: now } }, { endsAt: { lte: now } }],
+            status: { in: ['scheduled', 'unassigned', 'uncovered'] },
           },
           select: { id: true, siteId: true, startsAt: true, endsAt: true, status: true },
           orderBy: { startsAt: 'asc' },
@@ -263,8 +285,6 @@ export class SitesService {
             where: {
               siteId: { in: siteIds },
               status: 'in_progress',
-              startsAt: { lte: now },
-              endsAt: { gt: now },
             },
           })
         : Promise.resolve(0),
@@ -296,8 +316,7 @@ export class SitesService {
     const shifts = await transaction.shift.findMany({
       where: {
         siteId: { in: siteIds },
-        status: { in: ['scheduled', 'unassigned'] },
-        OR: [{ startsAt: { gt: this.clock.now() } }, { endsAt: { lte: this.clock.now() } }],
+        status: { in: ['scheduled', 'unassigned', 'uncovered'] },
       },
       select: { id: true },
     });
@@ -315,6 +334,18 @@ export class SitesService {
         cancelledById: adminId,
         cancellationReason: 'Baja del predio',
       },
+    });
+  }
+
+  private async assertActiveClient(id: string) {
+    const client = await this.resources.findOwnedOrThrow('Client', id);
+    if (client.status !== 'active') throw new ConflictException('El cliente está dado de baja');
+  }
+
+  private async removeSiteTags(tx: Prisma.TransactionClient, siteIds: string[], adminId: string) {
+    await tx.nfcTag.updateMany({
+      where: { checkpoint: { siteId: { in: siteIds } }, status: 'active' },
+      data: { status: 'removed', endedAt: this.clock.now(), endedById: adminId },
     });
   }
 

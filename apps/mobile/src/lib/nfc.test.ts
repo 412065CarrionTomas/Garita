@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import NfcManager, { NfcTech, NfcEvents } from 'react-native-nfc-manager';
 import type * as Nfc from './nfc';
 import { readFactoryUid, readNfcTag, cancelNfcRead, nfcAvailability, openNfcSettings } from './nfc';
@@ -43,6 +43,7 @@ describe('lectura del UID NFC', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(Alert, 'alert').mockImplementation();
     getTag.mockResolvedValue({ id: 'E004015012345678' } as never);
     cancelTechnologyRequest.mockResolvedValue();
   });
@@ -112,6 +113,7 @@ describe('lectura del UID NFC', () => {
     const listener = jest.mocked(NfcManager.setEventListener).mock.calls[0]?.[1];
     (listener as (tag: unknown) => void)({ id: '04:aa:bb:cc' });
     (listener as (tag: unknown) => void)({ id: 'invalid' });
+    expect(Alert.alert).toHaveBeenCalledWith('Etiqueta NFC no válida', expect.any(String));
     expect(onTag).toHaveBeenCalledTimes(1);
     expect(onTag).toHaveBeenCalledWith('04AABBCC');
     await cancelNfcRead();

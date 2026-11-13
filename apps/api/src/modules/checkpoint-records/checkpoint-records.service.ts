@@ -10,6 +10,7 @@ import {
 import {
   CHECKPOINT_RECORD_ERROR_CODES,
   checkpointRecordResponseSchema,
+  shiftOfflineDataSchema,
   imputeRecord,
   normalizeNfcUid,
   type CheckpointRecordRequest,
@@ -52,6 +53,7 @@ export function computeRequestHash(request: CheckpointRecordRequest): string {
 }
 
 export interface CheckpointRecordBatchContext {
+  credentialAssignmentId?: string;
   shift?: {
     id: string;
     companyId: string;
@@ -59,9 +61,11 @@ export interface CheckpointRecordBatchContext {
     status: string;
     closedBy: string | null;
     closedAt: Date | null;
+    events?: { type: string; occurredAt: Date; response?: unknown }[];
     assignments: {
       id: string;
       guardId: string | null;
+      isCurrent: boolean;
       startsAt: Date;
       endsAt: Date;
     }[];
@@ -132,8 +136,21 @@ export class CheckpointRecordsService {
       (await this.prisma.tenantPrisma.shift.findFirst({
         where: { id: input.shiftId },
         include: {
+          ...(context?.credentialAssignmentId
+            ? {
+                events: {
+                  where: {
+                    assignmentId: context.credentialAssignmentId,
+                    type: { in: ['admin_close', 'start'] },
+                  },
+                  orderBy: { occurredAt: 'desc' as const },
+                },
+              }
+            : {}),
           assignments: {
-            where: { isCurrent: true, active: true },
+            where: context?.credentialAssignmentId
+              ? { id: context.credentialAssignmentId, guardId: user.userId }
+              : { isCurrent: true, active: true },
             orderBy: { createdAt: 'desc' },
             take: 1,
           },
@@ -144,9 +161,15 @@ export class CheckpointRecordsService {
     }
 
     const assignment = shift.assignments[0];
-    const isGuardAssigned = assignment?.guardId === user.userId;
+    const isGuardAssigned =
+      assignment?.guardId === user.userId &&
+      (!context?.credentialAssignmentId || assignment.id === context.credentialAssignmentId);
     const isShiftInProgress = shift.status === 'in_progress';
-    const isClosedByAdmin = shift.status === 'closed' && shift.closedBy === 'admin';
+    const administrativeClose =
+      shift.events?.find((event) => event.type === 'admin_close')?.occurredAt ??
+      (shift.status === 'closed' && shift.closedBy === 'admin' ? shift.closedAt : null);
+    const isClosedByAdmin =
+      administrativeClose !== null || (shift.status === 'closed' && shift.closedBy === 'admin');
     const isAutoClosed = shift.status === 'auto_closed';
 
     if (!isGuardAssigned || (!isShiftInProgress && !isClosedByAdmin && !isAutoClosed)) {
@@ -155,10 +178,18 @@ export class CheckpointRecordsService {
 
     const occurredAt = new Date(input.clock?.trustedAt ?? input.occurredAtDevice);
     const receivedAt = this.clock.now();
+    // Solo el vigilador saliente queda acotado a su tramo; una hora sospechosa del vigente se marca, no se rechaza (HU-15).
+    if (
+      context?.credentialAssignmentId &&
+      !assignment.isCurrent &&
+      (occurredAt < assignment.startsAt || occurredAt > assignment.endsAt)
+    ) {
+      throw new ConflictException({ code: CHECKPOINT_RECORD_ERROR_CODES.shiftNotInProgress });
+    }
 
     // Counts for compliance is false if the event occurred after an administrative close
     const countsForCompliance = isClosedByAdmin
-      ? occurredAt <= (shift.closedAt ?? receivedAt)
+      ? occurredAt <= (administrativeClose ?? receivedAt)
       : true;
 
     // 3. Scan verification (QR / NFC)
@@ -281,8 +312,15 @@ export class CheckpointRecordsService {
       throw new ConflictException('Checkpoint no identificado');
     }
 
-    const shiftData =
-      context?.shiftData ?? (await this.shiftExecution.getShiftOfflineData(shift.id));
+    const startResponse = shift.events?.find((event) => event.type === 'start')?.response;
+    const snapshot = shiftOfflineDataSchema.safeParse(
+      startResponse && typeof startResponse === 'object' && 'data' in startResponse
+        ? startResponse.data
+        : undefined,
+    );
+    const shiftData = snapshot.success
+      ? snapshot.data
+      : (context?.shiftData ?? (await this.shiftExecution.getShiftOfflineData(shift.id)));
     let previousRecords: {
       checkpointId: string;
       occurredAtUtc: string;
@@ -292,7 +330,7 @@ export class CheckpointRecordsService {
       previousRecords = context.previousRecords;
     } else {
       const dbPreviousRecords = await this.prisma.tenantPrisma.checkpointRecord.findMany({
-        where: { shiftId: shift.id },
+        where: { shiftId: shift.id, invalidatedAt: null },
         select: {
           checkpointId: true,
           occurredAtDevice: true,
@@ -323,11 +361,6 @@ export class CheckpointRecordsService {
 
     if (imputation.kind === 'counted') {
       let createdRecord;
-      context?.previousRecords?.push({
-        checkpointId,
-        occurredAtUtc: occurredAt.toISOString(),
-        countedFor: imputation.countedFor,
-      });
       try {
         createdRecord = await this.prisma.tenantPrisma.checkpointRecord.create({
           data: {
@@ -372,6 +405,11 @@ export class CheckpointRecordsService {
         throw error;
       }
 
+      context?.previousRecords?.push({
+        checkpointId,
+        occurredAtUtc: occurredAt.toISOString(),
+        countedFor: imputation.countedFor,
+      });
       try {
         await this.marcas.evaluateRecord({ ...createdRecord, clock: input.clock });
       } catch (error) {

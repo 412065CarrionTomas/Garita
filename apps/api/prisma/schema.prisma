@@ -258,7 +258,7 @@ model Checkpoint {
   roundVersions         RoundVersionCheckpoint[]
   records               CheckpointRecord[]
 
-  @@unique([siteId, name])
+  // Nombre único entre puntos activos: índice parcial en la migración.
   @@index([companyId, status])
   @@index([siteId, status])
 }

@@ -162,8 +162,13 @@ describe('Flujos de gestión de personal (e2e)', () => {
     expect(identity.revokeRefreshTokens).toHaveBeenCalledWith(uid);
   });
 
-  it('reactivar devuelve el acceso al usuario', async () => {
+  it('reactivar devuelve el acceso al usuario que ya había ingresado', async () => {
     const { user } = await create('reactivate');
+    // Primer ingreso: la invitación queda usada y la cuenta activa.
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set({ Authorization: `Bearer user:${user.firebaseUid}` })
+      .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/usuarios/${user.id}/desactivar`)
       .set(admin)

@@ -82,3 +82,41 @@ it.each([
     );
   },
 );
+
+describe('audit shift list filters', () => {
+  const now = new Date('2030-05-10T22:30:00Z');
+  const findMany = jest.fn().mockResolvedValue([]);
+  const service = new ShiftsService(
+    { tenantPrisma: { shift: { findMany } } } as unknown as PrismaService,
+    {} as TenantResourceService,
+    { now: () => now },
+    { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
+    { resolve: jest.fn(), raise: jest.fn() },
+    { emitToSite: jest.fn() },
+  );
+  it('excludes only unassigned shifts when sinVigilador is false', async () => {
+    await service.list({ sinVigilador: 'false' });
+    expect(findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { status: { not: 'unassigned' } } }),
+    );
+  });
+  it('includes current running assignments even after scheduled end', async () => {
+    await service.mine({ userId: 'guard', companyId: 'company', role: 'guard', status: 'active' });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      where: {
+        OR: [
+          { status: 'in_progress' },
+          { status: { in: ['scheduled', 'unassigned'] }, endsAt: { gte: now } },
+        ],
+        assignments: {
+          some: {
+            guardId: 'guard',
+            isCurrent: true,
+            active: true,
+            startsAt: { lte: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) },
+          },
+        },
+      },
+    });
+  });
+});

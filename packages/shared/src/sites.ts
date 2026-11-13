@@ -19,15 +19,20 @@ export const clientListQuerySchema = z.object({
   ),
   pagina: z.coerce.number().int().positive().default(1),
 });
-export const siteInputSchema = z.object({
-  clientId: z.string().min(1),
-  name: z.string().trim().min(1).max(200),
-  address: z.string().trim().min(1).max(500),
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  accessInstructions: z.string().max(2000).optional(),
-  observations: z.string().max(4000).optional(),
-});
+export const siteInputSchema = z
+  .object({
+    clientId: z.string().min(1),
+    name: z.string().trim().min(1).max(200),
+    address: z.string().trim().min(1).max(500),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    accessInstructions: z.string().max(2000).optional(),
+    observations: z.string().max(4000).optional(),
+  })
+  .refine(({ latitude, longitude }) => latitude !== 0 || longitude !== 0, {
+    message: 'Ubicá el predio antes de guardar',
+    path: ['latitude'],
+  });
 export const siteListQuerySchema = z.object({
   cliente: z.preprocess((value) => (value === '' ? undefined : value), z.string().optional()),
   estado: z.preprocess(
@@ -54,6 +59,7 @@ export const clientsResponseSchema = z.array(
 export const siteResponseSchema = z.looseObject({
   id: z.string(),
   clientId: z.string(),
+  client: z.looseObject({ id: z.string(), name: z.string() }).optional(),
   name: z.string(),
   address: z.string(),
   latitude: z.union([z.number(), z.string()]),

@@ -1,5 +1,7 @@
+import { aesBlock, aesCbc } from './crypto';
 import {
   FACTORY_KEY,
+  changeKey,
   authContinue,
   authFirst,
   checkFullResponse,
@@ -60,3 +62,24 @@ describe('EV2 relay vectors', () => {
     ).toBe('0'.repeat(16));
   });
 });
+
+// AN12196 ChangeKey Case 1: nonzero old key requires XOR; CRC is always over the new key.
+it.each([Buffer.alloc(16), Buffer.from('F3847D627727ED3BC9C4CC050489B966', 'hex')])(
+  'ChangeKey masks a non-authenticated slot with its actual old key %j',
+  (oldKey) => {
+    const state = {
+      rndA: '13c5db8a5930439fc3def9a4c675360f',
+      rndB: '00112233445566778899aabbccddeeff',
+      ti: '11223344',
+    };
+    const newKey = Buffer.from('F3847D627727ED3BC9C4CC050489B966', 'hex');
+    const command = Buffer.from(changeKey(2, newKey, 1, 0, state, FACTORY_KEY, oldKey), 'hex');
+    const { enc } = sessionKeys(FACTORY_KEY, state);
+    const iv = aesBlock(enc, Buffer.from('a55a1122334400000000000000000000', 'hex'));
+    const plain = aesCbc(enc, iv, command.subarray(6, -9), true);
+    expect(plain.subarray(0, 16)).toEqual(
+      Buffer.from(newKey.map((byte, i) => byte ^ (oldKey[i] ?? 0))),
+    );
+    expect(plain.subarray(16, 21).toString('hex').toUpperCase()).toBe('01789DFADC');
+  },
+);

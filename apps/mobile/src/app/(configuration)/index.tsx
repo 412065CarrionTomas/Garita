@@ -123,15 +123,16 @@ export default function ConfigurationHome() {
   };
 
   const startAssociation = async (point: CheckpointItem) => {
-    const network = await Network.getNetworkStateAsync();
-    if (!network.isConnected || !network.isInternetReachable) {
-      setMessage('Se necesita conexión para asociar una etiqueta.');
-      return;
-    }
-    if (availability !== 'ready') return;
+    if (busyId) return;
     setBusyId(point.id);
-    setMessage('Acercá la etiqueta al celular…');
     try {
+      const network = await Network.getNetworkStateAsync();
+      if (!network.isConnected || network.isInternetReachable === false) {
+        setMessage('Se necesita conexión para asociar una etiqueta.');
+        return;
+      }
+      if (availability !== 'ready') return;
+      setMessage('Acercá la etiqueta al celular…');
       const sessionId = await withSecureNfcTag(async (tag) => {
         setMessage('Etiqueta segura detectada. Configurando…');
         let step = await apiRequest(
@@ -140,7 +141,7 @@ export default function ConfigurationHome() {
           secureTagStepResponseSchema,
           { uid: tag.uid, version: tag.version },
         );
-        for (let i = 0; step.apdu && i < 12; i++) {
+        for (let i = 0; step.apdu && i < 23; i++) {
           const response = await tag.transceive(step.apdu);
           step = await apiRequest(
             'POST',
@@ -179,12 +180,16 @@ export default function ConfigurationHome() {
   };
 
   const removeTag = async (point: CheckpointItem) => {
+    if (busyId) return;
+    setBusyId(point.id);
     try {
       await apiDelete(`/puntos/${encodeURIComponent(point.id)}/etiqueta-nfc`, emptySchema);
       await loadPoints(siteId);
       setMessage(`Etiqueta quitada de ${point.name}`);
     } catch {
       setMessage('No pudimos quitar la etiqueta.');
+    } finally {
+      setBusyId('');
     }
   };
 
@@ -219,7 +224,8 @@ export default function ConfigurationHome() {
           trailing={siteId === site.id ? <Badge tone="info" label="Seleccionado" /> : undefined}
           accessibilityRole="button"
           accessibilityLabel={`Seleccionar predio ${site.name}`}
-          accessibilityState={{ selected: siteId === site.id }}
+          accessibilityState={{ selected: siteId === site.id, disabled: !!busyId }}
+          disabled={!!busyId}
           onPress={() => setSiteId(site.id)}
         />
       ))}
@@ -244,7 +250,7 @@ export default function ConfigurationHome() {
               }
               accessibilityRole="button"
               accessibilityLabel={`${point.etiquetaNfc?.status === 'active' ? 'Reemplazar' : 'Asociar'} etiqueta NFC a ${point.name}`}
-              disabled={busyId === point.id}
+              disabled={!!busyId}
               onPress={() => void startAssociation(point)}
             />
           )}
@@ -254,6 +260,7 @@ export default function ConfigurationHome() {
               label="Quitar etiqueta"
               accessibilityRole="button"
               accessibilityLabel={`Quitar etiqueta NFC de ${point.name}`}
+              disabled={!!busyId}
               onPress={() => void removeTag(point)}
             />
           )}

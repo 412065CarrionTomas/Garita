@@ -236,3 +236,26 @@ it('muestra advertencia cuando la configuración se interrumpe', async () => {
     await view.findByText('La configuración no se completó. Volvé a acercar el celular'),
   ).toBeTruthy();
 });
+
+it('permite asociar cuando internetReachable es desconocido', async () => {
+  networkMock.mockResolvedValue({
+    isConnected: true,
+    isInternetReachable: null,
+  } as unknown as Network.NetworkState);
+  const user = userEvent.setup();
+  const view = await mount();
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  expect(await view.findByText('Etiqueta asociada a Portón trasero')).toBeTruthy();
+});
+it('bloquea todos los puntos y el cambio de predio durante una lectura', async () => {
+  secureMock.mockReturnValueOnce(new Promise(() => undefined));
+  const user = userEvent.setup();
+  const view = await mount([
+    point,
+    { id: 'point-b', name: 'Segundo', etiquetaNfc: { status: 'active' } },
+  ]);
+  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
+  expect(view.getByLabelText('Reemplazar etiqueta NFC a Segundo')).toBeDisabled();
+  expect(view.getByLabelText('Quitar etiqueta NFC de Segundo')).toBeDisabled();
+  expect(view.getByLabelText('Seleccionar predio Predio A')).toBeDisabled();
+});

@@ -107,6 +107,40 @@ describe('panic button', () => {
   });
   afterEach(() => jest.useRealTimers());
 
+  it('hides receipt and confirmation when the newest alert is resolved', async () => {
+    alerts = [
+      {
+        request: { shiftId: 'shift', alertId: 'resolved' },
+        state: {
+          alertId: 'resolved',
+          status: 'resolved',
+          receivedAt: '2035-01-01T12:00:00Z',
+          confirmedAt: '2035-01-01T12:01:00Z',
+        },
+      } as LocalPanicAlert,
+    ];
+    const rendered = await render(<PanicOverlay />);
+    expect(rendered.queryByText('Confirmada por el supervisor')).toBeNull();
+    expect(rendered.queryByText('Alerta recibida por la central')).toBeNull();
+  });
+
+  it('clears the status when polling observes resolution', async () => {
+    alerts = [
+      {
+        request: { shiftId: 'shift', alertId: 'first' },
+        state: {
+          alertId: 'first',
+          status: 'confirmed',
+          receivedAt: '2035-01-01T12:00:00Z',
+          confirmedAt: '2035-01-01T12:01:00Z',
+        },
+      } as LocalPanicAlert,
+    ];
+    jest.mocked(fetchPanicState).mockResolvedValue({ ...alerts[0]!.state!, status: 'resolved' });
+    const rendered = await render(<PanicOverlay />);
+    expect(rendered.queryByText('Confirmada por el supervisor')).toBeNull();
+  });
+
   it.each([
     ['sent', 'SMS enviado'],
     ['delivered', 'SMS entregado'],

@@ -102,3 +102,26 @@ it('BDD3: muestra el motivo de etiqueta reemplazada validado por el servidor', a
   await fireEvent.press(await screen.findByRole('button', { name: 'Leer etiqueta' }));
   expect(screen.getByRole('alert')).toHaveTextContent('Etiqueta reemplazada. Intento guardado.');
 });
+
+it('refreshes the parent after local persistence and after server reconciliation', async () => {
+  const onSaved = jest.fn();
+  jest.mocked(processScan).mockImplementation((_uid, _data, _method, saved) => {
+    const result = {
+      status: 'invalid_attempt' as const,
+      reason: 'tag_not_associated' as const,
+      recordId: 'id',
+      message: 'Intento guardado',
+    };
+    saved?.(result);
+    return Promise.resolve(result);
+  });
+  await render(<NfcReader shiftData={data} onSaved={onSaved} />);
+  await waitFor(() => expect(readNfcTag).toHaveBeenCalled());
+  const [callback] = jest.mocked(readNfcTag).mock.calls[0] as unknown as [
+    (tag: { uid: string }) => void,
+  ];
+  await act(async () => {
+    callback?.({ uid: '04AABBCC' });
+  });
+  expect(onSaved).toHaveBeenCalledTimes(2);
+});

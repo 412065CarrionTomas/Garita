@@ -4127,7 +4127,10 @@ describe('Aplicación (e2e)', () => {
       .parse(impactBody);
     expect(impact.shiftsToCancel).toBeGreaterThanOrEqual(2);
     expect(impact.weeklySchedulesToEnd).toBe(0);
-    expect(impact.inProgressShiftsToClose).toBe(0);
+    // El impacto cuenta todos los turnos en curso que la baja va a cerrar (F5-03).
+    expect(impact.inProgressShiftsToClose).toBe(
+      await prisma.shift.count({ where: { siteId: northAssignedSiteId, status: 'in_progress' } }),
+    );
     await client
       .post(`/api/v1/predios/${northAssignedSiteId}/baja`)
       .set(admin)

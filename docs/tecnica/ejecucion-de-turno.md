@@ -19,3 +19,17 @@ El cierre automático deja un evento `auto_close` y el turno en `auto_closed`. U
 Desactivar un vigilador con turno en curso devuelve `409 GUARD_HAS_SHIFT_IN_PROGRESS`; `{ "forceDeactivate": true, "reason": "..." }` lo cierra en el momento como `admin_close`. Dar de baja un predio o cliente cierra los turnos en curso con motivo `baja del predio`; el impacto de baja los cuenta. Los eventos móviles posteriores a ese cierre se guardan con `countsForCompliance: false`.
 
 Los servicios de notificación de cierre anticipado (HU-35), cobertura (HU-44), y notificación/SMS (HU-45) quedan como puntos de integración para sus historias.
+
+### Turnos en curso y datos locales
+
+`GET /mis-turnos` incluye los turnos `in_progress` de la asignación vigente y
+activa del vigilador, incluso si pasó su fin programado. La app los etiqueta **En
+curso** y abre sus datos locales. Si se perdieron esos datos (por ejemplo, por una
+reinstalación), muestra que debe contactar al supervisor y no ofrece iniciar de
+nuevo. Recuperar la credencial sin el `eventId` original requiere una regla nueva,
+pendiente de decisión.
+
+Durante `[endUtc, endUtc + graceMinutes)` una ventana incompleta sigue siendo la
+actual y se muestra **Atrasada**; se mantiene fuera de las ventanas completas. Al
+completarse o agotarse la gracia, el progreso pasa a la ventana que corresponda.
+El aviso de ronda completa solo considera rondas con una ventana actual.

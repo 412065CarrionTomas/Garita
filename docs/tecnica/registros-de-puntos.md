@@ -77,7 +77,8 @@ plano; se cancela al salir. En iPhone tocá **Leer etiqueta** para abrir la hoja
 sistema y acercá la etiqueta. La lectura no requiere permiso de cámara ni luz.
 Si el turno tiene puntos con etiqueta vigente, NFC se ofrece primero y **Escanear
 código QR** queda como alternativa. El lector también está disponible desde la
-pantalla de escaneo cuando no se concedió permiso de cámara.
+pantalla de escaneo, tanto con la cámara activa como sin permiso de cámara.
+El lector de la pantalla anterior se cancela al perder foco.
 
 Con NFC apagado se muestra **El NFC está apagado** y **Abrir ajustes**. Al volver de
 los ajustes se comprueba nuevamente el estado. Los teléfonos sin NFC muestran solo
@@ -124,7 +125,7 @@ Una vez validado el punto, se evalúa su asignación e imputación con la funci�
 
 - **Ventanas y rondas del turno:** se construyen las rondas del turno con las versiones fijadas al iniciar el turno (`ShiftRound.roundVersionId`) y sus ventanas calculadas según horarios y frecuencias.
 - **Historial de registros previos:** se consultan los registros previos válidos del turno para el cálculo del tiempo mínimo y duplicados.
-- **Asignación:** se verifica la asignación vigente del vigilador en el turno.
+- **Asignación:** el envío directo verifica la asignación vigente. El lote usa la asignación identificada por la credencial, incluso después de un cierre administrativo y **Cubrir el resto**; valida el vigilador y que la hora del evento esté dentro de esa asignación. Usa las ventanas del snapshot de su inicio, con los límites de esa asignación; si no hay snapshot válido, obtiene los datos del turno. Los registros invalidados no integran el historial de imputación.
 - **Resultados de imputación:**
   - `counted`: el punto cuenta para una o varias rondas que tienen una ventana abierta o en período de gracia a la que le falta el punto. Se guarda en `CheckpointRecord` con `countedFor: [{ roundId, windowIndex, late }]` y `outOfWindow: false`. Si la ventana ya había finalizado pero estaba dentro de su período de gracia (`graceMinutes`), se marca `late: true` ("completa con demora").
   - `out_of_window`: el registro ocurrió fuera de cualquier ventana o período de gracia configurado. Se guarda en `CheckpointRecord` con `outOfWindow: true`, `countedFor: []` y `countsForCompliance: true` (a menos que aplique cierre administrativo).
@@ -139,3 +140,8 @@ Si el turno fue cerrado de forma administrativa (por desactivación forzada del 
 
 - Los registros móviles generados con fecha de dispositivo `occurredAtDevice` posterior al cierre administrativo del turno se aceptan y almacenan con `countsForCompliance: false`.
 - Esto permite registrar el paso sin alterar las métricas de cumplimiento del turno cerrado.
+
+El lote conserva la fecha del evento `admin_close` de la asignación original, aunque
+la cobertura haya limpiado `closedAt` y `closedBy` en el turno. Esa fecha determina
+`countsForCompliance` para los registros tardíos del vigilador saliente. Esto no
+habilita reasignar un turno en curso.

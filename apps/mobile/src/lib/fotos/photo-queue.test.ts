@@ -16,8 +16,8 @@ const mockPhotos: {
 ];
 const mockRepository = {
   listIncidentPhotos: jest.fn(async () => mockPhotos),
-  retryIncidentPhoto: jest.fn(async (_id: string, attempts: number, nextAttemptAt: string) => {
-    const photo = mockPhotos[0];
+  retryIncidentPhoto: jest.fn(async (id: string, attempts: number, nextAttemptAt: string) => {
+    const photo = mockPhotos.find((item) => item.photoId === id);
     if (photo) Object.assign(photo, { attempts, nextAttemptAt });
   }),
   removeIncidentPhoto: jest.fn(async () => {
@@ -67,7 +67,34 @@ describe('processIncidentPhotos', () => {
     mockRepository.removeIncidentPhoto.mockClear();
     resetIncidentPhotoQueueForTesting();
   });
-  afterEach(() => jest.useRealTimers());
+  afterEach(() => {
+    resetIncidentPhotoQueueForTesting();
+    jest.useRealTimers();
+  });
+
+  it('wakes at the earliest pending time after a fresh pass skips future photos', async () => {
+    mockPhotos[0]!.nextAttemptAt = new Date(Date.now() + 5_000).toISOString();
+    await processIncidentPhotos();
+    expect(mockApiRequest).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(mockApiRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps one timer for the earliest backoff even when a later photo fails last', async () => {
+    mockPhotos.push({ ...mockPhotos[0]!, photoId: 'second-photo', attempts: 3 });
+    mockApiRequest.mockRejectedValue(new Error('sin señal'));
+    await processIncidentPhotos();
+    expect(jest.getTimerCount()).toBe(1);
+    mockApiRequest.mockClear();
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(mockApiRequest).toHaveBeenCalledTimes(1);
+    expect(mockRepository.retryIncidentPhoto).toHaveBeenLastCalledWith(
+      'photo-id',
+      2,
+      expect.any(String),
+    );
+    expect(jest.getTimerCount()).toBe(1);
+  });
 
   it('keeps a photo after a failed upload and removes it after a retry succeeds', async () => {
     mockApiRequest.mockImplementation((_method: string, path: string) =>

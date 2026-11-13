@@ -91,4 +91,20 @@ describe('currentRoundProgress', () => {
     ).toEqual(['a', 'c']);
     expect(currentRoundProgress(data, '2026-10-14T10:00:00.000Z')[0]?.currentWindow).toBeNull();
   });
+  it('keeps an incomplete previous window current throughout grace, but advances at the boundary', () => {
+    const recorded = new Map([['r1:0', new Set(['a', 'b'])]]);
+    expect(
+      currentRoundProgress(data, '2026-10-14T03:00:00.000Z', recorded)[0]?.currentWindow?.index,
+    ).toBe(0);
+    expect(
+      currentRoundProgress(data, '2026-10-14T03:14:59.999Z', recorded)[0]?.pendingCheckpointIds,
+    ).toEqual(['c']);
+    expect(
+      currentRoundProgress(data, '2026-10-14T03:15:00.000Z', recorded)[0]?.currentWindow?.index,
+    ).toBe(1);
+    recorded.set('r1:0', new Set(['a', 'b', 'c']));
+    expect(
+      currentRoundProgress(data, '2026-10-14T03:05:00.000Z', recorded)[0]?.currentWindow?.index,
+    ).toBe(1);
+  });
 });
