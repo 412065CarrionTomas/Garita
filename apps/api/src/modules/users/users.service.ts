@@ -333,9 +333,12 @@ export class UsersService {
   async reactivate(id: string, adminId: string) {
     const user = await this.getUser(id);
     if (user.clientId) await this.assertActiveClient(user.clientId);
-    const usedInvitation = await this.prisma.tenantPrisma.invitation.findFirst({
-      where: { userId: id, usedAt: { not: null } },
-    });
+    // Nunca activó la cuenta: tiene invitaciones y ninguna se usó. Sin invitaciones (alta inicial o seed) se reactiva.
+    const [invitations, used] = await Promise.all([
+      this.prisma.tenantPrisma.invitation.count({ where: { userId: id } }),
+      this.prisma.tenantPrisma.invitation.count({ where: { userId: id, usedAt: { not: null } } }),
+    ]);
+    const usedInvitation = invitations === 0 || used > 0;
     await this.firebase.setDisabled(user.firebaseUid, !usedInvitation);
     try {
       await this.prisma.tenantPrisma.$transaction(async (tx) => {

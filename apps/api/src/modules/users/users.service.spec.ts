@@ -19,7 +19,7 @@ describe('UsersService invitation lifecycle', () => {
   };
   const db = {
     user: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
-    invitation: { findFirst: jest.fn(), updateMany: jest.fn(), create: jest.fn() },
+    invitation: { count: jest.fn(), updateMany: jest.fn(), create: jest.fn() },
     client: { updateMany: jest.fn() },
   };
   const transaction = jest.fn((run: (tx: typeof db) => Promise<unknown>) => run(db));
@@ -38,7 +38,10 @@ describe('UsersService invitation lifecycle', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     db.user.findUniqueOrThrow.mockResolvedValue(user);
-    db.invitation.findFirst.mockResolvedValue(null);
+    // Por defecto: tiene una invitación y ninguna usada.
+    db.invitation.count.mockImplementation(({ where }: { where: { usedAt?: unknown } }) =>
+      Promise.resolve(where.usedAt ? 0 : 1),
+    );
     transaction.mockImplementation((run) => run(db));
     db.user.update.mockResolvedValue(user);
   });
@@ -50,13 +53,20 @@ describe('UsersService invitation lifecycle', () => {
       data: { status: 'invitation_pending' },
     });
     expect(firebase.setDisabled).toHaveBeenCalledWith('uid', true);
-    expect(db.invitation.findFirst).toHaveBeenCalledWith({
-      where: { userId: 'user', usedAt: { not: null } },
-    });
   });
 
   it('restores active access only after a prior first login', async () => {
-    db.invitation.findFirst.mockResolvedValue({ id: 'used-invitation', usedAt: new Date() });
+    db.invitation.count.mockResolvedValue(1);
+    await service.reactivate('user', 'admin');
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: 'user' },
+      data: { status: 'active' },
+    });
+    expect(firebase.setDisabled).toHaveBeenCalledWith('uid', false);
+  });
+
+  it('keeps an account without invitations (initial seed) active', async () => {
+    db.invitation.count.mockResolvedValue(0);
     await service.reactivate('user', 'admin');
     expect(db.user.update).toHaveBeenCalledWith({
       where: { id: 'user' },
@@ -66,7 +76,7 @@ describe('UsersService invitation lifecycle', () => {
   });
 
   it('disables Firebase again if reactivation fails in PostgreSQL', async () => {
-    db.invitation.findFirst.mockResolvedValue({ id: 'used-invitation', usedAt: new Date() });
+    db.invitation.count.mockResolvedValue(1);
     const error = new Error('transaction failed');
     transaction.mockRejectedValueOnce(error);
     await expect(service.reactivate('user', 'admin')).rejects.toBe(error);
