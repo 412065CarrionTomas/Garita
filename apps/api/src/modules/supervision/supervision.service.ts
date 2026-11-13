@@ -43,7 +43,7 @@ export class SupervisionService {
           },
         },
         events: {
-          where: { type: { in: ['close', 'admin_close'] } },
+          where: { type: { in: ['close', 'admin_close'] }, assignment: { isCurrent: true } },
           orderBy: { receivedAt: 'desc' },
           take: 1,
           select: { type: true },
@@ -81,7 +81,7 @@ export class SupervisionService {
                 scheduledEndAt: shift.endsAt,
                 syncDeadlineAt: shift.syncDeadlineAt,
                 withoutSignal: shift.connectivityType === 'without_signal',
-                closed: shift.events.length > 0,
+                closed: shift.status === 'closed' || shift.events.length > 0,
                 closedWithoutData: Boolean(shift.closedWithoutDataAt),
               })
             : null,
@@ -114,7 +114,23 @@ export class SupervisionService {
         events: { orderBy: { occurredAt: 'asc' } },
         rounds: {
           include: {
-            round: { select: { name: true } },
+            round: {
+              select: {
+                name: true,
+                currentVersion: {
+                  include: {
+                    checkpoints: {
+                      orderBy: { position: 'asc' },
+                      include: {
+                        checkpoint: {
+                          select: { id: true, name: true, latitude: true, longitude: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
             roundVersion: {
               include: {
                 checkpoints: {
@@ -152,14 +168,30 @@ export class SupervisionService {
     const records = await this.marcas.getShiftRecords(shiftId, filter, user);
     const pointIds = new Set(
       shift.checkpointRecords
-        .filter((record) => record.countsForCompliance)
+        .filter(
+          (record) =>
+            record.countsForCompliance &&
+            !record.invalidatedAt &&
+            Array.isArray(record.countedFor) &&
+            record.countedFor.some(
+              (entry) =>
+                typeof entry === 'object' &&
+                entry !== null &&
+                'roundId' in entry &&
+                'windowIndex' in entry &&
+                shift.roundWindowStates.some(
+                  (window) =>
+                    window.roundId === entry.roundId && window.windowIndex === entry.windowIndex,
+                ),
+            ),
+        )
         .map((record) => record.checkpointId),
     );
     const points = [
       ...new Map(
         shift.rounds.flatMap(
           (round) =>
-            round.roundVersion?.checkpoints.map(
+            (round.roundVersion ?? round.round.currentVersion)?.checkpoints.map(
               ({ checkpoint }) =>
                 [
                   checkpoint.id,
