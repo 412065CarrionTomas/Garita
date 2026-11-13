@@ -180,6 +180,25 @@ describe('HU-25 cumplimiento por HTTP', () => {
         inReviewSince: index >= 20 ? new Date('2026-10-02T00:00:00Z') : null,
       })),
     });
+    // Un turno con registros tuvo inicio y sincronizó: la revisión evalúa con esa cobertura.
+    await db.shiftEvent.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId,
+        assignmentId,
+        type: 'start',
+        occurredAt: shift.startsAt,
+      },
+    });
+    await db.shiftSyncState.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId,
+        lastContactAt: shift.endsAt,
+        lastPendingCount: 0,
+        syncedUntil: shift.endsAt,
+      },
+    });
     // El primer segmento empieza después de la asignación, para probar el dueño de una ausencia.
     await db.shiftAssignment.update({
       where: { id: assignmentId },
