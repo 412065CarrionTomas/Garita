@@ -5,6 +5,7 @@ import { TenantResourceService } from '../auth/tenant-resource.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CLOCK, type Clock } from '../../common/clock';
 import { PHOTO_STORAGE_PORT, type PhotoStoragePort } from './photo-storage.port';
+import { localDateTimeToUtc } from '@garita/shared';
 
 interface Decision {
   classification: 'client_visible' | 'internal';
@@ -38,6 +39,14 @@ export class IncidentClassificationService {
       : {};
   }
 
+  private async companyTimezone(user: AuthenticatedUser) {
+    const company = await this.prisma.tenantPrisma.company.findUniqueOrThrow({
+      where: { id: user.companyId },
+      select: { timezone: true },
+    });
+    return company.timezone;
+  }
+
   private queueWhere(user: AuthenticatedUser, predio?: string): Prisma.IncidentWhereInput {
     return {
       classificationStatus: 'pending',
@@ -55,6 +64,7 @@ export class IncidentClassificationService {
   }
 
   async queue(user: AuthenticatedUser, predio?: string) {
+    const timezone = await this.companyTimezone(user);
     const rows = await this.prisma.tenantPrisma.incident.findMany({
       where: this.queueWhere(user, predio),
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -63,15 +73,26 @@ export class IncidentClassificationService {
         type: true,
         description: true,
         createdAt: true,
+        occurredAtDevice: true,
+        trustedAt: true,
         site: { select: { id: true, name: true } },
         guard: { select: { firstName: true, lastName: true, status: true } },
       },
     });
     const overdueBefore = this.clock.now().getTime() - 24 * 60 * 60_000;
-    return rows.map((row) => ({ ...row, overdue: row.createdAt.getTime() < overdueBefore }));
+    return rows.map((row) => ({
+      ...row,
+      timezone,
+      overdue: row.createdAt.getTime() < overdueBefore,
+    }));
   }
 
   async list(user: AuthenticatedUser, filters: Filters) {
+    const timezone = await this.companyTimezone(user);
+    const dateRange = {
+      ...(filters.desde ? { gte: localDateTimeToUtc(filters.desde, 0, timezone) } : {}),
+      ...(filters.hasta ? { lt: localDateTimeToUtc(filters.hasta, 1440, timezone) } : {}),
+    };
     const where: Prisma.IncidentWhereInput = {
       ...this.activeAssignment(user),
       ...(filters.predio ? { siteId: filters.predio } : {}),
@@ -79,12 +100,7 @@ export class IncidentClassificationService {
       ...(filters.clasificacion ? { classificationStatus: filters.clasificacion } : {}),
       ...(filters.desde || filters.hasta
         ? {
-            createdAt: {
-              ...(filters.desde ? { gte: new Date(`${filters.desde}T00:00:00.000Z`) } : {}),
-              ...(filters.hasta
-                ? { lt: new Date(Date.parse(`${filters.hasta}T00:00:00.000Z`) + 86_400_000) }
-                : {}),
-            },
+            OR: [{ trustedAt: dateRange }, { trustedAt: null, occurredAtDevice: dateRange }],
           }
         : {}),
     };
@@ -99,6 +115,8 @@ export class IncidentClassificationService {
           type: true,
           description: true,
           createdAt: true,
+          occurredAtDevice: true,
+          trustedAt: true,
           classificationStatus: true,
           site: { select: { id: true, name: true } },
           guard: { select: { firstName: true, lastName: true, status: true } },
@@ -106,7 +124,12 @@ export class IncidentClassificationService {
       }),
       this.prisma.tenantPrisma.incident.count({ where }),
     ]);
-    return { items, total, page: filters.pagina, pageSize: 25 };
+    return {
+      items: items.map((item) => ({ ...item, timezone })),
+      total,
+      page: filters.pagina,
+      pageSize: 25,
+    };
   }
 
   async detail(id: string, user: AuthenticatedUser) {
@@ -127,6 +150,7 @@ export class IncidentClassificationService {
     const { photos, guard, ...rest } = incident;
     return {
       ...rest,
+      timezone: await this.companyTimezone(user),
       guard: {
         name: `${guard.firstName} ${guard.lastName}${guard.status === 'deactivated' ? ' (desactivado)' : ''}`,
       },

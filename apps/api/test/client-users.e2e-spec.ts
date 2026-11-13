@@ -279,10 +279,14 @@ describe('HU-27 usuarios del portal (e2e)', () => {
       .set(admin)
       .send({})
       .expect(201);
+    // Nunca ingresó: vuelve a invitación pendiente y necesita una invitación nueva.
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { status: true } }),
+    ).resolves.toEqual({ status: 'invitation_pending' });
     await request(app.getHttpServer())
       .get('/api/v1/auth/me')
       .set(auth(row.firebaseUid))
-      .expect(200);
+      .expect(403);
     const before = mailer.sendInvitation.mock.calls.length;
     await request(app.getHttpServer())
       .post(`/api/v1/usuarios/${user.id}/reenviar-invitacion`)

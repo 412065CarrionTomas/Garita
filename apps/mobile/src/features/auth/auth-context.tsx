@@ -101,6 +101,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (reason) {
           if (reason instanceof ApiError && (reason.status === 401 || reason.status === 403)) {
             setError(firebaseErrorMessage(reason));
+            registeredUid = null;
+            setUser(null);
+            await AsyncStorage.removeItem(profileKey(firebaseUser.uid));
             await signOut(auth);
           } else setUser(await cachedProfile(firebaseUser.uid));
         } finally {
@@ -127,6 +130,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (reason instanceof AuthFlowError) throw reason;
       const message = firebaseErrorMessage(reason);
       setError(message);
+      if (
+        credential &&
+        reason instanceof ApiError &&
+        (reason.status === 401 || reason.status === 403)
+      ) {
+        registeredUid = null;
+        setUser(null);
+        await AsyncStorage.removeItem(profileKey(credential.user.uid));
+      }
       if (credential) await signOut(auth);
       throw new AuthFlowError(message);
     }
@@ -135,12 +147,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const uid = auth.currentUser?.uid;
     try {
       await unregisterGuardDevice();
-    } catch {
-      Alert.alert(
-        'No se pudo cerrar sesión',
-        'Conectate a internet para dar de baja las notificaciones de este celular y volvé a intentarlo.',
-      );
-      return;
+    } catch (reason) {
+      if (!(reason instanceof ApiError && (reason.status === 401 || reason.status === 403))) {
+        Alert.alert(
+          'No se pudo cerrar sesión',
+          'Conectate a internet para dar de baja las notificaciones de este celular y volvé a intentarlo.',
+        );
+        return;
+      }
     }
     await signOut(auth);
     await dismissPanicNotification().catch(recordLockedPanicFailure);

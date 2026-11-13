@@ -55,7 +55,7 @@ export function PanicOverlay({ bottomOffset = 0 }: { bottomOffset?: number }) {
         (alert) => alert.request.shiftId === shift?.shift.id && !alert.blockedReason,
       );
       const resolved = shiftAlerts.findIndex((alert) => alert.state?.status === 'resolved');
-      const alerts = resolved > 0 ? shiftAlerts.slice(0, resolved) : shiftAlerts;
+      const alerts = resolved >= 0 ? shiftAlerts.slice(0, resolved) : shiftAlerts;
       const latest = alerts.find((alert) => alert.state !== null);
       if (!latest?.state) {
         const sms = alerts.find(
@@ -76,7 +76,11 @@ export function PanicOverlay({ bottomOffset = 0 }: { bottomOffset?: number }) {
           if (JSON.stringify(state) !== JSON.stringify(latest.state))
             await repository.patchPanicAlert(latest.request.alertId, { state });
           setStatus(
-            state.confirmedAt ? 'Confirmada por el supervisor' : 'Alerta recibida por la central',
+            state.status === 'resolved'
+              ? null
+              : state.confirmedAt
+                ? 'Confirmada por el supervisor'
+                : 'Alerta recibida por la central',
           );
         }
       }

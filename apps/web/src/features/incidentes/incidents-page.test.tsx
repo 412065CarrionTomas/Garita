@@ -23,6 +23,9 @@ const incident = {
   type: 'intrusion',
   description: null,
   createdAt: '2026-10-20T00:00:00.000Z',
+  occurredAtDevice: '2026-10-20T02:00:00.000Z',
+  trustedAt: '2026-10-21T02:00:00.000Z',
+  timezone: 'America/Argentina/Buenos_Aires',
   site: { id: 'site-1', name: 'Predio A' },
   guard: { firstName: 'Pedro', lastName: 'Díaz', status: 'deactivated' },
   classificationStatus: 'pending',
@@ -35,6 +38,8 @@ const detailIncident = {
   description: 'Portón forzado en lateral este',
   createdAt: '2026-10-20T00:00:00.000Z',
   occurredAtDevice: '2026-10-20T00:00:00.000Z',
+  trustedAt: '2026-10-21T02:00:00.000Z',
+  timezone: 'America/Argentina/Buenos_Aires',
   site: { id: 'site-1', name: 'Predio A' },
   guard: { name: 'Pedro Díaz (desactivado)' },
   classificationStatus: 'pending',
@@ -65,6 +70,43 @@ it('muestra la cola antigua con estado textual y acceso por teclado', async () =
     '/incidentes/incident-1',
   );
 });
+
+it.each([incident.trustedAt, null])(
+  'shows the same occurrence date in list and detail using company timezone (trustedAt=%s)',
+  async (trustedAt) => {
+    jest
+      .mocked(apiGet)
+      .mockImplementation((path) =>
+        Promise.resolve(
+          path === '/predios'
+            ? []
+            : path === '/incidentes/incident-1'
+              ? { ...detailIncident, occurredAtDevice: incident.occurredAtDevice, trustedAt }
+              : { items: [{ ...incident, trustedAt }], total: 1, page: 1, pageSize: 25 },
+        ),
+      );
+    const list = renderWithQueryClient(
+      <MemoryRouter>
+        <IncidentsListPage />
+      </MemoryRouter>,
+    );
+    const when = new Date(trustedAt ?? incident.occurredAtDevice).toLocaleString('es-AR', {
+      timeZone: incident.timezone,
+    });
+    expect(
+      await screen.findByText(
+        (_text, node) => node?.tagName === 'SPAN' && node.textContent.endsWith(when),
+      ),
+    ).toBeInTheDocument();
+    list.unmount();
+    renderWithQueryClient(
+      <MemoryRouter>
+        <IncidentDetailPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(`Predio A · ${when}`)).toBeInTheDocument();
+  },
+);
 
 it('envía los filtros del listado a la consulta y conserva etiquetas accesibles', async () => {
   jest
