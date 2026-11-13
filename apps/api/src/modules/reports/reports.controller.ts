@@ -60,6 +60,12 @@ export class ReportsController {
   @ApiQuery({ name: 'dia', required: false, description: 'Fecha local YYYY-MM-DD' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiQuery({
+    name: 'orden',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Orden cronológico; asc por defecto',
+  })
   @ApiOkResponse({
     standardSchema: reportDetailResponseSchema,
   })

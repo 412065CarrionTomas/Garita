@@ -1792,6 +1792,25 @@ describe('Aplicación (e2e)', () => {
     const assignment = await prisma.shiftAssignment.findFirstOrThrow({
       where: { shiftId: shift.id },
     });
+    // Un turno con registros tuvo inicio y sincronizó: la revisión evalúa con esa cobertura.
+    await prisma.shiftEvent.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        type: 'start',
+        occurredAt: shift.startsAt,
+      },
+    });
+    await prisma.shiftSyncState.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: shift.id,
+        lastContactAt: shift.endsAt,
+        lastPendingCount: 0,
+        syncedUntil: shift.endsAt,
+      },
+    });
     const window = await prisma.roundWindowState.create({
       data: {
         companyId: 'norte-company',
@@ -5978,7 +5997,9 @@ describe('Aplicación (e2e)', () => {
     const actor = await prisma.user.findUniqueOrThrow({
       where: { firebaseUid: 'seed-norte-admin' },
     });
-    const client = await prisma.client.findFirstOrThrow({ where: { companyId: 'norte-company' } });
+    const client = await prisma.client.findFirstOrThrow({
+      where: { companyId: 'norte-company', status: 'active' },
+    });
     const site = await prisma.site.create({
       data: {
         companyId: 'norte-company',

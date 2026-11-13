@@ -60,15 +60,13 @@ export function localReportDay(instant: string | Date, timezone: string): string
 function addWindow(totals: ComplianceTotals, window: ComplianceWindow) {
   switch (window.status) {
     case 'complete':
+    case 'complete_late':
       totals.complete++;
+      if (window.status === 'complete_late') totals.complete_late++;
       if (window.severityLevel === 'media' || window.severityLevel === 'leve')
         totals[window.severityLevel]++;
       else if (window.severityLevel === 'grave') totals.validated++;
       else totals.withoutObservations++;
-      break;
-    case 'complete_late':
-      totals.complete++;
-      totals.complete_late++;
       break;
     case 'incomplete':
     case 'not_done':

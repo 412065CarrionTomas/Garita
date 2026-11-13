@@ -18,9 +18,13 @@ La API ofrece `GET /api/v1/supervision/turnos` para los turnos de la fecha local
 
 ## Sincronización
 
+Un cierre de una asignación anterior no marca completa la sincronización de su reemplazo. Solo se considera el cierre de la asignación vigente o un turno efectivamente cerrado.
+
 La función compartida `computeSyncStatus` usa `ShiftSyncState`, el snapshot `syncDeadlineAt` y el cierre del turno. Un contacto es un aviso o lote recibido hace menos de cinco minutos. Los resultados son `al_dia`, `sincronizando` (incluye `pendingCount`), `sin_contacto` (hora y cantidad pendiente), `esperando_hasta` (plazo del predio sin señal), `sin_sincronizar`, `completo` y `cerrado_sin_datos`. “Sin contacto” no afirma que el teléfono esté desconectado: iOS puede suspender el envío con la pantalla bloqueada. La evaluación de rondas no usa la edad del contacto: espera a que `syncedUntil` cubra el fin de la gracia de cada ventana.
 
 ## Ventanas
+
+Antes del inicio, el detalle lista los puntos de la versión vigente de cada ronda si todavía no se fijó una versión para el turno. Un punto figura registrado únicamente con un registro válido, computable y atribuido a una ventana del turno; las invalidaciones y lecturas fuera de ventana no lo marcan.
 
 `RoundWindowState` se crea al iniciar el turno o en el barrido para turnos sin inicio. La clave única es turno, ronda e índice de ventana. Los registros vuelven a calcular el estado con `windowCompletion`; el job por minuto actualiza ventanas evaluables. Estados: `pending`, `in_progress`, `late`, `complete`, `complete_late`, `incomplete`, `not_done`, `pending_sync` e `in_review`. La regla completa está en [evaluacion-de-rondas.md](evaluacion-de-rondas.md).
 

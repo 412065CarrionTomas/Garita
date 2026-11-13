@@ -67,6 +67,9 @@ describe('<ShiftsPanel />', () => {
     ['closed', 'Cerrado', 'normal'],
     ['auto_closed', 'Cerrado por el sistema', 'late'],
     ['cancelled', 'Cancelado', 'dashed'],
+    ['no_show', 'No presentado', 'late'],
+    ['uncovered', 'Sin cobertura', 'late'],
+    ['future_status', 'Estado desconocido', 'dashed'],
   ])('valida y muestra el estado %s con sello %s', async (status, label, variant) => {
     mockQueries();
     const fallback = jest.mocked(apiGet).getMockImplementation();

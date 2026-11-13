@@ -38,6 +38,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { useAuth } from '../auth/auth-context';
+import { loadAvailableGuards } from './available-guards';
 
 type Person = ReturnType<typeof personnelUserSchema.parse>;
 
@@ -122,7 +123,7 @@ export function PersonalPage() {
   const guardOptions = useQuery({
     queryKey: ['personal', 'vigiladores', 'derivacion'],
     enabled: deactivating?.role === 'guard',
-    queryFn: () => apiGet('/usuarios?rol=guard&pagina=1', usersPageSchema),
+    queryFn: loadAvailableGuards,
   });
   const params = new URLSearchParams({ pagina: String(page) });
   if (role) params.set('rol', role);
@@ -248,9 +249,13 @@ export function PersonalPage() {
       await handleDeactivateError(error, 'No se pudo desactivar el usuario.');
     }
   };
-  const runAction = async (path: string, failure: string) => {
+  const runAction = async (
+    path: string,
+    failure: string,
+    responseSchema: z.ZodType = emptyResponseSchema,
+  ) => {
     try {
-      await apiPost(path, {}, emptyRequestSchema, emptyResponseSchema);
+      await apiPost(path, {}, emptyRequestSchema, responseSchema);
       setFormError('');
       await refresh();
     } catch {
@@ -533,6 +538,7 @@ export function PersonalPage() {
                               void runAction(
                                 `/usuarios/${person.id}/reenviar-invitacion`,
                                 'No se pudo reenviar la invitación.',
+                                personnelUserSchema,
                               )
                             }
                           >

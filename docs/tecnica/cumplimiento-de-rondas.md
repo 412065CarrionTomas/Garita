@@ -15,7 +15,7 @@ El módulo `reports` consulta estados vigentes; no recalcula ventanas ni persist
 | `pending`, `in_progress`, `late` | Fuera de evaluación: siguen en curso                                                           |
 | Turno `cancelled`                | Se omiten todas sus ventanas                                                                   |
 
-HU-17 y HU-39 producen los estados. Validar una ventana en revisión la devuelve a `complete`; invalidar un registro puede dejarla incompleta o no realizada. Cada GET lee nuevamente esos datos. CA1 da 18/20 = 90 % y dos en revisión; al validar una, 19/21 y una en revisión. Las observaciones no restan cumplimiento de una ventana completa.
+HU-17 y HU-39 producen los estados. Validar una ventana en revisión la devuelve a `complete` o `complete_late`, conservando la demora; ambos estados se clasifican además por gravedad. Invalidar un registro puede dejarla incompleta o no realizada al vencer su gracia. Cada GET lee nuevamente esos datos. CA1 da 18/20 = 90 % y dos en revisión; al validar una, 19/21 y una en revisión. Las observaciones no restan cumplimiento de una ventana completa. La tabla por predio separa a tiempo, tardías, incompletas y no realizadas: su suma es Programadas (evaluadas).
 
 ## Atribución y fechas
 
@@ -28,13 +28,13 @@ HU-17 y HU-39 producen los estados. Validar una ventana en revisión la devuelve
 Swagger en `/api/docs` documenta parámetros y respuestas Zod compartidas. Prefijo `/api/v1`:
 
 - `GET /reportes/rondas?desde=&hasta=&predio=&cliente=&vigilador=`: totales, evolución, comparación por predio y por guardia, y opciones visibles de filtros. `vigilador=unassigned` selecciona sin vigilador.
-- `GET /reportes/rondas/detalle`: mismos filtros más `estado`, `dia` local, `page` (desde 1) y `pageSize` (1–100, por defecto 25). Incluye IDs de turno para `/supervision/turnos/:id`.
+- `GET /reportes/rondas/detalle`: mismos filtros más `estado`, `dia` local, `page` (desde 1), `pageSize` (1–100, por defecto 25) y `orden` (`asc` por defecto o `desc`, por inicio de ventana e ID). Incluye IDs de turno para `/supervision/turnos/:id`. El listado de no realizadas pide las ocho más recientes con `orden=desc` antes de paginar.
 - `GET /reportes/pendientes?predio=`: conteos y mínimo de `inReviewSince`, creación del incidente pendiente, creación del aviso abierto `shift_unsynced`, y próximo inicio de turno futuro `unassigned`. Son pendientes actuales, independientes del período, cliente y vigilador.
 - `GET /reportes/puntos-marcas-frecuentes?desde=&hasta=&predio=`: diez puntos ordenados por proporción descendente, con mínimo tres registros marcados. No aplica cliente ni vigilador; la pantalla explicita este alcance.
 
 Administrador: toda la empresa. Supervisor: solo predios asignados, también al omitir filtros. `TenantResourceService` valida IDs de predio, cliente y vigilador; `tenantPrisma` agrega aislamiento de empresa y predios en todas las lecturas. Un predio o cliente ajeno/no asignado responde 404; guardia y cliente 403; sin sesión 401. Nunca se usa SQL sin aislamiento ni `systemPrisma` en el módulo.
 
-Los puntos cuentan registros con `invalidatedAt = null`, según `occurredAtDevice`. Varias marcas en un registro cuentan una sola vez. La atribución usa la asignación del registro. Si un vigilador concentra al menos 70 % de los registros marcados, se informa «concentradas»; en otro caso se informa «repartidas», con cantidad de vigiladores distintos. No es una sanción ni una prueba de conducta.
+Los puntos cuentan registros con `countsForCompliance = true` e `invalidatedAt = null`, excluyen turnos cancelados y aplican el período a `trustedAt`, usando `occurredAtDevice` solo si falta la hora confiable. Varias marcas en un registro cuentan una sola vez. La atribución usa la asignación del registro. Si un vigilador concentra al menos 70 % de los registros marcados, se informa «concentradas»; en otro caso se informa «repartidas», con cantidad de vigiladores distintos. No es una sanción ni una prueba de conducta.
 
 ## Índices y rendimiento
 

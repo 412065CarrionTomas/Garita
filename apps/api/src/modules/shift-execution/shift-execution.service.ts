@@ -94,6 +94,8 @@ export class ShiftExecutionService {
       return this.startResponse(replay.shift.id);
     }
     const shift = await this.ownedShift(id);
+    if (shift.site.status === 'inactive' || shift.site.client.status === 'inactive')
+      throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
     if (shift.status === 'cancelled' || shift.status === 'closed' || shift.status === 'auto_closed')
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
     const assignment = await this.currentAssignment(shift.id);
@@ -144,7 +146,11 @@ export class ShiftExecutionService {
         if (claimed.count !== 1)
           throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.reassigned });
         const changed = await tx.shift.updateMany({
-          where: { id, status: 'scheduled' },
+          where: {
+            id,
+            status: 'scheduled',
+            site: { status: 'active', client: { status: 'active' } },
+          },
           data: {
             status: 'in_progress',
             startedAt: now,
@@ -278,11 +284,21 @@ export class ShiftExecutionService {
     });
     if (!notice) throw new ConflictException('El turno no está sin sincronizar');
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      const changed = await tx.notice.updateMany({
+      const sync = await tx.shiftSyncState.findUnique({
+        where: { shiftId: id },
+        select: { syncedUntil: true },
+      });
+      const close = await tx.shiftEvent.findFirst({
+        where: { shiftId: id, type: 'close', assignment: { isCurrent: true } },
+        select: { id: true },
+      });
+      if ((sync?.syncedUntil && sync.syncedUntil >= shift.endsAt) || close)
+        throw new ConflictException('El turno ya está sincronizado');
+      const resolved = await tx.notice.updateMany({
         where: { id: notice.id, status: 'open' },
         data: { status: 'resolved', resolution: 'closed_without_data', resolvedAt: now },
       });
-      if (!changed.count) throw new ConflictException('El turno ya fue cerrado sin datos');
+      if (!resolved.count) throw new ConflictException('El turno ya fue cerrado sin datos');
       await tx.shift.update({
         where: { id },
         data: {
@@ -856,7 +872,14 @@ export class ShiftExecutionService {
   private async ownedShift(id: string) {
     const shift = await this.prisma.tenantPrisma.shift.findFirst({
       where: { id },
-      include: { site: { include: { company: { select: { timezone: true } } } } },
+      include: {
+        site: {
+          include: {
+            company: { select: { timezone: true } },
+            client: { select: { status: true } },
+          },
+        },
+      },
     });
     if (!shift) throw new NotFoundException('Turno no encontrado');
     return shift;

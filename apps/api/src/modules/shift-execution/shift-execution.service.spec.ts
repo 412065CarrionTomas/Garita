@@ -7,6 +7,86 @@ import type { SyncDeadlinePort } from './shift-execution.service';
 
 const now = new Date('2026-10-13T08:00:00.000Z');
 
+describe('ShiftExecutionService audit restrictions', () => {
+  const user = {
+    userId: 'guard',
+    companyId: 'company',
+    role: 'admin' as const,
+    status: 'active' as const,
+  };
+  function setup() {
+    const shift = {
+      id: 'shift',
+      companyId: 'company',
+      siteId: 'site',
+      status: 'scheduled',
+      endsAt: now,
+      closedWithoutDataAt: null,
+      site: { status: 'active', client: { status: 'active' } },
+    };
+    const db = {
+      shift: {
+        findFirst: jest.fn().mockResolvedValue(shift),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      shiftEvent: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      shiftSyncState: { findUnique: jest.fn().mockResolvedValue({ syncedUntil: null }) },
+      notice: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'notice' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      roundWindowState: { updateMany: jest.fn() },
+    };
+    const service = new ShiftExecutionService(
+      {
+        tenantPrisma: { ...db, $transaction: (fn: (tx: typeof db) => Promise<unknown>) => fn(db) },
+      } as unknown as PrismaService,
+      { now: () => now },
+      {} as Queue,
+      {} as SyncDeadlinePort,
+      new NoopShiftExecutionEffects(),
+    );
+    return { service, db, shift };
+  }
+  it.each(['site', 'client'] as const)(
+    'rejects starting a shift with inactive %s',
+    async (resource) => {
+      const { service, shift } = setup();
+      if (resource === 'site') shift.site.status = 'inactive';
+      else shift.site.client.status = 'inactive';
+      await expect(
+        service.start('shift', { eventId: 'event' } as Parameters<typeof service.start>[1], user),
+      ).rejects.toBeInstanceOf(ConflictException);
+    },
+  );
+  it.each(['synced', 'closed'] as const)(
+    'rejects close-without-data if already %s',
+    async (state) => {
+      const { service, db } = setup();
+      if (state === 'synced') db.shiftSyncState.findUnique.mockResolvedValue({ syncedUntil: now });
+      else db.shiftEvent.findFirst.mockResolvedValue({ id: 'close' });
+      await expect(service.closeWithoutData('shift', 'Motivo válido', user)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(db.shift.update).not.toHaveBeenCalled();
+      expect(db.notice.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it('resolves the notice explicitly when closing without data', async () => {
+    const { service, db } = setup();
+    await service.closeWithoutData('shift', 'Motivo válido', user);
+    expect(db.notice.updateMany).toHaveBeenCalledWith({
+      where: { id: 'notice', status: 'open' },
+      data: { status: 'resolved', resolution: 'closed_without_data', resolvedAt: now },
+    });
+    expect(db.roundWindowState.updateMany).toHaveBeenCalled();
+  });
+});
+
 describe('ShiftExecutionService assignment closure result', () => {
   it.each(['close', 'closeForSites', 'closeForGuard', 'realCloseAfterAuto'] as const)(
     '%s preserves the assignment result for window ownership',

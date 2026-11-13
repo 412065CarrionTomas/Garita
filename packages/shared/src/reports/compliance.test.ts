@@ -80,7 +80,7 @@ describe('computeCompliance', () => {
       ).totals,
     ).toMatchObject({
       complete: 5,
-      withoutObservations: 1,
+      withoutObservations: 2,
       media: 1,
       leve: 1,
       validated: 1,
@@ -89,6 +89,18 @@ describe('computeCompliance', () => {
       percentage: 100,
     });
   });
+  it.each(['media', 'leve', 'grave'] as const)(
+    'classifies late complete windows with %s severity',
+    (severityLevel) => {
+      expect(
+        computeCompliance([window('complete_late', { severityLevel })], 'UTC').totals,
+      ).toMatchObject({
+        complete: 1,
+        complete_late: 1,
+        [severityLevel === 'grave' ? 'validated' : severityLevel]: 1,
+      });
+    },
+  );
   it.each(['no_show', 'closed', 'auto_closed', 'unassigned'])(
     'cuenta no realizada de %s, sin cobertura o cerrada sin datos',
     (shiftStatus) => {

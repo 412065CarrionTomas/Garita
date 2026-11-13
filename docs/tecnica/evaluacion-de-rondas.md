@@ -22,7 +22,7 @@ Una ventana completada durante la gracia queda `complete_late`. Una ventana `in_
 
 ## Plazo de sincronización y cierre sin datos
 
-Al iniciar el turno, `syncDeadlineAt` queda fijado con la conectividad del predio: fin programado más traslado hasta zona con señal y margen. Si llega el plazo sin `syncedUntil` hasta el fin y sin cierre del vigilador, se abre un único `shift_unsynced`. El supervisor asignado o administrador puede llamar `POST /api/v1/turnos/:id/cerrar-sin-datos` con un motivo de 5 a 500 caracteres. La operación guarda actor y fecha, resuelve el aviso y marca ventanas pendientes `not_done`. Los datos que lleguen después se procesan y corrigen las ventanas.
+Al iniciar el turno, `syncDeadlineAt` queda fijado con la conectividad del predio: fin programado más traslado hasta zona con señal y margen. Si llega el plazo sin `syncedUntil` hasta el fin y sin cierre del vigilador, se abre un único `shift_unsynced`. El supervisor asignado o administrador puede llamar `POST /api/v1/turnos/:id/cerrar-sin-datos` con un motivo de 5 a 500 caracteres. Solo se permite si sigue sin sincronizar: responde 409 cuando `syncedUntil >= endsAt`, llegó el cierre del vigilador de la asignación vigente o ya se cerró sin datos. La operación guarda actor y fecha, resuelve el aviso con `closed_without_data` y marca ventanas pendientes `not_done`. La llegada posterior de datos no resuelve automáticamente `shift_unsynced`. Los datos que lleguen después se procesan y corrigen las ventanas.
 
 `GET /api/v1/avisos?estado=&tipo=&predio=` devuelve los avisos más recientes y `openCount`; `GET /api/v1/avisos/:id` devuelve el detalle. Ambos aplican aislamiento por empresa y predio. Los tres endpoints figuran en Swagger (`/api/docs`).
 
