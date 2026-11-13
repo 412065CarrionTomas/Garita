@@ -100,20 +100,26 @@ describe('withSecureNfcTag', () => {
 
     await expect(withSecureNfcTag(async () => 'ok')).rejects.toThrow(NotSecureNfcTag);
   });
-  it.each(['transport', 'parse', 'uid-byte'])(
-    'convierte fallo de deteccion %s en fallback basico',
+  it('convierte una version sin byte de UID valido en fallback basico', async () => {
+    requestTechnology.mockResolvedValueOnce(NfcTech.IsoDep as never);
+    const bytes = (hex: string) => hex.match(/../g)!.map((b) => Number.parseInt(b, 16));
+    transceive
+      .mockResolvedValueOnce(bytes('9000'))
+      .mockResolvedValueOnce(bytes('0404083000110591AF'))
+      .mockResolvedValueOnce(bytes('0404020101110591AF'))
+      .mockResolvedValueOnce(bytes('05DE5F1EACC040000000000000009100'));
+    await expect(withSecureNfcTag(async () => 'ok')).rejects.toThrow(NotSecureNfcTag);
+    expect(cancelTechnologyRequest).toHaveBeenCalled();
+  });
+  it.each(['transport', 'parse'])(
+    'no degrada a etiqueta basica ante un fallo de lectura %s',
     async (failure) => {
       requestTechnology.mockResolvedValueOnce(NfcTech.IsoDep as never);
-      const bytes = (hex: string) => hex.match(/../g)!.map((b) => Number.parseInt(b, 16));
-      if (failure === 'transport') transceive.mockRejectedValueOnce(new Error('not supported'));
-      else if (failure === 'parse') transceive.mockResolvedValueOnce([999]);
-      else
-        transceive
-          .mockResolvedValueOnce(bytes('9000'))
-          .mockResolvedValueOnce(bytes('0404083000110591AF'))
-          .mockResolvedValueOnce(bytes('0404020101110591AF'))
-          .mockResolvedValueOnce(bytes('05DE5F1EACC040000000000000009100'));
-      await expect(withSecureNfcTag(async () => 'ok')).rejects.toThrow(NotSecureNfcTag);
+      if (failure === 'transport') transceive.mockRejectedValueOnce(new Error('Tag was lost'));
+      else transceive.mockResolvedValueOnce([999]);
+      const result = withSecureNfcTag(async () => 'ok');
+      await expect(result).rejects.toThrow();
+      await expect(result).rejects.not.toBeInstanceOf(NotSecureNfcTag);
       expect(cancelTechnologyRequest).toHaveBeenCalled();
     },
   );

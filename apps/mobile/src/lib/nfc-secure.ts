@@ -54,27 +54,23 @@ export async function withSecureNfcTag<T>(
     if (technology !== nfc.NfcTech.IsoDep) throw new NotSecureNfcTag(uid);
     const transceive = async (command: string) =>
       hex(responseSchema.parse(await nfc.default.isoDepHandler.transceive(bytes(command))));
-    let version: string;
-    try {
-      if ((await transceive('00A4040C07D276000085010100')) !== '9000')
-        throw new NotSecureNfcTag(uid);
-      const parts: string[] = [];
-      for (let i = 0; i < 3; i++) {
-        const response = await transceive(i === 0 ? '9060000000' : '90AF000000');
-        const status = response.slice(-4);
-        if (status !== (i === 2 ? '9100' : '91AF')) throw new NotSecureNfcTag(uid);
-        parts.push(response.slice(0, -4));
-      }
-      version = versionSchema.parse(parts.join(''));
-      if (
-        !version.startsWith('0404') ||
-        version.slice(14, 18) !== '0404' ||
-        version.slice(28, 30) !== '04'
-      )
-        throw new NotSecureNfcTag(uid);
-    } catch {
-      throw new NotSecureNfcTag(uid);
+    // Solo una respuesta de protocolo explícita degrada a etiqueta básica; un error de
+    // transporte (etiqueta retirada) se propaga para reintentar sin perder la seguridad.
+    if ((await transceive('00A4040C07D276000085010100')) !== '9000') throw new NotSecureNfcTag(uid);
+    const parts: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const response = await transceive(i === 0 ? '9060000000' : '90AF000000');
+      const status = response.slice(-4);
+      if (status !== (i === 2 ? '9100' : '91AF')) throw new NotSecureNfcTag(uid);
+      parts.push(response.slice(0, -4));
     }
+    const version = versionSchema.safeParse(parts.join('')).data;
+    if (
+      !version?.startsWith('0404') ||
+      version.slice(14, 18) !== '0404' ||
+      version.slice(28, 30) !== '04'
+    )
+      throw new NotSecureNfcTag(uid);
     return await action({ uid, version, transceive });
   } finally {
     await nfc.default.cancelTechnologyRequest().catch(() => undefined);
