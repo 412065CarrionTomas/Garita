@@ -31,6 +31,9 @@ const rowSchema = z.object({
   type: z.enum(INCIDENT_TYPES),
   description: z.string().nullable(),
   createdAt: z.string(),
+  occurredAtDevice: z.string(),
+  trustedAt: z.string().nullable(),
+  timezone: z.string(),
   site: z.object({ id: z.string(), name: z.string() }),
   guard: z.object({ firstName: z.string(), lastName: z.string(), status: z.string() }),
   classificationStatus: z.enum(['pending', 'client_visible', 'internal']).optional(),
@@ -130,7 +133,9 @@ function IncidentRows({
             <span className="block text-sm text-muted-foreground tabular-nums">
               {incident.guard.firstName} {incident.guard.lastName}
               {incident.guard.status === 'deactivated' ? ' (desactivado)' : ''} ·{' '}
-              {new Date(incident.createdAt).toLocaleString('es-AR')}
+              {new Date(incident.trustedAt ?? incident.occurredAtDevice).toLocaleString('es-AR', {
+                timeZone: incident.timezone,
+              })}
             </span>
           </>
         );
@@ -558,8 +563,8 @@ function IncidentDetail({ id, embedded = false }: { id: string; embedded?: boole
   const incident = detail.data;
   const lat = incident.latitude;
   const lng = incident.longitude;
-  const when = new Date(incident.occurredAtDevice);
-  const whenText = when.toLocaleString('es-AR');
+  const when = new Date(incident.trustedAt ?? incident.occurredAtDevice);
+  const whenText = when.toLocaleString('es-AR', { timeZone: incident.timezone });
   const title = INCIDENT_TYPE_LABELS[incident.type];
   const subtitle = `${incident.site.name} · ${whenText}`;
   const Root = embedded ? 'div' : 'main';
@@ -592,7 +597,11 @@ function IncidentDetail({ id, embedded = false }: { id: string; embedded?: boole
           <dt className="t-label text-muted-foreground">Hora</dt>
           <dd>
             <Stamp>
-              {when.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+              {when.toLocaleTimeString('es-AR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: incident.timezone,
+              })}
             </Stamp>
           </dd>
         </div>
