@@ -299,4 +299,59 @@ describe('<ShiftScreen />', () => {
       expect(screen.getAllByText('En curso')[0]).toHaveStyle({ color: palette.primaryForeground });
     }
   });
+  it('explains missing local data for an in-progress assignment without offering a second start', async () => {
+    repository.getShiftData.mockResolvedValue(null as never);
+    jest.mocked(apiGet).mockResolvedValue([
+      {
+        id: 'shift-1',
+        status: 'in_progress',
+        startsAt: nowUtc,
+        endsAt: windowEndUtc,
+        site: { name: 'Predio A' },
+        assignments: [{ startsAt: nowUtc }],
+      },
+    ]);
+    await render(<ShiftScreen shiftId="shift-1" />);
+    expect(await screen.findByText(/Contactá a tu supervisor/)).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Iniciar turno' })).toBeNull();
+    expect(beginShift).not.toHaveBeenCalled();
+  });
+  it('keeps an incomplete grace window overdue, without counting it complete', async () => {
+    const graceData = {
+      ...data,
+      windows: [{ ...data.windows[0]!, endUtc: new Date(Date.now() - 60_000).toISOString() }],
+    };
+    repository.getShiftData.mockResolvedValue(graceData);
+    await render(<ShiftScreen shiftId="shift-1" />);
+    expect(await screen.findByText('Atrasada')).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Escanear Acceso' })).toBeOnTheScreen();
+    expect(screen.getByText('0 de 1 ventanas completas')).toBeOnTheScreen();
+    expect(screen.queryByText('No realizada')).toBeNull();
+  });
+  it('shows round complete when all rounds with a current window are complete', async () => {
+    repository.getShiftData.mockResolvedValue({
+      ...data,
+      rounds: [...data.rounds, { ...data.rounds[0]!, roundId: 'inactive-round' }],
+    });
+    jest.mocked(createDefaultFieldRepository).mockResolvedValue({
+      ...repository,
+      listCheckpointRecords: () =>
+        Promise.resolve(
+          data.checkpoints.map((point, index) => ({
+            recordId: `id-${index}`,
+            shiftId: 'shift-1',
+            checkpointId: point.id,
+            checkpointName: point.name,
+            countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
+            occurredAtUtc: nowUtc,
+            outOfWindow: false,
+            createdAt: nowUtc,
+          })),
+        ),
+    } as never);
+    await render(<ShiftScreen shiftId="shift-1" />);
+    expect(
+      await screen.findByText('Ronda completa. Se enviará a supervisión apenas recuperes señal.'),
+    ).toBeOnTheScreen();
+  });
 });

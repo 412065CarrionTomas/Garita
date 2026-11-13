@@ -26,7 +26,7 @@ export function SendScreen() {
   const [events, setEvents] = useState<PendingFieldEvent[]>([]);
   const [snapshot, setSnapshot] = useState<SyncStateSnapshot | null>(null);
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<'sent' | 'offline' | null>(null);
+  const [result, setResult] = useState<'sent' | 'offline' | 'busy' | 'error' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -59,7 +59,12 @@ export function SendScreen() {
     setResult(null);
     try {
       const outcome = await processSyncQueue();
-      setResult(outcome.success ? 'sent' : 'offline');
+      const state = await getSyncSnapshot();
+      setResult(
+        outcome.success ? 'sent' : state.isOffline ? 'offline' : state.isSyncing ? 'busy' : 'error',
+      );
+    } catch {
+      setResult('error');
     } finally {
       setSending(false);
       const next = await load();
@@ -87,6 +92,13 @@ export function SendScreen() {
       {result === 'offline' ? (
         <Banner tone="warning" accessibilityLiveRegion="polite">
           Sin señal: no se pudo enviar. Se reintenta solo.
+        </Banner>
+      ) : null}
+      {result === 'busy' || result === 'error' ? (
+        <Banner tone="warning" accessibilityLiveRegion="polite">
+          {result === 'busy'
+            ? 'Ya hay un envío en curso.'
+            : 'No se pudo enviar. Se reintenta solo.'}
         </Banner>
       ) : null}
       {events.length === 0 ? (

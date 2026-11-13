@@ -56,7 +56,7 @@ export class ShiftsService {
           ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
           : {}),
         ...(query.sinVigilador === 'true' ? { status: 'unassigned' } : {}),
-        ...(query.sinVigilador === 'false' ? { status: 'scheduled' } : {}),
+        ...(query.sinVigilador === 'false' ? { status: { not: 'unassigned' } } : {}),
         ...(query.desde || query.hasta
           ? {
               startsAt: {
@@ -508,9 +508,13 @@ export class ShiftsService {
     const until = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
     return this.prisma.tenantPrisma.shift.findMany({
       where: {
-        status: { in: ['scheduled', 'unassigned'] },
-        endsAt: { gte: now },
-        assignments: { some: { guardId: user.userId, isCurrent: true, startsAt: { lte: until } } },
+        OR: [
+          { status: 'in_progress' },
+          { status: { in: ['scheduled', 'unassigned'] }, endsAt: { gte: now } },
+        ],
+        assignments: {
+          some: { guardId: user.userId, isCurrent: true, active: true, startsAt: { lte: until } },
+        },
       },
       include: this.shiftInclude(),
       orderBy: { startsAt: 'asc' },

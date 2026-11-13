@@ -102,13 +102,22 @@ describe('<ScannerScreen />', () => {
       }),
       nfc: async () => 'on',
       uuid: () => '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
-      send: jest.fn(async () => ({
-        result: 'recorded' as const,
-        recordId: '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
-        checkpointId: 'cp-porton',
-        countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
-        outOfWindow: false,
-      })),
+      send: jest.fn(async (request) =>
+        request.scannedValue === 'invalid-qr' || request.method === 'nfc'
+          ? {
+              result: 'rejected' as const,
+              recordId: request.recordId,
+              reason:
+                request.method === 'nfc' ? ('tag_not_associated' as const) : ('malformed' as const),
+            }
+          : {
+              result: 'recorded' as const,
+              recordId: '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
+              checkpointId: 'cp-porton',
+              countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
+              outOfWindow: false,
+            },
+      ),
       repository: async () =>
         ({
           getSyncMeta: jest.fn(async () =>
@@ -119,6 +128,8 @@ describe('<ScannerScreen />', () => {
               offsetMs: 0,
             }),
           ),
+          getShiftData: jest.fn(async () => shiftData),
+          setSyncMeta: jest.fn(async () => undefined),
           saveCheckpointRecord: jest.fn(async () => undefined),
           listCheckpointRecords: jest.fn(async () => []),
           addPendingEvent: jest.fn(async () => undefined),
@@ -126,7 +137,14 @@ describe('<ScannerScreen />', () => {
           updateCheckpointRecordServerResult: jest.fn(async () => undefined),
         }) as never,
       feedback: jest.fn(async () => undefined),
+      triggerSync: jest.fn(),
     });
+  });
+
+  it('mounts exactly one NFC reader when camera permission is granted', async () => {
+    await render(<ScannerScreen shiftData={shiftData} />);
+    expect(await screen.findByRole('button', { name: 'Leer etiqueta' })).toBeOnTheScreen();
+    expect(screen.getAllByRole('button', { name: 'Leer etiqueta' })).toHaveLength(1);
   });
 
   it('shows permission explanation and NFC alternative when camera permission is not granted', async () => {

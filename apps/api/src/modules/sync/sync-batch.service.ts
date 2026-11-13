@@ -60,8 +60,8 @@ export class SyncBatchService {
       input.syncedUntil,
     );
 
-    // systemPrisma se usa para registrar la auditoría del lote recibido
-    await this.prisma.systemPrisma.syncBatch.create({
+    // El guard configura el tenant de la credencial antes de procesar el lote.
+    await this.prisma.tenantPrisma.syncBatch.create({
       data: {
         companyId: credential.companyId,
         shiftId: credential.shiftId,
@@ -73,23 +73,29 @@ export class SyncBatchService {
     });
 
     // Precarga de contexto de turno para optimizar procesamiento por lote
-    const shift = await this.prisma.systemPrisma.shift.findFirst({
+    const shift = await this.prisma.tenantPrisma.shift.findFirst({
       where: { id: credential.shiftId, companyId: credential.companyId },
       include: {
+        events: {
+          where: { assignmentId: credential.assignmentId, type: { in: ['admin_close', 'start'] } },
+          orderBy: { occurredAt: 'desc' },
+        },
         assignments: {
-          where: { isCurrent: true, active: true },
+          where: { id: credential.assignmentId, guardId: credential.userId },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
       },
     });
 
-    let batchContext: CheckpointRecordBatchContext | undefined;
+    let batchContext: CheckpointRecordBatchContext = {
+      credentialAssignmentId: credential.assignmentId,
+    };
     if (shift) {
       try {
         const shiftData = await this.shiftExecutionService.getShiftOfflineData(credential.shiftId);
-        const dbPrevious = await this.prisma.systemPrisma.checkpointRecord.findMany({
-          where: { shiftId: credential.shiftId },
+        const dbPrevious = await this.prisma.tenantPrisma.checkpointRecord.findMany({
+          where: { shiftId: credential.shiftId, invalidatedAt: null },
           select: { checkpointId: true, occurredAtDevice: true, trustedAt: true, countedFor: true },
         });
         const previousRecords = dbPrevious.map((r) => ({
@@ -100,6 +106,7 @@ export class SyncBatchService {
             : [],
         }));
         batchContext = {
+          credentialAssignmentId: credential.assignmentId,
           shift,
           shiftData,
           previousRecords,
@@ -132,7 +139,7 @@ export class SyncBatchService {
         const reqHash = computeRequestHash(event.payload);
 
         // Chequeo de idempotencia sobre CheckpointRecord
-        const existingRecord = await this.prisma.systemPrisma.checkpointRecord.findUnique({
+        const existingRecord = await this.prisma.tenantPrisma.checkpointRecord.findUnique({
           where: { recordId },
         });
         if (existingRecord) {
@@ -150,12 +157,20 @@ export class SyncBatchService {
         }
 
         // Chequeo de idempotencia sobre InvalidScanAttempt
-        const existingAttempt = await this.prisma.systemPrisma.invalidScanAttempt.findUnique({
+        const existingAttempt = await this.prisma.tenantPrisma.invalidScanAttempt.findUnique({
           where: { recordId },
         });
         if (existingAttempt) {
           if (existingAttempt.requestHash === reqHash) {
-            results.push({ status: 'duplicate', eventId: recordId });
+            results.push({
+              status: 'accepted',
+              eventId: recordId,
+              outcome: {
+                result: 'rejected',
+                recordId,
+                reason: existingAttempt.reason,
+              },
+            });
           } else {
             results.push({
               status: 'rejected',
@@ -196,7 +211,7 @@ export class SyncBatchService {
         const eventId = event.payload.eventId;
 
         // Chequeo de idempotencia sobre ShiftEvent
-        const existingEvent = await this.prisma.systemPrisma.shiftEvent.findUnique({
+        const existingEvent = await this.prisma.tenantPrisma.shiftEvent.findUnique({
           where: { deviceEventId: eventId },
         });
         if (existingEvent) {
@@ -227,7 +242,7 @@ export class SyncBatchService {
             user,
           );
           // Conserva el hash del payload junto a la respuesta para validar reintentos de cierre.
-          await this.prisma.systemPrisma.shiftEvent.update({
+          await this.prisma.tenantPrisma.shiftEvent.update({
             where: { deviceEventId: eventId },
             data: {
               response: {
