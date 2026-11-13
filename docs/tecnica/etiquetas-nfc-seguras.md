@@ -171,6 +171,7 @@ Confirmar verifica el SUN contra `lastCounter` persistido y actualiza con compar
 - [ ] Retirar y reasociar en otro punto; comprobar que no reconfigura sin reset y conserva contador.
 - [ ] Restablecer una retirada y comprobar reconfiguracion completa y lectura de prueba.
 - [ ] Probar etiqueta basica, UID invalido y GetVersion no compatible; verificar feedback y fallback.
+- [ ] Retirar una NTAG 424 DNA durante la deteccion; verificar que pide volver a acercarla y no la asocia como basica.
 - [ ] Durante lectura, comprobar botones y cambio de predio bloqueados; probar red alcanzable desconocida y sin conexion.
 
 Estas pruebas requieren hardware y no fueron ejecutadas por la auditoria automatizada.
