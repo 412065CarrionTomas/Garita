@@ -36,10 +36,32 @@ describe('ActivationPage', () => {
   });
 
   it('muestra el mensaje de invitación vencida ante 410', async () => {
-    jest.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(410, { message: 'expired' }));
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(410, { reason: 'expired' }));
     render(<ActivationPage />);
     expect(await screen.findByText(/Esta invitación venció/i)).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveClass('text-danger');
+  });
+
+  it.each([
+    [
+      410,
+      'invalid',
+      'Esta invitación no es válida. Pedile a tu administrador que te envíe una nueva',
+    ],
+    [
+      410,
+      'replaced',
+      'Esta invitación fue reemplazada. Pedile a tu administrador que te envíe una nueva',
+    ],
+    [410, 'used', 'Esta invitación ya fue usada. Ingresá con tu cuenta.'],
+    [429, 'rate_limited', 'Demasiados intentos. Esperá un minuto y volvé a intentarlo.'],
+  ])('explica el motivo %s %s', async (status, reason, message) => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(mockResponse(status, { reason, message: 'used expired' }));
+    render(<ActivationPage />);
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Definir contraseña' })).not.toBeInTheDocument();
   });
 
   it('ofrece al supervisor el enlace para definir la contraseña', async () => {
