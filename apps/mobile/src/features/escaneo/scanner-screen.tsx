@@ -262,6 +262,7 @@ export function ScannerScreen({ shiftData: initialShiftData, onScanComplete }: S
         </View>
 
         <View style={styles.bottomBar}>
+          {shiftData && <NfcReader shiftData={shiftData} />}
           {processing && (
             <View style={[styles.processingBox, cameraControlStyle]}>
               <ActivityIndicator size="small" color={cameraColors.foreground} />
