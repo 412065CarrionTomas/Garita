@@ -44,9 +44,9 @@ El endpoint recibe lotes de eventos generados sin señal (`syncBatchRequestSchem
   - `duplicate`: Evento que ya había sido procesado previamente con datos idénticos; se confirma sin duplicar registros.
   - `rejected`: Evento con datos inválidos, con su `reason` y mensaje descriptivo en español. Si el evento indica un `shiftId` distinto al de la credencial presentada, se rechaza con motivo `not_in_credential_shift`. Si se reutiliza un identificador con datos distintos a los originales, se rechaza con `event_id_conflict`.
 - **Deduplicación e idempotencia:**
-  - `checkpoint_record`: Se verifica la existencia previa de `recordId` en `CheckpointRecord` e `InvalidScanAttempt`. Si existe con el mismo `requestHash`, se reporta como `duplicate`. Si existe con hash diferente, se rechaza por `event_id_conflict`.
+  - `checkpoint_record`: Se verifica la existencia previa de `recordId` en `CheckpointRecord` e `InvalidScanAttempt`. Si existe un `CheckpointRecord` con el mismo `requestHash`, se reporta como `duplicate` (CA3, BDD 3). Si existe un `InvalidScanAttempt` con el mismo hash, se devuelve `accepted` con el `outcome` original `rejected` y su motivo, para que el celular no lo dé por registrado cuando perdió la primera respuesta. Si existe con hash diferente, se rechaza por `event_id_conflict`.
   - `shift_close`: Se verifica la existencia previa de `deviceEventId` en `ShiftEvent`. Si ya existe para el mismo turno, se reporta como `duplicate`. Si pertenece a otro turno, se rechaza como `event_id_conflict`.
-- **Optimización de contexto (`batchContext`):** Antes de recorrer los eventos, el servicio precarga en memoria los datos del predio, rondas fijadas, ventanas y registros previos del turno, reutilizándolos en cada paso para maximizar el rendimiento.
+- **Optimización de contexto (`batchContext`):** Antes de recorrer los eventos, el servicio precarga en memoria los datos del predio, rondas fijadas, ventanas y registros previos del turno, reutilizándolos en cada paso para maximizar el rendimiento. La asignación es la de la credencial, no necesariamente la vigente, y el historial excluye registros invalidados. Solo se agrega al contexto un registro después de persistirlo con éxito.
 
 ## 4. Estados de turno permitidos y eventos tardíos
 

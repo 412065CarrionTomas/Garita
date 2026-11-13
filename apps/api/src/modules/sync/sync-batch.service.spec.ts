@@ -24,13 +24,14 @@ interface CheckpointRecordMock {
   recordId: string;
   checkpointId: string;
   occurredAtDevice: Date;
-  countedFor: { roundId: string; windowIndex: number }[];
+  countedFor: { roundId: string; windowIndex: number; late: boolean }[];
   outOfWindow: boolean;
   requestHash: string;
   shiftId?: string;
 }
 
 interface InvalidScanMock {
+  reason: 'outdated_version';
   recordId: string;
   requestHash: string;
 }
@@ -81,7 +82,7 @@ describe('SyncBatchService', () => {
     clock = { now: () => fixedNow };
 
     prisma = {
-      systemPrisma: {
+      tenantPrisma: {
         syncBatch: {
           create: jest.fn((args: { data: SyncBatchRecord }) => {
             syncBatches.push(args.data);
@@ -143,7 +144,7 @@ describe('SyncBatchService', () => {
             recordId: payload.recordId,
             checkpointId: 'cp-1',
             occurredAtDevice: new Date(payload.occurredAtDevice),
-            countedFor: [{ roundId: 'round-1', windowIndex: 0 }],
+            countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
             outOfWindow: false,
             requestHash: hash,
             shiftId: payload.shiftId,
@@ -524,6 +525,64 @@ describe('SyncBatchService', () => {
 
     await expect(service.processBatch(input, credential, guardUser)).rejects.toThrow(
       ConflictException,
+    );
+  });
+  it('replays an invalid attempt with its original rejection reason', async () => {
+    const payload: CheckpointRecordRequest = {
+      recordId: '11111111-1111-4111-8111-111111111111',
+      shiftId: credential.shiftId,
+      method: 'qr',
+      scannedValue: 'old-qr',
+      occurredAtDevice: '2026-10-14T10:00:00.000Z',
+      location: {
+        status: 'disabled',
+        latitude: null,
+        longitude: null,
+        accuracyMeters: null,
+        simulation: 'unavailable',
+        takenAt: null,
+      },
+      phoneNfc: 'off',
+    };
+    invalidScanAttempts.set(payload.recordId, {
+      recordId: payload.recordId,
+      requestHash: computeRequestHash(payload),
+      reason: 'outdated_version',
+    });
+    const result = await service.processBatch(
+      {
+        shiftId: credential.shiftId,
+        events: [{ type: 'checkpoint_record', payload }],
+        pendingCount: 0,
+        syncedUntil: null,
+      },
+      credential,
+      guardUser,
+    );
+    expect(result.results).toEqual([
+      {
+        status: 'accepted',
+        eventId: payload.recordId,
+        outcome: { result: 'rejected', recordId: payload.recordId, reason: 'outdated_version' },
+      },
+    ]);
+    expect(prisma.tenantPrisma.shift.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          events: {
+            where: { assignmentId: 'assign-1', type: { in: ['admin_close', 'start'] } },
+            orderBy: { occurredAt: 'desc' },
+          },
+          assignments: {
+            where: { id: 'assign-1', guardId: 'guard-1' },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      }),
+    );
+    expect(prisma.tenantPrisma.checkpointRecord.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { shiftId: 'shift-1', invalidatedAt: null } }),
     );
   });
 });
