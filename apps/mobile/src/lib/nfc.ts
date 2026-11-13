@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import type * as NfcModule from 'react-native-nfc-manager';
 import { nfcTagUidSchema } from '@garita/shared';
 import { z } from 'zod';
@@ -68,7 +68,10 @@ export async function readNfcTag(onTag?: (tag: NfcRead) => void): Promise<NfcRea
       try {
         onTag(readTag(tag, nfc));
       } catch {
-        // Ignora etiquetas sin UID o datos nativos inválidos.
+        Alert.alert(
+          'Etiqueta NFC no válida',
+          'No pudimos leer el identificador de la etiqueta. Probá con otra.',
+        );
       }
     });
     try {
