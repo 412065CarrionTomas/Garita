@@ -26,6 +26,7 @@ export const reportDetailQuerySchema = z
     ...filters,
     estado: z.enum(ROUND_WINDOW_STATUSES).optional(),
     dia: day.optional(),
+    orden: z.enum(['asc', 'desc']).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
   })

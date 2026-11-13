@@ -214,6 +214,7 @@ export class ReportsService {
           (!input.estado || window.status === input.estado) &&
           (!input.dia || localReportDay(window.startsAt, scope.timezone) === input.dia),
       );
+      if (input.orden === 'desc') windows.reverse();
       return {
         total: windows.length,
         page: input.page,
@@ -292,8 +293,12 @@ export class ReportsService {
       const records = await this.prisma.tenantPrisma.checkpointRecord.findMany({
         where: {
           invalidatedAt: null,
-          occurredAtDevice: scope.dateRange,
-          shift: { siteId: { in: scope.siteIds } },
+          countsForCompliance: true,
+          OR: [
+            { trustedAt: scope.dateRange },
+            { trustedAt: null, occurredAtDevice: scope.dateRange },
+          ],
+          shift: { siteId: { in: scope.siteIds }, status: { not: 'cancelled' } },
         },
         select: {
           checkpointId: true,

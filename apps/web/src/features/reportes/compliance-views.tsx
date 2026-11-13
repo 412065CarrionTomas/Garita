@@ -61,6 +61,7 @@ export function SiteComplianceTable({
           <TableHead className="text-right">Programadas</TableHead>
           <TableHead className="text-right">A tiempo</TableHead>
           <TableHead className="text-right">Tardías</TableHead>
+          <TableHead className="text-right">Incompletas</TableHead>
           <TableHead className="text-right">No realizadas</TableHead>
           <TableHead>Cumplimiento</TableHead>
           <TableHead>
@@ -79,6 +80,7 @@ export function SiteComplianceTable({
                 {totals.complete - totals.complete_late}
               </TableCell>
               <TableCell className="t-numeral text-right">{totals.complete_late}</TableCell>
+              <TableCell className="t-numeral text-right">{totals.incomplete}</TableCell>
               <TableCell className="t-numeral text-right">{totals.not_done}</TableCell>
               <TableCell>
                 {value === null ? (

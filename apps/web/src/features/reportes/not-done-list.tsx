@@ -16,8 +16,6 @@ import {
 } from '@/components/ui/table';
 
 const SHOWN = 8;
-// El detalle viene ordenado de la más antigua a la más reciente: se pide el máximo y se muestran las últimas.
-const PAGE_SIZE = 100;
 
 /** Las ventanas no realizadas más recientes del período, siempre visibles debajo de la vista elegida. */
 export function NotDoneList({ query, timezone }: { query: string; timezone: string }) {
@@ -25,7 +23,7 @@ export function NotDoneList({ query, timezone }: { query: string; timezone: stri
     queryKey: ['reports', 'not-done', query],
     queryFn: () =>
       apiGet(
-        `/reportes/rondas/detalle?${query}&estado=not_done&pageSize=${PAGE_SIZE}`,
+        `/reportes/rondas/detalle?${query}&estado=not_done&pageSize=${SHOWN}&orden=desc`,
         reportDetailResponseSchema,
       ),
   });
