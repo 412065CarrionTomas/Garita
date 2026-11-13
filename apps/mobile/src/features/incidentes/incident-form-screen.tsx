@@ -139,6 +139,8 @@ export function IncidentFormScreen({
     } finally {
       if (queued)
         void processSyncQueue()
+          // La cola reprograma su reintento; las fotos se intentan igual y respetan su backoff.
+          .catch(() => undefined)
           .then(() => processIncidentPhotos())
           .catch(() => undefined);
       setBusy(false);

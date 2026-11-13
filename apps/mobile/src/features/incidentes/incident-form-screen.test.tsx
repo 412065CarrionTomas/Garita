@@ -91,6 +91,21 @@ describe('<IncidentFormScreen />', () => {
     });
     expect(processIncidentPhotos).toHaveBeenCalled();
   });
+  it('still processes photos when the sync queue fails', async () => {
+    jest.mocked(processIncidentPhotos).mockClear();
+    jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///chosen.jpg', width: 100, height: 100 }],
+    } as never);
+    jest.mocked(reduceIncidentPhoto).mockResolvedValue({ uri: 'file:///reduced.jpg' } as never);
+    jest.mocked(processSyncQueue).mockRejectedValue(new Error('sync'));
+    const view = await render(
+      <IncidentFormScreen shiftId="00000000-0000-4000-8000-000000000001" shiftData={shiftData} />,
+    );
+    await fireEvent.press(view.getByLabelText('Elegir de galería'));
+    await fireEvent.press(view.getByLabelText('Guardar incidente'));
+    await waitFor(() => expect(processIncidentPhotos).toHaveBeenCalled());
+  });
   it('marks exactly one incident type as selected', async () => {
     const { getByLabelText } = await render(
       <IncidentFormScreen shiftId="shift-1" shiftData={shiftData} />,
