@@ -752,4 +752,16 @@ describe('scan-action: processScan', () => {
     expect(mockRepo.meta.get('synced_until')).toBeUndefined();
     expect(triggerSync).toHaveBeenCalled();
   });
+  it('compares pending events by trusted time like computeSyncedUntil', async () => {
+    mockRepo.pendingEvents.push({
+      id: '00000000-0000-4000-8000-000000000002',
+      type: 'checkpoint_record',
+      // Reloj del celular adelantado: la hora del dispositivo es posterior, la confiable anterior.
+      payload: { clock: { trustedAt: '2026-10-14T22:20:00.000Z' } },
+      occurredAtDevice: '2026-10-14T22:40:00.000Z',
+      createdAt: '2026-10-14T22:40:00.000Z',
+    });
+    await processScan('GQR1.cp-porton.1.sig', shiftData);
+    expect(mockRepo.meta.get('synced_until')).toBeUndefined();
+  });
 });

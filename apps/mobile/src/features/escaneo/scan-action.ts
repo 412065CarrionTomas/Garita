@@ -14,6 +14,7 @@ import {
   type ShiftOfflineData,
 } from '@garita/shared';
 import * as Network from 'expo-network';
+import { z } from 'zod';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import {
   createDefaultFieldRepository,
@@ -374,6 +375,10 @@ export async function processScan(
   return response ? serverScanResult(response, shiftData, saved) : saved;
 }
 
+const pendingClockSchema = z.object({
+  clock: z.object({ trustedAt: z.string().nullable() }).nullish(),
+});
+
 async function deliverScan(
   request: CheckpointRecordRequest,
   repository: FieldRepository,
@@ -385,9 +390,13 @@ async function deliverScan(
       await applyCheckpointRecordResponse(repository, request, response);
       await repository.markPendingEventSent(request.recordId);
       const pending = await repository.listPendingEvents();
-      const earlierPending = pending.some(
-        (event) => Date.parse(event.occurredAtDevice) <= Date.parse(request.occurredAtDevice),
-      );
+      // Misma clave que computeSyncedUntil: hora confiable si existe, si no la del dispositivo.
+      const requestAt = Date.parse(computeSyncedUntil([request], null) ?? request.occurredAtDevice);
+      const earlierPending = pending.some((event) => {
+        const clock = pendingClockSchema.safeParse(event.payload).data?.clock ?? undefined;
+        const at = computeSyncedUntil([{ occurredAtDevice: event.occurredAtDevice, clock }], null);
+        return Date.parse(at ?? event.occurredAtDevice) <= requestAt;
+      });
       const previous = await repository.getSyncMeta('synced_until');
       const syncedUntil = earlierPending ? previous : computeSyncedUntil([request], previous);
       if (syncedUntil) await repository.setSyncMeta('synced_until', syncedUntil);
