@@ -42,9 +42,24 @@ it('sin pendientes dice que todo está enviado y no deja enviar', async () => {
 
 it('"Enviar ahora" sin señal avisa que se reintenta solo', async () => {
   givenQueue([event]);
+  jest.mocked(getSyncSnapshot).mockResolvedValue({ ...snapshot, isOffline: true });
   jest.mocked(processSyncQueue).mockResolvedValue({ processed: 0, batchesSent: 0, success: false });
   const screen = await render(<SendScreen />);
   await screen.findByText('Escaneo de punto');
   await userEvent.setup().press(screen.getByRole('button', { name: 'Enviar ahora' }));
   expect(await screen.findByText(/no se pudo enviar/)).toBeTruthy();
+});
+
+it.each([
+  [true, 'Ya hay un envío en curso.'],
+  [false, 'No se pudo enviar. Se reintenta solo.'],
+])('distinguishes busy or HTTP failure from no signal: %s', async (isSyncing, message) => {
+  givenQueue([event]);
+  jest.mocked(getSyncSnapshot).mockResolvedValue({ ...snapshot, isSyncing });
+  jest.mocked(processSyncQueue).mockResolvedValue({ processed: 0, batchesSent: 0, success: false });
+  const screen = await render(<SendScreen />);
+  await screen.findByText('Escaneo de punto');
+  await userEvent.setup().press(screen.getByRole('button', { name: 'Enviar ahora' }));
+  expect(await screen.findByText(message)).toBeOnTheScreen();
+  expect(screen.queryByText(/Sin señal:/)).toBeNull();
 });
