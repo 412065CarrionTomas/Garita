@@ -131,35 +131,43 @@ export class IncidentsService {
 
   async authorizePhoto(id: string, credential: ShiftCredentialPayload) {
     const incident = await this.ownedIncident(id, credential);
-    await this.prisma.systemPrisma.incidentPhotoAuthorization.deleteMany({
-      where: { incidentId: incident.id, expiresAt: { lte: this.clock.now() } },
-    });
-    const [photoCount, authorizationCount] = await Promise.all([
-      this.prisma.systemPrisma.incidentPhoto.count({ where: { incidentId: incident.id } }),
-      this.prisma.systemPrisma.incidentPhotoAuthorization.count({
-        where: { incidentId: incident.id },
-      }),
-    ]);
-    const count = photoCount + authorizationCount;
-    if (count >= 5) throw new ConflictException('El incidente ya tiene cinco fotos');
-    const authorization = await this.photos.authorizeUpload(
-      credential.companyId,
-      incident.incidentId,
-    );
-    if (
-      !authorization.publicId.startsWith(
-        `incidentes/${credential.companyId}/${incident.incidentId}/`,
+    return this.prisma.systemPrisma.$transaction(async (tx) => {
+      // Serializa autorizaciones y confirmaciones del incidente propio de la credencial.
+      await tx.$queryRaw`SELECT id FROM "Incident" WHERE id = ${incident.id} FOR UPDATE`;
+      await tx.incidentPhotoAuthorization.deleteMany({
+        where: { incidentId: incident.id, expiresAt: { lte: this.clock.now() } },
+      });
+      const photoCount = await tx.incidentPhoto.count({ where: { incidentId: incident.id } });
+      if (photoCount >= 5) throw new ConflictException('El incidente ya tiene cinco fotos');
+      const authorization = await this.photos.authorizeUpload(
+        credential.companyId,
+        incident.incidentId,
+      );
+      if (
+        !authorization.publicId.startsWith(
+          `incidentes/${credential.companyId}/${incident.incidentId}/`,
+        )
       )
-    )
-      throw new Error('La autorización generó un identificador inesperado');
-    await this.prisma.systemPrisma.incidentPhotoAuthorization.create({
-      data: {
-        incidentId: incident.id,
-        cloudinaryPublicId: authorization.publicId,
-        expiresAt: new Date(this.clock.now().getTime() + 15 * 60_000),
-      },
+        throw new Error('La autorización generó un identificador inesperado');
+      // Los reintentos reemplazan las autorizaciones más viejas, sin consumir cupo de fotos reales.
+      const replaced = await tx.incidentPhotoAuthorization.findMany({
+        where: { incidentId: incident.id },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: 4 - photoCount,
+        select: { id: true },
+      });
+      await tx.incidentPhotoAuthorization.deleteMany({
+        where: { id: { in: replaced.map(({ id: authorizationId }) => authorizationId) } },
+      });
+      await tx.incidentPhotoAuthorization.create({
+        data: {
+          incidentId: incident.id,
+          cloudinaryPublicId: authorization.publicId,
+          expiresAt: new Date(this.clock.now().getTime() + 15 * 60_000),
+        },
+      });
+      return { ...authorization, maxBytes: INCIDENT_PHOTO_MAX_BYTES };
     });
-    return { ...authorization, maxBytes: INCIDENT_PHOTO_MAX_BYTES };
   }
 
   async registerPhoto(id: string, credential: ShiftCredentialPayload, publicId: string) {
@@ -183,11 +191,21 @@ export class IncidentsService {
       throw new ConflictException('La foto supera los 3 MB');
     try {
       return await this.prisma.systemPrisma.$transaction(async (transaction) => {
+        await transaction.$queryRaw`SELECT id FROM "Incident" WHERE id = ${incident.id} FOR UPDATE`;
+        const currentCount = await transaction.incidentPhoto.count({
+          where: { incidentId: incident.id },
+        });
+        if (currentCount >= 5) throw new ConflictException('El incidente ya tiene cinco fotos');
+        const consumed = await transaction.incidentPhotoAuthorization.deleteMany({
+          where: {
+            incidentId: incident.id,
+            cloudinaryPublicId: publicId,
+            expiresAt: { gt: this.clock.now() },
+          },
+        });
+        if (consumed.count !== 1) throw new NotFoundException();
         const photo = await transaction.incidentPhoto.create({
           data: { incidentId: incident.id, cloudinaryPublicId: publicId, ...uploaded },
-        });
-        await transaction.incidentPhotoAuthorization.delete({
-          where: { cloudinaryPublicId: publicId },
         });
         this.logger.log({
           event: 'incident.photo_registered',
