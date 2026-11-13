@@ -184,9 +184,18 @@ export function SitesPage() {
     queryFn: () => apiGet('/predios', sitesResponseSchema),
   });
   const clients = useQuery({
-    queryKey: ['clientes'],
-    queryFn: () =>
-      apiGet('/clientes', z.array(z.looseObject({ id: z.string(), name: z.string() }))),
+    queryKey: ['clientes', 'activos', 'todos'],
+    queryFn: async () => {
+      const clients: { id: string; name: string }[] = [];
+      for (let page = 1; ; page++) {
+        const batch = await apiGet(
+          `/clientes?estado=active&pagina=${page}`,
+          z.array(z.looseObject({ id: z.string(), name: z.string() })),
+        );
+        clients.push(...batch);
+        if (batch.length < 50) return clients;
+      }
+    },
   });
   const [form, setForm] = useState({
     clientId: '',
@@ -249,6 +258,15 @@ export function SitesPage() {
       await apiPost('/predios', parsed.data, siteInputSchema, response);
       setCreateError('');
       setCreating(false);
+      setForm({
+        clientId: '',
+        name: '',
+        address: '',
+        latitude: 0,
+        longitude: 0,
+        accessInstructions: '',
+        observations: '',
+      });
       await sites.refetch();
     } catch (caught) {
       setCreateError(errorMessage(caught, 'Ya existe un predio con ese nombre en el cliente'));
@@ -411,7 +429,7 @@ export function SitesPage() {
                   >
                     <span className="font-semibold break-words">{site.name}</span>
                     <span className="text-sm opacity-80">
-                      {clients.data?.find((client) => client.id === site.clientId)?.name}
+                      {site.client?.name}
                       {site.status === 'active' ? '' : ' · Inactivo'}
                     </span>
                   </button>
@@ -431,9 +449,7 @@ export function SitesPage() {
                         {site.status === 'active' ? 'Activo' : 'Inactivo'}
                       </StatusBadge>
                     </div>
-                    <p className="text-muted-foreground">
-                      Cliente: {clients.data?.find((client) => client.id === site.clientId)?.name}
-                    </p>
+                    <p className="text-muted-foreground">Cliente: {site.client?.name}</p>
                     <p>
                       {site.address} · {site.latitude}, {site.longitude}
                     </p>

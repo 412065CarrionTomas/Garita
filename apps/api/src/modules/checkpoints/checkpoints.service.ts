@@ -1,4 +1,11 @@
-import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { TenantResourceService } from '../auth/tenant-resource.service';
@@ -130,9 +137,23 @@ export class CheckpointsService {
         message: 'Quitá el punto de las rondas activas antes de darlo de baja',
         rounds: rounds.map(({ id: roundId, name }) => ({ id: roundId, name })),
       });
-    const updated = await this.prisma.tenantPrisma.checkpoint.update({
-      where: { id },
-      data: { status: 'inactive' },
+    const pinned = await this.prisma.tenantPrisma.roundVersionCheckpoint.findFirst({
+      where: {
+        checkpointId: id,
+        roundVersion: { shifts: { some: { shift: { status: 'in_progress' } } } },
+      },
+    });
+    if (pinned)
+      throw new ConflictException({
+        code: 'CHECKPOINT_IN_PROGRESS_SHIFT',
+        message: 'El punto está incluido en una ronda de un turno en curso',
+      });
+    const updated = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      await tx.nfcTag.updateMany({
+        where: { checkpointId: id, status: 'active' },
+        data: { status: 'removed', endedAt: new Date(), endedById: user.userId },
+      });
+      return tx.checkpoint.update({ where: { id }, data: { status: 'inactive' } });
     });
     this.logger.log({ action: 'checkpoint.deactivated', checkpointId: id, userId: user.userId });
     return updated;
@@ -157,6 +178,7 @@ export class CheckpointsService {
     });
     if (ids && checkpoints.length !== new Set(ids).size)
       throw new NotFoundException('Punto no encontrado');
+    if (!checkpoints.length) throw new BadRequestException('No hay puntos para imprimir');
     const PDFDocument = (await import('pdfkit')).default;
     const document = new PDFDocument({ size: 'A4', margin: 28 });
     const chunks: Buffer[] = [];

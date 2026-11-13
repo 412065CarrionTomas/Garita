@@ -80,18 +80,20 @@ async function main(): Promise<void> {
           'Depósito central',
           'Acceso perimetral',
         ].entries()) {
-          await prisma.checkpoint.upsert({
-            where: { siteId_name: { siteId: site.id, name: checkpointName } },
-            create: {
-              companyId,
-              siteId: site.id,
-              name: checkpointName,
-              latitude: -34.6 + index * 0.01 + checkpointIndex * 0.0001,
-              longitude: -58.4 + index * 0.01 + checkpointIndex * 0.0001,
-              isIndoor: checkpointIndex === 1,
-            },
-            update: {},
+          const existingCheckpoint = await prisma.checkpoint.findFirst({
+            where: { siteId: site.id, name: checkpointName, status: 'active' },
           });
+          if (!existingCheckpoint)
+            await prisma.checkpoint.create({
+              data: {
+                companyId,
+                siteId: site.id,
+                name: checkpointName,
+                latitude: -34.6 + index * 0.01 + checkpointIndex * 0.0001,
+                longitude: -58.4 + index * 0.01 + checkpointIndex * 0.0001,
+                isIndoor: checkpointIndex === 1,
+              },
+            });
         }
       }
     }

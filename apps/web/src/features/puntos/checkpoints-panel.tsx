@@ -67,14 +67,15 @@ export function CheckpointsPanel({ site }: SiteProps) {
     queryKey: ['puntos', site.id],
     queryFn: () => apiGet(`/predios/${site.id}/puntos`, checkpointsResponseSchema),
   });
-  const [form, setForm] = useState({
+  const emptyForm = {
     name: '',
     latitude: Number(site.latitude),
     longitude: Number(site.longitude),
     toleranceRadiusMeters: 30,
     stickerLocation: '',
     isIndoor: false,
-  });
+  };
+  const [form, setForm] = useState(emptyForm);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string>();
   const [confirmFar, setConfirmFar] = useState(false);
@@ -101,6 +102,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
         await apiPost(`/predios/${site.id}/puntos`, parsed.data, checkpointInputSchema, idResponse);
       setConfirmFar(false);
       setEditingId(undefined);
+      setForm(emptyForm);
       setMessage('Punto guardado.');
       await points.refetch();
     } catch (error) {
@@ -251,7 +253,8 @@ export function CheckpointsPanel({ site }: SiteProps) {
                     size="sm"
                     onClick={() => {
                       setEditingId(undefined);
-                      setForm({ ...form, name: '' });
+                      setForm(emptyForm);
+                      setConfirmFar(false);
                     }}
                   >
                     Cancelar edición
@@ -260,7 +263,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
               </div>
             </form>
           )}
-          {admin && (
+          {admin && !!points.data?.length && (
             <Button variant="outline" onClick={() => void download()}>
               Descargar stickers de todos
             </Button>
@@ -351,7 +354,8 @@ export function CheckpointsPanel({ site }: SiteProps) {
                                       qrPayload: z.string(),
                                     }),
                                   )
-                                    .then(() => {
+                                    .then(async () => {
+                                      await points.refetch();
                                       setMessage('QR regenerado. Imprimí un sticker nuevo.');
                                     })
                                     .catch(() => {

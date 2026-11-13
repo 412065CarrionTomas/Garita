@@ -27,6 +27,7 @@ jest.mock('@/lib/api-client', () => ({
         {
           id: 'site-1',
           clientId: 'client-1',
+          client: { id: 'client-1', name: 'Cliente desde predio' },
           name: 'Sede',
           address: 'Calle 1',
           latitude: -34,
@@ -36,7 +37,8 @@ jest.mock('@/lib/api-client', () => ({
           supervisors: [{ user: { id: 'supervisor-1' } }],
         },
       ];
-    if (path === '/clientes') return [{ id: 'client-1', name: 'Cliente' }];
+    if (path.startsWith('/clientes?estado=active&pagina='))
+      return [{ id: 'client-1', name: 'Cliente' }];
     if (path === '/predios/supervisores-disponibles')
       return [{ id: 'supervisor-1', firstName: 'Ana', lastName: 'Gómez' }];
     return [];
@@ -258,4 +260,51 @@ describe('SitesPage', () => {
       );
     });
   });
+});
+
+it('trae todas las paginas de clientes activos y muestra el cliente incluido en el predio', async () => {
+  jest.mocked(useAuth).mockReturnValue(profile('admin'));
+  const original = jest.mocked(apiGet).getMockImplementation();
+  jest.mocked(apiGet).mockImplementation(((path: string, schema: unknown) => {
+    if (path === '/clientes?estado=active&pagina=1')
+      return Promise.resolve(
+        Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, name: `Cliente ${i}` })),
+      );
+    if (path === '/clientes?estado=active&pagina=2')
+      return Promise.resolve([{ id: 'last', name: 'Ultimo cliente' }]);
+    return original?.(path, schema as never);
+  }) as typeof apiGet);
+  try {
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+    expect(await screen.findByText('Cliente: Cliente desde predio')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+    expect(await screen.findByRole('option', { name: 'Ultimo cliente' })).toBeInTheDocument();
+    expect(apiGet).toHaveBeenCalledWith('/clientes?estado=active&pagina=2', expect.anything());
+  } finally {
+    jest.mocked(apiGet).mockImplementation(original);
+  }
+});
+it('no guarda en cero y limpia el formulario despues del alta', async () => {
+  jest.mocked(useAuth).mockReturnValue(profile('admin'));
+  jest.mocked(apiPost).mockClear();
+  const user = userEvent.setup();
+  renderWithQueryClient(<SitesPage />);
+  await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+  const dialog = screen.getByRole('dialog', { name: 'Alta de predio' });
+  await user.selectOptions(await within(dialog).findByLabelText('Cliente'), 'client-1');
+  await user.type(within(dialog).getByLabelText('Nombre'), 'Nuevo');
+  await user.type(within(dialog).getByLabelText('Dirección'), 'Calle');
+  await user.click(within(dialog).getByRole('button', { name: 'Guardar predio' }));
+  expect(await screen.findByText('Ubicá el predio antes de guardar')).toBeInTheDocument();
+  expect(apiPost).not.toHaveBeenCalled();
+  await user.clear(within(dialog).getByLabelText('Latitud'));
+  await user.type(within(dialog).getByLabelText('Latitud'), '-34');
+  await user.click(within(dialog).getByRole('button', { name: 'Guardar predio' }));
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+  await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+  expect(screen.getByLabelText('Nombre')).toHaveValue('');
+  expect(screen.getByLabelText('Dirección')).toHaveValue('');
 });

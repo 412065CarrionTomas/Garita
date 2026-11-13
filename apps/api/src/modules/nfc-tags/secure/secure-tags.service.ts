@@ -42,6 +42,9 @@ const stateSchema = z.object({
     .regex(/^[0-9a-f]{8}$/)
     .optional(),
   authKind: z.enum(['factory', 'derived']).default('factory'),
+  counter: z.number().int().min(0).default(0),
+  resumeStep: z.enum(['key_1', 'key_2', 'key_3', 'key_4']).optional(),
+  oldKeyKind: z.enum(['factory', 'derived']).default('factory'),
 });
 type SessionState = z.infer<typeof stateSchema>;
 
@@ -107,20 +110,27 @@ export class SecureTagsService {
     if (globalTag?.status === 'active' && globalTag.checkpointId !== checkpointId)
       throw new ConflictException('La etiqueta está asociada a otro punto');
 
-    const retired = globalTag?.kind === 'secure' && globalTag.status === 'removed';
+    if (globalTag?.masterKeyVersion != null && globalTag.masterKeyVersion !== version)
+      throw new ConflictException(
+        'La etiqueta usa otra versión de la clave maestra; requiere recuperar esa clave antes de reconfigurar',
+      );
+    const readyToConfirm =
+      globalTag?.kind === 'secure' &&
+      globalTag.configurationStatus === 'configured' &&
+      globalTag.masterKeyVersion === version;
     const session = await this.prisma.tenantPrisma.secureTagSession.create({
       data: {
         id: randomUUID(),
         companyId: user.companyId,
         tagUid: input.uid,
         checkpointId,
-        step: retired ? 'ready' : 'auth_1',
+        step: readyToConfirm ? 'ready' : 'auth_1',
         state: { authKind: 'factory' },
         expiresAt: new Date(Date.now() + 2 * 60_000),
         createdById: user.userId,
       },
     });
-    if (!retired) {
+    if (!readyToConfirm) {
       if (globalTag) {
         await this.prisma.tenantPrisma.nfcTag.update({
           where: { id: globalTag.id },
@@ -140,7 +150,11 @@ export class SecureTagsService {
         });
       }
     }
-    return { sessionId: session.id, apdu: retired ? null : authFirst(), complete: retired };
+    return {
+      sessionId: session.id,
+      apdu: readyToConfirm ? null : authFirst(),
+      complete: readyToConfirm,
+    };
   }
 
   private async session(id: string, user: AuthenticatedUser) {
@@ -167,41 +181,68 @@ export class SecureTagsService {
     let command: string | null;
     try {
       if (session.step === 'auth_1') {
-        if (response.subarray(-2).toString('hex') !== '91af' && previous.authKind === 'factory') {
+        const next = authContinue(response, authKey);
+        state = { ...previous, ...next.state, counter: 0 };
+        step = 'auth_2';
+        command = next.command;
+      } else if (session.step === 'auth_2') {
+        if (
+          response.toString('hex') === '91ae' &&
+          previous.authKind === 'factory' &&
+          !previous.resumeStep
+        ) {
           step = 'auth_1';
-          state = { authKind: 'derived' };
+          state = { authKind: 'derived', oldKeyKind: 'factory', counter: 0 };
           command = authFirst();
         } else {
-          const next = authContinue(response, authKey);
-          state = { ...next.state, authKind: previous.authKind };
-          step = 'auth_2';
-          command = next.command;
-        }
-      } else if (session.step === 'auth_2') {
-        if (!previous.rndA || !previous.rndB) throw new Error('Estado incompleto');
-        state = {
-          ...finishAuth(response, authKey, previous as Ev2State),
-          authKind: previous.authKind,
-        };
-        if (previous.authKind === 'derived') {
-          step = 'ready';
-          command = null;
-        } else {
-          step = STEPS[0];
-          command = writeNdef(0, state as Ev2State, authKey);
+          if (!previous.rndA || !previous.rndB) throw new Error('Estado incompleto');
+          state = {
+            ...previous,
+            ...finishAuth(response, authKey, previous as Ev2State),
+            counter: 0,
+          };
+          step = previous.resumeStep ?? STEPS[0];
+          command =
+            step === 'write_ndef'
+              ? writeNdef(0, state as Ev2State, authKey)
+              : this.nextCommand(step, state, authKey, session.tagUid);
         }
       } else {
         const index = STEPS.indexOf(session.step as (typeof STEPS)[number]);
         if (index < 0) throw new Error('Paso no válido');
-        checkFullResponse(response, index, state as Ev2State, authKey, session.step === 'key_0');
-        if (index === STEPS.length - 1) {
-          step = 'ready';
-          command = null;
+        if (
+          response.toString('hex') === '911e' &&
+          /^key_[1-4]$/.test(session.step) &&
+          previous.oldKeyKind === 'factory'
+        ) {
+          // Un error de integridad invalida EV2: reautenticar antes de probar la clave anterior derivada.
+          state = {
+            authKind: previous.authKind,
+            oldKeyKind: 'derived',
+            counter: 0,
+            resumeStep: session.step as SessionState['resumeStep'],
+          };
+          step = 'auth_1';
+          command = authFirst();
         } else {
-          const nextStep = STEPS[index + 1];
-          if (!nextStep) throw new Error('Paso no válido');
-          step = nextStep;
-          command = this.nextCommand(step, index + 1, state as Ev2State, authKey, session.tagUid);
+          checkFullResponse(
+            response,
+            previous.counter,
+            state as Ev2State,
+            authKey,
+            session.step === 'key_0',
+          );
+          state = { ...previous, counter: previous.counter + 1, oldKeyKind: 'factory' };
+          delete state.resumeStep;
+          if (index === STEPS.length - 1) {
+            step = 'ready';
+            command = null;
+          } else {
+            const nextStep = STEPS[index + 1];
+            if (!nextStep) throw new Error('Paso no válido');
+            step = nextStep;
+            command = this.nextCommand(step, state, authKey, session.tagUid);
+          }
         }
       }
     } catch {
@@ -216,22 +257,18 @@ export class SecureTagsService {
     return { sessionId: id, apdu: command, complete: step === 'ready' };
   }
 
-  private nextCommand(
-    step: string,
-    counter: number,
-    state: Ev2State,
-    authKey: Buffer,
-    uid: string,
-  ) {
-    if (step === 'file_settings') return changeFileSettings(counter, state, authKey);
+  private nextCommand(step: string, state: SessionState, authKey: Buffer, uid: string) {
+    if (step === 'file_settings')
+      return changeFileSettings(state.counter, state as Ev2State, authKey);
     const slot = Number(step.slice(-1));
     return changeKey(
       slot,
       this.keyFor(uid, slot, this.keys().version),
       this.keys().version,
-      counter,
-      state,
+      state.counter,
+      state as Ev2State,
       authKey,
+      state.oldKeyKind === 'derived' ? this.keyFor(uid, slot, this.keys().version) : FACTORY_KEY,
     );
   }
 
@@ -239,16 +276,21 @@ export class SecureTagsService {
     const session = await this.session(id, user);
     if (session.step !== 'ready') throw new ConflictException('La configuración no se completó');
     const { version } = this.keys();
-    const result = verifySun(
-      input.sdmMessage,
-      session.tagUid,
-      this.keyFor(session.tagUid, 2, version),
-      this.keyFor(session.tagUid, 1, version),
-      null,
-    );
-    if (result.result !== 'valid')
-      throw new UnprocessableEntityException('La lectura de prueba no es válida');
     const tag = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const candidate = await tx.nfcTag.findFirst({
+        where: { uid: session.tagUid },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!candidate) throw new NotFoundException('Etiqueta no encontrada');
+      const result = verifySun(
+        input.sdmMessage,
+        session.tagUid,
+        this.keyFor(session.tagUid, 2, version),
+        this.keyFor(session.tagUid, 1, version),
+        candidate.lastCounter,
+      );
+      if (result.result !== 'valid' || result.counter === undefined)
+        throw new UnprocessableEntityException('La lectura de prueba no es válida');
       const previous = await tx.nfcTag.findFirst({
         where: { checkpointId: session.checkpointId, status: 'active' },
       });
@@ -258,13 +300,8 @@ export class SecureTagsService {
           data: { status: 'replaced', endedAt: new Date(), endedById: user.userId },
         });
       }
-      const candidate = await tx.nfcTag.findFirst({
-        where: { uid: session.tagUid },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (!candidate) throw new NotFoundException('Etiqueta no encontrada');
-      await tx.nfcTag.updateMany({
-        where: { id: candidate.id },
+      const updated = await tx.nfcTag.updateMany({
+        where: { id: candidate.id, lastCounter: candidate.lastCounter },
         data: {
           checkpointId: session.checkpointId,
           status: 'active',
@@ -278,6 +315,8 @@ export class SecureTagsService {
           endedById: null,
         },
       });
+      if (updated.count !== 1)
+        throw new ConflictException('La etiqueta cambió. Repetí la lectura de prueba');
       await tx.secureTagSession.deleteMany({ where: { id } });
       return candidate;
     });
