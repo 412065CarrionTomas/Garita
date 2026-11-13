@@ -1,0 +1,122 @@
+import { RoundReviewService } from './round-review.service';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { TenantResourceService } from '../auth/tenant-resource.service';
+import type { RoundWindowStateService } from '../supervision/round-window-state.service';
+
+const user = {
+  userId: 'admin',
+  companyId: 'company',
+  role: 'admin' as const,
+  status: 'active' as const,
+};
+const startsAt = new Date('2026-11-01T10:00:00Z');
+const endsAt = new Date('2026-11-01T11:00:00Z');
+const graceEndsAt = new Date('2026-11-01T11:15:00Z');
+function setup(now = graceEndsAt) {
+  const assignments = [{ id: 'owner', startsAt, result: 'started' }];
+  const window = {
+    id: 'window',
+    shiftId: 'shift',
+    roundId: 'round',
+    windowIndex: 0,
+    startsAt,
+    endsAt,
+    graceEndsAt,
+    expectedCount: 1,
+    status: 'in_review',
+    inReviewSince: endsAt,
+    shift: { siteId: 'site', assignments },
+  };
+  const record = {
+    id: 'record',
+    shiftId: 'shift',
+    assignmentId: 'owner',
+    checkpointId: 'point',
+    countedFor: [{ roundId: 'round', windowIndex: 0, late: true }],
+    invalidatedAt: null as Date | null,
+    flags: [] as { type: 'time_altered' }[],
+    shift: window.shift,
+  };
+  const db = {
+    roundWindowState: {
+      findFirst: jest.fn().mockResolvedValue(window),
+      findMany: jest.fn().mockResolvedValue([window]),
+      findUnique: jest.fn().mockResolvedValue({ status: 'complete_late' }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      update: jest.fn(),
+    },
+    checkpointRecord: {
+      findFirst: jest.fn().mockResolvedValue(record),
+      findMany: jest.fn().mockImplementation(() => Promise.resolve([record])),
+      updateMany: jest.fn().mockImplementation(() => {
+        record.invalidatedAt = now;
+        return Promise.resolve({ count: 1 });
+      }),
+    },
+    roundReviewDecision: { create: jest.fn() },
+  };
+  const transaction = (fn: (tx: typeof db) => Promise<unknown>) => fn(db);
+  const notifications = { notifySiteStaff: jest.fn(), notifyUsers: jest.fn() };
+  const service = new RoundReviewService(
+    {
+      tenantPrisma: { ...db, $transaction: transaction },
+      systemPrisma: { ...db, $transaction: transaction },
+    } as unknown as PrismaService,
+    { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService,
+    {} as RoundWindowStateService,
+    { now: () => now },
+    { emitToSite: jest.fn() },
+    notifications,
+    { recalculate: jest.fn() },
+  );
+  jest.spyOn(service, 'detail').mockResolvedValue({} as never);
+  return { service, db, record, window, notifications };
+}
+
+it('validates a late window without losing its lateness', async () => {
+  const { service, db } = setup();
+  await service.validate('window', user, 'Validación justificada');
+  expect(db.roundWindowState.updateMany).toHaveBeenCalledWith(
+    expect.objectContaining({ data: { status: 'complete_late', inReviewSince: null } }),
+  );
+});
+
+it('ignores records belonging to another assignment when reviewing a window', async () => {
+  const { service, db, record, notifications } = setup();
+  db.checkpointRecord.findMany.mockImplementation(() =>
+    Promise.resolve([record, { ...record, assignmentId: 'other', invalidatedAt: null }]),
+  );
+  await service.recordDecision('record', 'invalidate', user, 'Registro inválido');
+  expect(db.roundWindowState.update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({ status: 'not_done', recordedCount: 0 }) as unknown,
+    }),
+  );
+  expect(notifications.notifySiteStaff).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['2026-11-01T10:30:00Z', 'in_progress'],
+  ['2026-11-01T11:05:00Z', 'late'],
+] as const)('does not finalize a window before grace at %s', async (instant, status) => {
+  const { service, db } = setup(new Date(instant));
+  await service.recordDecision('record', 'invalidate', user, 'Registro inválido');
+  expect(db.roundWindowState.update).toHaveBeenCalledWith(
+    expect.objectContaining({ data: expect.objectContaining({ status }) as unknown }),
+  );
+});
+
+it('preserves complete_late when restoring a late valid record', async () => {
+  const { service, db, record } = setup();
+  record.invalidatedAt = endsAt;
+  db.checkpointRecord.updateMany.mockImplementation(() => {
+    record.invalidatedAt = null;
+    return Promise.resolve({ count: 1 });
+  });
+  await service.recordDecision('record', 'restore', user, 'Registro válido');
+  expect(db.roundWindowState.update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({ status: 'complete_late' }) as unknown,
+    }),
+  );
+});

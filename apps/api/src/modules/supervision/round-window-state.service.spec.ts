@@ -46,8 +46,8 @@ describe('RoundWindowStateService (HU-17)', () => {
       checkpointRecords: [] as {
         assignmentId: string;
         checkpointId: string;
-        countedFor: { roundId: string; windowIndex: number }[];
-        flags: never[];
+        countedFor: { roundId: string; windowIndex: number; late?: boolean }[];
+        flags: { type: 'time_altered' }[];
         invalidatedAt: null;
       }[],
     };
@@ -75,6 +75,33 @@ describe('RoundWindowStateService (HU-17)', () => {
     );
     return { shift, db, update, raise, resolve, service };
   }
+
+  it('keeps a validated late grave window complete across repeated recalculations', async () => {
+    const { shift, db, service, update } = setup();
+    const window = shift.roundWindowStates[0];
+    if (!window) throw new Error('Missing window');
+    window.status = 'complete_late';
+    shift.checkpointRecords.push({
+      assignmentId: 'owner',
+      checkpointId: 'point',
+      countedFor: [{ roundId: 'round', windowIndex: 0, late: true }],
+      flags: [{ type: 'time_altered' }],
+      invalidatedAt: null,
+    });
+    db.roundReviewDecision.findFirst.mockResolvedValue({ kind: 'validate' });
+    await service.recalculate('shift');
+    await service.recalculate('shift');
+    expect(update.mock.calls.at(-1)?.[0].data.status).toBe('complete_late');
+    expect(db.roundReviewDecision.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { windowStateId: 'window' },
+        orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+    db.roundReviewDecision.findFirst.mockResolvedValue({ kind: 'invalidate' });
+    await service.recalculate('shift');
+    expect(update.mock.calls.at(-1)?.[0].data.status).toBe('in_review');
+  });
 
   it('keeps a closed-without-data decision without fabricating synchronization or a missed notice (CA9)', async () => {
     const { shift, service, update, raise } = setup();

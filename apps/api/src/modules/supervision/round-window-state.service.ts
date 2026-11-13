@@ -191,11 +191,13 @@ export class RoundWindowStateService {
             ? 'complete_late'
             : status;
       const validated =
-        window.status === 'complete' &&
-        (await db.roundReviewDecision.findFirst({
-          where: { windowStateId: window.id, kind: 'validate' },
-          select: { id: true },
-        }));
+        (
+          await db.roundReviewDecision.findFirst({
+            where: { windowStateId: window.id },
+            orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
+            select: { kind: true },
+          })
+        )?.kind === 'validate';
       const nextStatus =
         (completeStatus === 'complete' || completeStatus === 'complete_late') &&
         severityLevel === 'grave' &&
