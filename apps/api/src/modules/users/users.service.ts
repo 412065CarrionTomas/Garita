@@ -333,17 +333,34 @@ export class UsersService {
   async reactivate(id: string, adminId: string) {
     const user = await this.getUser(id);
     if (user.clientId) await this.assertActiveClient(user.clientId);
-    await this.firebase.setDisabled(user.firebaseUid, false);
-    await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      if (user.clientId) {
-        const locked = await tx.client.updateMany({
-          where: { id: user.clientId, status: 'active' },
-          data: { status: 'active' },
-        });
-        if (!locked.count) throw new ConflictException('El cliente está dado de baja');
-      }
-      await tx.user.update({ where: { id }, data: { status: 'active' } });
+    const usedInvitation = await this.prisma.tenantPrisma.invitation.findFirst({
+      where: { userId: id, usedAt: { not: null } },
     });
+    await this.firebase.setDisabled(user.firebaseUid, !usedInvitation);
+    try {
+      await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        if (user.clientId) {
+          const locked = await tx.client.updateMany({
+            where: { id: user.clientId, status: 'active' },
+            data: { status: 'active' },
+          });
+          if (!locked.count) throw new ConflictException('El cliente está dado de baja');
+        }
+        await tx.user.update({
+          where: { id },
+          data: { status: usedInvitation ? 'active' : 'invitation_pending' },
+        });
+      });
+    } catch (error) {
+      await this.firebase.setDisabled(user.firebaseUid, true).catch((cleanupError: unknown) => {
+        this.logger.error({
+          event: 'personnel_reactivation_cleanup_failed',
+          userId: id,
+          error: cleanupError instanceof Error ? cleanupError.message : 'unknown',
+        });
+      });
+      throw error;
+    }
     this.logger.log({ event: 'personnel_reactivated', actorUserId: adminId, userId: id });
     return { ok: true as const };
   }
@@ -354,6 +371,8 @@ export class UsersService {
       throw new ConflictException(
         'El usuario está desactivado. Reactivalo antes de reenviar la invitación',
       );
+    if (user.status !== 'invitation_pending')
+      throw new ConflictException('El usuario ya activó su cuenta');
     await this.prisma.tenantPrisma.invitation.updateMany({
       where: { userId: id, usedAt: null, replacedAt: null },
       data: { replacedAt: new Date() },
