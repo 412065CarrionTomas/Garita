@@ -5975,7 +5975,9 @@ describe('Aplicación (e2e)', () => {
     const actor = await prisma.user.findUniqueOrThrow({
       where: { firebaseUid: 'seed-norte-admin' },
     });
-    const client = await prisma.client.findFirstOrThrow({ where: { companyId: 'norte-company' } });
+    const client = await prisma.client.findFirstOrThrow({
+      where: { companyId: 'norte-company', status: 'active' },
+    });
     const site = await prisma.site.create({
       data: {
         companyId: 'norte-company',
