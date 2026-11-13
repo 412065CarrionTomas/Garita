@@ -300,6 +300,10 @@ export async function processSyncQueue(): Promise<{
       totalProcessed += batchSlice.length;
 
       const receivedEventIds = new Set<string>();
+      // Una sola lectura por lote: releer la tabla por evento vuelve cuadrático el envío.
+      const knownRecords = response.results.some((result) => result.status === 'accepted')
+        ? await repo.listCheckpointRecords()
+        : [];
 
       for (const result of response.results) {
         const matchingEvent = batchSlice.find(
@@ -320,6 +324,7 @@ export async function processSyncQueue(): Promise<{
               repo,
               checkpointRecordRequestSchema.parse(matchingEvent.payload),
               checkpointRecordResponseSchema.parse(result.outcome),
+              knownRecords,
             );
           }
           await repo.markPendingEventSent(result.eventId);

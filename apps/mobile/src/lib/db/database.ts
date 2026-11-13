@@ -635,6 +635,8 @@ export async function applyCheckpointRecordResponse(
   repository: FieldRepository,
   request: CheckpointRecordRequest,
   response: CheckpointRecordResponse,
+  /** Registros locales ya leídos: evita releer la tabla por cada evento de un lote. */
+  knownRecords?: readonly LocalCheckpointRecord[],
 ): Promise<void> {
   if (response.result !== 'recorded') {
     await repository.updateCheckpointRecordServerResult(
@@ -644,7 +646,7 @@ export async function applyCheckpointRecordResponse(
     );
     return;
   }
-  const existing = (await repository.listCheckpointRecords(request.shiftId)).find(
+  const existing = (knownRecords ?? (await repository.listCheckpointRecords(request.shiftId))).find(
     (record) => record.recordId === request.recordId,
   );
   const data = existing ? null : await repository.getShiftData();
