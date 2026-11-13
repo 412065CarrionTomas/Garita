@@ -114,7 +114,6 @@ export function IncidentFormScreen({
       });
       queued = true;
       setEventSaved(true);
-      void processSyncQueue();
       const reduced = await Promise.all(
         photos.map((photo) => reduceIncidentPhoto(photo.uri, newId(), photo.width, photo.height)),
       );
@@ -127,7 +126,6 @@ export function IncidentFormScreen({
           nextAttemptAt: null,
         });
       }
-      void processIncidentPhotos();
       setMessage('Incidente guardado. Las fotos se enviarán cuando haya conexión.');
       router.back();
     } catch (error: unknown) {
@@ -138,8 +136,11 @@ export function IncidentFormScreen({
             ? error.message
             : 'No pudimos guardar el incidente.',
       );
-      if (queued) void processSyncQueue();
     } finally {
+      if (queued)
+        void processSyncQueue()
+          .then(() => processIncidentPhotos())
+          .catch(() => undefined);
       setBusy(false);
     }
   };
