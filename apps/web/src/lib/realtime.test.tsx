@@ -66,10 +66,12 @@ it('invalida las consultas por registro y recarga todo al reconectar', async () 
   expect(screen.getByText('Reconectando…')).toBeInTheDocument();
   act(() => mockListeners.get('connect')?.());
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ['supervision'] });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['incidents'] });
 });
 
 it('muestra aviso de incidente con predio, anuncia y permite cerrarlo', async () => {
   const client = new QueryClient();
+  const invalidate = jest.spyOn(client, 'invalidateQueries');
   client.setQueryData(
     ['supervision', 'turnos'],
     [{ site: { id: 'p1', name: 'Depósito Central' } }],
@@ -89,6 +91,9 @@ it('muestra aviso de incidente con predio, anuncia y permite cerrarlo', async ()
     });
   });
   expect(screen.getByRole('status')).toHaveTextContent('Incidente nuevo en Depósito Central');
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['incidents'] });
+  act(() => mockListeners.get('turno.actualizado')?.({ shiftId: 's1', siteId: 'p1' }));
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['turnos'] });
   act(() => {
     screen.getByRole('button', { name: 'Cerrar' }).click();
   });
