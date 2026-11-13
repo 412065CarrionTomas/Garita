@@ -13,7 +13,19 @@ export function normalizeNfcUid(value: string): string {
   return compact;
 }
 
-export const nfcTagUidSchema = z.string().trim().min(1).max(64).transform(normalizeNfcUid);
+export const nfcTagUidSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .transform((value, ctx) => {
+    try {
+      return normalizeNfcUid(value);
+    } catch {
+      ctx.addIssue({ code: 'custom', message: 'El identificador NFC no es válido' });
+      return z.NEVER;
+    }
+  });
 export const associateNfcTagSchema = z.object({
   uid: nfcTagUidSchema,
   confirmMove: z.boolean().optional().default(false),
