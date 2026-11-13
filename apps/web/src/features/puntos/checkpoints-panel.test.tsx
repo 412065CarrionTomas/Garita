@@ -174,3 +174,49 @@ describe('CheckpointsPanel', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+it('no ofrece imprimir una lista vacia y limpia el alta al guardar', async () => {
+  setRole('admin');
+  jest.mocked(apiGet).mockResolvedValue([] as never);
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={site} />);
+  await waitFor(() => expect(screen.queryByText('Cargando puntos…')).not.toBeInTheDocument());
+  expect(
+    screen.queryByRole('button', { name: 'Descargar stickers de todos' }),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+  await user.type(await screen.findByLabelText('Nombre del punto'), 'Nuevo punto');
+  await user.click(screen.getByRole('button', { name: 'Crear punto' }));
+  await screen.findByText('Punto guardado.');
+  expect(screen.getByLabelText('Nombre del punto')).toHaveValue('');
+  expect(screen.getByLabelText('Radio de tolerancia (m)')).toHaveValue(30);
+});
+it('cancelar edicion limpia todos los campos y regenerar QR refresca puntos', async () => {
+  setRole('admin');
+  jest.mocked(apiGet).mockResolvedValue([
+    {
+      id: 'p',
+      siteId: site.id,
+      name: 'Porton',
+      latitude: -34.6,
+      longitude: -58.4,
+      toleranceRadiusMeters: 100,
+      stickerLocation: 'Pared',
+      isIndoor: true,
+      qrVersion: 1,
+      status: 'active',
+    },
+  ] as never);
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={site} />);
+  await user.click(await screen.findByRole('button', { name: 'Editar' }));
+  await user.click(screen.getByRole('button', { name: 'Cancelar edición' }));
+  expect(screen.getByLabelText('Nombre del punto')).toHaveValue('');
+  expect(screen.getByLabelText('Radio de tolerancia (m)')).toHaveValue(30);
+  expect(screen.getByLabelText('Ubicación del sticker (opcional)')).toHaveValue('');
+  expect(screen.getByLabelText('Punto interior')).not.toBeChecked();
+  const reads = jest.mocked(apiGet).mock.calls.length;
+  await user.click(screen.getByRole('button', { name: 'Regenerar QR' }));
+  await screen.findByText('QR regenerado. Imprimí un sticker nuevo.');
+  expect(jest.mocked(apiGet).mock.calls.length).toBeGreaterThan(reads);
+});
