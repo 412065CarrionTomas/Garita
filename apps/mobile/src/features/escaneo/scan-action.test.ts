@@ -4,7 +4,9 @@ import type {
   PendingFieldEvent,
   ShiftOfflineData,
 } from '@garita/shared';
+import { readClock } from '@/lib/clock/clock';
 import type { LocalCheckpointRecord } from '@/lib/db/database';
+import { parseAndValidateQr } from './qr-parser';
 import { processScan, resetScanActionsForTesting, setScanActionsForTesting } from './scan-action';
 jest.mock('@/lib/clock/clock', () => ({
   readClock: jest.fn(async (_repository: unknown, deviceTime: string) => ({
@@ -112,8 +114,15 @@ function createMockRepository() {
   const pendingEvents: PendingFieldEvent[] = [];
   const checkpointRecords: LocalCheckpointRecord[] = [];
   const sentEvents = new Set<string>();
+  const meta = new Map<string, string>();
 
   return {
+    meta,
+    getSyncMeta: jest.fn((key: string) => Promise.resolve(meta.get(key) ?? null)),
+    setSyncMeta: jest.fn((key: string, value: string) => {
+      meta.set(key, value);
+      return Promise.resolve();
+    }),
     pendingEvents,
     checkpointRecords,
     sentEvents,
@@ -155,13 +164,26 @@ describe('scan-action: processScan', () => {
 
   beforeEach(() => {
     mockRepo = createMockRepository();
-    sendMock = jest.fn(async (req) => ({
-      result: 'recorded' as const,
-      recordId: req.recordId,
-      checkpointId: 'cp-porton',
-      countedFor: [{ roundId: 'round-perimetral', windowIndex: 0, late: false }],
-      outOfWindow: false,
-    }));
+    sendMock = jest.fn((req) => {
+      const parsed =
+        req.method === 'qr' ? parseAndValidateQr(req.scannedValue, shiftData.checkpoints) : null;
+      if (parsed && !parsed.valid)
+        return Promise.resolve({
+          result: 'rejected' as const,
+          recordId: req.recordId,
+          reason: parsed.reason,
+        });
+      const local = mockRepo.checkpointRecords.find((record) => record.recordId === req.recordId);
+      return Promise.resolve({
+        result: 'recorded' as const,
+        recordId: req.recordId,
+        checkpointId: local?.checkpointId ?? 'cp-porton',
+        countedFor: local?.countedFor ?? [
+          { roundId: 'round-perimetral', windowIndex: 0, late: false },
+        ],
+        outOfWindow: local?.outOfWindow ?? false,
+      });
+    });
     feedbackMock = jest.fn(async () => undefined);
 
     setScanActionsForTesting({
@@ -181,6 +203,7 @@ describe('scan-action: processScan', () => {
       send: sendMock,
       repository: async () => mockRepo as never,
       feedback: feedbackMock,
+      triggerSync: jest.fn(),
     });
   });
 
@@ -348,10 +371,7 @@ describe('scan-action: processScan', () => {
     expect(mockRepo.markPendingEventSent).toHaveBeenCalledWith(
       '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
     );
-    expect(mockRepo.updateCheckpointRecordServerResult).toHaveBeenCalledWith(
-      '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
-      'recorded',
-    );
+    expect(mockRepo.checkpointRecords[0]?.serverResult).toBe('recorded');
   });
 
   // CA2, BDD 2
@@ -631,11 +651,105 @@ describe('scan-action: processScan', () => {
       shiftData,
     );
 
-    expect(result.status).toBe('counted');
+    expect(result.status).toBe('invalid_attempt');
     expect(mockRepo.updateCheckpointRecordServerResult).toHaveBeenCalledWith(
       '0199c2c6-958d-7a4a-9f4f-f2ca1b852040',
       'rejected',
       'signature',
     );
+  });
+  it('uses a server QR rejection instead of displaying a counted success', async () => {
+    sendMock.mockImplementation((req) =>
+      Promise.resolve({ result: 'rejected', recordId: req.recordId, reason: 'outdated_version' }),
+    );
+    expect(await processScan('GQR1.cp-porton.1.sig', shiftData)).toMatchObject({
+      status: 'invalid_attempt',
+      reason: 'outdated_version',
+    });
+    expect(mockRepo.checkpointRecords[0]?.serverResult).toBe('rejected');
+  });
+  it('removes a not_generated response from local compliance and returns its cause', async () => {
+    sendMock.mockImplementation((req) =>
+      Promise.resolve({
+        result: 'not_generated',
+        recordId: req.recordId,
+        cause: 'already_recorded',
+        retryAfterUtc: null,
+      }),
+    );
+    expect(await processScan('GQR1.cp-porton.1.sig', shiftData)).toMatchObject({
+      status: 'already_recorded',
+    });
+    expect(mockRepo.checkpointRecords[0]).toMatchObject({
+      serverResult: 'rejected',
+      serverReason: 'already_recorded',
+    });
+  });
+  it('reconciles imputation and advances sync metadata after direct delivery', async () => {
+    sendMock.mockImplementation((req) =>
+      Promise.resolve({
+        result: 'recorded',
+        recordId: req.recordId,
+        checkpointId: 'cp-porton',
+        countedFor: [],
+        outOfWindow: true,
+      }),
+    );
+    expect(await processScan('GQR1.cp-porton.1.sig', shiftData)).toMatchObject({
+      status: 'out_of_window',
+    });
+    expect(mockRepo.checkpointRecords[0]).toMatchObject({
+      countedFor: [],
+      outOfWindow: true,
+      serverResult: 'recorded',
+    });
+    expect(mockRepo.meta.get('synced_until')).toBe('2026-10-14T22:30:00.000Z');
+    expect(mockRepo.meta.get('last_sync_at')).toBe('2026-10-14T22:30:00.000Z');
+  });
+  it('accepts an NFC association newer than downloaded data', async () => {
+    expect(await processScan('04AABBCC', shiftData, 'nfc')).toMatchObject({
+      status: 'counted',
+      checkpointId: 'cp-porton',
+    });
+    expect(mockRepo.checkpointRecords[0]?.serverResult).toBe('recorded');
+  });
+  it('schedules the queue when direct delivery fails', async () => {
+    const triggerSync = jest.fn();
+    setScanActionsForTesting({ triggerSync });
+    sendMock.mockRejectedValue(new Error('offline'));
+    await processScan('GQR1.cp-porton.1.sig', shiftData);
+    expect(triggerSync).toHaveBeenCalled();
+    expect(mockRepo.sentEvents.size).toBe(0);
+  });
+
+  it('schedules sync when the clock is pending without attempting a direct send', async () => {
+    const triggerSync = jest.fn();
+    setScanActionsForTesting({ triggerSync });
+    jest.mocked(readClock).mockResolvedValueOnce({
+      deviceTime: '2026-10-14T22:30:00.000Z',
+      trustedAt: null,
+      elapsedMs: 1000,
+      bootId: 'test-boot',
+      referenceOffsetMs: null,
+      timeStatus: 'pending',
+    });
+    await processScan('GQR1.cp-porton.1.sig', shiftData);
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(triggerSync).toHaveBeenCalled();
+    expect(mockRepo.pendingEvents).toHaveLength(1);
+  });
+  it('does not certify past an older event still pending after direct delivery', async () => {
+    const triggerSync = jest.fn();
+    setScanActionsForTesting({ triggerSync });
+    mockRepo.pendingEvents.push({
+      id: '00000000-0000-4000-8000-000000000001',
+      type: 'checkpoint_record',
+      payload: {},
+      occurredAtDevice: '2026-10-14T22:20:00.000Z',
+      createdAt: '2026-10-14T22:20:00.000Z',
+    });
+    await processScan('GQR1.cp-porton.1.sig', shiftData);
+    expect(mockRepo.meta.get('synced_until')).toBeUndefined();
+    expect(triggerSync).toHaveBeenCalled();
   });
 });

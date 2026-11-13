@@ -1,5 +1,6 @@
 import {
   fieldLocationSchema,
+  computeSyncedUntil,
   formatTooSoonMessage,
   imputeRecord,
   nfcTagUidSchema,
@@ -16,9 +17,11 @@ import * as Network from 'expo-network';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import {
   createDefaultFieldRepository,
+  applyCheckpointRecordResponse,
   type FieldRepository,
   type LocalCheckpointRecord,
 } from '@/lib/db/database';
+import { scheduleSyncRetry, notifySyncState } from '@/lib/cola/sync-service';
 import { getCurrentLocation, LocationError } from '@/lib/location';
 import { readClock } from '@/lib/clock/clock';
 import { nfcAvailability } from '@/lib/nfc';
@@ -76,6 +79,7 @@ export interface ScanActionsDependencies {
   send(body: CheckpointRecordRequest): Promise<CheckpointRecordResponse>;
   repository(): Promise<FieldRepository>;
   feedback(): Promise<void>;
+  triggerSync(): void;
 }
 
 function generateUuid(): string {
@@ -166,6 +170,7 @@ const defaultDependencies: ScanActionsDependencies = {
   send: sendCheckpointRecord,
   repository: createDefaultFieldRepository,
   feedback: playSuccessFeedback,
+  triggerSync: scheduleSyncRetry,
 };
 
 let overrides: Partial<ScanActionsDependencies> = {};
@@ -252,28 +257,8 @@ export async function processScan(
     };
     onSaved?.(attempt);
 
-    if (clock.timeStatus !== 'pending' && (await d.online())) {
-      try {
-        const response = await d.send(requestPayload);
-        await repository.markPendingEventSent(recordId);
-        if (response.result === 'rejected' && response.reason === 'tag_replaced') {
-          return {
-            ...attempt,
-            reason: response.reason,
-            message: 'Etiqueta reemplazada. Intento guardado.',
-          };
-        }
-      } catch {
-        // Keeps event pending for sync
-      }
-    }
-
-    return {
-      status: 'invalid_attempt',
-      reason: parsed.reason,
-      message: parsed.message,
-      recordId,
-    };
+    const response = await deliverScan(requestPayload, repository, d);
+    return response ? serverScanResult(response, shiftData, attempt) : attempt;
   }
 
   const { checkpoint } = parsed;
@@ -384,29 +369,99 @@ export async function processScan(
   if (method === 'nfc') await d.feedback();
   onSaved?.(saved);
 
-  if (clock.timeStatus !== 'pending' && (await d.online())) {
-    try {
-      const response = await d.send(requestPayload);
-      await repository.markPendingEventSent(recordId);
-      if (response.result === 'recorded') {
-        await repository.updateCheckpointRecordServerResult(recordId, 'recorded');
-      } else if (response.result === 'rejected') {
-        await repository.updateCheckpointRecordServerResult(recordId, 'rejected', response.reason);
-        if (method === 'nfc')
-          return {
-            status: 'invalid_attempt',
-            recordId,
-            reason: response.reason,
-            message:
-              response.reason === 'tag_replaced'
-                ? 'Etiqueta reemplazada. Intento guardado.'
-                : 'Etiqueta no válida para este turno. Intento guardado.',
-          };
-      }
-    } catch {
-      // Keeps event pending for sync
-    }
-  }
+  notifySyncState();
+  const response = await deliverScan(requestPayload, repository, d);
+  return response ? serverScanResult(response, shiftData, saved) : saved;
+}
 
-  return saved;
+async function deliverScan(
+  request: CheckpointRecordRequest,
+  repository: FieldRepository,
+  d: ScanActionsDependencies,
+): Promise<CheckpointRecordResponse | null> {
+  try {
+    if (request.clock?.timeStatus !== 'pending' && (await d.online())) {
+      const response = await d.send(request);
+      await applyCheckpointRecordResponse(repository, request, response);
+      await repository.markPendingEventSent(request.recordId);
+      const pending = await repository.listPendingEvents();
+      const earlierPending = pending.some(
+        (event) => Date.parse(event.occurredAtDevice) <= Date.parse(request.occurredAtDevice),
+      );
+      const previous = await repository.getSyncMeta('synced_until');
+      const syncedUntil = earlierPending ? previous : computeSyncedUntil([request], previous);
+      if (syncedUntil) await repository.setSyncMeta('synced_until', syncedUntil);
+      await repository.setSyncMeta('last_sync_at', d.now().toISOString());
+      notifySyncState();
+      if (pending.length > 0) d.triggerSync();
+      return response;
+    }
+  } catch {
+    // El evento persiste hasta que la cola confirme la entrega.
+  }
+  d.triggerSync();
+  return null;
+}
+
+function serverScanResult(
+  response: CheckpointRecordResponse,
+  data: ShiftOfflineData,
+  saved: ScanActionResult,
+): ScanActionResult {
+  if (
+    response.result === 'rejected' &&
+    saved.status === 'invalid_attempt' &&
+    saved.reason === response.reason
+  )
+    return saved;
+  if (response.result === 'rejected')
+    return {
+      status: 'invalid_attempt',
+      recordId: response.recordId,
+      reason: response.reason,
+      message:
+        response.reason === 'tag_replaced'
+          ? 'Etiqueta reemplazada. Intento guardado.'
+          : 'Lectura rechazada por el servidor. Intento guardado.',
+    };
+  const checkpointId =
+    response.result === 'recorded'
+      ? response.checkpointId
+      : 'checkpointId' in saved
+        ? saved.checkpointId
+        : '';
+  const checkpointName =
+    data.checkpoints.find((point) => point.id === checkpointId)?.name ?? 'Punto de control';
+  if (response.result === 'not_generated') {
+    return response.cause === 'too_soon' && response.retryAfterUtc
+      ? {
+          status: 'too_soon',
+          checkpointId,
+          checkpointName,
+          retryAfterUtc: response.retryAfterUtc,
+          message: 'Este punto se registró hace poco. Esperá antes de volver a registrarlo.',
+        }
+      : {
+          status: 'already_recorded',
+          checkpointId,
+          checkpointName,
+          message: 'Este punto ya está registrado en esta vuelta',
+        };
+  }
+  return response.outOfWindow
+    ? {
+        status: 'out_of_window',
+        recordId: response.recordId,
+        checkpointId,
+        checkpointName,
+        message: `${checkpointName} registrado fuera de ventana`,
+      }
+    : {
+        status: 'counted',
+        recordId: response.recordId,
+        checkpointId,
+        checkpointName,
+        countedFor: response.countedFor,
+        message: `${checkpointName} registrado`,
+      };
 }
