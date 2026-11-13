@@ -282,7 +282,7 @@ it('trae todas las paginas de clientes activos y muestra el cliente incluido en 
     expect(await screen.findByRole('option', { name: 'Ultimo cliente' })).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledWith('/clientes?estado=active&pagina=2', expect.anything());
   } finally {
-    jest.mocked(apiGet).mockImplementation(original!);
+    jest.mocked(apiGet).mockImplementation(original);
   }
 });
 it('no guarda en cero y limpia el formulario despues del alta', async () => {
@@ -301,7 +301,9 @@ it('no guarda en cero y limpia el formulario despues del alta', async () => {
   await user.clear(within(dialog).getByLabelText('Latitud'));
   await user.type(within(dialog).getByLabelText('Latitud'), '-34');
   await user.click(within(dialog).getByRole('button', { name: 'Guardar predio' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
   await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
   expect(screen.getByLabelText('Nombre')).toHaveValue('');
   expect(screen.getByLabelText('Dirección')).toHaveValue('');

@@ -180,7 +180,9 @@ it('no ofrece imprimir una lista vacia y limpia el alta al guardar', async () =>
   jest.mocked(apiGet).mockResolvedValue([] as never);
   const user = userEvent.setup();
   renderWithQueryClient(<CheckpointsPanel site={site} />);
-  await waitFor(() => expect(screen.queryByText('Cargando puntos…')).not.toBeInTheDocument());
+  await waitFor(() => {
+    expect(screen.queryByText('Cargando puntos…')).not.toBeInTheDocument();
+  });
   expect(
     screen.queryByRole('button', { name: 'Descargar stickers de todos' }),
   ).not.toBeInTheDocument();
