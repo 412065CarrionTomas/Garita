@@ -90,6 +90,22 @@ describe('PersonalPage', () => {
     jest.mocked(apiPost).mockResolvedValue({ ok: true });
   });
 
+  it('accepts the personnel detail returned when resending an invitation', async () => {
+    listedStatus = 'invitation_pending';
+    setup();
+    jest
+      .mocked(apiPost)
+      .mockImplementation((_path, _body, _request, response) =>
+        Promise.resolve(response.parse({ ...page.items[0], status: 'invitation_pending' })),
+      );
+    await userEvent.click(await screen.findByRole('button', { name: 'Acciones' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Reenviar invitación' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalled();
+    });
+    expect(screen.queryByText('No se pudo reenviar la invitación.')).not.toBeInTheDocument();
+  });
+
   it('lista, pagina y filtra personal por rol y estado', async () => {
     setup();
     expect(await screen.findByText(/Ana Pérez/)).toBeInTheDocument();

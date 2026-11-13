@@ -1,6 +1,5 @@
 import {
   computeRoundWindows,
-  SHIFT_EXECUTION_STATUSES,
   findUncoveredWindows,
   localDateTimeToUtc,
   shiftInputSchema,
@@ -11,13 +10,14 @@ import { useEffect, useMemo, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { loadAvailableGuards } from '../personal/available-guards';
 
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { SegmentedFilter } from '@/components/segmented-filter';
 import { Stamp } from '@/components/stamp';
-import { StatusBadge } from '@/components/status-badge';
+import { StatusBadge, type StatusTone } from '@/components/status-badge';
 import { WindowBar } from '@/components/window-bar';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -42,7 +42,7 @@ const shiftRowsSchema = z.array(
     startsAt: z.string(),
     endsAt: z.string(),
     serviceDate: z.string(),
-    status: z.enum(['scheduled', 'unassigned', 'cancelled', ...SHIFT_EXECUTION_STATUSES]),
+    status: z.string(),
     site: z.looseObject({ name: z.string(), company: z.looseObject({ timezone: z.string() }) }),
     assignments: z.array(
       z.looseObject({
@@ -81,16 +81,6 @@ const sitesSchema = z.array(
     company: z.looseObject({ timezone: z.string() }),
   }),
 );
-const guardsSchema = z.looseObject({
-  items: z.array(
-    z.looseObject({
-      id: z.string(),
-      firstName: z.string(),
-      lastName: z.string(),
-      status: z.string(),
-    }),
-  ),
-});
 const roundsSchema = z.array(
   z.looseObject({
     id: z.string(),
@@ -119,14 +109,16 @@ interface FormValues {
   roundIds: string[];
 }
 // En curso lleva tilde; programado y cancelado, recuadro punteado; lo cerrado va en tinta.
-const shiftStates = {
+const shiftStates: Partial<Record<string, { label: string; tone: StatusTone }>> = {
   scheduled: { label: 'Programado', tone: 'neutral' },
   unassigned: { label: 'Sin asignar', tone: 'warning' },
   in_progress: { label: 'En curso', tone: 'success' },
   closed: { label: 'Cerrado', tone: 'info' },
   auto_closed: { label: 'Cerrado por el sistema', tone: 'warning' },
   cancelled: { label: 'Cancelado', tone: 'neutral' },
-} as const;
+  no_show: { label: 'No presentado', tone: 'warning' },
+  uncovered: { label: 'Sin cobertura', tone: 'warning' },
+};
 
 type StateFilter = 'all' | 'curso' | 'prog' | 'fin' | 'canc';
 const stateFilters: { value: StateFilter; label: string }[] = [
@@ -193,7 +185,7 @@ export function ShiftsPanel() {
   });
   const guards = useQuery({
     queryKey: ['personal', 'vigiladores'],
-    queryFn: () => apiGet('/usuarios?rol=guard&pagina=1', guardsSchema),
+    queryFn: loadAvailableGuards,
   });
   const visibleShifts = (shifts.data ?? []).filter(
     (shift) => stateFilter === 'all' || filterStatuses[stateFilter].includes(shift.status),
@@ -542,8 +534,8 @@ export function ShiftsPanel() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <StatusBadge tone={shiftStates[shift.status].tone}>
-                      {shiftStates[shift.status].label}
+                    <StatusBadge tone={shiftStates[shift.status]?.tone ?? 'neutral'}>
+                      {shiftStates[shift.status]?.label ?? 'Estado desconocido'}
                     </StatusBadge>
                   </TableCell>
                   <TableCell>
@@ -643,7 +635,7 @@ function ShiftFormDialog(props: {
   form: FormValues;
   setForm: (value: FormValues) => void;
   sites: z.infer<typeof sitesSchema>;
-  guards: z.infer<typeof guardsSchema>['items'];
+  guards: Awaited<ReturnType<typeof loadAvailableGuards>>['items'];
   rounds: z.infer<typeof roundsSchema>;
   timezone: string;
   preview: { expected: string[]; uncovered: string[] };
