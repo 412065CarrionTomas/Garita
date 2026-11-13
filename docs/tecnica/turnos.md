@@ -20,6 +20,8 @@ La migración habilita `btree_gist` y crea una exclusión GiST sobre `guardId` y
 
 ## API
 
+El inicio de ejecución se rechaza con 409 si el predio o su cliente están dados de baja. Los selectores web de vigiladores para turnos y derivación cargan todas las páginas de usuarios activos y con invitación pendiente, mediante los filtros de `GET /usuarios`; excluyen desactivados.
+
 Las rutas tienen prefijo `/api/v1` y requieren autenticación y rol habilitado.
 
 | Método y ruta                                                      | Uso                                                                                             | Respuestas relevantes                                                    |
