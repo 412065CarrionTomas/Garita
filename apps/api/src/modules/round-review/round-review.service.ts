@@ -3,7 +3,11 @@ import { computeRoundWindowStatus, windowOwner, windowSeverity } from '@garita/s
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { RoundWindowStateService } from '../supervision/round-window-state.service';
+import {
+  RoundWindowStateService,
+  assignmentStates,
+  windowCoverage,
+} from '../supervision/round-window-state.service';
 import { CLOCK, type Clock } from '../../common/clock';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
@@ -216,7 +220,13 @@ export class RoundReviewService {
         shift: {
           select: {
             siteId: true,
-            assignments: { select: { id: true, startsAt: true, result: true } },
+            status: true,
+            closeReason: true,
+            closedAt: true,
+            closedWithoutDataAt: true,
+            assignments: { select: { id: true, startsAt: true, result: true, guardId: true } },
+            events: { select: { assignmentId: true, type: true, occurredAt: true } },
+            syncState: { select: { syncedUntil: true } },
           },
         },
       },
@@ -244,6 +254,7 @@ export class RoundReviewService {
     const firstWindow = windows[0];
     if (!firstWindow) throw new ConflictException('El registro no pertenece a una ventana');
     const decidedAt = this.clock.now();
+    const assignments = assignmentStates(record.shift);
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
       const updated = await tx.checkpointRecord.updateMany({
         where: {
@@ -281,14 +292,7 @@ export class RoundReviewService {
             flags: { select: { type: true } },
           },
         });
-        const ownerId = windowOwner(
-          window.endsAt.toISOString(),
-          record.shift.assignments.map((assignment) => ({
-            ...assignment,
-            startsAt: assignment.startsAt.toISOString(),
-            result: assignment.result,
-          })),
-        );
+        const { ownerId, coverage } = windowCoverage(record.shift, assignments, window);
         const matching = all.filter(
           (item) =>
             item.assignmentId === ownerId &&
@@ -313,11 +317,15 @@ export class RoundReviewService {
           completedLate: valid.some((item) =>
             belongsToWindow(item.countedFor, window.roundId, window.windowIndex, true),
           ),
+          coverage,
+          syncedUntil: record.shift.syncState?.syncedUntil ?? null,
         });
+        const evaluated =
+          record.shift.closedWithoutDataAt && status === 'pending_sync' ? 'not_done' : status;
         const nextStatus =
-          (status === 'complete' || status === 'complete_late') && severityLevel === 'grave'
+          (evaluated === 'complete' || evaluated === 'complete_late') && severityLevel === 'grave'
             ? 'in_review'
-            : status;
+            : evaluated;
         await tx.roundWindowState.update({
           where: { id: window.id },
           data: {

@@ -16,6 +16,74 @@ import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/n
 import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 
+interface CoverageShift {
+  status: string;
+  closeReason: string | null;
+  closedAt: Date | null;
+  assignments: { id: string; startsAt: Date; result: string; guardId: string | null }[];
+  events: { assignmentId: string | null; type: string; occurredAt: Date }[];
+}
+
+/** Resultado efectivo de cada asignación según sus eventos de inicio y cierre. */
+export function assignmentStates(shift: CoverageShift) {
+  return shift.assignments.map((assignment) => {
+    const started = shift.events.some(
+      (event) => event.assignmentId === assignment.id && event.type === 'start',
+    );
+    const closed = shift.events.some(
+      (event) =>
+        event.assignmentId === assignment.id &&
+        (event.type === 'close' || event.type === 'admin_close'),
+    );
+    const result: AssignmentResult =
+      assignment.result === 'replaced' ||
+      assignment.result === 'absent' ||
+      assignment.result === 'closed_early' ||
+      assignment.result === 'started'
+        ? assignment.result
+        : started
+          ? closed
+            ? 'closed_early'
+            : 'started'
+          : 'scheduled';
+    return { id: assignment.id, startsAt: assignment.startsAt.toISOString(), result, started };
+  });
+}
+
+/** Asignación dueña de la ventana y cobertura que la evalúa; compartida por recálculo y revisión. */
+export function windowCoverage(
+  shift: CoverageShift,
+  assignments: ReturnType<typeof assignmentStates>,
+  window: { startsAt: Date; endsAt: Date },
+) {
+  const ownerId = windowOwner(window.endsAt.toISOString(), assignments);
+  const owner = assignments.find((assignment) => assignment.id === ownerId);
+  const closeEvent = shift.events.find(
+    (event) =>
+      event.assignmentId === ownerId && (event.type === 'close' || event.type === 'admin_close'),
+  );
+  const siteClosed = shift.closeReason === 'baja del predio';
+  const coverage =
+    shift.status === 'cancelled'
+      ? 'cancelled'
+      : siteClosed && shift.closedAt && window.endsAt > shift.closedAt
+        ? 'site_closed_after'
+        : !owner || !shift.assignments.find((assignment) => assignment.id === ownerId)?.guardId
+          ? 'unassigned'
+          : !owner.started
+            ? 'absent'
+            : closeEvent?.type === 'close' && window.startsAt >= closeEvent.occurredAt
+              ? 'guard_closed_after'
+              : closeEvent?.type === 'close'
+                ? 'guard_closed'
+                : closeEvent?.type === 'admin_close' && window.endsAt > closeEvent.occurredAt
+                  ? 'admin_closed_after'
+                  : closeEvent?.type === 'admin_close'
+                    ? 'admin_closed_before'
+                    : 'active';
+  return { ownerId, owner, coverage } as const;
+}
+
 @Injectable()
 export class RoundWindowStateService {
   private readonly logger = new Logger(RoundWindowStateService.name);
@@ -90,55 +158,9 @@ export class RoundWindowStateService {
     });
     if (!shift) return;
     const now = this.clock.now();
-    const assignments = shift.assignments.map((assignment) => {
-      const started = shift.events.some(
-        (event) => event.assignmentId === assignment.id && event.type === 'start',
-      );
-      const closed = shift.events.some(
-        (event) =>
-          event.assignmentId === assignment.id &&
-          (event.type === 'close' || event.type === 'admin_close'),
-      );
-      const result: AssignmentResult =
-        assignment.result === 'replaced' ||
-        assignment.result === 'absent' ||
-        assignment.result === 'closed_early' ||
-        assignment.result === 'started'
-          ? assignment.result
-          : started
-            ? closed
-              ? 'closed_early'
-              : 'started'
-            : 'scheduled';
-      return { id: assignment.id, startsAt: assignment.startsAt.toISOString(), result, started };
-    });
+    const assignments = assignmentStates(shift);
     for (const window of shift.roundWindowStates) {
-      const ownerId = windowOwner(window.endsAt.toISOString(), assignments);
-      const owner = assignments.find((assignment) => assignment.id === ownerId);
-      const closeEvent = shift.events.find(
-        (event) =>
-          event.assignmentId === ownerId &&
-          (event.type === 'close' || event.type === 'admin_close'),
-      );
-      const siteClosed = shift.closeReason === 'baja del predio';
-      const coverage =
-        shift.status === 'cancelled'
-          ? 'cancelled'
-          : siteClosed && shift.closedAt && window.endsAt > shift.closedAt
-            ? 'site_closed_after'
-            : !owner || !shift.assignments.find((assignment) => assignment.id === ownerId)?.guardId
-              ? 'unassigned'
-              : !owner.started
-                ? 'absent'
-                : closeEvent?.type === 'close' && window.startsAt >= closeEvent.occurredAt
-                  ? 'guard_closed_after'
-                  : closeEvent?.type === 'close'
-                    ? 'guard_closed'
-                    : closeEvent?.type === 'admin_close' && window.endsAt > closeEvent.occurredAt
-                      ? 'admin_closed_after'
-                      : closeEvent?.type === 'admin_close'
-                        ? 'admin_closed_before'
-                        : 'active';
+      const { ownerId, owner, coverage } = windowCoverage(shift, assignments, window);
       const round = shift.rounds.find((item) => item.roundId === window.roundId);
       const checkpoints = round?.roundVersion?.checkpoints ?? [];
       const matching = shift.checkpointRecords.filter(

@@ -12,8 +12,8 @@ const user = {
 const startsAt = new Date('2026-11-01T10:00:00Z');
 const endsAt = new Date('2026-11-01T11:00:00Z');
 const graceEndsAt = new Date('2026-11-01T11:15:00Z');
-function setup(now = graceEndsAt) {
-  const assignments = [{ id: 'owner', startsAt, result: 'started' }];
+function setup(now = graceEndsAt, shiftOverrides: Record<string, unknown> = {}) {
+  const assignments = [{ id: 'owner', startsAt, result: 'started', guardId: 'guard' }];
   const window = {
     id: 'window',
     shiftId: 'shift',
@@ -25,7 +25,17 @@ function setup(now = graceEndsAt) {
     expectedCount: 1,
     status: 'in_review',
     inReviewSince: endsAt,
-    shift: { siteId: 'site', assignments },
+    shift: {
+      siteId: 'site',
+      status: 'in_progress',
+      closeReason: null,
+      closedAt: null,
+      closedWithoutDataAt: null,
+      assignments,
+      events: [{ assignmentId: 'owner', type: 'start', occurredAt: startsAt }],
+      syncState: { syncedUntil: graceEndsAt },
+      ...shiftOverrides,
+    },
   };
   const record = {
     id: 'record',
@@ -118,5 +128,16 @@ it('preserves complete_late when restoring a late valid record', async () => {
     expect.objectContaining({
       data: expect.objectContaining({ status: 'complete_late' }) as unknown,
     }),
+  );
+});
+
+it.each([
+  ['sin sincronizar la gracia', { syncState: { syncedUntil: endsAt } }, 'pending_sync'],
+  ['turno cancelado', { status: 'cancelled' }, 'pending'],
+] as const)('evaluates the window like the recalculation (%s)', async (_case, shift, status) => {
+  const { service, db } = setup(graceEndsAt, shift);
+  await service.recordDecision('record', 'invalidate', user, 'Registro inválido');
+  expect(db.roundWindowState.update).toHaveBeenCalledWith(
+    expect.objectContaining({ data: expect.objectContaining({ status }) as unknown }),
   );
 });
