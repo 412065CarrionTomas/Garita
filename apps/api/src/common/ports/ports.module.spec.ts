@@ -5,6 +5,7 @@ import { SocketRealtimeService } from '../../modules/realtime/socket-realtime.se
 import { NotificationsService } from '../../modules/notifications/notifications.service';
 import { NoopSms, type SmsPort } from './sms.port';
 import { NoopNotices, type NoticesPort } from './notices.port';
+import { NoopAccountState, type AccountStatePort } from './account-state.port';
 
 describe('RealtimePort provider', () => {
   it('implements the typed realtime port without throwing before a gateway connects', async () => {
@@ -91,6 +92,17 @@ describe('NoticesPort provider', () => {
         subjectId: 'w',
         resolution: 'data_arrived',
       }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('AccountStatePort provider', () => {
+  it('keeps the noop account state active and without a guard limit', async () => {
+    const account: AccountStatePort = new NoopAccountState();
+    await expect(account.get('c')).resolves.toMatchObject({ status: 'active', guardLimit: null });
+    await expect(account.assertGuardSlot('c')).resolves.toBeUndefined();
+    await expect(
+      account.transition({ companyId: 'c', to: 'suspended', reason: 'trial_expired' }),
     ).resolves.toBeUndefined();
   });
 });
