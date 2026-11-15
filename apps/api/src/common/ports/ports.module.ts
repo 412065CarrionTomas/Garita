@@ -11,6 +11,7 @@ import { NoopReportRecalculation, REPORT_RECALCULATION_PORT } from './report-rec
 import { NOTICES_PORT } from './notices.port';
 import { NoticesModule } from '../../modules/notices/notices.module';
 import { NoticesService } from '../../modules/notices/notices.service';
+import { ACCOUNT_STATE_PORT, NoopAccountState } from './account-state.port';
 
 @Global()
 @Module({
@@ -21,7 +22,15 @@ import { NoticesService } from '../../modules/notices/notices.service';
     { provide: SMS_PORT, useClass: NoopSms },
     { provide: REPORT_RECALCULATION_PORT, useClass: NoopReportRecalculation },
     { provide: NOTICES_PORT, useExisting: NoticesService },
+    { provide: ACCOUNT_STATE_PORT, useClass: NoopAccountState },
   ],
-  exports: [NOTIFICATIONS_PORT, REALTIME_PORT, SMS_PORT, REPORT_RECALCULATION_PORT, NOTICES_PORT],
+  exports: [
+    NOTIFICATIONS_PORT,
+    REALTIME_PORT,
+    SMS_PORT,
+    REPORT_RECALCULATION_PORT,
+    NOTICES_PORT,
+    ACCOUNT_STATE_PORT,
+  ],
 })
 export class PortsModule {}
