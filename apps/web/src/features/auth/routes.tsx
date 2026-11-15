@@ -33,6 +33,7 @@ import { PanicDetailPage } from '../panico/panic-detail-page';
 import { PanicBanner } from '../panico/panic-banner';
 import { useActivePanicAlerts } from '../panico/queries';
 import { ReportsPage } from '../reportes/reports-page';
+import { IncidentReportsPage } from '../reportes/incidentes/incident-reports-page';
 import { SubscriptionPage } from '../suscripcion/subscription-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
@@ -51,6 +52,7 @@ function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode
 const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
   admin: [
     { path: '/cumplimiento', title: 'Cumplimiento' },
+    { path: '/incidentes-y-respuesta', title: 'Incidentes y respuesta' },
     { path: '/resumen', title: 'Resumen' },
     { path: '/supervision', title: 'En vivo' },
     { path: '/turnos', title: 'Turnos' },
@@ -62,6 +64,7 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
   ],
   supervisor: [
     { path: '/cumplimiento', title: 'Cumplimiento' },
+    { path: '/incidentes-y-respuesta', title: 'Incidentes y respuesta' },
     { path: '/supervision', title: 'En vivo' },
     { path: '/turnos', title: 'Turnos' },
     { path: '/personal', title: 'Personal' },
@@ -180,6 +183,14 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <PanicDetailPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/incidentes-y-respuesta"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <IncidentReportsPage />
             </Protected>
           }
         />
