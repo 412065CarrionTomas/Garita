@@ -82,6 +82,8 @@ model Company {
   id                String             @id @default(cuid())
   name              String
   timezone          String             @default("America/Argentina/Buenos_Aires")
+  /// Optional free trial (HU-41): null means the company never had one and pays from day one.
+  trialEndsAt       DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   users             User[]
@@ -99,6 +101,8 @@ model Company {
   notificationPreferences NotificationPreference[]
   noticeViews NoticeView[]
   notices Notice[]
+  subscriptions Subscription[]
+  subscriptionCharges SubscriptionCharge[]
 }
 
 model User {
@@ -136,6 +140,7 @@ model User {
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
   notificationPreferences NotificationPreference[]
   noticeViews NoticeView[]
+  cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
 
   @@index([companyId])
   @@index([clientId])
@@ -1044,4 +1049,99 @@ model NotificationPreference {
 
   @@unique([userId, kind])
   @@index([companyId, kind, push])
+}
+
+// --- Suscripciones con Mercado Pago (HU-29) ---
+
+/// Platform plans, loaded by seed; there is no edit screen.
+model Plan {
+  id            String         @id @default(cuid())
+  code          String         @unique
+  name          String
+  monthlyPrice  Decimal        @db.Decimal(12, 2)
+  maxGuards     Int
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  subscriptions Subscription[]
+}
+
+/// Mirrors Mercado Pago preapproval statuses.
+enum SubscriptionStatus {
+  pending
+  authorized
+  paused
+  cancelled
+}
+
+model Subscription {
+  id                String               @id @default(cuid())
+  companyId         String
+  planId            String
+  status            SubscriptionStatus   @default(pending)
+  mpPreapprovalId   String?              @unique
+  /// Email of the Mercado Pago account that pays; may differ from the admin's Garita email.
+  payerEmail        String
+  /// First charge date: now, or the end of the trial when the admin keeps it.
+  startsAt          DateTime
+  nextChargeAt      DateTime?
+  lastFailureReason String?
+  /// Scheduled cancellation (HU-42): service runs until this date, then the debit is cancelled in Mercado Pago.
+  cancelAt            DateTime?
+  cancelReason        String?
+  cancelRequestedAt   DateTime?
+  cancelRequestedById String?
+  cancelRequestedBy   User?     @relation("SubscriptionCancelRequester", fields: [cancelRequestedById], references: [id], onDelete: Restrict)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  company           Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  plan              Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
+  charges           SubscriptionCharge[]
+
+  // Partial unique index (one open subscription per company) lives in the migration SQL.
+  @@index([companyId])
+}
+
+enum SubscriptionChargeStatus {
+  pending
+  approved
+  rejected
+}
+
+/// One row per Mercado Pago authorized_payment.
+model SubscriptionCharge {
+  id                    String                   @id @default(cuid())
+  companyId             String
+  subscriptionId        String
+  mpAuthorizedPaymentId String                   @unique
+  mpPaymentId           String?
+  amount                Decimal                  @db.Decimal(12, 2)
+  status                SubscriptionChargeStatus
+  statusDetail          String?
+  retryAttempt          Int                      @default(0)
+  chargedAt             DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  company               Company                  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  subscription          Subscription             @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([subscriptionId])
+}
+
+enum MercadoPagoNotificationStatus {
+  received
+  processed
+  failed
+}
+
+/// Platform-level log of received webhooks; its id is Mercado Pago's own notification id, so a retry can't be stored twice.
+model MercadoPagoNotification {
+  id          String                        @id
+  type        String
+  action      String?
+  resourceId  String
+  status      MercadoPagoNotificationStatus @default(received)
+  error       String?
+  receivedAt  DateTime                      @default(now())
+  processedAt DateTime?
 }

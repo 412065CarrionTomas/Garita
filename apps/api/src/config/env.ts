@@ -43,6 +43,8 @@ export const envSchema = z
     CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
     CLOUDINARY_API_KEY: z.string().min(1).optional(),
     CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+    MERCADOPAGO_ACCESS_TOKEN: z.string().min(1).optional(),
+    MERCADOPAGO_WEBHOOK_SECRET: z.string().min(1).optional(),
   })
   .superRefine((env, context) => {
     if (env.NODE_ENV !== 'test') {

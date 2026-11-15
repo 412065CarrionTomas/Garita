@@ -33,6 +33,7 @@ import { PanicDetailPage } from '../panico/panic-detail-page';
 import { PanicBanner } from '../panico/panic-banner';
 import { useActivePanicAlerts } from '../panico/queries';
 import { ReportsPage } from '../reportes/reports-page';
+import { SubscriptionPage } from '../suscripcion/subscription-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -57,6 +58,7 @@ const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
     { path: '/clientes', title: 'Clientes' },
     { path: '/predios', title: 'Predios' },
     { path: '/incidentes', title: 'Incidentes' },
+    { path: '/suscripcion', title: 'Suscripción' },
   ],
   supervisor: [
     { path: '/cumplimiento', title: 'Cumplimiento' },
@@ -266,6 +268,14 @@ export function AppRoutes() {
           element={
             <Protected roles={['client']}>
               <HomePlaceholder role="Cliente" title="Reportes de mi predio" />
+            </Protected>
+          }
+        />
+        <Route
+          path="/suscripcion"
+          element={
+            <Protected roles={['admin']}>
+              <SubscriptionPage />
             </Protected>
           }
         />

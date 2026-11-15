@@ -28,6 +28,7 @@ import { PanicModule } from './modules/panic/panic.module';
 import { NoticesModule } from './modules/notices/notices.module';
 import { CompanyModule } from './modules/company/company.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     ReportsModule,
     CoverageNoticesModule,
     NotificationPreferencesModule,
+    SubscriptionsModule,
   ],
 })
 export class AppModule {}
