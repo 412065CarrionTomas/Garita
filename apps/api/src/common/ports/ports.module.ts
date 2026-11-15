@@ -11,18 +11,20 @@ import { NoopReportRecalculation, REPORT_RECALCULATION_PORT } from './report-rec
 import { NOTICES_PORT } from './notices.port';
 import { NoticesModule } from '../../modules/notices/notices.module';
 import { NoticesService } from '../../modules/notices/notices.service';
-import { ACCOUNT_STATE_PORT, NoopAccountState } from './account-state.port';
+import { ACCOUNT_STATE_PORT } from './account-state.port';
+import { AccountModule } from '../../modules/account/account.module';
+import { AccountService } from '../../modules/account/account.service';
 
 @Global()
 @Module({
-  imports: [NotificationsModule, RealtimeModule, NoticesModule],
+  imports: [NotificationsModule, RealtimeModule, NoticesModule, AccountModule],
   providers: [
     { provide: NOTIFICATIONS_PORT, useExisting: NotificationsService },
     { provide: REALTIME_PORT, useExisting: SocketRealtimeService },
     { provide: SMS_PORT, useClass: NoopSms },
     { provide: REPORT_RECALCULATION_PORT, useClass: NoopReportRecalculation },
     { provide: NOTICES_PORT, useExisting: NoticesService },
-    { provide: ACCOUNT_STATE_PORT, useClass: NoopAccountState },
+    { provide: ACCOUNT_STATE_PORT, useExisting: AccountService },
   ],
   exports: [
     NOTIFICATIONS_PORT,

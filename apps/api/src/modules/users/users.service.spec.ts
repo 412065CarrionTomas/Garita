@@ -33,6 +33,7 @@ describe('UsersService invitation lifecycle', () => {
     { now: () => new Date('2026-11-13T12:00:00Z') },
     {} as WeeklyScheduleDerivationPort,
     {} as ShiftExecutionService,
+    { assertGuardSlot: jest.fn().mockResolvedValue(undefined) } as never,
   );
 
   beforeEach(() => {

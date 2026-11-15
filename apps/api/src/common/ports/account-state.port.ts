@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { AccountStatus, SuspensionReason } from '@garita/shared';
+import type { Prisma } from '../../generated/prisma/client';
 
 export interface AccountState {
   status: AccountStatus;
@@ -16,7 +17,7 @@ export interface AccountStatePort {
    * Rejects with a 409 (`GUARD_LIMIT_REACHED_CODE`) when one more guard, active or with a
    * pending invitation, would exceed the limit. Called on guard creation and reactivation.
    */
-  assertGuardSlot(companyId: string): Promise<void>;
+  assertGuardSlot(companyId: string, tx?: Prisma.TransactionClient): Promise<void>;
   /** Idempotent: moving to the current state is a no-op. `reason` only with `suspended`. */
   transition(input: {
     companyId: string;
@@ -41,7 +42,7 @@ export class NoopAccountState implements AccountStatePort {
     });
   }
 
-  assertGuardSlot(): Promise<void> {
+  assertGuardSlot(_companyId: string, _tx?: Prisma.TransactionClient): Promise<void> {
     return Promise.resolve();
   }
 
