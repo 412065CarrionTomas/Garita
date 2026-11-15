@@ -1,6 +1,8 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { z } from 'zod';
 import {
+  cancelSubscriptionRequestSchema,
   createSubscriptionRequestSchema,
   createSubscriptionResponseSchema,
   plansResponseSchema,
@@ -15,11 +17,20 @@ import { PageHeader } from '@/components/page-header';
 import { Stamp } from '@/components/stamp';
 import { StatusBadge, type StatusTone } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -105,7 +116,10 @@ function CurrentSubscription({
 }: {
   subscription: NonNullable<SubscriptionResponse['subscription']>;
 }) {
-  const status = SUBSCRIPTION_STATUS[subscription.status];
+  const cancelAt = subscription.status === 'cancelled' ? null : subscription.cancelAt;
+  const status = cancelAt
+    ? { label: `Activa hasta el ${formatDate(cancelAt)}`, tone: 'neutral' as const }
+    : SUBSCRIPTION_STATUS[subscription.status];
   return (
     <Card>
       <CardHeader>
@@ -126,7 +140,9 @@ function CurrentSubscription({
           <div>
             <dt className="t-label text-muted-foreground">Próximo cobro</dt>
             <dd>
-              {subscription.nextChargeAt ? (
+              {cancelAt ? (
+                'Sin más cobros'
+              ) : subscription.nextChargeAt ? (
                 <Stamp>{formatDate(subscription.nextChargeAt)}</Stamp>
               ) : (
                 '—'
@@ -150,6 +166,13 @@ function CurrentSubscription({
               desde abajo.
             </p>
           ))}
+        {cancelAt ? (
+          <RevertCancellation cancelAt={cancelAt} />
+        ) : (
+          subscription.status === 'authorized' && (
+            <CancelSubscription paidUntil={subscription.nextChargeAt} />
+          )
+        )}
         <div className="space-y-2">
           <h3 className="t-label text-muted-foreground">Historial de cobros</h3>
           {subscription.charges.length === 0 ? (
@@ -188,6 +211,106 @@ function CurrentSubscription({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function useUpdateSubscription(
+  mutationFn: () => Promise<SubscriptionResponse>,
+  onDone?: () => void,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['suscripcion'], data);
+      onDone?.();
+    },
+  });
+}
+
+function CancelSubscription({ paidUntil }: { paidUntil: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const cancel = useUpdateSubscription(
+    () =>
+      apiPost(
+        '/suscripcion/cancelar',
+        reason.trim() ? { reason: reason.trim() } : {},
+        cancelSubscriptionRequestSchema,
+        subscriptionResponseSchema,
+      ),
+    () => {
+      setOpen(false);
+    },
+  );
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <div className="flex justify-end">
+        <AlertDialogTrigger asChild>
+          <Button variant="outline">Cancelar suscripción</Button>
+        </AlertDialogTrigger>
+      </div>
+      <AlertDialogContent className="space-y-4">
+        <AlertDialogTitle>Cancelar la suscripción</AlertDialogTitle>
+        <AlertDialogDescription>
+          {paidUntil
+            ? `El servicio sigue funcionando hasta el ${formatDate(paidUntil)} y no se hacen más cobros. Después, la cuenta queda suspendida.`
+            : 'No se hacen más cobros y, al terminar el ciclo pagado, la cuenta queda suspendida.'}{' '}
+          Podés revertir la cancelación antes de esa fecha.
+        </AlertDialogDescription>
+        <div className="grid gap-2">
+          <Label htmlFor="cancel-reason">Motivo (opcional)</Label>
+          <Textarea
+            id="cancel-reason"
+            maxLength={500}
+            value={reason}
+            onChange={(event) => {
+              setReason(event.target.value);
+            }}
+          />
+        </div>
+        {cancel.error && <Alert variant="destructive">{errorMessage(cancel.error)}</Alert>}
+        <div className="flex flex-wrap justify-end gap-2">
+          <AlertDialogCancel asChild>
+            <Button variant="outline">Volver</Button>
+          </AlertDialogCancel>
+          <Button
+            disabled={cancel.isPending}
+            onClick={() => {
+              cancel.mutate();
+            }}
+          >
+            {cancel.isPending ? 'Cancelando…' : 'Cancelar suscripción'}
+          </Button>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function RevertCancellation({ cancelAt }: { cancelAt: string }) {
+  const revert = useUpdateSubscription(() =>
+    apiPost('/suscripcion/revertir-cancelacion', {}, z.object({}), subscriptionResponseSchema),
+  );
+  return (
+    <div className="space-y-3">
+      <Alert>
+        Cancelaste la suscripción. El servicio sigue hasta el {formatDate(cancelAt)} y después la
+        cuenta queda suspendida. Si cambiaste de idea, podés revertirlo hasta esa fecha.
+      </Alert>
+      {revert.error && <Alert variant="destructive">{errorMessage(revert.error)}</Alert>}
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          disabled={revert.isPending}
+          onClick={() => {
+            revert.mutate();
+          }}
+        >
+          {revert.isPending ? 'Revirtiendo…' : 'Revertir cancelación'}
+        </Button>
+      </div>
+    </div>
   );
 }
 

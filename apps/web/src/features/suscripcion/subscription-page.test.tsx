@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { SubscriptionResponse } from '@garita/shared';
 import { renderWithQueryClient } from '@/test/render';
@@ -101,6 +101,7 @@ describe('SubscriptionPage', () => {
         startsAt: '2026-11-15T12:00:00.000Z',
         nextChargeAt: null,
         lastFailureReason: 'cc_rejected_insufficient_amount',
+        cancelAt: null,
         charges: [],
       },
     });
@@ -122,6 +123,7 @@ describe('SubscriptionPage', () => {
         startsAt: '2026-11-15T12:00:00.000Z',
         nextChargeAt: '2026-12-15T12:00:00.000Z',
         lastFailureReason: null,
+        cancelAt: null,
         charges: [
           {
             id: 'charge-1',
@@ -139,5 +141,63 @@ describe('SubscriptionPage', () => {
     expect(screen.getByText('Aprobado')).toBeInTheDocument();
     expect(screen.getByText('Acreditado')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Suscribirme' })).not.toBeInTheDocument();
+  });
+
+  const active = {
+    id: 'sub-1',
+    status: 'authorized' as const,
+    plan,
+    payerEmail: 'buyer@testuser.com',
+    startsAt: '2026-11-15T12:00:00.000Z',
+    nextChargeAt: '2026-12-15T12:00:00.000Z',
+    lastFailureReason: null,
+    cancelAt: null,
+    charges: [],
+  };
+
+  it('cancels at the end of the paid cycle after confirming', async () => {
+    mockApi({ trialEndsAt: null, subscription: active });
+    jest.mocked(apiPost).mockResolvedValue({
+      trialEndsAt: null,
+      subscription: { ...active, status: 'paused', cancelAt: '2026-12-15T12:00:00.000Z' },
+    });
+    renderWithQueryClient(<SubscriptionPage />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancelar suscripción' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('El servicio sigue funcionando hasta el 15/12/2026');
+    await userEvent.type(screen.getByLabelText('Motivo (opcional)'), 'Cerramos la empresa');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancelar suscripción' }));
+
+    expect(apiPost).toHaveBeenCalledWith(
+      '/suscripcion/cancelar',
+      { reason: 'Cerramos la empresa' },
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(await screen.findByText('Activa hasta el 15/12/2026')).toBeInTheDocument();
+    expect(screen.getByText('Sin más cobros')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Revertir cancelación' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Suscribirme' })).not.toBeInTheDocument();
+  });
+
+  it('reverts a scheduled cancellation', async () => {
+    mockApi({
+      trialEndsAt: null,
+      subscription: { ...active, status: 'paused', cancelAt: '2026-12-15T12:00:00.000Z' },
+    });
+    jest.mocked(apiPost).mockResolvedValue({ trialEndsAt: null, subscription: active });
+    renderWithQueryClient(<SubscriptionPage />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Revertir cancelación' }));
+
+    expect(apiPost).toHaveBeenCalledWith(
+      '/suscripcion/revertir-cancelacion',
+      {},
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(await screen.findByText('Activa')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancelar suscripción' })).toBeInTheDocument();
   });
 });
