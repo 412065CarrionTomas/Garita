@@ -1,6 +1,6 @@
 # Incidentes y tiempos de respuesta — HU-26
 
-El módulo `reports` agrega consultas de lectura; no modifica incidentes, avisos ni pánicos. Reutiliza el alcance y los logs de HU-25 mediante `ReportScopeService`. Las funciones puras `computeIncidentReport`, `computeResponseTimes`, `summarizeResponseTimes`, `firstResponse` y `computePanicReport` están en `@garita/shared/reports` (exportadas también por la raíz) y devuelven datos independientes de HTTP para HU-40.
+El módulo `reports` agrega consultas de lectura; no modifica incidentes, avisos ni pánicos. Reutiliza el alcance y los logs de HU-25 mediante `ReportScopeService`. Las funciones puras `computeIncidentReport`, `computeResponseTimes`, `summarizeResponseTimes`, `firstResponse` y `computePanicReport` están en `packages/shared/src/reports/incidents.ts` y se importan desde `@garita/shared` y devuelven datos independientes de HTTP para HU-40.
 
 ## Período y fórmulas
 
