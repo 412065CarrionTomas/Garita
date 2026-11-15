@@ -548,3 +548,51 @@ describe('PersonalPage', () => {
     });
   });
 });
+
+describe('HU-41 mensajes del cupo', () => {
+  it.each([
+    ['trial', 'Suscribirme'],
+    ['active', 'Cambiar de plan'],
+  ])('reactivación con cuenta %s muestra mensaje del servidor y %s', async (status, link) => {
+    listedStatus = 'deactivated';
+    setup();
+    jest.mocked(apiPost).mockRejectedValue(
+      new ApiError('Conflicto', 409, {
+        code: 'guard_limit_reached',
+        status,
+        message: 'Alcanzaste el límite de vigiladores.',
+      }),
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Reactivar' }));
+    expect(await screen.findByText('Alcanzaste el límite de vigiladores.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: link })).toHaveAttribute('href', '/suscripcion');
+  });
+  it('alta con cupo completo no confunde el error con correo duplicado', async () => {
+    setup();
+    jest.mocked(apiPost).mockRejectedValue(
+      new ApiError('Conflicto', 409, {
+        code: 'guard_limit_reached',
+        status: 'trial',
+        message: 'Alcanzaste el límite de vigiladores de la prueba.',
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Invitar usuario' }));
+    const form = screen.getByRole('form', { name: 'Invitar usuario' });
+    fireEvent.change(within(form).getByLabelText('Nombre'), { target: { value: 'Ana' } });
+    fireEvent.change(within(form).getByLabelText('Apellido'), { target: { value: 'Prueba' } });
+    fireEvent.change(within(form).getByLabelText('Correo'), {
+      target: { value: 'ana@example.invalid' },
+    });
+    fireEvent.change(within(form).getByLabelText('Teléfono celular'), {
+      target: { value: '+5491123456789' },
+    });
+    fireEvent.submit(form);
+    expect(
+      await screen.findByText('Alcanzaste el límite de vigiladores de la prueba.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Suscribirme' })).toHaveAttribute(
+      'href',
+      '/suscripcion',
+    );
+  });
+});

@@ -1,4 +1,5 @@
 import { PrismaPg } from '@prisma/adapter-pg';
+import { trialEndsAt } from '@garita/shared';
 import { PrismaClient } from '../src/generated/prisma/client';
 
 if (!process.env.DATABASE_URL) {
@@ -16,9 +17,19 @@ const prisma = new PrismaClient({ adapter });
 const roles = ['admin', 'supervisor', 'guard', 'client'] as const;
 
 async function seedCompany(name: string, prefix: string): Promise<string> {
+  const createdAt = new Date();
+  const timezone = 'America/Argentina/Buenos_Aires';
   const company = await prisma.company.upsert({
     where: { id: `${prefix}-company` },
-    create: { id: `${prefix}-company`, name, guardPhone: '+541100000000' },
+    create: {
+      id: `${prefix}-company`,
+      name,
+      guardPhone: '+541100000000',
+      createdAt,
+      timezone,
+      accountStatus: 'trial',
+      trialEndsAt: trialEndsAt(createdAt, timezone),
+    },
     update: { name, guardPhone: '+541100000000' },
   });
   for (const role of roles) {
