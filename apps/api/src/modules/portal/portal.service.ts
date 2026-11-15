@@ -261,7 +261,8 @@ export class PortalService {
           return {
             triggeredAt: row.triggeredAt.toISOString(),
             site: row.site,
-            responseTimeMs: row.confirmedAt.getTime() - row.triggeredAt.getTime(),
+            // A device clock ahead of the server can put triggeredAt after confirmedAt.
+            responseTimeMs: Math.max(0, row.confirmedAt.getTime() - row.triggeredAt.getTime()),
           };
         }),
       });
