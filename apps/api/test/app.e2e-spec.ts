@@ -513,31 +513,38 @@ describe('Aplicación (e2e)', () => {
     }
   }, 30000);
 
-  it.each(['rondas', 'rondas/detalle', 'pendientes', 'puntos-marcas-frecuentes'])(
-    'HU-25 permisos de reportes/%s',
-    async (endpoint) => {
-      const path = `/api/v1/reportes/${endpoint}`;
-      await request(app.getHttpServer()).get(path).expect(401);
-      for (const token of ['token-guard', 'token-client'])
-        await request(app.getHttpServer())
-          .get(path)
-          .set('Authorization', `Bearer ${token}`)
-          .expect(403);
-      for (const siteId of [northUnassignedSiteId, southSiteId])
-        await request(app.getHttpServer())
-          .get(`${path}?predio=${siteId}`)
-          .set('Authorization', 'Bearer token-supervisor')
-          .expect(404);
+  it.each([
+    'rondas',
+    'rondas/detalle',
+    'pendientes',
+    'puntos-marcas-frecuentes',
+    'incidentes',
+    'incidentes/detalle',
+    'tiempos-de-respuesta',
+    'panico',
+    'panico/detalle',
+  ])('HU-25 permisos de reportes/%s', async (endpoint) => {
+    const path = `/api/v1/reportes/${endpoint}`;
+    await request(app.getHttpServer()).get(path).expect(401);
+    for (const token of ['token-guard', 'token-client'])
       await request(app.getHttpServer())
-        .get(`${path}?predio=${northAssignedSiteId}`)
-        .set('Authorization', 'Bearer token-other-supervisor')
-        .expect(404);
+        .get(path)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+    for (const siteId of [northUnassignedSiteId, southSiteId])
       await request(app.getHttpServer())
-        .get(`${path}?predio=${northAssignedSiteId}`)
+        .get(`${path}?predio=${siteId}`)
         .set('Authorization', 'Bearer token-supervisor')
-        .expect(200);
-    },
-  );
+        .expect(404);
+    await request(app.getHttpServer())
+      .get(`${path}?predio=${northAssignedSiteId}`)
+      .set('Authorization', 'Bearer token-other-supervisor')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`${path}?predio=${northAssignedSiteId}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+  });
 
   beforeAll(async () => {
     process.env.NFC_MASTER_KEY =

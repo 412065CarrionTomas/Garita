@@ -1,96 +1,26 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   complianceOwner,
   computeCompliance,
-  defaultReportPeriod,
-  localDateTimeToUtc,
   localReportDay,
   type ComplianceWindow,
   type ReportDetailQuery,
   type ReportQuery,
 } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantResourceService } from '../auth/tenant-resource.service';
+import { ReportScopeService, type ReportScope } from './incident-reports-scope.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
 
 @Injectable()
 export class ReportsService {
-  private readonly logger = new Logger(ReportsService.name);
   constructor(
     private readonly prisma: PrismaService,
-    private readonly resources: TenantResourceService,
+    private readonly scopes: ReportScopeService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  private async scope(input: ReportQuery, user: AuthenticatedUser) {
-    if (input.predio) await this.resources.findOwnedOrThrow('Site', input.predio);
-    if (input.cliente) await this.resources.findOwnedOrThrow('Client', input.cliente);
-    if (input.vigilador && input.vigilador !== 'unassigned')
-      await this.resources.findOwnedOrThrow('User', input.vigilador);
-    const db = this.prisma.tenantPrisma;
-    const [company, sites] = await Promise.all([
-      db.company.findUniqueOrThrow({ where: { id: user.companyId }, select: { timezone: true } }),
-      db.site.findMany({
-        select: {
-          id: true,
-          name: true,
-          clientId: true,
-          client: { select: { id: true, name: true } },
-        },
-        orderBy: { name: 'asc' },
-      }),
-    ]);
-    const period =
-      input.desde && input.hasta
-        ? { desde: input.desde, hasta: input.hasta }
-        : defaultReportPeriod(this.clock.now(), company.timezone);
-    const siteIds = sites
-      .filter(
-        (site) =>
-          (!input.predio || site.id === input.predio) &&
-          (!input.cliente || site.clientId === input.cliente),
-      )
-      .map((site) => site.id);
-    return {
-      ...period,
-      timezone: company.timezone,
-      sites,
-      siteIds,
-      dateRange: {
-        gte: localDateTimeToUtc(period.desde, 0, company.timezone),
-        lt: localDateTimeToUtc(period.hasta, 0, company.timezone),
-      },
-    };
-  }
-
-  private async measured<T>(
-    kind: string,
-    input: ReportQuery,
-    user: AuthenticatedUser,
-    run: (scope: Awaited<ReturnType<ReportsService['scope']>>) => Promise<T>,
-  ) {
-    const started = performance.now();
-    let scope: Awaited<ReturnType<ReportsService['scope']>> | undefined;
-    try {
-      scope = await this.scope(input, user);
-      return await run(scope);
-    } finally {
-      const elapsedMs = performance.now() - started;
-      this.logger[elapsedMs > 10_000 ? 'warn' : 'log']({
-        event: 'reports.query',
-        kind,
-        userId: user.userId,
-        role: user.role,
-        siteIds: scope?.siteIds ?? [],
-        desde: scope?.desde ?? input.desde,
-        hasta: scope?.hasta ?? input.hasta,
-        elapsedMs,
-      });
-    }
-  }
-
-  private async windows(scope: Awaited<ReturnType<ReportsService['scope']>>) {
+  private async windows(scope: ReportScope) {
     const rows = await this.prisma.tenantPrisma.roundWindowState.findMany({
       where: {
         startsAt: scope.dateRange,
@@ -168,7 +98,7 @@ export class ReportsService {
   }
 
   report(input: ReportQuery, user: AuthenticatedUser) {
-    return this.measured('rounds', input, user, async (scope) => {
+    return this.scopes.measured('rounds', input, user, async (scope) => {
       const windows = await this.windows(scope);
       const guards = new Map(
         windows.flatMap((window) =>
@@ -206,7 +136,7 @@ export class ReportsService {
   }
 
   detail(input: ReportDetailQuery, user: AuthenticatedUser) {
-    return this.measured('detail', input, user, async (scope) => {
+    return this.scopes.measured('detail', input, user, async (scope) => {
       const windows = (await this.windows(scope)).filter(
         (window) =>
           !['pending', 'in_progress', 'late'].includes(window.status) &&
@@ -241,7 +171,7 @@ export class ReportsService {
   }
 
   pending(input: { predio?: string }, user: AuthenticatedUser) {
-    return this.measured('pending', input, user, async (scope) => {
+    return this.scopes.measured('pending', input, user, async (scope) => {
       const db = this.prisma.tenantPrisma;
       const sites = { in: scope.siteIds };
       const [reviews, incidents, unsynced, unassigned] = await Promise.all([
@@ -289,7 +219,7 @@ export class ReportsService {
   }
 
   points(input: ReportQuery, user: AuthenticatedUser) {
-    return this.measured('frequent_flags', input, user, async (scope) => {
+    return this.scopes.measured('frequent_flags', input, user, async (scope) => {
       const records = await this.prisma.tenantPrisma.checkpointRecord.findMany({
         where: {
           invalidatedAt: null,
