@@ -1,4 +1,7 @@
 import { FcmMessaging } from '../src/modules/notifications/fcm-messaging';
+import { MercadoPagoClient } from '../src/modules/subscriptions/mercadopago.client';
+import { MercadoPagoNotificationsProcessor } from '../src/modules/subscriptions/mercadopago-notifications.processor';
+import { MercadoPagoReconciliationProcessor } from '../src/modules/subscriptions/mercadopago-reconciliation.processor';
 import { CoverageNoticesService } from '../src/modules/coverage-notices/coverage-notices.service';
 import { getQueueToken } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
@@ -249,6 +252,22 @@ describe('Aplicación (e2e)', () => {
   let testNow = new Date('2026-10-13T12:00:00.000Z');
   const createdNfcCheckpointIds: string[] = [];
   const notificationTokens: string[] = [];
+
+  it('HU-29: gestión de suscripción requiere sesión y administrador', async () => {
+    for (const [method, path] of [
+      ['get', 'planes'],
+      ['get', 'suscripcion'],
+      ['post', 'suscripcion'],
+      ['post', 'suscripcion/cancelar'],
+      ['post', 'suscripcion/revertir-cancelacion'],
+    ] as const) {
+      await request(app.getHttpServer())[method](`/api/v1/${path}`).expect(401);
+      await request(app.getHttpServer())
+        [method](`/api/v1/${path}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(403);
+    }
+  });
 
   it('HU-35 preferencias personales: roles, default, persistencia, aislamiento y body estricto', async () => {
     const http = request(app.getHttpServer());
@@ -546,6 +565,12 @@ describe('Aplicación (e2e)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule, TestOnlyModule],
     })
+      .overrideProvider(MercadoPagoClient)
+      .useValue({})
+      .overrideProvider(MercadoPagoNotificationsProcessor)
+      .useValue({})
+      .overrideProvider(MercadoPagoReconciliationProcessor)
+      .useValue({})
       .overrideProvider(FIREBASE_IDENTITY_PROVIDER)
       .useValue({
         verifyIdToken: (token: string) => {
