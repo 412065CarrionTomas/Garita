@@ -595,6 +595,7 @@ model Notice {
 
   @@index([companyId, status, createdAt])
   @@index([companyId, kind, status, createdAt])
+  @@index([companyId, kind, createdAt])
   @@index([siteId, createdAt])
 }
 
@@ -796,6 +797,9 @@ model Incident {
   @@index([companyId, siteId, classificationStatus, createdAt])
   @@index([shiftId, occurredAtDevice])
   @@index([assignmentId])
+  @@index([companyId, trustedAt])
+  @@index([companyId, occurredAtDevice])
+  @@index([companyId, receivedAt])
 }
 
 enum PanicAlertStatus {
@@ -866,6 +870,7 @@ model PanicAlert {
   @@index([siteId, createdAt])
   @@index([shiftId, status])
   @@index([companyId, receivedAt])
+  @@index([companyId, triggeredAt])
   @@index([siteId, status])
 }
 

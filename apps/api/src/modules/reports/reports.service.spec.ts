@@ -1,4 +1,5 @@
 import { ReportsService } from './reports.service';
+import { ReportScopeService } from './incident-reports-scope.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
 
@@ -34,7 +35,11 @@ describe('ReportsService.points', () => {
       };
       const service = new ReportsService(
         prisma as unknown as PrismaService,
-        { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService,
+        new ReportScopeService(
+          prisma as unknown as PrismaService,
+          { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService,
+          { now: () => new Date('2026-11-01T00:00:00Z') },
+        ),
         { now: () => new Date('2026-11-01T00:00:00Z') },
       );
       expect(
@@ -96,7 +101,11 @@ it('paginates recent not-done windows before slicing, including after the first 
   };
   const service = new ReportsService(
     { tenantPrisma: db } as unknown as PrismaService,
-    { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService,
+    new ReportScopeService(
+      { tenantPrisma: db } as unknown as PrismaService,
+      { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService,
+      { now: () => new Date('2026-11-01T00:00:00Z') },
+    ),
     { now: () => new Date('2026-11-01T00:00:00Z') },
   );
   const { reportDetailQuerySchema } = await import('@garita/shared');
