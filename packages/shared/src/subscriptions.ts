@@ -29,37 +29,44 @@ export const createSubscriptionRequestSchema = z
   .strict();
 export type CreateSubscriptionRequest = z.infer<typeof createSubscriptionRequestSchema>;
 
-export interface PlanResponse {
-  id: string;
-  name: string;
+export const planResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
   /** Pesos with two decimals, as a string to avoid floating point. */
-  monthlyPrice: string;
-  maxGuards: number;
-}
+  monthlyPrice: z.string(),
+  maxGuards: z.number().int(),
+});
+export type PlanResponse = z.infer<typeof planResponseSchema>;
+export const plansResponseSchema = z.array(planResponseSchema);
 
-export interface CreateSubscriptionResponse {
+export const createSubscriptionResponseSchema = z.object({
   /** Mercado Pago page where the admin loads the card and authorizes the debit. */
-  initPoint: string;
-}
+  initPoint: z.url(),
+});
+export type CreateSubscriptionResponse = z.infer<typeof createSubscriptionResponseSchema>;
 
-export interface SubscriptionChargeResponse {
-  id: string;
-  amount: string;
-  status: SubscriptionChargeStatus;
-  statusDetail: string | null;
-  chargedAt: string | null;
-}
+export const subscriptionChargeResponseSchema = z.object({
+  id: z.string(),
+  amount: z.string(),
+  status: z.enum(SUBSCRIPTION_CHARGE_STATUSES),
+  statusDetail: z.string().nullable(),
+  chargedAt: z.string().nullable(),
+});
+export type SubscriptionChargeResponse = z.infer<typeof subscriptionChargeResponseSchema>;
 
-export interface SubscriptionResponse {
-  trialEndsAt: string | null;
-  subscription: {
-    id: string;
-    status: SubscriptionStatus;
-    plan: PlanResponse;
-    payerEmail: string;
-    startsAt: string;
-    nextChargeAt: string | null;
-    lastFailureReason: string | null;
-    charges: SubscriptionChargeResponse[];
-  } | null;
-}
+export const subscriptionResponseSchema = z.object({
+  trialEndsAt: z.string().nullable(),
+  subscription: z
+    .object({
+      id: z.string(),
+      status: z.enum(SUBSCRIPTION_STATUSES),
+      plan: planResponseSchema,
+      payerEmail: z.string(),
+      startsAt: z.string(),
+      nextChargeAt: z.string().nullable(),
+      lastFailureReason: z.string().nullable(),
+      charges: z.array(subscriptionChargeResponseSchema),
+    })
+    .nullable(),
+});
+export type SubscriptionResponse = z.infer<typeof subscriptionResponseSchema>;
