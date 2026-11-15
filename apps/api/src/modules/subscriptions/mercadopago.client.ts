@@ -22,7 +22,7 @@ export type MercadoPagoPreapproval = z.infer<typeof preapprovalSchema>;
 export const authorizedPaymentSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
   preapproval_id: z.string(),
-  transaction_amount: z.number(),
+  transaction_amount: z.union([z.string().regex(/^\d+(?:\.\d{1,2})?$/), z.number().nonnegative()]),
   date_created: z.string().nullish(),
   retry_attempt: z.number().nullish(),
   payment: z
@@ -35,7 +35,33 @@ export const authorizedPaymentSchema = z.object({
 });
 export type MercadoPagoAuthorizedPayment = z.infer<typeof authorizedPaymentSchema>;
 
-const authorizedPaymentSearchSchema = z.object({ results: z.array(authorizedPaymentSchema) });
+const authorizedPaymentSearchSchema = z.object({
+  results: z.array(authorizedPaymentSchema),
+  paging: z
+    .object({
+      total: z.number().int().nonnegative(),
+      offset: z.number().int().nonnegative(),
+      limit: z.number().int().positive(),
+    })
+    .optional(),
+});
+const paymentSchema = z.object({
+  id: z.union([z.string(), z.number()]).transform(String),
+  status: z.string(),
+  status_detail: z.string().nullish(),
+  external_reference: z.string().nullish(),
+  transaction_amount: z.union([z.string().regex(/^\d+(?:\.\d{1,2})?$/), z.number().nonnegative()]),
+});
+export type MercadoPagoPayment = z.infer<typeof paymentSchema>;
+
+export class MercadoPagoRetryableError extends Error {
+  constructor(
+    readonly retryAfterMs: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 export interface CreatePreapprovalInput {
   reason: string;
@@ -98,13 +124,26 @@ export class MercadoPagoClient {
   }
 
   async searchAuthorizedPayments(preapprovalId: string): Promise<MercadoPagoAuthorizedPayment[]> {
-    const query = new URLSearchParams({ preapproval_id: preapprovalId });
-    const page = await this.request(
-      'GET',
-      `/authorized_payments/search?${query.toString()}`,
-      authorizedPaymentSearchSchema,
-    );
-    return page.results;
+    const payments: MercadoPagoAuthorizedPayment[] = [];
+    for (let offset = 0; ;) {
+      const query = new URLSearchParams({
+        preapproval_id: preapprovalId,
+        offset: String(offset),
+        limit: '20',
+      });
+      const page = await this.request(
+        'GET',
+        `/authorized_payments/search?${query.toString()}`,
+        authorizedPaymentSearchSchema,
+      );
+      payments.push(...page.results);
+      offset += page.results.length;
+      if (!page.paging || offset >= page.paging.total || page.results.length === 0) return payments;
+    }
+  }
+
+  getPayment(id: string): Promise<MercadoPagoPayment> {
+    return this.request('GET', `/v1/payments/${encodeURIComponent(id)}`, paymentSchema);
   }
 
   private async request<T>(
@@ -122,6 +161,17 @@ export class MercadoPagoClient {
       signal: AbortSignal.timeout(10_000),
     });
     const data: unknown = await res.json().catch(() => null);
+    if (res.status === 429 || res.status >= 500) {
+      const retryAfter = res.headers.get('Retry-After');
+      const seconds = retryAfter === null ? NaN : Number(retryAfter);
+      const retryAfterMs = Number.isFinite(seconds)
+        ? seconds * 1000
+        : Math.max(0, Date.parse(retryAfter ?? '') - Date.now());
+      throw new MercadoPagoRetryableError(
+        Number.isFinite(retryAfterMs) ? retryAfterMs : 5000,
+        `Mercado Pago HTTP ${res.status}`,
+      );
+    }
     if (!res.ok) {
       this.logger.warn(
         `Mercado Pago respondió ${res.status} a ${method} ${path}: ${JSON.stringify(data)}`,

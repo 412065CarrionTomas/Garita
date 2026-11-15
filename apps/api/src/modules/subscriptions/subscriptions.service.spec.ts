@@ -3,6 +3,9 @@ import type { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../generated/prisma/client';
 import type { Env } from '../../config/env';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { AccountStatePort } from '../../common/ports/account-state.port';
+import { NoopSubscriptionEffects } from './subscription-effects.port';
+import type { GuardSelectionService } from './guard-selection';
 import type { MercadoPagoClient } from './mercadopago.client';
 import { SubscriptionsService } from './subscriptions.service';
 
@@ -29,7 +32,16 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
       findUniqueOrThrow: jest.fn().mockResolvedValue({ trialEndsAt: options.trialEndsAt ?? null }),
     },
     subscription,
-    subscriptionCharge: { upsert: jest.fn().mockResolvedValue({}) },
+    subscriptionCharge: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      update: jest.fn(),
+      upsert: jest
+        .fn()
+        .mockImplementation(({ create }: { create: object }) =>
+          Promise.resolve({ id: 'charge', ...create }),
+        ),
+    },
+    $executeRaw: jest.fn(),
   };
   const mercadoPago = {
     createPreapproval: jest
@@ -41,13 +53,22 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
     searchAuthorizedPayments: jest.fn().mockResolvedValue([]),
   };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
+  const systemPrisma = {
+    ...db,
+    $transaction: (run: (tx: typeof db) => Promise<unknown>) => run(db),
+  };
+  const account = { get: jest.fn().mockResolvedValue({ status: 'active' }), transition: jest.fn() };
+  const selection = { validate: jest.fn().mockResolvedValue(null), apply: jest.fn() };
   const service = new SubscriptionsService(
-    { tenantPrisma: db, systemPrisma: db } as unknown as PrismaService,
+    { tenantPrisma: db, systemPrisma } as unknown as PrismaService,
     mercadoPago as unknown as MercadoPagoClient,
     config as unknown as ConfigService<Env, true>,
     { now: () => NOW },
+    account as unknown as AccountStatePort,
+    new NoopSubscriptionEffects(),
+    selection as unknown as GuardSelectionService,
   );
-  return { service, db, mercadoPago };
+  return { service, db, mercadoPago, account };
 }
 
 const request = { planId: 'plan-10', payerEmail: 'buyer@testuser.com', keepTrial: false };
@@ -55,7 +76,9 @@ const request = { planId: 'plan-10', payerEmail: 'buyer@testuser.com', keepTrial
 describe('SubscriptionsService.create', () => {
   it('rejects a second subscription when one is already authorized', async () => {
     const { service, mercadoPago } = setup({ open: { id: 'sub-1', status: 'authorized' } });
-    await expect(service.create('company-1', request)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.create('company-1', request, 'admin')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(mercadoPago.createPreapproval).not.toHaveBeenCalled();
   });
 
@@ -63,7 +86,7 @@ describe('SubscriptionsService.create', () => {
     const { service, db, mercadoPago } = setup({
       open: { id: 'sub-old', status: 'pending', mpPreapprovalId: 'mp-old' },
     });
-    await expect(service.create('company-1', request)).resolves.toEqual({
+    await expect(service.create('company-1', request, 'admin')).resolves.toEqual({
       initPoint: 'https://mp/checkout',
     });
     expect(mercadoPago.cancelPreapproval).toHaveBeenCalledWith('mp-old');
@@ -84,13 +107,13 @@ describe('SubscriptionsService.create', () => {
   it('defers the first charge to the end of the trial only when the admin keeps it', async () => {
     const trialEndsAt = new Date('2026-11-25T02:59:59.000Z');
     const kept = setup({ trialEndsAt });
-    await kept.service.create('company-1', { ...request, keepTrial: true });
+    await kept.service.create('company-1', { ...request, keepTrial: true }, 'admin');
     expect(kept.mercadoPago.createPreapproval).toHaveBeenCalledWith(
       expect.objectContaining({ startDate: trialEndsAt }),
     );
 
     const skipped = setup({ trialEndsAt });
-    await skipped.service.create('company-1', request);
+    await skipped.service.create('company-1', request, 'admin');
     expect(skipped.mercadoPago.createPreapproval).toHaveBeenCalledWith(
       expect.objectContaining({ startDate: undefined }),
     );
@@ -99,7 +122,7 @@ describe('SubscriptionsService.create', () => {
   it('cancels the local row when Mercado Pago fails, so the admin can retry', async () => {
     const { service, db, mercadoPago } = setup();
     mercadoPago.createPreapproval.mockRejectedValue(new Error('boom'));
-    await expect(service.create('company-1', request)).rejects.toThrow('boom');
+    await expect(service.create('company-1', request, 'admin')).rejects.toThrow('boom');
     expect(db.subscription.update).toHaveBeenCalledWith({
       where: { id: 'sub-new' },
       data: { status: 'cancelled', lastFailureReason: 'No se pudo crear en Mercado Pago' },
@@ -108,6 +131,23 @@ describe('SubscriptionsService.create', () => {
 });
 
 describe('SubscriptionsService.syncPreapproval', () => {
+  it.each([false, true])(
+    'authorizes with deferred trial=%s without ending a retained trial',
+    async (deferred) => {
+      const { service, mercadoPago, account } = setup({
+        local: {
+          id: 'sub-1',
+          companyId: 'company-1',
+          status: 'pending',
+          startsAt: new Date(deferred ? '2026-11-25T12:00:00Z' : '2026-11-15T12:00:00Z'),
+        },
+      });
+      account.get.mockResolvedValue({ status: 'trial' });
+      mercadoPago.getPreapproval.mockResolvedValue({ id: 'mp-1', status: 'authorized' });
+      await service.syncPreapproval('mp-1');
+      expect(account.transition).toHaveBeenCalledTimes(deferred ? 0 : 1);
+    },
+  );
   it('copies the remote status and charges, keeping the rejection reason', async () => {
     const { service, db, mercadoPago } = setup({
       local: { id: 'sub-1', companyId: 'company-1', status: 'pending' },

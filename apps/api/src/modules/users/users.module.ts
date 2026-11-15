@@ -12,6 +12,7 @@ import {
 
 @Module({
   imports: [PrismaModule, AuthModule, ShiftExecutionModule],
+  exports: [UsersService],
   controllers: [UsersController, InvitationsController, ClientUsersController],
   providers: [
     UsersService,
