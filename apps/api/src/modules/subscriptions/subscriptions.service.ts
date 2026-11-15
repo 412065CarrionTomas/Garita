@@ -141,6 +141,7 @@ export class SubscriptionsService {
       where: { companyId },
       orderBy: { createdAt: 'desc' },
     });
+    if (latest) await this.finishDueCancellation(latest);
     // Pull from Mercado Pago on read so the screen is right even if a webhook was missed.
     if (latest?.mpPreapprovalId && latest.status !== 'cancelled') {
       await this.syncPreapproval(latest.mpPreapprovalId).catch((error: unknown) => {
@@ -163,6 +164,7 @@ export class SubscriptionsService {
         startsAt: subscription.startsAt.toISOString(),
         nextChargeAt: subscription.nextChargeAt?.toISOString() ?? null,
         lastFailureReason: subscription.lastFailureReason,
+        cancelAt: subscription.cancelAt?.toISOString() ?? null,
         charges: subscription.charges.map((charge) => ({
           id: charge.id,
           amount: charge.amount.toFixed(2),
@@ -226,6 +228,93 @@ export class SubscriptionsService {
           status === 'authorized' ? null : (lastRejected?.payment?.status_detail ?? null),
       },
     });
+  }
+
+  /**
+   * HU-42: the service keeps running until the end of the paid cycle. The debit is paused (not
+   * cancelled) in Mercado Pago so the admin can still revert; a pending checkout has no paid
+   * cycle and is dropped right away.
+   */
+  async cancel(
+    companyId: string,
+    userId: string,
+    reason: string | undefined,
+  ): Promise<SubscriptionResponse> {
+    const db = this.prisma.tenantPrisma;
+    const open = await db.subscription.findFirst({
+      where: { companyId, status: { in: OPEN_STATUSES } },
+    });
+    if (!open) throw new NotFoundException('No hay una suscripción para cancelar');
+    if (open.cancelAt) throw new ConflictException('La suscripción ya está cancelada');
+    if (open.status === 'pending') {
+      await this.cancelPending(open.id, open.mpPreapprovalId);
+      return this.get(companyId);
+    }
+    if (open.status !== 'authorized' || !open.mpPreapprovalId) {
+      throw new ConflictException('La suscripción no se puede cancelar en este estado');
+    }
+    // The next charge date is where the paid cycle ends; refresh it before relying on it.
+    await this.syncPreapproval(open.mpPreapprovalId);
+    const fresh = await db.subscription.findUniqueOrThrow({ where: { id: open.id } });
+    const now = this.clock.now();
+    const cancelAt = fresh.nextChargeAt && fresh.nextChargeAt > now ? fresh.nextChargeAt : now;
+    await this.mercadoPago.setPreapprovalStatus(open.mpPreapprovalId, 'paused');
+    await db.subscription.update({
+      where: { id: open.id },
+      data: {
+        status: 'paused',
+        cancelAt,
+        cancelReason: reason ?? null,
+        cancelRequestedAt: now,
+        cancelRequestedById: userId,
+      },
+    });
+    return this.get(companyId);
+  }
+
+  async revertCancellation(companyId: string): Promise<SubscriptionResponse> {
+    const db = this.prisma.tenantPrisma;
+    const scheduled = await db.subscription.findFirst({
+      where: { companyId, status: 'paused', cancelAt: { not: null } },
+    });
+    if (!scheduled?.cancelAt || !scheduled.mpPreapprovalId) {
+      throw new NotFoundException('No hay una cancelación para revertir');
+    }
+    if (scheduled.cancelAt <= this.clock.now()) {
+      throw new ConflictException('El ciclo pagado ya terminó: volvé a suscribirte');
+    }
+    await this.mercadoPago.setPreapprovalStatus(scheduled.mpPreapprovalId, 'authorized');
+    await db.subscription.update({
+      where: { id: scheduled.id },
+      data: {
+        status: 'authorized',
+        cancelAt: null,
+        cancelReason: null,
+        cancelRequestedAt: null,
+        cancelRequestedById: null,
+      },
+    });
+    return this.get(companyId);
+  }
+
+  /** shortcut: applied on read; the daily job (ID-337) will also run it for companies that never log in. */
+  private async finishDueCancellation(subscription: {
+    id: string;
+    status: SubscriptionStatus;
+    cancelAt: Date | null;
+    mpPreapprovalId: string | null;
+  }): Promise<void> {
+    if (!subscription.cancelAt || subscription.status === 'cancelled') return;
+    if (subscription.cancelAt > this.clock.now()) return;
+    if (subscription.mpPreapprovalId) {
+      // If Mercado Pago fails, the row stays paused and the next read retries.
+      await this.mercadoPago.cancelPreapproval(subscription.mpPreapprovalId);
+    }
+    await this.prisma.tenantPrisma.subscription.update({
+      where: { id: subscription.id },
+      data: { status: 'cancelled' },
+    });
+    subscription.status = 'cancelled';
   }
 
   private async cancelPending(id: string, mpPreapprovalId: string | null): Promise<void> {

@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../generated/prisma/client';
 import type { Env } from '../../config/env';
@@ -21,6 +21,7 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
     findUnique: jest.fn().mockResolvedValue(options.local ?? null),
     create: jest.fn().mockResolvedValue({ id: 'sub-new' }),
     update: jest.fn().mockResolvedValue({}),
+    findUniqueOrThrow: jest.fn(),
   };
   const db = {
     plan: { findFirst: jest.fn().mockResolvedValue(plan) },
@@ -36,6 +37,7 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
       .mockResolvedValue({ id: 'mp-new', status: 'pending', init_point: 'https://mp/checkout' }),
     cancelPreapproval: jest.fn().mockResolvedValue({ id: 'mp-old', status: 'cancelled' }),
     getPreapproval: jest.fn(),
+    setPreapprovalStatus: jest.fn().mockResolvedValue({ id: 'mp-1', status: 'paused' }),
     searchAuthorizedPayments: jest.fn().mockResolvedValue([]),
   };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
@@ -156,5 +158,118 @@ describe('SubscriptionsService.syncPreapproval', () => {
     await service.syncPreapproval('mp-old');
     expect(mercadoPago.cancelPreapproval).toHaveBeenCalledWith('mp-old');
     expect(db.subscription.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('SubscriptionsService cancellation', () => {
+  const paidUntil = new Date('2026-12-15T12:00:00.000Z');
+
+  it('pauses the debit and keeps the service until the end of the paid cycle', async () => {
+    const { service, db, mercadoPago } = setup({
+      open: { id: 'sub-1', status: 'authorized', mpPreapprovalId: 'mp-1', cancelAt: null },
+    });
+    jest.spyOn(service, 'syncPreapproval').mockResolvedValue();
+    const get = jest
+      .spyOn(service, 'get')
+      .mockResolvedValue({ trialEndsAt: null, subscription: null });
+    db.subscription.findUniqueOrThrow.mockResolvedValue({ nextChargeAt: paidUntil });
+
+    await service.cancel('company-1', 'user-1', 'Cerramos la empresa');
+
+    expect(mercadoPago.setPreapprovalStatus).toHaveBeenCalledWith('mp-1', 'paused');
+    expect(mercadoPago.cancelPreapproval).not.toHaveBeenCalled();
+    expect(db.subscription.update).toHaveBeenCalledWith({
+      where: { id: 'sub-1' },
+      data: {
+        status: 'paused',
+        cancelAt: paidUntil,
+        cancelReason: 'Cerramos la empresa',
+        cancelRequestedAt: NOW,
+        cancelRequestedById: 'user-1',
+      },
+    });
+    expect(get).toHaveBeenCalledWith('company-1');
+  });
+
+  it('does not cancel twice', async () => {
+    const { service, mercadoPago } = setup({
+      open: { id: 'sub-1', status: 'paused', mpPreapprovalId: 'mp-1', cancelAt: paidUntil },
+    });
+    await expect(service.cancel('company-1', 'user-1', undefined)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(mercadoPago.setPreapprovalStatus).not.toHaveBeenCalled();
+  });
+
+  it('reverts a scheduled cancellation before the cycle ends', async () => {
+    const { service, db, mercadoPago } = setup({
+      open: { id: 'sub-1', status: 'paused', mpPreapprovalId: 'mp-1', cancelAt: paidUntil },
+    });
+    jest.spyOn(service, 'get').mockResolvedValue({ trialEndsAt: null, subscription: null });
+
+    await service.revertCancellation('company-1');
+
+    expect(mercadoPago.setPreapprovalStatus).toHaveBeenCalledWith('mp-1', 'authorized');
+    expect(db.subscription.update).toHaveBeenCalledWith({
+      where: { id: 'sub-1' },
+      data: {
+        status: 'authorized',
+        cancelAt: null,
+        cancelReason: null,
+        cancelRequestedAt: null,
+        cancelRequestedById: null,
+      },
+    });
+  });
+
+  it('refuses to revert once the paid cycle is over', async () => {
+    const { service, mercadoPago } = setup({
+      open: {
+        id: 'sub-1',
+        status: 'paused',
+        mpPreapprovalId: 'mp-1',
+        cancelAt: new Date('2026-11-01T00:00:00.000Z'),
+      },
+    });
+    await expect(service.revertCancellation('company-1')).rejects.toBeInstanceOf(ConflictException);
+    expect(mercadoPago.setPreapprovalStatus).not.toHaveBeenCalled();
+  });
+
+  it('refuses to revert when nothing was cancelled', async () => {
+    const { service } = setup();
+    await expect(service.revertCancellation('company-1')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('ends the subscription in Mercado Pago once the paid cycle is over', async () => {
+    const { service, db, mercadoPago } = setup({
+      open: {
+        id: 'sub-1',
+        status: 'paused',
+        mpPreapprovalId: 'mp-1',
+        cancelAt: new Date('2026-11-15T11:59:00.000Z'),
+      },
+    });
+    const sync = jest.spyOn(service, 'syncPreapproval');
+    db.subscription.findUniqueOrThrow.mockResolvedValue({
+      id: 'sub-1',
+      status: 'cancelled',
+      plan,
+      payerEmail: 'buyer@testuser.com',
+      startsAt: NOW,
+      nextChargeAt: null,
+      lastFailureReason: null,
+      cancelAt: new Date('2026-11-15T11:59:00.000Z'),
+      charges: [],
+    });
+
+    const result = await service.get('company-1');
+
+    expect(mercadoPago.cancelPreapproval).toHaveBeenCalledWith('mp-1');
+    expect(db.subscription.update).toHaveBeenCalledWith({
+      where: { id: 'sub-1' },
+      data: { status: 'cancelled' },
+    });
+    expect(sync).not.toHaveBeenCalled();
+    expect(result.subscription?.status).toBe('cancelled');
   });
 });

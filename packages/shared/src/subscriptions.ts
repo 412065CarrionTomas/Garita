@@ -29,6 +29,11 @@ export const createSubscriptionRequestSchema = z
   .strict();
 export type CreateSubscriptionRequest = z.infer<typeof createSubscriptionRequestSchema>;
 
+export const cancelSubscriptionRequestSchema = z
+  .object({ reason: z.string().trim().max(500).optional() })
+  .strict();
+export type CancelSubscriptionRequest = z.infer<typeof cancelSubscriptionRequestSchema>;
+
 export const planResponseSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -65,6 +70,8 @@ export const subscriptionResponseSchema = z.object({
       startsAt: z.string(),
       nextChargeAt: z.string().nullable(),
       lastFailureReason: z.string().nullable(),
+      /** Set when the admin cancelled: service runs until this date, then the subscription ends. */
+      cancelAt: z.string().nullable(),
       charges: z.array(subscriptionChargeResponseSchema),
     })
     .nullable(),

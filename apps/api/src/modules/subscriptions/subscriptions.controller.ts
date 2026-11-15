@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { createSubscriptionRequestSchema } from '@garita/shared';
+import { cancelSubscriptionRequestSchema, createSubscriptionRequestSchema } from '@garita/shared';
 import { parseOrBadRequest } from '../../common/parse-or-bad-request';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -29,6 +29,27 @@ export class SubscriptionsController {
       user.companyId,
       parseOrBadRequest(createSubscriptionRequestSchema, body),
     );
+  }
+
+  @Post('suscripcion/cancelar')
+  @Roles('admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancela al fin del ciclo pagado; hasta entonces se puede revertir' })
+  @ApiResponse({ status: 403, description: 'Solo administradores' })
+  @ApiResponse({ status: 409, description: 'Ya estaba cancelada' })
+  cancel(@Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
+    const { reason } = parseOrBadRequest(cancelSubscriptionRequestSchema, body ?? {});
+    return this.subscriptions.cancel(user.companyId, user.userId, reason);
+  }
+
+  @Post('suscripcion/revertir-cancelacion')
+  @Roles('admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revierte una cancelación antes del fin del ciclo pagado' })
+  @ApiResponse({ status: 403, description: 'Solo administradores' })
+  @ApiResponse({ status: 409, description: 'El ciclo pagado ya terminó' })
+  revertCancellation(@CurrentUser() user: AuthenticatedUser) {
+    return this.subscriptions.revertCancellation(user.companyId);
   }
 
   @Get('suscripcion')

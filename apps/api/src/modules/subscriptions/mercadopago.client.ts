@@ -75,10 +75,18 @@ export class MercadoPagoClient {
     return this.request('GET', `/preapproval/${encodeURIComponent(id)}`, preapprovalSchema);
   }
 
-  cancelPreapproval(id: string): Promise<MercadoPagoPreapproval> {
+  /** `cancelled` is final in Mercado Pago; `paused` stops debits and can go back to `authorized`. */
+  setPreapprovalStatus(
+    id: string,
+    status: 'paused' | 'authorized' | 'cancelled',
+  ): Promise<MercadoPagoPreapproval> {
     return this.request('PUT', `/preapproval/${encodeURIComponent(id)}`, preapprovalSchema, {
-      status: 'cancelled',
+      status,
     });
+  }
+
+  cancelPreapproval(id: string): Promise<MercadoPagoPreapproval> {
+    return this.setPreapprovalStatus(id, 'cancelled');
   }
 
   getAuthorizedPayment(id: string): Promise<MercadoPagoAuthorizedPayment> {
