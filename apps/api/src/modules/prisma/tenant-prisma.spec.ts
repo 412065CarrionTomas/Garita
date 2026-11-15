@@ -454,4 +454,39 @@ describe('aislamiento del portal por cliente', () => {
     const args = { where: { status: 'inactive' } };
     expect(addClientFilter('Site', args, { ...user, role: 'admin' })).toBe(args);
   });
+  it.each([
+    [
+      'RoundWindowState',
+      {
+        shift: {
+          site: { clientId: 'client-a', status: 'active', client: { status: 'active' } },
+          status: { not: 'cancelled' },
+        },
+      },
+    ],
+    [
+      'Incident',
+      {
+        site: { clientId: 'client-a', status: 'active', client: { status: 'active' } },
+        classificationStatus: 'client_visible',
+      },
+    ],
+    [
+      'PanicAlert',
+      {
+        site: { clientId: 'client-a', status: 'active', client: { status: 'active' } },
+        status: 'resolved',
+        outcome: 'real_emergency',
+      },
+    ],
+  ])(
+    'HU-28: %s conserva empresa y clave y exige visibilidad aunque el caller intente otro filtro',
+    (model, policy) => {
+      const where = { id: 'row', companyId: 'north', status: 'active', AND: [{ siteId: 'other' }] };
+      expect(addClientFilter(model, { where }, user)).toEqual({
+        where: { ...where, AND: [where, policy] },
+      });
+      expect(() => addClientFilter(model, {}, { ...user, clientId: null })).toThrow();
+    },
+  );
 });

@@ -34,6 +34,7 @@ import { PanicDetailPage } from '../panico/panic-detail-page';
 import { PanicBanner } from '../panico/panic-banner';
 import { useActivePanicAlerts } from '../panico/queries';
 import { ReportsPage } from '../reportes/reports-page';
+import { PortalPage } from '../portal/portal-page';
 import { IncidentReportsPage } from '../reportes/incidentes/incident-reports-page';
 import { SubscriptionPage } from '../suscripcion/subscription-page';
 
@@ -280,7 +281,7 @@ export function AppRoutes() {
           path="/reportes"
           element={
             <Protected roles={['client']}>
-              <HomePlaceholder role="Cliente" title="Reportes de mi predio" />
+              <PortalPage />
             </Protected>
           }
         />

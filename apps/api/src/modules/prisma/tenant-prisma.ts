@@ -206,7 +206,21 @@ export function addClientFilter(
   if (model === 'User') return { ...args, where: { ...where, id: user.userId } };
   if (model === 'Invitation') return { ...args, where: { ...where, userId: user.userId } };
   if (model === 'NotificationDevice') return { ...args, where: { ...where, userId: user.userId } };
-  // HU-28 habilitará otros modelos del portal con su filtro explícito.
+  if (model === 'RoundWindowState')
+    return {
+      ...args,
+      where: { ...where, AND: [where, { shift: { site, status: { not: 'cancelled' } } }] },
+    };
+  if (model === 'Incident')
+    return {
+      ...args,
+      where: { ...where, AND: [where, { site, classificationStatus: 'client_visible' }] },
+    };
+  if (model === 'PanicAlert')
+    return {
+      ...args,
+      where: { ...where, AND: [where, { site, status: 'resolved', outcome: 'real_emergency' }] },
+    };
   if (model !== 'Company') throw new ForbiddenException('Modelo no habilitado para el portal');
   return args;
 }

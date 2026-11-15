@@ -515,6 +515,23 @@ describe('Aplicación (e2e)', () => {
   }, 30000);
 
   it.each([
+    'predios',
+    'rondas',
+    'rondas/dia?fecha=2026-10-01',
+    'incidentes',
+    'incidentes/inexistente/fotos',
+    'emergencias',
+  ])('HU-28 permisos de portal/%s: sin sesión 401 y roles internos 403', async (endpoint) => {
+    const path = `/api/v1/portal/${endpoint}`;
+    await request(app.getHttpServer()).get(path).expect(401);
+    for (const token of ['token-admin', 'token-supervisor', 'token-guard'])
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+  });
+
+  it.each([
     'rondas',
     'rondas/detalle',
     'pendientes',
