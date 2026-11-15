@@ -7,6 +7,9 @@ import {
   createSubscriptionResponseSchema,
   plansResponseSchema,
   subscriptionResponseSchema,
+  guardSelectionRequiredSchema,
+  type GuardSelection,
+  type GuardSelectionRequired,
   type SubscriptionChargeStatus,
   type SubscriptionResponse,
   type SubscriptionStatus,
@@ -43,6 +46,7 @@ import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { errorMessage } from '@/lib/error-message';
 import { useAuth } from '../auth/auth-context';
 import { openCheckoutTab, sendToCheckout } from './checkout-redirect';
+import { GuardSelectionStep } from './guard-selection-step';
 
 const SUBSCRIPTION_STATUS: Record<SubscriptionStatus, { label: string; tone: StatusTone }> = {
   pending: { label: 'Falta autorizar', tone: 'neutral' },
@@ -80,9 +84,14 @@ const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 export function SubscriptionPage() {
+  const [chargePage, setChargePage] = useState(1);
   const subscription = useQuery({
-    queryKey: ['suscripcion'],
-    queryFn: () => apiGet('/suscripcion', subscriptionResponseSchema),
+    queryKey: chargePage === 1 ? ['suscripcion'] : ['suscripcion', chargePage],
+    queryFn: () =>
+      apiGet(
+        chargePage === 1 ? '/suscripcion' : `/suscripcion?chargePage=${chargePage}`,
+        subscriptionResponseSchema,
+      ),
     // Always stale: coming back from the Mercado Pago tab refetches, and the API syncs on read.
     staleTime: 0,
   });
@@ -105,7 +114,13 @@ export function SubscriptionPage() {
         <Alert variant="destructive">No se pudo cargar la suscripción.</Alert>
       ) : (
         <>
-          {current && <CurrentSubscription subscription={current} />}
+          {current && (
+            <CurrentSubscription
+              subscription={current}
+              chargePage={chargePage}
+              onPageChange={setChargePage}
+            />
+          )}
           {canSubscribe && (
             <SubscribeForm
               trialEndsAt={subscription.data.trialEndsAt}
@@ -120,8 +135,12 @@ export function SubscriptionPage() {
 
 function CurrentSubscription({
   subscription,
+  chargePage,
+  onPageChange,
 }: {
   subscription: NonNullable<SubscriptionResponse['subscription']>;
+  chargePage: number;
+  onPageChange: (page: number) => void;
 }) {
   const cancelAt = subscription.status === 'cancelled' ? null : subscription.cancelAt;
   // Mercado Pago cancels the subscription itself when the first payment is rejected.
@@ -169,6 +188,11 @@ function CurrentSubscription({
             <dd className="break-all">{subscription.payerEmail}</dd>
           </div>
         </dl>
+        <p className="text-sm text-muted-foreground">
+          Tu plan permite hasta {subscription.plan.maxGuards} vigiladores activos o con invitación
+          pendiente. Si alcanzaste el límite y necesitás ampliarlo, contactá a la plataforma para
+          subir de plan.
+        </p>
         {rejected ? (
           <Alert variant="destructive">
             Mercado Pago rechazó el pago: {paymentDetail(subscription.lastFailureReason)}. La
@@ -226,6 +250,29 @@ function CurrentSubscription({
             </Table>
           )}
         </div>
+        {(chargePage > 1 || subscription.hasMoreCharges) && (
+          <nav aria-label="Páginas del historial" className="flex items-center justify-end gap-3">
+            <Button
+              variant="outline"
+              disabled={chargePage === 1}
+              onClick={() => {
+                onPageChange(chargePage - 1);
+              }}
+            >
+              Anterior
+            </Button>
+            <span>Página {chargePage}</span>
+            <Button
+              variant="outline"
+              disabled={!subscription.hasMoreCharges}
+              onClick={() => {
+                onPageChange(chargePage + 1);
+              }}
+            >
+              Siguiente
+            </Button>
+          </nav>
+        )}
       </CardContent>
     </Card>
   );
@@ -350,6 +397,11 @@ function SubscribeForm({
   const [payerEmail, setPayerEmail] = useState(lastPayerEmail ?? user?.email ?? '');
   const [keepTrial, setKeepTrial] = useState(true);
   const [formError, setFormError] = useState('');
+  const [requiredSelection, setRequiredSelection] = useState<GuardSelectionRequired | null>(null);
+  const [guardSelection, setGuardSelection] = useState<GuardSelection>({
+    guardsToKeep: [],
+    shiftDecisions: [],
+  });
   const inTrial = trialEndsAt !== null && new Date(trialEndsAt) > new Date();
 
   const queryClient = useQueryClient();
@@ -367,8 +419,22 @@ function SubscribeForm({
         void queryClient.invalidateQueries({ queryKey: ['suscripcion'] });
       }
     },
-    onError: (_error, { tab }) => {
+    onError: (error, { tab }) => {
       tab?.close();
+      const required = guardSelectionRequiredSchema.safeParse(
+        error instanceof ApiError ? error.body : null,
+      );
+      if (required.success) {
+        setRequiredSelection(required.data);
+        setGuardSelection({
+          guardsToKeep: [],
+          shiftDecisions: required.data.guards.map((guard) => ({
+            guardId: guard.id,
+            shiftAction: 'unassign',
+            confirmUnassignedCount: guard.futureShiftCount,
+          })),
+        });
+      }
     },
   });
 
@@ -391,7 +457,12 @@ function SubscribeForm({
           className="space-y-5"
           onSubmit={(event) => {
             event.preventDefault();
-            const body = { planId, payerEmail, keepTrial: inTrial && keepTrial };
+            const body = {
+              planId,
+              payerEmail,
+              keepTrial: inTrial && keepTrial,
+              ...(requiredSelection ? { guardSelection } : {}),
+            };
             const parsed = createSubscriptionRequestSchema.safeParse(body);
             if (!parsed.success) {
               setFormError(planId ? 'Ingresá un email válido.' : 'Elegí un plan.');
@@ -413,6 +484,7 @@ function SubscribeForm({
                     checked={planId === plan.id}
                     onChange={() => {
                       setPlanId(plan.id);
+                      setRequiredSelection(null);
                     }}
                     className="absolute opacity-0"
                   />
@@ -482,12 +554,21 @@ function SubscribeForm({
             </fieldset>
           )}
 
+          {requiredSelection && (
+            <GuardSelectionStep
+              required={requiredSelection}
+              value={guardSelection}
+              onChange={setGuardSelection}
+            />
+          )}
           {formError && <Alert variant="destructive">{formError}</Alert>}
           {subscribe.error && (
             <Alert variant="destructive">
               {subscribe.error instanceof ApiError && subscribe.error.status === 502
                 ? 'Mercado Pago no aceptó la suscripción. Revisá que el email sea el de tu cuenta de Mercado Pago.'
-                : errorMessage(subscribe.error, 'Tu empresa ya tiene una suscripción activa.')}
+                : requiredSelection
+                  ? 'Elegí qué vigiladores siguen activos y confirmá la decisión sobre sus turnos antes de continuar.'
+                  : errorMessage(subscribe.error, 'Tu empresa ya tiene una suscripción activa.')}
             </Alert>
           )}
           {subscribe.isSuccess && (

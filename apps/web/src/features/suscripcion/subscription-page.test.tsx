@@ -9,9 +9,11 @@ import { SubscriptionPage } from './subscription-page';
 jest.mock('@/lib/api-client', () => {
   class ApiError extends Error {
     readonly status: number | undefined;
-    constructor(message: string, status?: number) {
+    readonly body: unknown;
+    constructor(message: string, status?: number, body?: unknown) {
       super(message);
       this.status = status;
+      this.body = body;
     }
   }
   return { ApiError, apiGet: jest.fn(), apiPost: jest.fn() };
@@ -47,6 +49,41 @@ beforeEach(() => {
 });
 
 describe('SubscriptionPage', () => {
+  it('asks for the guard decision after a 409 and submits it with the subscription', async () => {
+    mockApi({ trialEndsAt: null, subscription: null });
+    jest
+      .mocked(apiPost)
+      .mockRejectedValueOnce(
+        new ApiError('choice', 409, {
+          code: 'guard_selection_required',
+          maxGuards: 1,
+          guards: [
+            { id: 'a', name: 'Ana', futureShiftCount: 0 },
+            { id: 'b', name: 'Bruno', futureShiftCount: 2 },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce({ initPoint: 'https://mp.test/checkout' });
+    renderWithQueryClient(<SubscriptionPage />);
+    await userEvent.click(await screen.findByRole('radio', { name: /Hasta 10 vigiladores/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }));
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Ana' }));
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'a');
+    await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenLastCalledWith(
+        '/suscripcion',
+        expect.objectContaining({
+          guardSelection: {
+            guardsToKeep: ['a'],
+            shiftDecisions: [{ guardId: 'b', shiftAction: 'derive', deriveToUserId: 'a' }],
+          },
+        }),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
   it('subscribes to the chosen plan and goes to Mercado Pago', async () => {
     mockApi({ trialEndsAt: null, subscription: null });
     jest.mocked(apiPost).mockResolvedValue({ initPoint: 'https://mp.test/checkout' });
