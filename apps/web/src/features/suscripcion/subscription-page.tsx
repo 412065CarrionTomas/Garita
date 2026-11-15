@@ -42,7 +42,7 @@ import {
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { errorMessage } from '@/lib/error-message';
 import { useAuth } from '../auth/auth-context';
-import { redirectToCheckout } from './checkout-redirect';
+import { openCheckoutTab, sendToCheckout } from './checkout-redirect';
 
 const SUBSCRIPTION_STATUS: Record<SubscriptionStatus, { label: string; tone: StatusTone }> = {
   pending: { label: 'Falta autorizar', tone: 'neutral' },
@@ -83,6 +83,8 @@ export function SubscriptionPage() {
   const subscription = useQuery({
     queryKey: ['suscripcion'],
     queryFn: () => apiGet('/suscripcion', subscriptionResponseSchema),
+    // Always stale: coming back from the Mercado Pago tab refetches, and the API syncs on read.
+    staleTime: 0,
   });
   const current = subscription.data?.subscription;
   const canSubscribe = !current || current.status === 'pending' || current.status === 'cancelled';
@@ -350,17 +352,23 @@ function SubscribeForm({
   const [formError, setFormError] = useState('');
   const inTrial = trialEndsAt !== null && new Date(trialEndsAt) > new Date();
 
+  const queryClient = useQueryClient();
   const subscribe = useMutation({
-    mutationFn: (body: unknown) =>
+    mutationFn: ({ body }: { body: unknown; tab: Window | null }) =>
       apiPost(
         '/suscripcion',
         body,
         createSubscriptionRequestSchema,
         createSubscriptionResponseSchema,
       ),
-    onSuccess: ({ initPoint }) => {
-      // The card is loaded on Mercado Pago's page; it sends the admin back to /suscripcion.
-      redirectToCheckout(initPoint);
+    onSuccess: ({ initPoint }, { tab }) => {
+      // The card is loaded on Mercado Pago's page; this tab refreshes when the admin comes back.
+      if (sendToCheckout(tab, initPoint)) {
+        void queryClient.invalidateQueries({ queryKey: ['suscripcion'] });
+      }
+    },
+    onError: (_error, { tab }) => {
+      tab?.close();
     },
   });
 
@@ -390,7 +398,7 @@ function SubscribeForm({
               return;
             }
             setFormError('');
-            subscribe.mutate(parsed.data);
+            subscribe.mutate({ body: parsed.data, tab: openCheckoutTab() });
           }}
         >
           <fieldset className="space-y-2">
@@ -482,11 +490,15 @@ function SubscribeForm({
                 : errorMessage(subscribe.error, 'Tu empresa ya tiene una suscripción activa.')}
             </Alert>
           )}
+          {subscribe.isSuccess && (
+            <Alert role="status">
+              Abrimos Mercado Pago en otra pestaña. Completá el pago ahí y volvé a esta pestaña: el
+              estado se actualiza solo.
+            </Alert>
+          )}
           <div className="flex justify-end">
-            <Button disabled={subscribe.isPending || subscribe.isSuccess}>
-              {subscribe.isPending || subscribe.isSuccess
-                ? 'Redirigiendo a Mercado Pago…'
-                : 'Suscribirme'}
+            <Button disabled={subscribe.isPending}>
+              {subscribe.isPending ? 'Abriendo Mercado Pago…' : 'Suscribirme'}
             </Button>
           </div>
         </form>

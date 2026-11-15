@@ -2,8 +2,8 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { SubscriptionResponse } from '@garita/shared';
 import { renderWithQueryClient } from '@/test/render';
-import { apiGet, apiPost } from '@/lib/api-client';
-import { redirectToCheckout } from './checkout-redirect';
+import { ApiError, apiGet, apiPost } from '@/lib/api-client';
+import { openCheckoutTab, sendToCheckout } from './checkout-redirect';
 import { SubscriptionPage } from './subscription-page';
 
 jest.mock('@/lib/api-client', () => {
@@ -16,7 +16,9 @@ jest.mock('@/lib/api-client', () => {
   }
   return { ApiError, apiGet: jest.fn(), apiPost: jest.fn() };
 });
-jest.mock('./checkout-redirect', () => ({ redirectToCheckout: jest.fn() }));
+const closeTab = jest.fn();
+const tab = { close: closeTab } as unknown as Window;
+jest.mock('./checkout-redirect', () => ({ openCheckoutTab: jest.fn(), sendToCheckout: jest.fn() }));
 jest.mock('../auth/auth-context', () => ({
   useAuth: () => ({ user: { email: 'admin@garita.test' } }),
 }));
@@ -40,6 +42,8 @@ function mockApi(state: SubscriptionResponse) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(openCheckoutTab).mockReturnValue(tab);
+  jest.mocked(sendToCheckout).mockReturnValue(true);
 });
 
 describe('SubscriptionPage', () => {
@@ -59,7 +63,7 @@ describe('SubscriptionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }));
 
     await waitFor(() => {
-      expect(redirectToCheckout).toHaveBeenCalledWith('https://mp.test/checkout');
+      expect(sendToCheckout).toHaveBeenCalledWith(tab, 'https://mp.test/checkout');
     });
     expect(apiPost).toHaveBeenCalledWith(
       '/suscripcion',
@@ -68,6 +72,23 @@ describe('SubscriptionPage', () => {
       expect.anything(),
     );
     expect(screen.queryByRole('group', { name: 'Prueba gratis' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Abrimos Mercado Pago en otra pestaña',
+    );
+    expect(screen.getByRole('button', { name: 'Suscribirme' })).toBeEnabled();
+  });
+
+  it('closes the blank tab when the subscription could not be created', async () => {
+    mockApi({ trialEndsAt: null, subscription: null });
+    jest.mocked(apiPost).mockRejectedValue(new ApiError('bad gateway', 502));
+    renderWithQueryClient(<SubscriptionPage />);
+
+    await userEvent.click(await screen.findByRole('radio', { name: /Hasta 10 vigiladores/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }));
+
+    expect(await screen.findByText(/Mercado Pago no aceptó la suscripción/)).toBeInTheDocument();
+    expect(closeTab).toHaveBeenCalled();
+    expect(sendToCheckout).not.toHaveBeenCalled();
   });
 
   it('lets the admin keep the free trial or pay now', async () => {
