@@ -51,6 +51,14 @@ describe('Flujos de gestión de personal (e2e)', () => {
     prisma = app.get(PrismaService).systemPrisma;
   });
 
+  beforeEach(async () => {
+    // Cada escenario de personal empieza con cupo libre, sin acumular altas de otros tests.
+    await prisma.invitation.deleteMany({
+      where: { user: { firebaseUid: { startsWith: uidPrefix } } },
+    });
+    await prisma.user.deleteMany({ where: { firebaseUid: { startsWith: uidPrefix } } });
+  });
+
   afterAll(async () => {
     await prisma.invitation.deleteMany({
       where: { user: { firebaseUid: { startsWith: uidPrefix } } },

@@ -101,6 +101,7 @@ describe('AccountStatePort provider', () => {
     const account: AccountStatePort = new NoopAccountState();
     await expect(account.get('c')).resolves.toMatchObject({ status: 'active', guardLimit: null });
     await expect(account.assertGuardSlot('c')).resolves.toBeUndefined();
+    await expect(account.assertGuardSlot('c', {} as never)).resolves.toBeUndefined();
     await expect(
       account.transition({ companyId: 'c', to: 'suspended', reason: 'trial_expired' }),
     ).resolves.toBeUndefined();
