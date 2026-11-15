@@ -1,4 +1,5 @@
 import { NotificationPreferencesPage } from '../avisos/notification-preferences-page';
+import { TrialBanner } from '../cuenta/trial-banner';
 import { Navigate, Outlet, Route, Routes } from 'react-router';
 import type { ReactNode } from 'react';
 import { USER_ROLE_LABELS } from '@garita/shared';
@@ -131,6 +132,7 @@ export function RoleLayout() {
       {(user.role === 'admin' || user.role === 'supervisor') && (
         <PanicBanner alerts={panic.data?.items ?? []} count={panic.data?.activeCount ?? 0} />
       )}
+      <TrialBanner />
       <Outlet />
     </AppShell>
   );
