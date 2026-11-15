@@ -1095,6 +1095,8 @@ model Subscription {
   updatedAt         DateTime             @updatedAt
   company           Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
   plan              Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
+  /// Validated guard selection, actor and remaining deactivations (HU-29).
+  guardSelection    Json?
   charges           SubscriptionCharge[]
 
   // Partial unique index (one open subscription per company) lives in the migration SQL.
@@ -1118,6 +1120,7 @@ model SubscriptionCharge {
   status                SubscriptionChargeStatus
   statusDetail          String?
   retryAttempt          Int                      @default(0)
+  effectsAppliedStatus  SubscriptionChargeStatus?
   chargedAt             DateTime?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
