@@ -7,8 +7,8 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { subscriptionResponseSchema, guardSelectionRequiredSchema } from '@garita/shared';
 import { setupApp } from '../src/setup-app';
+import { AccountTrialProcessor } from '../src/modules/account/account-trial.processor';
 import { CLOCK } from '../src/common/clock';
-import { ACCOUNT_STATE_PORT } from '../src/common/ports/account-state.port';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 import { MercadoPagoClient } from '../src/modules/subscriptions/mercadopago.client';
@@ -37,11 +37,6 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
   const now = new Date('2030-01-01T12:00:00Z');
   const secret = 'hu29-test-secret';
   const queue = { add: jest.fn().mockResolvedValue({}), upsertJobScheduler: jest.fn() };
-  const account = {
-    get: jest.fn().mockResolvedValue({ status: 'active' }),
-    transition: jest.fn(),
-    assertGuardSlot: jest.fn(),
-  };
   const effects = {
     onChargeApproved: jest.fn(),
     onChargeRejected: jest.fn(),
@@ -74,12 +69,12 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
       .useValue({})
       .overrideProvider(MercadoPagoReconciliationProcessor)
       .useValue({})
+      .overrideProvider(AccountTrialProcessor)
+      .useValue({})
       .overrideProvider(getQueueToken(MP_NOTIFICATIONS_QUEUE))
       .useValue(queue)
       .overrideProvider(getQueueToken(MP_RECONCILIATION_QUEUE))
       .useValue(queue)
-      .overrideProvider(ACCOUNT_STATE_PORT)
-      .useValue(account)
       .overrideProvider(SUBSCRIPTION_EFFECTS_PORT)
       .useValue(effects)
       .overrideProvider(CLOCK)
@@ -99,8 +94,14 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
     prisma = app.get(PrismaService).systemPrisma;
     await prisma.company.createMany({
       data: [
-        { id: companyId, name: 'HU29' },
-        { id: southId, name: 'Otra empresa HU29' },
+        {
+          id: companyId,
+          name: 'HU29',
+          accountStatus: 'trial',
+          trialEndsAt: new Date('2030-01-15T23:59:00Z'),
+          timezone: 'America/Argentina/Buenos_Aires',
+        },
+        { id: southId, name: 'Otra empresa HU29', accountStatus: 'trial' },
       ],
     });
     await prisma.user.createMany({
@@ -336,7 +337,12 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
     await reconciliation().process({ id: 'pending', data: { kind: 'pending' } } as Job);
     expect(await prisma.user.count({ where: { companyId, status: 'deactivated' } })).toBe(4);
     await http.post('/api/v1/suscripcion').set(auth()).send(body).expect(409);
-    expect(account.transition).toHaveBeenCalledWith({ companyId, to: 'active' });
+    await expect(
+      prisma.company.findUniqueOrThrow({
+        where: { id: companyId },
+        select: { accountStatus: true },
+      }),
+    ).resolves.toEqual({ accountStatus: 'active' });
   });
 
   it('BDD3: un cobro perdido se recupera en la comparación diaria, se pagina y queda aislado por empresa', async () => {
