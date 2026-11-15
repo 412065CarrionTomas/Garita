@@ -13,6 +13,7 @@ describe('UsersService invitation lifecycle', () => {
   const user = {
     id: 'user',
     firebaseUid: 'uid',
+    companyId: 'company',
     role: 'guard',
     status: 'deactivated',
     clientId: null,
@@ -24,6 +25,7 @@ describe('UsersService invitation lifecycle', () => {
   };
   const transaction = jest.fn((run: (tx: typeof db) => Promise<unknown>) => run(db));
   const firebase = { setDisabled: jest.fn(() => Promise.resolve()) };
+  const account = { assertGuardSlot: jest.fn().mockResolvedValue(undefined) };
   const service = new UsersService(
     { tenantPrisma: { ...db, $transaction: transaction } } as unknown as PrismaService,
     { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService,
@@ -33,7 +35,7 @@ describe('UsersService invitation lifecycle', () => {
     { now: () => new Date('2026-11-13T12:00:00Z') },
     {} as WeeklyScheduleDerivationPort,
     {} as ShiftExecutionService,
-    { assertGuardSlot: jest.fn().mockResolvedValue(undefined) } as never,
+    account as never,
   );
 
   beforeEach(() => {
@@ -54,6 +56,12 @@ describe('UsersService invitation lifecycle', () => {
       data: { status: 'invitation_pending' },
     });
     expect(firebase.setDisabled).toHaveBeenCalledWith('uid', true);
+  });
+
+  it('verifica el cupo para todo vigilador sin depender del estado leído antes de la transacción', async () => {
+    db.user.findUniqueOrThrow.mockResolvedValue({ ...user, status: 'active' });
+    await service.reactivate('user', 'admin');
+    expect(account.assertGuardSlot).toHaveBeenCalledWith('company', db);
   });
 
   it('restores active access only after a prior first login', async () => {

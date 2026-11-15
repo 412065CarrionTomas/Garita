@@ -346,7 +346,7 @@ export class UsersService {
     await this.firebase.setDisabled(user.firebaseUid, !usedInvitation);
     try {
       await this.prisma.tenantPrisma.$transaction(async (tx) => {
-        if (user.role === 'guard' && user.status === 'deactivated')
+        if (user.role === 'guard')
           await this.account.assertGuardSlot(
             user.companyId,
             tx as unknown as Prisma.TransactionClient,
