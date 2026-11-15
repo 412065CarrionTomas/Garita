@@ -140,6 +140,7 @@ model User {
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
   notificationPreferences NotificationPreference[]
   noticeViews NoticeView[]
+  cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
 
   @@index([companyId])
   @@index([clientId])
@@ -1084,6 +1085,12 @@ model Subscription {
   startsAt          DateTime
   nextChargeAt      DateTime?
   lastFailureReason String?
+  /// Scheduled cancellation (HU-42): service runs until this date, then the debit is cancelled in Mercado Pago.
+  cancelAt            DateTime?
+  cancelReason        String?
+  cancelRequestedAt   DateTime?
+  cancelRequestedById String?
+  cancelRequestedBy   User?     @relation("SubscriptionCancelRequester", fields: [cancelRequestedById], references: [id], onDelete: Restrict)
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   company           Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
