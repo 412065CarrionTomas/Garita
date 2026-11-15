@@ -1,12 +1,11 @@
 import { getQueueToken } from '@nestjs/bullmq';
-import { Logger, type INestApplication } from '@nestjs/common';
+import { Logger, type INestApplication, type Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { createHmac, randomUUID } from 'node:crypto';
 import type { Job, Queue } from 'bullmq';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { subscriptionResponseSchema, guardSelectionRequiredSchema } from '@garita/shared';
-import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { CLOCK } from '../src/common/clock';
 import { ACCOUNT_STATE_PORT } from '../src/common/ports/account-state.port';
@@ -65,6 +64,9 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
   beforeAll(async () => {
     previousSecret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
     process.env.MERCADOPAGO_WEBHOOK_SECRET = secret;
+    const appModulePath = '../src/app.module';
+    const appModule: unknown = await import(appModulePath);
+    const AppModule = (appModule as { AppModule: Type<unknown> }).AppModule;
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(MercadoPagoClient)
       .useValue(mp)
@@ -190,8 +192,9 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
   async function notify(type: string, resourceId: string, id = randomUUID()) {
     notificationIds.push(id);
     const ts = '1704908010';
+    const signedId = /^[a-z0-9]+$/i.test(resourceId) ? resourceId.toLowerCase() : resourceId;
     const signature = createHmac('sha256', secret)
-      .update(`id:${resourceId.toLowerCase()};request-id:hu29;ts:${ts};`)
+      .update(`id:${signedId};request-id:hu29;ts:${ts};`)
       .digest('hex');
     await request(app.getHttpServer())
       .post('/api/v1/webhooks/mercadopago')
