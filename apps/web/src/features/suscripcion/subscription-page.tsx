@@ -104,7 +104,12 @@ export function SubscriptionPage() {
       ) : (
         <>
           {current && <CurrentSubscription subscription={current} />}
-          {canSubscribe && <SubscribeForm trialEndsAt={subscription.data.trialEndsAt} />}
+          {canSubscribe && (
+            <SubscribeForm
+              trialEndsAt={subscription.data.trialEndsAt}
+              lastPayerEmail={current?.payerEmail}
+            />
+          )}
         </>
       )}
     </section>
@@ -117,9 +122,17 @@ function CurrentSubscription({
   subscription: NonNullable<SubscriptionResponse['subscription']>;
 }) {
   const cancelAt = subscription.status === 'cancelled' ? null : subscription.cancelAt;
+  // Mercado Pago cancels the subscription itself when the first payment is rejected.
+  const rejected =
+    subscription.lastFailureReason !== null &&
+    (subscription.status === 'pending' ||
+      (subscription.status === 'cancelled' &&
+        !subscription.charges.some((charge) => charge.status === 'approved')));
   const status = cancelAt
     ? { label: `Activa hasta el ${formatDate(cancelAt)}`, tone: 'neutral' as const }
-    : SUBSCRIPTION_STATUS[subscription.status];
+    : rejected
+      ? { label: 'No se activó', tone: 'neutral' as const }
+      : SUBSCRIPTION_STATUS[subscription.status];
   return (
     <Card>
       <CardHeader>
@@ -142,7 +155,7 @@ function CurrentSubscription({
             <dd>
               {cancelAt ? (
                 'Sin más cobros'
-              ) : subscription.nextChargeAt ? (
+              ) : subscription.status === 'authorized' && subscription.nextChargeAt ? (
                 <Stamp>{formatDate(subscription.nextChargeAt)}</Stamp>
               ) : (
                 '—'
@@ -154,18 +167,20 @@ function CurrentSubscription({
             <dd className="break-all">{subscription.payerEmail}</dd>
           </div>
         </dl>
-        {subscription.status === 'pending' &&
-          (subscription.lastFailureReason ? (
-            <Alert variant="destructive">
-              Mercado Pago rechazó el pago: {paymentDetail(subscription.lastFailureReason)}. Probá
-              de nuevo con otra tarjeta.
-            </Alert>
-          ) : (
+        {rejected ? (
+          <Alert variant="destructive">
+            Mercado Pago rechazó el pago: {paymentDetail(subscription.lastFailureReason)}. La
+            suscripción no se activó. Para intentar con otra tarjeta, volvé a suscribirte desde
+            abajo: en la página de Mercado Pago ya no se puede reintentar.
+          </Alert>
+        ) : (
+          subscription.status === 'pending' && (
             <p className="text-sm text-muted-foreground">
               Falta autorizar el débito en Mercado Pago. Si cerraste esa página, volvé a suscribirte
               desde abajo.
             </p>
-          ))}
+          )
+        )}
         {cancelAt ? (
           <RevertCancellation cancelAt={cancelAt} />
         ) : (
@@ -317,14 +332,20 @@ function RevertCancellation({ cancelAt }: { cancelAt: string }) {
 const optionClass =
   'relative grid cursor-pointer gap-0.5 rounded-md border-[1.5px] border-input px-3.5 py-3 has-[:checked]:bg-muted has-[:checked]:ring-2 has-[:checked]:ring-inset has-[:checked]:ring-primary has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring';
 
-function SubscribeForm({ trialEndsAt }: { trialEndsAt: string | null }) {
+function SubscribeForm({
+  trialEndsAt,
+  lastPayerEmail,
+}: {
+  trialEndsAt: string | null;
+  lastPayerEmail: string | undefined;
+}) {
   const { user } = useAuth();
   const plans = useQuery({
     queryKey: ['planes'],
     queryFn: () => apiGet('/planes', plansResponseSchema),
   });
   const [planId, setPlanId] = useState('');
-  const [payerEmail, setPayerEmail] = useState(user?.email ?? '');
+  const [payerEmail, setPayerEmail] = useState(lastPayerEmail ?? user?.email ?? '');
   const [keepTrial, setKeepTrial] = useState(true);
   const [formError, setFormError] = useState('');
   const inTrial = trialEndsAt !== null && new Date(trialEndsAt) > new Date();

@@ -90,26 +90,68 @@ describe('SubscriptionPage', () => {
     });
   });
 
-  it('shows why Mercado Pago rejected the payment and lets the admin retry', async () => {
+  it('explains a rejected first payment that Mercado Pago cancelled, and retries with the same payer', async () => {
     mockApi({
       trialEndsAt: null,
       subscription: {
         id: 'sub-1',
-        status: 'pending',
+        status: 'cancelled',
         plan,
         payerEmail: 'buyer@testuser.com',
         startsAt: '2026-11-15T12:00:00.000Z',
-        nextChargeAt: null,
+        nextChargeAt: '2026-11-15T12:00:00.000Z',
         lastFailureReason: 'cc_rejected_insufficient_amount',
         cancelAt: null,
-        charges: [],
+        charges: [
+          {
+            id: 'charge-1',
+            amount: '45000.00',
+            status: 'rejected',
+            statusDetail: 'cc_rejected_insufficient_amount',
+            chargedAt: '2026-11-15T12:00:00.000Z',
+          },
+        ],
       },
     });
     renderWithQueryClient(<SubscriptionPage />);
 
-    expect(await screen.findByText(/Fondos insuficientes/)).toBeInTheDocument();
-    expect(screen.getByText('Falta autorizar')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Suscribirme' })).toBeInTheDocument();
+    expect(await screen.findByText('No se activó')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Mercado Pago rechazó el pago: Fondos insuficientes',
+    );
+    expect(screen.queryByText('15/11/2026', { selector: 'dd *' })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Email de tu cuenta de Mercado Pago')).toHaveValue(
+      'buyer@testuser.com',
+    );
+  });
+
+  it('does not call a subscription the admin cancelled a rejection', async () => {
+    mockApi({
+      trialEndsAt: null,
+      subscription: {
+        id: 'sub-1',
+        status: 'cancelled',
+        plan,
+        payerEmail: 'buyer@testuser.com',
+        startsAt: '2026-11-15T12:00:00.000Z',
+        nextChargeAt: null,
+        lastFailureReason: null,
+        cancelAt: null,
+        charges: [
+          {
+            id: 'charge-1',
+            amount: '45000.00',
+            status: 'approved',
+            statusDetail: 'accredited',
+            chargedAt: '2026-11-15T12:00:00.000Z',
+          },
+        ],
+      },
+    });
+    renderWithQueryClient(<SubscriptionPage />);
+
+    expect(await screen.findByText('Cancelada')).toBeInTheDocument();
+    expect(screen.queryByText('No se activó')).not.toBeInTheDocument();
   });
 
   it('shows an active subscription with its charges and hides the form', async () => {
