@@ -39,7 +39,21 @@ async function seedCompany(name: string, prefix: string): Promise<string> {
   return company.id;
 }
 
+// shortcut: test prices, set the real ones before going to production (Sprint 6).
+const plans = [
+  { code: 'hasta-10', name: 'Hasta 10 vigiladores', monthlyPrice: '45000.00', maxGuards: 10 },
+  { code: 'hasta-25', name: 'Hasta 25 vigiladores', monthlyPrice: '95000.00', maxGuards: 25 },
+  { code: 'hasta-50', name: 'Hasta 50 vigiladores', monthlyPrice: '170000.00', maxGuards: 50 },
+] as const;
+
+async function seedPlans(): Promise<void> {
+  for (const plan of plans) {
+    await prisma.plan.upsert({ where: { code: plan.code }, create: plan, update: plan });
+  }
+}
+
 async function main(): Promise<void> {
+  await seedPlans();
   const north = await seedCompany('Seguridad Norte', 'norte');
   const south = await seedCompany('Custodia Sur', 'sur');
   for (const [companyId, prefix] of [
