@@ -77,7 +77,25 @@ enum IncidentClassificationStatus {
   internal
 }
 
+enum AccountStatus {
+  trial
+  active
+  grace
+  suspended
+}
+
+enum SuspensionReason {
+  trial_expired
+  grace_expired
+  cancelled
+}
+
 model Company {
+  accountStatus AccountStatus @default(trial)
+  suspensionReason SuspensionReason?
+  graceEndsAt DateTime?
+  suspendedAt DateTime?
+  trialRemindersSent Int[] @default([])
   guardPhone        String?
   id                String             @id @default(cuid())
   name              String

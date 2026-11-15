@@ -23,6 +23,7 @@ import { CLOCK, type Clock } from '../../common/clock';
 import { WEEKLY_SCHEDULE_DERIVATION_PORT } from './weekly-schedule-derivation.port';
 import type { WeeklyScheduleDerivationPort } from './weekly-schedule-derivation.port';
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
+import { ACCOUNT_STATE_PORT, type AccountStatePort } from '../../common/ports/account-state.port';
 
 @Injectable()
 export class UsersService {
@@ -37,6 +38,7 @@ export class UsersService {
     @Inject(WEEKLY_SCHEDULE_DERIVATION_PORT)
     private readonly weeklySchedules: WeeklyScheduleDerivationPort,
     private readonly shiftExecution: ShiftExecutionService,
+    @Inject(ACCOUNT_STATE_PORT) private readonly account: AccountStatePort,
   ) {}
 
   async list(query: {
@@ -127,6 +129,8 @@ export class UsersService {
     const token = randomBytes(32).toString('base64url');
     const user = await this.prisma.tenantPrisma
       .$transaction(async (tx) => {
+        if (input.role === 'guard')
+          await this.account.assertGuardSlot(companyId, tx as unknown as Prisma.TransactionClient);
         if (clientId) {
           // Serializa el alta con la baja del cliente para no dejar accesos activos tras la baja.
           const locked = await tx.client.updateMany({
@@ -342,6 +346,12 @@ export class UsersService {
     await this.firebase.setDisabled(user.firebaseUid, !usedInvitation);
     try {
       await this.prisma.tenantPrisma.$transaction(async (tx) => {
+        if (user.role === 'guard')
+          await this.account.assertGuardSlot(
+            user.companyId,
+            tx as unknown as Prisma.TransactionClient,
+          );
+
         if (user.clientId) {
           const locked = await tx.client.updateMany({
             where: { id: user.clientId, status: 'active' },

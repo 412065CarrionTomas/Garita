@@ -228,6 +228,7 @@ import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { CLOCK } from '../src/common/clock';
+import { AccountTrialProcessor } from '../src/modules/account/account-trial.processor';
 import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-error';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
@@ -582,6 +583,9 @@ describe('Aplicación (e2e)', () => {
         deleteUser: jest.fn(() => Promise.resolve()),
         generatePasswordResetLink: jest.fn((email: string) => Promise.resolve(email)),
       })
+      // El reloj simulado de permisos no debe disparar barridos reales de prueba sobre el seed.
+      .overrideProvider(AccountTrialProcessor)
+      .useValue({})
       .overrideProvider(CLOCK)
       .useValue({ now: () => testNow })
       .overrideProvider(FcmMessaging)
@@ -7089,4 +7093,28 @@ describe('Aplicación (e2e)', () => {
       }
     },
   );
+  it('HU-41: estado de cuenta requiere sesión y solo permite administrador de su empresa', async () => {
+    const http = request(app.getHttpServer());
+    await http.get('/api/v1/cuenta/estado').expect(401);
+    for (const token of ['token-supervisor', 'token-guard', 'token-client']) {
+      await http.get('/api/v1/cuenta/estado').set('Authorization', `Bearer ${token}`).expect(403);
+    }
+    const own = await http
+      .get('/api/v1/cuenta/estado')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    const attempted = await http
+      .get('/api/v1/cuenta/estado?companyId=sur-company')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    expect(attempted.body).toEqual(own.body);
+    await http
+      .get('/api/v1/cuenta/estado')
+      .set('Authorization', 'Bearer token-south-admin')
+      .expect(200);
+    await http
+      .get('/api/v1/cuenta/sur-company/estado')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+  });
 });

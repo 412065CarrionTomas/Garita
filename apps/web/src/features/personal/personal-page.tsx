@@ -2,6 +2,7 @@ import { Children, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
+  GUARD_LIMIT_REACHED_CODE,
   createUserRequestSchema,
   emptyRequestSchema,
   emptyResponseSchema,
@@ -102,6 +103,20 @@ export function PersonalPage() {
   const [dialogError, setDialogError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
+  const [guardLimitTrial, setGuardLimitTrial] = useState<boolean | null>(null);
+  const handleGuardLimit = (error: unknown): boolean => {
+    const parsed = z
+      .object({
+        code: z.literal(GUARD_LIMIT_REACHED_CODE),
+        message: z.string(),
+        status: z.string(),
+      })
+      .safeParse(error instanceof ApiError ? error.body : null);
+    if (!(error instanceof ApiError) || error.status !== 409 || !parsed.success) return false;
+    setFormError(parsed.data.message);
+    setGuardLimitTrial(parsed.data.status === 'trial');
+    return true;
+  };
   const reasonInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const futureShifts = useQuery({
@@ -255,10 +270,12 @@ export function PersonalPage() {
     responseSchema: z.ZodType = emptyResponseSchema,
   ) => {
     try {
+      setGuardLimitTrial(null);
       await apiPost(path, {}, emptyRequestSchema, responseSchema);
       setFormError('');
       await refresh();
-    } catch {
+    } catch (error: unknown) {
+      if (handleGuardLimit(error)) return;
       setFormError(failure);
     }
   };
@@ -367,6 +384,7 @@ export function PersonalPage() {
                 return;
               }
               setErrors({});
+              setGuardLimitTrial(null);
               setFormError('');
               void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
                 .then(async () => {
@@ -374,6 +392,7 @@ export function PersonalPage() {
                   setCreating(false);
                 })
                 .catch((error: unknown) => {
+                  if (handleGuardLimit(error)) return;
                   setFormError(
                     error instanceof ApiError && error.status === 409
                       ? 'Ese correo ya está en uso'
@@ -421,6 +440,11 @@ export function PersonalPage() {
               {formError && (
                 <Alert variant="destructive" role="alert">
                   {formError}
+                  {guardLimitTrial !== null && user?.role === 'admin' && (
+                    <a href="/suscripcion" className="font-semibold underline">
+                      {guardLimitTrial ? 'Suscribirme' : 'Cambiar de plan'}
+                    </a>
+                  )}
                 </Alert>
               )}
               <Button
@@ -645,6 +669,11 @@ export function PersonalPage() {
       {formError && !creating && !editing && (
         <Alert variant="destructive" role="alert">
           {formError}
+          {guardLimitTrial !== null && user?.role === 'admin' && (
+            <a href="/suscripcion" className="font-semibold underline">
+              {guardLimitTrial ? 'Suscribirme' : 'Cambiar de plan'}
+            </a>
+          )}
         </Alert>
       )}
       <Dialog
@@ -701,6 +730,11 @@ export function PersonalPage() {
               {formError && (
                 <Alert variant="destructive" role="alert">
                   {formError}
+                  {guardLimitTrial !== null && user?.role === 'admin' && (
+                    <a href="/suscripcion" className="font-semibold underline">
+                      {guardLimitTrial ? 'Suscribirme' : 'Cambiar de plan'}
+                    </a>
+                  )}
                 </Alert>
               )}
               <div className="flex flex-wrap justify-end gap-3 sm:col-span-2">
