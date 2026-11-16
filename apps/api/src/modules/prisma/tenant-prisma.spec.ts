@@ -490,3 +490,9 @@ describe('aislamiento del portal por cliente', () => {
     },
   );
 });
+
+it('HU-37: los SMS sin empresa y los de otra empresa no entran en la consulta tenant', () => {
+  expect(scopeArgs('SmsInbound', 'findMany', { where: { result: 'unknown' } }, 'north')).toEqual({
+    where: { result: 'unknown', companyId: 'north' },
+  });
+});
