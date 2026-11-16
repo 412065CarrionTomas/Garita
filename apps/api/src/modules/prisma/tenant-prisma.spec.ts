@@ -490,3 +490,15 @@ describe('aislamiento del portal por cliente', () => {
     },
   );
 });
+
+describe('aislamiento de los cambios de plan', () => {
+  it.each(['PlanChangePayment', 'SubscriptionChange'])(
+    '%s pertenece �nicamente a su empresa',
+    (model) => {
+      expect(COMPANY_ID_MODELS).toContain(model);
+      expect(scopeArgs(model, 'findMany', { where: { companyId: 'otra' } }, 'propia')).toEqual({
+        where: { companyId: 'propia' },
+      });
+    },
+  );
+});

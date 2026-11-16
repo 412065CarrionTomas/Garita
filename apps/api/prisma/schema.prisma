@@ -120,6 +120,8 @@ model Company {
   noticeViews NoticeView[]
   notices Notice[]
   subscriptions Subscription[]
+  planChangePayments PlanChangePayment[]
+  subscriptionChanges SubscriptionChange[]
   subscriptionCharges SubscriptionCharge[]
 }
 
@@ -159,6 +161,8 @@ model User {
   notificationPreferences NotificationPreference[]
   noticeViews NoticeView[]
   cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
+  planChangePayments PlanChangePayment[]
+  subscriptionChanges SubscriptionChange[]
 
   @@index([companyId])
   @@index([clientId])
@@ -1085,7 +1089,11 @@ model Plan {
   maxGuards     Int
   active        Boolean        @default(true)
   createdAt     DateTime       @default(now())
-  subscriptions Subscription[]
+  subscriptions Subscription[] @relation("CurrentPlan")
+  pendingSubscriptions Subscription[] @relation("PendingPlan")
+  previousPayments PlanChangePayment[] @relation("PreviousPlan")
+  newPayments PlanChangePayment[] @relation("NewPlan")
+  changes SubscriptionChange[]
 }
 
 /// Mirrors Mercado Pago preapproval statuses.
@@ -1117,9 +1125,16 @@ model Subscription {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   company           Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  plan              Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
+  plan              Plan                 @relation("CurrentPlan", fields: [planId], references: [id], onDelete: Restrict)
   /// Validated guard selection, actor and remaining deactivations (HU-29).
   guardSelection    Json?
+  pendingPlanId String?
+  pendingPlan Plan? @relation("PendingPlan", fields: [pendingPlanId], references: [id], onDelete: Restrict)
+  pendingPlanAt DateTime?
+  pendingGuardSelection Json?
+  pendingPlanAdminId String?
+  planChangePayments PlanChangePayment[]
+  changes SubscriptionChange[]
   charges           SubscriptionCharge[]
 
   // Partial unique index (one open subscription per company) lives in the migration SQL.
@@ -1170,4 +1185,58 @@ model MercadoPagoNotification {
   error       String?
   receivedAt  DateTime                      @default(now())
   processedAt DateTime?
+}
+
+
+enum SubscriptionChangeType {
+  upgrade
+  downgrade_scheduled
+  downgrade_applied
+  cancellation
+  cancellation_reverted
+}
+
+model PlanChangePayment {
+  id String @id @default(cuid())
+  companyId String
+  subscriptionId String
+  previousPlanId String
+  newPlanId String
+  adminId String
+  amount Decimal @db.Decimal(12, 2)
+  remainingDays Int
+  cycleDays Int
+  mpPreferenceId String? @unique
+  mpPaymentId String? @unique
+  status SubscriptionChargeStatus @default(pending)
+  rejectionReason String?
+  expiresAt DateTime
+  amountUpdatePending Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  previousPlan Plan @relation("PreviousPlan", fields: [previousPlanId], references: [id], onDelete: Restrict)
+  newPlan Plan @relation("NewPlan", fields: [newPlanId], references: [id], onDelete: Restrict)
+  admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  @@index([companyId])
+  @@index([subscriptionId])
+}
+
+model SubscriptionChange {
+  id String @id @default(cuid())
+  companyId String
+  subscriptionId String
+  type SubscriptionChangeType
+  planId String
+  effectiveAt DateTime
+  adminId String
+  reason String?
+  createdAt DateTime @default(now())
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  @@index([companyId])
+  @@index([subscriptionId, createdAt])
 }

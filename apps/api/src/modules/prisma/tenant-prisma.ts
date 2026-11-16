@@ -36,6 +36,8 @@ export const COMPANY_ID_MODELS = [
   'NotificationDevice',
   'Subscription',
   'SubscriptionCharge',
+  'PlanChangePayment',
+  'SubscriptionChange',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
