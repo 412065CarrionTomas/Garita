@@ -1,6 +1,10 @@
 import { PlanChangeController } from './plan-change.controller';
 import { PlanChangeService } from './plan-change.service';
 import { PlanChangeProcessor, PLAN_CHANGE_QUEUE } from './plan-change.processor';
+import { GraceService } from './grace.service';
+import { GraceController } from './grace.controller';
+import { GraceProcessor, SUBSCRIPTION_GRACE_QUEUE } from './grace.processor';
+import { ResendInvitationMailer } from '../users/email.service';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { UsersModule } from '../users/users.module';
@@ -29,12 +33,21 @@ import { SubscriptionsService } from './subscriptions.service';
       { name: MP_NOTIFICATIONS_QUEUE },
       { name: MP_RECONCILIATION_QUEUE },
       { name: PLAN_CHANGE_QUEUE },
+      { name: SUBSCRIPTION_GRACE_QUEUE },
     ),
   ],
-  controllers: [MercadoPagoWebhookController, SubscriptionsController, PlanChangeController],
+  controllers: [
+    MercadoPagoWebhookController,
+    SubscriptionsController,
+    PlanChangeController,
+    GraceController,
+  ],
   providers: [
     PlanChangeService,
     PlanChangeProcessor,
+    GraceService,
+    GraceProcessor,
+    ResendInvitationMailer,
     MercadoPagoClient,
     MercadoPagoWebhookService,
     SubscriptionsService,

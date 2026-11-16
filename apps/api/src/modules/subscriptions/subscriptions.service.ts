@@ -222,10 +222,19 @@ export class SubscriptionsService {
   ): Promise<void> {
     // Webhooks/jobs have no authenticated tenant; serialize all reads and writes for this MP resource.
     this.logger.log({ event: 'subscription.sync_system_query', correlationId, mpPreapprovalId });
+    // Only charges copied by this sync get their effects delivered, never older rows.
+    const syncedChargeIds: string[] = [];
     const justAuthorized = await this.prisma.systemPrisma.$transaction(
       async (db) => {
         await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${mpPreapprovalId}, 0))`;
-        return this.syncLocked(db, mpPreapprovalId, correlationId, paymentId, reconciliation);
+        return this.syncLocked(
+          db,
+          mpPreapprovalId,
+          correlationId,
+          paymentId,
+          reconciliation,
+          syncedChargeIds,
+        );
       },
       { timeout: 120_000 },
     );
@@ -243,6 +252,21 @@ export class SubscriptionsService {
         await this.account.transition({ companyId: subscription.companyId, to: 'active' });
       }
     }
+    // Charge effects run after the first activation: a first charge rejected in the same sync
+    // must find the account already active to start the grace.
+    const charges = await this.prisma.systemPrisma.subscriptionCharge.findMany({
+      where: { id: { in: syncedChargeIds }, status: { not: 'pending' } },
+      orderBy: [{ chargedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    });
+    for (const charge of charges) {
+      if (charge.effectsAppliedStatus === charge.status) continue;
+      if (charge.status === 'approved') await this.effects.onChargeApproved(charge);
+      else await this.effects.onChargeRejected(charge);
+      await this.prisma.systemPrisma.subscriptionCharge.updateMany({
+        where: { id: charge.id, status: charge.status },
+        data: { effectsAppliedStatus: charge.status },
+      });
+    }
     if (subscription.status === 'authorized')
       await this.guardSelection.apply(
         subscription.id,
@@ -257,6 +281,7 @@ export class SubscriptionsService {
     correlationId: string,
     paymentId: string | undefined,
     reconciliation: boolean,
+    syncedChargeIds: string[],
   ): Promise<boolean> {
     const [remote, searched] = await Promise.all([
       this.mercadoPago.getPreapproval(mpPreapprovalId),
@@ -313,6 +338,7 @@ export class SubscriptionsService {
         },
         update: data,
       });
+      syncedChargeIds.push(charge.id);
       if (
         reconciliation &&
         (before?.status !== charge.status ||
@@ -338,14 +364,6 @@ export class SubscriptionsService {
           metric: 'charges',
           status: charge.status,
           value: 1,
-        });
-      }
-      if (charge.effectsAppliedStatus !== charge.status && charge.status !== 'pending') {
-        if (charge.status === 'approved') await this.effects.onChargeApproved(charge);
-        else await this.effects.onChargeRejected(charge);
-        await db.subscriptionCharge.update({
-          where: { id: charge.id },
-          data: { effectsAppliedStatus: charge.status },
         });
       }
     }

@@ -1,5 +1,6 @@
 import { paymentDetail } from './payment-detail';
 import { PlanChange } from './plan-change';
+import { GraceActions } from './grace-actions';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -90,6 +91,7 @@ export function SubscriptionPage() {
         title="Suscripción y cobros"
         description="Elegí tu plan y autorizá el débito automático mensual en Mercado Pago."
       />
+      <GraceActions />
       {subscription.isPending ? (
         <div role="status" className="space-y-3">
           <span className="sr-only">Cargando la suscripción…</span>

@@ -22,6 +22,7 @@ import { SiteComplianceTable, WindowGrid } from './compliance-views';
 import { NotDoneList } from './not-done-list';
 import { ReportDetail } from './report-detail';
 import { ReportPending } from './report-pending';
+import { ExportPdfButton } from './export-pdf-button';
 
 type View = 'tabla' | 'grilla' | 'graficos';
 const VIEW_KEY = 'garita-cumplimiento-vista';
@@ -204,6 +205,11 @@ export function ReportsPage() {
           </form>
         </CardContent>
       </Card>
+      <ExportPdfButton
+        endpoint="/reportes/rondas/pdf"
+        filters={{ ...filters, ...(data ? { desde: data.desde, hasta: data.hasta } : {}) }}
+        disabled={!data || report.isFetching}
+      />
       {report.isPending && (
         <div role="status" aria-label="Cargando cumplimiento" className="space-y-2">
           <Skeleton className="h-9 w-full" />

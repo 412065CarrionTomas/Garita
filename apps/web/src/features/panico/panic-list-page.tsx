@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { apiGet } from '@/lib/api-client';
 import { panicListSchema, panicStatuses } from './queries';
+import { SmsBadges } from './sms-badges';
 
 export function PanicListPage() {
   const [filters, setFilters] = useState({ estado: '', predio: '', pagina: 1 });
@@ -97,7 +98,8 @@ export function PanicListPage() {
                       {alert.site.name} · {alert.guard.name}
                     </p>
                     <p className="text-sm text-muted-foreground tabular-nums">
-                      Recibida: {new Date(alert.receivedAt).toLocaleString('es-AR')}
+                      Enviada: {new Date(alert.triggeredAt).toLocaleString('es-AR')} · Recibida:{' '}
+                      {new Date(alert.receivedAt).toLocaleString('es-AR')}
                     </p>
                     <StatusBadge
                       tone={
@@ -110,6 +112,7 @@ export function PanicListPage() {
                     >
                       {panicStatuses[alert.status]}
                     </StatusBadge>
+                    <SmsBadges {...alert} />
                   </div>
                   <Button variant="outline" size="sm" asChild>
                     <Link to={`/alertas-panico/${alert.id}`}>Ver alerta</Link>

@@ -247,8 +247,9 @@ export class PlanChangeService {
         title: result.title,
         amount: result.payment.amount.toFixed(2),
         backUrl: `${this.config.get('WEB_APP_URL', { infer: true })}/suscripcion`,
+        excludeOffline: true,
       });
-      await this.mercadoPago.setPreferenceExpiration(preference.id, result.payment.expiresAt);
+      await this.mercadoPago.expirePreference(preference.id, result.payment.expiresAt);
       await db.planChangePayment.update({
         where: { id: result.payment.id },
         data: { mpPreferenceId: preference.id },

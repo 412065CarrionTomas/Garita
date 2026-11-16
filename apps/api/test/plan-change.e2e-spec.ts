@@ -47,7 +47,7 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
   const queue = { add: jest.fn().mockResolvedValue({}), upsertJobScheduler: jest.fn() };
   const mp = {
     createPreference: jest.fn(),
-    setPreferenceExpiration: jest.fn(),
+    expirePreference: jest.fn(),
     updatePreapprovalAmount: jest.fn(),
     getPreapproval: jest.fn(),
     searchAuthorizedPayments: jest.fn(),
@@ -183,7 +183,7 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
     mp.createPreference.mockImplementation(() =>
       Promise.resolve({ id: randomUUID(), initPoint: 'https://mp.example.invalid/pay' }),
     );
-    mp.setPreferenceExpiration.mockResolvedValue(undefined);
+    mp.expirePreference.mockResolvedValue(undefined);
     mp.updatePreapprovalAmount.mockResolvedValue({ id: prefix, status: 'authorized' });
     mp.getPreapproval.mockResolvedValue({
       id: prefix,

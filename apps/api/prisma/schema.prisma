@@ -96,6 +96,9 @@ model Company {
   graceEndsAt DateTime?
   suspendedAt DateTime?
   trialRemindersSent Int[] @default([])
+  graceRemindersSent Int[] @default([])
+  /// Originating monthly invoice; scalar so account does not depend on subscriptions.
+  graceChargeId String?
   guardPhone        String?
   id                String             @id @default(cuid())
   name              String
@@ -123,6 +126,7 @@ model Company {
   planChangePayments PlanChangePayment[]
   subscriptionChanges SubscriptionChange[]
   subscriptionCharges SubscriptionCharge[]
+  reportExports ReportExport[]
 }
 
 model User {
@@ -163,6 +167,7 @@ model User {
   cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
   planChangePayments PlanChangePayment[]
   subscriptionChanges SubscriptionChange[]
+  reportExports ReportExport[]
 
   @@index([companyId])
   @@index([clientId])
@@ -835,6 +840,10 @@ enum PanicSmsDeliveryStatus {
 }
 
 model PanicAlert {
+  shortId String? @db.VarChar(8)
+  unverified Boolean @default(false)
+  phoneMismatch Boolean @default(false)
+  inboundSms SmsInbound[]
   id             String            @id @db.Uuid
   companyId      String
   siteId         String
@@ -872,6 +881,7 @@ model PanicAlert {
 
   @@index([companyId, status])
   @@index([siteId, createdAt])
+  @@unique([shiftId, shortId])
   @@index([shiftId, status])
   @@index([companyId, receivedAt])
   @@index([companyId, triggeredAt])
@@ -1159,6 +1169,11 @@ model SubscriptionCharge {
   statusDetail          String?
   retryAttempt          Int                      @default(0)
   effectsAppliedStatus  SubscriptionChargeStatus?
+  gracePreferenceId String?
+  graceInitPoint String?
+  gracePreferenceExpiresAt DateTime?
+  /// The approved Checkout Pro payment regularizing this invoice; does not overwrite MP's debit.
+  gracePaidPaymentId String? @unique
   chargedAt             DateTime?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
@@ -1239,4 +1254,60 @@ model SubscriptionChange {
   admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
   @@index([companyId])
   @@index([subscriptionId, createdAt])
+}
+
+enum ReportExportType {
+  rounds
+  incidents
+  portal
+}
+
+enum ReportExportResult {
+  ok
+  failed
+}
+
+model ReportExport {
+  id            String @id @default(cuid())
+  companyId     String
+  userId        String
+  role          UserRole
+  siteIds       String[]
+  periodStart   String? @db.VarChar(10)
+  periodEnd     String? @db.VarChar(10)
+  reportType    ReportExportType
+  result        ReportExportResult
+  correlationId String
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user          User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
+}
+model SmsInbound {
+  id String @id @default(cuid())
+  provider String @default("http")
+  messageId String @db.VarChar(100)
+  fromOriginal String @db.VarChar(40)
+  fromNormalized String @db.VarChar(40)
+  text String @db.VarChar(1600)
+  gatewayReceivedAt DateTime @db.Timestamptz(3)
+  receivedAt DateTime @db.Timestamptz(3)
+  result SmsInboundAuthResult @default(unknown)
+  companyId String?
+  shiftId String?
+  alertId String? @db.Uuid
+  processedAt DateTime? @db.Timestamptz(3)
+  alert PanicAlert? @relation(fields: [alertId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  @@unique([provider, messageId])
+  @@index([shiftId])
+  @@index([fromNormalized])
+  @@index([companyId, receivedAt])
+}
+
+enum SmsInboundAuthResult {
+  valid
+  unverified
+  unknown
 }

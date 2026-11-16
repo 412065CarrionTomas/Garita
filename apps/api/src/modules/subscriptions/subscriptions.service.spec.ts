@@ -5,7 +5,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { Env } from '../../config/env';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AccountStatePort } from '../../common/ports/account-state.port';
-import { NoopSubscriptionEffects } from './subscription-effects.port';
+
 import type { GuardSelectionService } from './guard-selection';
 import type { MercadoPagoClient } from './mercadopago.client';
 import { SubscriptionsService } from './subscriptions.service';
@@ -37,6 +37,8 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
     },
     subscription,
     subscriptionCharge: {
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn(),
       findUnique: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
       upsert: jest
@@ -64,17 +66,22 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
   };
   const account = { get: jest.fn().mockResolvedValue({ status: 'active' }), transition: jest.fn() };
   const selection = { validate: jest.fn().mockResolvedValue(null), apply: jest.fn() };
+  const effects = {
+    onChargeRejected: jest.fn(),
+    onChargeApproved: jest.fn(),
+    onOneTimePayment: jest.fn(),
+  };
   const service = new SubscriptionsService(
     { tenantPrisma: db, systemPrisma } as unknown as PrismaService,
     mercadoPago as unknown as MercadoPagoClient,
     config as unknown as ConfigService<Env, true>,
     { now: () => NOW },
     account as unknown as AccountStatePort,
-    new NoopSubscriptionEffects({ onPayment: jest.fn() } as unknown as PlanChangeService),
+    effects,
     selection as unknown as GuardSelectionService,
     { clearDowngrade: jest.fn().mockResolvedValue(undefined) } as unknown as PlanChangeService,
   );
-  return { service, db, mercadoPago, account };
+  return { service, db, mercadoPago, account, effects };
 }
 
 const request = { planId: 'plan-10', payerEmail: 'buyer@testuser.com', keepTrial: false };
@@ -403,5 +410,45 @@ describe('SubscriptionsService cancellation', () => {
     });
     expect(sync).not.toHaveBeenCalled();
     expect(result.subscription?.status).toBe('cancelled');
+  });
+});
+
+describe('entrega de efectos después del commit', () => {
+  it('entrega cronológicamente y marca solo el estado entregado', async () => {
+    const f = setup({ local: { id: 'sub-1', companyId: 'company-1', status: 'authorized' } });
+    f.mercadoPago.getPreapproval.mockResolvedValue({ id: 'mp-1', status: 'authorized' });
+    f.db.subscriptionCharge.findMany.mockResolvedValue([
+      { id: 'rejected', status: 'rejected', effectsAppliedStatus: null },
+      { id: 'approved', status: 'approved', effectsAppliedStatus: null },
+      { id: 'done', status: 'approved', effectsAppliedStatus: 'approved' },
+    ]);
+    await f.service.syncPreapproval('mp-1');
+    expect(f.effects.onChargeRejected).toHaveBeenCalledTimes(1);
+    expect(f.effects.onChargeApproved).toHaveBeenCalledTimes(1);
+    expect(f.db.subscriptionCharge.updateMany).toHaveBeenCalledWith({
+      where: { id: 'rejected', status: 'rejected' },
+      data: { effectsAppliedStatus: 'rejected' },
+    });
+    expect(f.db.subscriptionCharge.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ chargedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      }),
+    );
+    expect(f.db.subscription.findUnique.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      f.effects.onChargeRejected.mock.invocationCallOrder[0] ?? Infinity,
+    );
+  });
+  it('propaga el fallo y deja el efecto sin marcar para reintentar', async () => {
+    const f = setup({ local: { id: 'sub-1', companyId: 'company-1', status: 'authorized' } });
+    f.mercadoPago.getPreapproval.mockResolvedValue({ id: 'mp-1', status: 'authorized' });
+    f.db.subscriptionCharge.findMany.mockResolvedValue([
+      { id: 'charge', status: 'rejected', effectsAppliedStatus: null },
+    ]);
+    f.effects.onChargeRejected.mockRejectedValueOnce(new Error('correo'));
+    await expect(f.service.syncPreapproval('mp-1')).rejects.toThrow('correo');
+    expect(f.db.subscriptionCharge.updateMany).not.toHaveBeenCalled();
+    await f.service.syncPreapproval('mp-1');
+    expect(f.effects.onChargeRejected).toHaveBeenCalledTimes(2);
+    expect(f.db.subscriptionCharge.updateMany).toHaveBeenCalledTimes(1);
   });
 });

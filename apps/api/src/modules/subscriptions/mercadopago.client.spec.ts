@@ -27,7 +27,7 @@ describe('MercadoPagoClient (HTTP simulado)', () => {
     expect(fetch.mock.calls[0]?.[1]?.body).toEqual(
       expect.stringContaining('"unit_price":26666.67'),
     );
-    await client.setPreferenceExpiration('pref', new Date('2030-11-12T12:00:00Z'));
+    await client.expirePreference('pref', new Date('2030-11-12T12:00:00Z'));
     expect(fetch.mock.calls[1]?.[1]?.body).toEqual(
       expect.stringContaining('"expiration_date_to":"2030-11-12T12:00:00.000Z"'),
     );

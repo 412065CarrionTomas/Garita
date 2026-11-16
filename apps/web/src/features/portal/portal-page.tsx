@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { ComplianceChart } from '../reportes/charts/compliance-chart';
 import { IncidentPhotos } from './incident-photos';
+import { ExportPdfButton } from '../reportes/export-pdf-button';
 
 function Pages({
   page,
@@ -188,6 +189,11 @@ export function PortalPage() {
           {data ? `: ${data.timezone}` : ''}.
         </p>
       </form>
+      <ExportPdfButton
+        endpoint="/portal/reporte/pdf"
+        filters={{ ...filters, ...(data ? { desde: data.desde, hasta: data.hasta } : {}) }}
+        disabled={!data || rounds.isFetching}
+      />
       {error && <Alert role="alert">{error}</Alert>}
       {(sites.error ?? rounds.error) && (
         <Alert role="alert">

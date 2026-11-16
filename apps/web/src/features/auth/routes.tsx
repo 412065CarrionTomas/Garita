@@ -1,3 +1,4 @@
+import { GraceBanner } from '../cuenta/grace-banner';
 import { NotificationPreferencesPage } from '../avisos/notification-preferences-page';
 import { TrialBanner } from '../cuenta/trial-banner';
 import { Navigate, Outlet, Route, Routes } from 'react-router';
@@ -32,6 +33,7 @@ import { useOpenNotices } from '../avisos/queries';
 import { useRealtime } from '@/lib/realtime';
 import { PanicListPage } from '../panico/panic-list-page';
 import { PanicDetailPage } from '../panico/panic-detail-page';
+import { SmsInboundPage } from '../panico/sms-inbound-page';
 import { PanicBanner } from '../panico/panic-banner';
 import { useActivePanicAlerts } from '../panico/queries';
 import { ReportsPage } from '../reportes/reports-page';
@@ -98,6 +100,7 @@ function staffSections(admin: boolean, counts: PendingCounts): NavSection[] {
       children: [
         { path: '/personal', title: 'Personal' },
         ...(admin ? [{ path: '/clientes', title: 'Clientes' }] : []),
+        ...(admin ? [{ path: '/sms-recibidos', title: 'SMS recibidos' }] : []),
         { path: '/predios', title: 'Predios' },
       ],
     },
@@ -162,6 +165,7 @@ export function RoleLayout() {
         <PanicBanner alerts={panic.data?.items ?? []} count={panic.data?.activeCount ?? 0} />
       )}
       <TrialBanner />
+      <GraceBanner />
       <Outlet />
     </AppShell>
   );
@@ -203,6 +207,14 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <PanicListPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/sms-recibidos"
+          element={
+            <Protected roles={['admin']}>
+              <SmsInboundPage />
             </Protected>
           }
         />

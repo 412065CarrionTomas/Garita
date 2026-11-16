@@ -87,7 +87,14 @@ export class AccountService implements AccountStatePort {
       graceDaysLeft: company.graceEndsAt
         ? daysLeft(company.graceEndsAt, now, company.timezone)
         : null,
-      amountDue: null,
+      amountDue:
+        company.accountStatus === 'grace' && company.graceChargeId
+          ? ((
+              await this.prisma.tenantPrisma.subscriptionCharge.findUnique({
+                where: { id: company.graceChargeId },
+              })
+            )?.amount.toFixed(2) ?? null)
+          : null,
       guardLimit,
       guardsCounted,
     });

@@ -70,8 +70,6 @@ export class PanicAttentionService {
     return {
       ...this.summary(row),
       timezone: row.company.timezone,
-      // TODO(HU-37): use the verified SMS ingestion result when that channel exists.
-      authenticated: true,
       latitude: row.latitude === null ? null : Number(row.latitude),
       longitude: row.longitude === null ? null : Number(row.longitude),
       accuracyMeters: row.accuracyMeters === null ? null : Number(row.accuracyMeters),
@@ -140,6 +138,8 @@ export class PanicAttentionService {
       id: row.id,
       status: row.status,
       channel: row.channel,
+      authenticated: !row.unverified,
+      phoneMismatch: row.phoneMismatch,
       triggeredAt: row.triggeredAt.toISOString(),
       receivedAt: row.receivedAt.toISOString(),
       confirmedAt: row.confirmedAt?.toISOString() ?? null,

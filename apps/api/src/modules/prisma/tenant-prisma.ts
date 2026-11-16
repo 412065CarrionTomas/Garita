@@ -22,6 +22,7 @@ export const COMPANY_ID_MODELS = [
   'RecordFlag',
   'Incident',
   'PanicAlert',
+  'SmsInbound',
   'PanicSmsDelivery',
   'IncidentClassification',
   'ShiftCredential',
@@ -38,6 +39,7 @@ export const COMPANY_ID_MODELS = [
   'SubscriptionCharge',
   'PlanChangePayment',
   'SubscriptionChange',
+  'ReportExport',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
@@ -199,11 +201,27 @@ export function addClientFilter(
   model: string,
   args: unknown,
   user: TenantContext['user'],
+  operation?: string,
 ): unknown {
   if (!isRecord(args) || user?.role !== 'client') return args;
   if (!user.clientId) throw new ForbiddenException('El usuario no tiene cliente asociado');
   const where = isRecord(args.where) ? args.where : {};
   const site = { clientId: user.clientId, status: 'active', client: { status: 'active' } };
+  if (model === 'Client')
+    return { ...args, where: { ...where, AND: [where, { id: user.clientId, status: 'active' }] } };
+  if (model === 'ReportExport') {
+    const writes = [args.data, args.create, args.update].filter((value) => value !== undefined);
+    for (const write of writes) {
+      for (const row of Array.isArray(write) ? write : [write]) {
+        if (!isRecord(row) || row.userId !== user.userId || Object.hasOwn(row, 'user'))
+          throw new ForbiddenException('Solo se registran exportaciones del usuario autenticado');
+      }
+    }
+    // create/createMany no aceptan where; las escrituras ya verificaron el propietario.
+    if (operation && ['create', 'createMany', 'createManyAndReturn'].includes(operation))
+      return args;
+    return { ...args, where: { ...where, AND: [where, { userId: user.userId }] } };
+  }
   if (model === 'Site') return { ...args, where: { ...where, AND: [where, site] } };
   if (model === 'User') return { ...args, where: { ...where, id: user.userId } };
   if (model === 'Invitation') return { ...args, where: { ...where, userId: user.userId } };
@@ -375,6 +393,7 @@ export function createTenantPrismaClient(systemPrisma: PrismaClient, context: Te
               model,
               applySiteAssignmentFilter(model, operation, tenantArgs, user),
               user,
+              operation,
             ) as typeof args,
           );
         },
