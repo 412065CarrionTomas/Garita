@@ -83,8 +83,10 @@ export async function apiDownload(path: string): Promise<Blob> {
   const token = await auth.currentUser?.getIdToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(`${env.VITE_API_URL}${path}`, { headers });
-  if (!response.ok)
+  if (!response.ok) {
+    if (response.status === 401) await expireSession('Tu sesión venció. Ingresá nuevamente.');
     throw new ApiError(`La API respondió con el estado ${response.status}`, response.status);
+  }
   return response.blob();
 }
 

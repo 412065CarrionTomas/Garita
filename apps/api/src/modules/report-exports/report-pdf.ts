@@ -142,10 +142,6 @@ export function renderReportPdf(report: ReportPdf): Promise<Buffer> {
   function chart(section: PdfSection) {
     const data = section.chart;
     if (!data?.values.length) return;
-    if (y + 170 > bottom) {
-      nextPage();
-      title(section.title);
-    }
     const top = y + 15;
     const left = 75;
     const chartWidth = width - 45;
@@ -177,6 +173,13 @@ export function renderReportPdf(report: ReportPdf): Promise<Buffer> {
           .fill('black');
     }
     if (connected) doc.stroke();
+    // A lone point (one day, or a day between gaps) has no segment: mark every point.
+    if (data.line)
+      for (const [index, value] of data.values.entries())
+        if (value !== null)
+          doc
+            .circle(left + (index + 0.5) * step, top + 110 - (value / max) * 100, 1.5)
+            .fill('black');
     doc.text('Orden de filas de la tabla; valores nulos: Sin datos.', left, top + 118, {
       lineBreak: false,
     });
@@ -195,11 +198,13 @@ export function renderReportPdf(report: ReportPdf): Promise<Buffer> {
       ],
     });
     for (const section of report.sections) {
+      // Room for the title, the chart and the start of the table, so a title is never left alone.
+      if (y + (section.chart?.values.length ? 170 : 0) + 80 > bottom) nextPage();
       title(section.title);
       chart(section);
       if (y + 55 > bottom) {
         nextPage();
-        title(section.title);
+        title(`${section.title} (continuación)`);
       }
       table(section);
     }

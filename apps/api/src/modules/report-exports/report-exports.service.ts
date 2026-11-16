@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import {
   isReportExportPeriodAllowed,
@@ -512,8 +512,10 @@ export class ReportExportsService {
     const db = this.prisma.tenantPrisma;
     const [company, client] = await Promise.all([
       db.company.findUniqueOrThrow({ where: { id: user.companyId }, select: { name: true } }),
-      db.client.findFirstOrThrow({ where: { id: user.clientId ?? '' }, select: { name: true } }),
+      db.client.findFirst({ where: { id: user.clientId ?? '' }, select: { name: true } }),
     ]);
+    // An inactive client is invisible to its own policy: answer 404, not a Prisma error.
+    if (!client) throw new NotFoundException('Cliente no encontrado');
     const header = reportExportHeaderSchema.parse({
       company: company.name,
       clients: [client.name],
