@@ -1,4 +1,4 @@
-import { normalizeArPhone, sameArPhone } from './sms-inbound';
+import { normalizeArPhone, sameArPhone, smsWebhookBodySchema } from './sms-inbound';
 
 describe('normalizeArPhone', () => {
   it.each([
@@ -16,5 +16,17 @@ describe('normalizeArPhone', () => {
   it('recognizes the number loaded with the 9 and reported without it (HU-37)', () => {
     expect(sameArPhone('+54 9 351 1234567', '+543511234567')).toBe(true);
     expect(sameArPhone('+54 9 351 1234567', '+54 9 351 7654321')).toBe(false);
+  });
+
+  it('a number without digits is never the same as another one without digits', () => {
+    expect(sameArPhone('-------', '()  ()  ()')).toBe(false);
+    expect(
+      smsWebhookBodySchema.safeParse({
+        id: 'm1',
+        from: '-------',
+        text: 'x',
+        receivedAt: '2035-01-01T12:00:00Z',
+      }).success,
+    ).toBe(false);
   });
 });

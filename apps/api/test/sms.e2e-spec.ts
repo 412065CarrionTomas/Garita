@@ -5,7 +5,12 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { buildPanicSms, panicAlertDetailSchema, smsInboundListSchema } from '@garita/shared';
+import {
+  buildPanicSms,
+  panicAlertDetailSchema,
+  panicShortId,
+  smsInboundListSchema,
+} from '@garita/shared';
 import { setupApp } from '../src/setup-app';
 import { CLOCK } from '../src/common/clock';
 import { NOTIFICATIONS_PORT } from '../src/common/ports/notifications.port';
@@ -374,6 +379,25 @@ describe('HU-37 SMS por HTTP con proveedor simulado', () => {
       authenticated: true,
       phoneMismatch: true,
     });
+  });
+  it('texto manual y luego SMS con el código del turno: la misma alerta queda verificada', async () => {
+    const id = randomUUID();
+    await send(body('Ayuda portón')).expect(200);
+    await send(body(text(id))).expect(200);
+    const alerts = await db.panicAlert.findMany({ where: { shiftId } });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ unverified: false, shortId: panicShortId(id) });
+    expect(notifications.notifySiteStaff).toHaveBeenCalledTimes(1);
+  });
+  it('completar la gemela de una alerta ya confirmada no vuelve a avisar al personal', async () => {
+    const id = randomUUID();
+    await send(body(text(id))).expect(200);
+    await db.panicAlert.updateMany({ where: { shiftId }, data: { status: 'confirmed' } });
+    await internet(id).expect(200);
+    expect(await db.panicAlert.findMany({ where: { shiftId } })).toEqual([
+      expect.objectContaining({ id, status: 'confirmed' }),
+    ]);
+    expect(notifications.notifySiteStaff).toHaveBeenCalledTimes(1);
   });
   it('consulta paginada exige administrador y nunca mezcla empresas', async () => {
     await send(body('Ayuda portón')).expect(200);

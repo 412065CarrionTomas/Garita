@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   normalizeArPhone,
   sameArPhone,
@@ -82,7 +82,7 @@ export class SmsInboundService {
     let companyId = auth.companyId;
     if (!companyId && !auth.candidate) {
       const guards = await db.user.findMany({
-        where: { role: 'guard', phone: { not: null } },
+        where: { role: 'guard', status: 'active', phone: { not: null } },
         select: { phone: true, companyId: true },
       });
       const owners = [
@@ -104,7 +104,11 @@ export class SmsInboundService {
       },
     });
     if (auth.result !== 'valid')
-      this.logger.error({ event: 'sms.authentication', inboundId: record.id, result: auth.result });
+      this.logger[auth.result === 'unknown' ? 'error' : 'warn']({
+        event: 'sms.authentication',
+        inboundId: record.id,
+        result: auth.result,
+      });
     if (!auth.candidate) return;
     const candidate = auth.candidate;
     const timezone =
@@ -113,35 +117,43 @@ export class SmsInboundService {
     const triggeredAt = smsTriggeredAt(auth.parsed?.time, record.gatewayReceivedAt, timezone);
     const latitude = auth.parsed?.latitude ?? null;
     const longitude = auth.parsed?.longitude ?? null;
-    await this.panic.create(
-      {
-        alertId: randomUUID(),
-        shiftId: candidate.id,
-        occurredAtDevice: triggeredAt.toISOString(),
-        location: {
-          status: latitude !== null && longitude !== null ? 'ok' : 'unverifiable',
-          latitude,
-          longitude,
-          accuracyMeters: null,
-          simulation: 'unavailable',
-          takenAt: null,
+    try {
+      await this.panic.create(
+        {
+          alertId: randomUUID(),
+          shiftId: candidate.id,
+          occurredAtDevice: triggeredAt.toISOString(),
+          location: {
+            status: latitude !== null && longitude !== null ? 'ok' : 'unverifiable',
+            latitude,
+            longitude,
+            accuracyMeters: null,
+            simulation: 'unavailable',
+            takenAt: null,
+          },
         },
-      },
-      {
-        companyId: candidate.companyId,
-        shiftId: candidate.id,
-        assignmentId: candidate.assignmentId,
-        userId: candidate.guardId,
-        exp: 0,
-      },
-      {
-        inboundId: record.id,
-        shortId: auth.result === 'valid' ? (auth.parsed?.shortId ?? null) : null,
-        unverified: auth.result === 'unverified',
-        phoneMismatch: auth.phoneMismatch,
-        receivedAt: record.receivedAt,
-      },
-    );
+        {
+          companyId: candidate.companyId,
+          shiftId: candidate.id,
+          assignmentId: candidate.assignmentId,
+          userId: candidate.guardId,
+          exp: 0,
+        },
+        {
+          inboundId: record.id,
+          shortId: auth.result === 'valid' ? (auth.parsed?.shortId ?? null) : null,
+          unverified: auth.result === 'unverified',
+          phoneMismatch: auth.phoneMismatch,
+          receivedAt: record.receivedAt,
+        },
+      );
+    } catch (error) {
+      // The shift closed between the read and the alert: the message is kept, retrying cannot help.
+      if (!(error instanceof ConflictException)) throw error;
+      await db.smsInbound.update({ where: { id: record.id }, data: { processedAt: now } });
+      this.logger.warn({ event: 'sms.shift_closed', inboundId: record.id });
+      return;
+    }
     this.logger.log({
       event: 'sms.processed',
       inboundId: record.id,
