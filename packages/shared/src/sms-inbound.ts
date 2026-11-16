@@ -17,7 +17,8 @@ export const smsWebhookBodySchema = z
       .string()
       .min(7)
       .max(40)
-      .regex(/^\+?[\d ()-]+$/),
+      .regex(/^\+?[\d ()-]+$/)
+      .regex(/\d/),
     text: z.string().min(1).max(1600),
     receivedAt: z.iso.datetime({ offset: true }),
   })
@@ -73,5 +74,6 @@ export function normalizeArPhone(raw: string): string {
 }
 
 export function sameArPhone(a: string, b: string): boolean {
-  return normalizeArPhone(a) === normalizeArPhone(b);
+  const normalized = normalizeArPhone(a);
+  return normalized !== '' && normalized === normalizeArPhone(b);
 }

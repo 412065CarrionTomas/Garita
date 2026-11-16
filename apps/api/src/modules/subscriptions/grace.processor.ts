@@ -8,7 +8,7 @@ export const SUBSCRIPTION_GRACE_QUEUE = 'subscription-grace';
 @Processor(SUBSCRIPTION_GRACE_QUEUE)
 export class GraceProcessor extends WorkerHost implements OnModuleInit {
   constructor(
-    private readonly trial: GraceService,
+    private readonly grace: GraceService,
     @InjectQueue(SUBSCRIPTION_GRACE_QUEUE) private readonly queue: Queue,
   ) {
     super();
@@ -30,6 +30,6 @@ export class GraceProcessor extends WorkerHost implements OnModuleInit {
     );
   }
   async process(): Promise<void> {
-    await this.trial.sweep();
+    await this.grace.sweep();
   }
 }

@@ -207,8 +207,12 @@ export function addClientFilter(
   if (!user.clientId) throw new ForbiddenException('El usuario no tiene cliente asociado');
   const where = isRecord(args.where) ? args.where : {};
   const site = { clientId: user.clientId, status: 'active', client: { status: 'active' } };
-  if (model === 'Client')
+  if (model === 'Client') {
+    // The client role only reads its own record.
+    if (operation && !/^(find|count|aggregate|groupBy)/.test(operation))
+      throw new ForbiddenException('El cliente no puede modificar su registro');
     return { ...args, where: { ...where, AND: [where, { id: user.clientId, status: 'active' }] } };
+  }
   if (model === 'ReportExport') {
     const writes = [args.data, args.create, args.update].filter((value) => value !== undefined);
     for (const write of writes) {

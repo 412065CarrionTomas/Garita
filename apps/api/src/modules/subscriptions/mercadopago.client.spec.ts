@@ -14,7 +14,6 @@ describe('MercadoPagoClient (HTTP simulado)', () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ id: 'pref', init_point: 'https://mp.example.invalid/pay' })),
       )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'pref' })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'mp', status: 'authorized' })));
     await expect(
       client.createPreference({
@@ -22,20 +21,22 @@ describe('MercadoPagoClient (HTTP simulado)', () => {
         title: 'Diferencia',
         amount: '26666.67',
         backUrl: 'https://garita.example.invalid/suscripcion',
+        expiresAt: new Date('2030-11-12T12:00:00Z'),
+        excludeOffline: true,
       }),
     ).resolves.toEqual({ id: 'pref', initPoint: 'https://mp.example.invalid/pay' });
     expect(fetch.mock.calls[0]?.[1]?.body).toEqual(
       expect.stringContaining('"unit_price":26666.67'),
     );
-    await client.expirePreference('pref', new Date('2030-11-12T12:00:00Z'));
-    expect(fetch.mock.calls[1]?.[1]?.body).toEqual(
+    expect(fetch.mock.calls[0]?.[1]?.body).toEqual(
       expect.stringContaining('"expiration_date_to":"2030-11-12T12:00:00.000Z"'),
     );
+    expect(fetch.mock.calls[0]?.[1]?.body).toEqual(expect.stringContaining('"ticket"'));
     await client.updatePreapprovalAmount('mp', '90000.00');
-    expect(fetch.mock.calls[2]?.[1]?.body).toBe(
-      '{"auto_recurring":{"transaction_amount":90000.00,"currency_id":"ARS"}}',
+    expect(fetch.mock.calls[1]?.[1]?.body).toBe(
+      '{"auto_recurring":{"transaction_amount":90000,"currency_id":"ARS"}}',
     );
-    expect(fetch.mock.calls[2]?.[1]?.method).toBe('PUT');
+    expect(fetch.mock.calls[1]?.[1]?.method).toBe('PUT');
   });
   it('reads all invoice pages and preserves exact decimal strings', async () => {
     const payment = (id: number) => ({ id, preapproval_id: 'mp', transaction_amount: '123.45' });

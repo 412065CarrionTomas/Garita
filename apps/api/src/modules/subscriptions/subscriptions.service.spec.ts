@@ -36,6 +36,7 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
       findUniqueOrThrow: jest.fn().mockResolvedValue({ trialEndsAt: options.trialEndsAt ?? null }),
     },
     subscription,
+    planChangePayment: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
     subscriptionCharge: {
       findMany: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn(),
@@ -292,6 +293,9 @@ describe('SubscriptionsService cancellation', () => {
     await service.cancel('company-1', 'user-1', 'Cerramos la empresa');
 
     expect(mercadoPago.setPreapprovalStatus).toHaveBeenCalledWith('mp-1', 'paused');
+    expect(db.planChangePayment.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { subscriptionId: 'sub-1', status: 'pending' } }),
+    );
     expect(mercadoPago.cancelPreapproval).not.toHaveBeenCalled();
     expect(db.subscription.update).toHaveBeenCalledWith({
       where: { id: 'sub-1' },

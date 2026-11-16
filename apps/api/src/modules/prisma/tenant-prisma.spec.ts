@@ -531,6 +531,15 @@ describe('aislamiento del portal por cliente', () => {
   );
 });
 
+describe('HU-40: el rol cliente solo lee su registro', () => {
+  const user = { role: 'client', clientId: 'cliente', userId: 'u' } as never;
+  it('rechaza escrituras sobre Client', () => {
+    for (const operation of ['update', 'updateMany', 'delete', 'create', 'upsert'])
+      expect(() => addClientFilter('Client', { where: {} }, user, operation)).toThrow();
+    expect(() => addClientFilter('Client', { where: {} }, user, 'findFirst')).not.toThrow();
+  });
+});
+
 describe('aislamiento de los cambios de plan', () => {
   it.each(['PlanChangePayment', 'SubscriptionChange'])(
     '%s pertenece únicamente a su empresa',

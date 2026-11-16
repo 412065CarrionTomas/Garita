@@ -20,14 +20,18 @@ describe('Checkout Pro para gracia (HTTP mockeado)', () => {
         amount: '9999999999.99',
         title: 'Garita',
         backUrl: 'https://web.test/suscripcion',
+        expiresAt: new Date('2030-12-02T15:00:00Z'),
       }),
     ).toEqual({ id: 'pref', initPoint: 'https://mp.test/pay' });
     const body = fetch.mock.calls[0]?.[1]?.body;
     expect(body).toEqual(expect.stringContaining('"unit_price":9999999999.99'));
     expect(body).toEqual(expect.stringContaining('"external_reference":"grace:charge"'));
     expect(body).toEqual(expect.stringContaining('"currency_id":"ARS"'));
+    expect(body).toEqual(
+      expect.stringContaining('"expiration_date_to":"2030-12-02T15:00:00.000Z"'),
+    );
   });
-  it('rechaza decimales inválidos antes de HTTP y ajusta el vencimiento por API', async () => {
+  it('rechaza decimales inválidos antes de HTTP', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"id":"pref"}'));
     await expect(
       client.createPreference({
@@ -35,17 +39,10 @@ describe('Checkout Pro para gracia (HTTP mockeado)', () => {
         amount: 'NaN',
         title: 'Garita',
         backUrl: 'https://web.test',
+        expiresAt: new Date('2030-12-02T15:00:00Z'),
       }),
     ).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
-    await client.expirePreference('pref', new Date('2030-12-02T15:00:00Z'));
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.mercadopago.com/checkout/preferences/pref',
-      expect.objectContaining({
-        method: 'PUT',
-        body: '{"expires":true,"expiration_date_to":"2030-12-02T15:00:00.000Z"}',
-      }),
-    );
   });
   it('pagina pagos por referencia y conserva su moneda', async () => {
     const page = (id: string) => ({

@@ -18,6 +18,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { ShiftCredentialPayload } from '../sync/shift-credential.service';
 import { completePanicSmsTwin } from './panic-sms-twin';
 import { panicShortId } from '@garita/shared';
+import { PanicJobsService } from './panic-jobs.service';
 
 export interface SmsPanicOrigin {
   inboundId: string;
@@ -26,7 +27,6 @@ export interface SmsPanicOrigin {
   phoneMismatch: boolean;
   receivedAt: Date;
 }
-import { PanicJobsService } from './panic-jobs.service';
 
 @Injectable()
 export class PanicService {
@@ -143,6 +143,16 @@ export class PanicService {
       });
       if (active) {
         if (sms) {
+          // A manual SMS opened this alert; the later SMS with the shift code verifies it.
+          const verifies = sms.shortId !== null && active.unverified && active.shortId === null;
+          if (verifies || (sms.phoneMismatch && !active.phoneMismatch))
+            await tx.panicAlert.update({
+              where: { id: active.id },
+              data: {
+                ...(verifies ? { shortId: sms.shortId, unverified: false } : {}),
+                ...(sms.phoneMismatch ? { phoneMismatch: true } : {}),
+              },
+            });
           await tx.smsInbound.update({
             where: { id: sms.inboundId },
             data: { alertId: active.id, processedAt: now },
@@ -204,19 +214,23 @@ export class PanicService {
       return { alert, changed: true, siteName: shift.site.name };
     });
     if (result.changed) {
+      // Completing the SMS twin of an alert already attended must not page the staff again.
+      const notify = !('notify' in result) || result.notify;
       const deliveries = await Promise.allSettled([
-        this.notifications.notifySiteStaff({
-          companyId: credential.companyId,
-          siteId: result.alert.siteId,
-          kind: 'panic',
-          priority: 'high',
-          payload: {
-            kind: 'panic',
-            siteName: result.siteName,
-            body: 'Alerta de pánico',
-            link: `/alertas-panico/${result.alert.id}`,
-          },
-        }),
+        notify
+          ? this.notifications.notifySiteStaff({
+              companyId: credential.companyId,
+              siteId: result.alert.siteId,
+              kind: 'panic',
+              priority: 'high',
+              payload: {
+                kind: 'panic',
+                siteName: result.siteName,
+                body: 'Alerta de pánico',
+                link: `/alertas-panico/${result.alert.id}`,
+              },
+            })
+          : Promise.resolve(),
         Promise.resolve().then(() => {
           this.realtime.emitToSite(
             credential.companyId,

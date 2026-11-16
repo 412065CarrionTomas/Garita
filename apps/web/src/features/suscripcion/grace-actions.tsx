@@ -70,6 +70,7 @@ export function GraceActions() {
             variant="outline"
             disabled={method.isPending}
             onClick={() => {
+              retry.reset();
               method.mutate(openCheckoutTab());
             }}
           >
@@ -78,6 +79,7 @@ export function GraceActions() {
           <Button
             disabled={retry.isPending}
             onClick={() => {
+              method.reset();
               retry.mutate(openCheckoutTab());
             }}
           >

@@ -64,6 +64,12 @@ const paymentSchema = z.object({
 });
 export type MercadoPagoPayment = z.infer<typeof paymentSchema>;
 
+export class MercadoPagoRejectedError extends BadGatewayException {
+  constructor() {
+    super('Mercado Pago rechazó la operación');
+  }
+}
+
 export class MercadoPagoRetryableError extends Error {
   constructor(
     readonly retryAfterMs: number,
@@ -161,23 +167,13 @@ export class MercadoPagoClient {
     path: string,
     schema: z.ZodType<T>,
     body?: unknown,
-    serialized = false,
   ): Promise<T> {
     const token = this.config.get('MERCADOPAGO_ACCESS_TOKEN', { infer: true });
     if (!token) throw new ServiceUnavailableException('Mercado Pago no está configurado');
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      // Validated decimal strings become JSON numbers without a floating point conversion.
-      body:
-        body === undefined
-          ? undefined
-          : serialized && typeof body === 'string'
-            ? body
-            : JSON.stringify(body).replace(
-                /"(unit_price|transaction_amount)":"(\d+(?:\.\d{1,2})?)"/g,
-                '"$1":$2',
-              ),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });
     const data: unknown = await res.json().catch(() => null);
@@ -196,7 +192,8 @@ export class MercadoPagoClient {
       this.logger.warn(
         `Mercado Pago respondió ${res.status} a ${method} ${path}: ${JSON.stringify(data)}`,
       );
-      throw new BadGatewayException('Mercado Pago rechazó la operación');
+      // 4xx: the operation was refused, so nothing was created on their side.
+      throw new MercadoPagoRejectedError();
     }
     const parsed = schema.safeParse(data);
     if (!parsed.success) {
@@ -211,7 +208,8 @@ export class MercadoPagoClient {
       .regex(/^\d+\.\d{2}$/)
       .parse(amount);
     return this.request('PUT', `/preapproval/${encodeURIComponent(id)}`, preapprovalSchema, {
-      auto_recurring: { transaction_amount: amount, currency_id: 'ARS' },
+      // A validated decimal with two places at most: exact as a JSON number.
+      auto_recurring: { transaction_amount: Number(amount), currency_id: 'ARS' },
     });
   }
 
@@ -237,51 +235,37 @@ export class MercadoPagoClient {
     }
   }
 
-  // https://www.mercadopago.com.ar/developers/es/docs/checkout-pro-preferences/additional-settings/term-of-preference
-  async expirePreference(id: string, expiresAt: Date): Promise<void> {
-    await this.request(
-      'PUT',
-      `/checkout/preferences/${encodeURIComponent(id)}`,
-      z.object({ id: z.string() }),
-      {
-        expires: true,
-        expiration_date_to: expiresAt.toISOString(),
-      },
-    );
-  }
-
   // https://www.mercadopago.com.ar/developers/es/reference/online-payments/checkout-pro-preferences/create-preference/post
   async createPreference(input: {
     externalReference: string;
     title: string;
     amount: string;
     backUrl: string;
+    expiresAt: Date;
     excludeOffline?: boolean;
   }): Promise<{ id: string; initPoint: string }> {
     const amount = z
       .string()
       .regex(/^\d+\.\d{2}$/)
       .parse(input.amount);
-    // MP expects a JSON number: emit the validated decimal token without floating point conversion.
-    const body = JSON.stringify({
-      external_reference: input.externalReference,
-      items: [
-        { title: input.title, quantity: 1, currency_id: 'ARS', unit_price: '__DECIMAL_AMOUNT__' },
-      ],
-      back_urls: { success: input.backUrl, failure: input.backUrl, pending: input.backUrl },
-      expires: true,
-      expiration_date_to: new Date(Date.now() + 86_400_000).toISOString(),
-      // Avoid vouchers that can settle long after the upgrade quote expires.
-      ...(input.excludeOffline && {
-        payment_methods: { excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }] },
-      }),
-    }).replace('"unit_price":"__DECIMAL_AMOUNT__"', '"unit_price":' + amount);
     const preference = await this.request(
       'POST',
       '/checkout/preferences',
       z.object({ id: z.string(), init_point: z.url() }),
-      body,
-      true,
+      {
+        external_reference: input.externalReference,
+        // A validated decimal with two places: exact as a JSON number.
+        items: [
+          { title: input.title, quantity: 1, currency_id: 'ARS', unit_price: Number(amount) },
+        ],
+        back_urls: { success: input.backUrl, failure: input.backUrl, pending: input.backUrl },
+        expires: true,
+        expiration_date_to: input.expiresAt.toISOString(),
+        // Avoid vouchers that can settle long after the upgrade quote expires.
+        ...(input.excludeOffline && {
+          payment_methods: { excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }] },
+        }),
+      },
     );
     return { id: preference.id, initPoint: preference.init_point };
   }

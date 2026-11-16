@@ -78,5 +78,5 @@ export async function completePanicSmsTwin(
       events: { create: { id: input.alertId, type: 'internet_completed', occurredAt: now } },
     },
   });
-  return { alert, changed: true as const, siteName: undefined };
+  return { alert, changed: true as const, notify: alert.status === 'active', siteName: undefined };
 }

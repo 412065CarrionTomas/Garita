@@ -139,6 +139,8 @@ export class PlanChangeService {
   }
 
   async change(companyId: string, adminId: string, input: PlanChangeRequest) {
+    // The remote amount is changed inside the transaction on purpose: if Mercado Pago refuses, the
+    // database keeps the current plan. A failure after the PUT leaves a drift that the daily pass repairs.
     const db = this.prisma.tenantPrisma;
     const result = await db.$transaction(
       async (tx) => {
@@ -247,9 +249,9 @@ export class PlanChangeService {
         title: result.title,
         amount: result.payment.amount.toFixed(2),
         backUrl: `${this.config.get('WEB_APP_URL', { infer: true })}/suscripcion`,
+        expiresAt: result.payment.expiresAt,
         excludeOffline: true,
       });
-      await this.mercadoPago.expirePreference(preference.id, result.payment.expiresAt);
       await db.planChangePayment.update({
         where: { id: result.payment.id },
         data: { mpPreferenceId: preference.id },
@@ -304,8 +306,11 @@ export class PlanChangeService {
         s.cancelAt ||
         s.pendingPlanId
       )
-        throw new ConflictException(
-          'El pago requiere revisión: la suscripción cambió desde la simulación.',
+        return this.paidWithoutChange(
+          tx,
+          row,
+          payment,
+          'La suscripción cambió desde la simulación: reintegrar el pago.',
         );
       if (
         row.status === 'rejected' &&
@@ -318,7 +323,12 @@ export class PlanChangeService {
           },
         }))
       )
-        throw new ConflictException('Pago tardío: ya existe otro cambio. Requiere revisión.');
+        return this.paidWithoutChange(
+          tx,
+          row,
+          payment,
+          'Pago tardío con otro cambio en curso: reintegrar el pago.',
+        );
       await tx.subscription.update({ where: { id: s.id }, data: { planId: row.newPlanId } });
       await tx.planChangePayment.update({
         where: { id },
@@ -347,6 +357,26 @@ export class PlanChangeService {
         subscriptionId: stored.subscriptionId,
         error: String(error),
       });
+    });
+  }
+
+  /** The customer paid but the plan cannot change: keep the payment id for the refund and stop the retries. */
+  private async paidWithoutChange(
+    tx: Prisma.TransactionClient,
+    row: { id: string; companyId: string },
+    payment: MercadoPagoPayment,
+    reason: string,
+  ): Promise<void> {
+    await tx.planChangePayment.update({
+      where: { id: row.id },
+      data: { mpPaymentId: payment.id, rejectionReason: reason },
+    });
+    this.logger.error({
+      event: 'subscription.plan_payment_needs_refund',
+      companyId: row.companyId,
+      planChangePaymentId: row.id,
+      paymentId: payment.id,
+      reason,
     });
   }
 
@@ -480,6 +510,7 @@ export class PlanChangeService {
     const [changes, payments] = await Promise.all([
       db.subscriptionChange.findMany({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 50,
         include: {
           admin: { select: { firstName: true, lastName: true } },
           plan: { select: { name: true } },

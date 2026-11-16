@@ -12,7 +12,11 @@ import type { Env } from '../../config/env';
 import { Prisma, type SubscriptionCharge } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ResendInvitationMailer } from '../users/email.service';
-import { MercadoPagoClient, type MercadoPagoPayment } from './mercadopago.client';
+import {
+  MercadoPagoClient,
+  MercadoPagoRejectedError,
+  type MercadoPagoPayment,
+} from './mercadopago.client';
 
 // shortcut: portal general sin enlace por suscripción; actualizar si MP documenta uno.
 // Fuente: https://www.mercadopago.com.ar/developers/es/docs/subscriptions/subscription-management
@@ -152,6 +156,17 @@ export class GraceService {
       where: { id: charge.id },
       data: { gracePaidPaymentId: payment.id },
     });
+    const { accountStatus } = await db.company.findUniqueOrThrow({
+      where: { id: charge.companyId },
+      select: { accountStatus: true },
+    });
+    if (accountStatus === 'suspended')
+      this.logger.error({
+        event: 'subscription.grace_payment_after_suspension',
+        companyId: charge.companyId,
+        chargeId: charge.id,
+        paymentId: payment.id,
+      });
     if (charge.status === 'approved') this.doubleCharge(charge, charge.mpPaymentId, payment.id);
     await this.activate(charge);
   }
@@ -215,10 +230,6 @@ export class GraceService {
           throw new ConflictException(
             'Se está confirmando la creación del enlace de pago. Contactá al administrador del sistema si persiste.',
           );
-        await this.mercadoPago.expirePreference(
-          charge.gracePreferenceId,
-          charge.gracePreferenceExpiresAt,
-        );
         return {
           initPoint: charge.graceInitPoint,
           expiresAt: charge.gracePreferenceExpiresAt.toISOString(),
@@ -236,20 +247,31 @@ export class GraceService {
           graceInitPoint: null,
         },
       });
-      const preference = await this.mercadoPago.createPreference({
-        externalReference: `grace:${charge.id}`,
-        title: 'Garita: regularizar el ciclo adeudado',
-        amount: charge.amount.toFixed(2),
-        backUrl: new URL(
-          '/suscripcion',
-          this.config.get('WEB_APP_URL', { infer: true }),
-        ).toString(),
-      });
+      let preference;
+      try {
+        preference = await this.mercadoPago.createPreference({
+          externalReference: `grace:${charge.id}`,
+          title: 'Garita: regularizar el ciclo adeudado',
+          amount: charge.amount.toFixed(2),
+          backUrl: new URL(
+            '/suscripcion',
+            this.config.get('WEB_APP_URL', { infer: true }),
+          ).toString(),
+          expiresAt,
+        });
+      } catch (error) {
+        // A refusal creates nothing, so the admin can retry at once; a timeout stays blocked.
+        if (error instanceof MercadoPagoRejectedError)
+          await db.subscriptionCharge.update({
+            where: { id: charge.id },
+            data: { gracePreferenceExpiresAt: null },
+          });
+        throw error;
+      }
       await db.subscriptionCharge.update({
         where: { id: charge.id },
         data: { gracePreferenceId: preference.id, graceInitPoint: preference.initPoint },
       });
-      await this.mercadoPago.expirePreference(preference.id, expiresAt);
       return { initPoint: preference.initPoint, expiresAt: expiresAt.toISOString() };
     });
   }

@@ -14,7 +14,13 @@ export function ExportPdfButton({
 }) {
   const statusId = useId();
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
+  // The text belongs to the filters it was produced for; other filters start clean.
+  const key = JSON.stringify(filters);
+  const [state, setState] = useState({ key: '', text: '' });
+  const message = state.key === key ? state.text : '';
+  const setMessage = (text: string) => {
+    setState({ key, text });
+  };
   const tooLong =
     filters.desde && filters.hasta && !isReportExportPeriodAllowed(filters.desde, filters.hasta);
   const download = async () => {
