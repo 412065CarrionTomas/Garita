@@ -29,7 +29,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
   const prefix = `hu40-${randomUUID()}`;
   const companyId = `${prefix}-company`;
   const foreignCompanyId = `${prefix}-foreign-company`;
-  const secret = 'TRAMPA_HU40_INTERNA';
+  const trap = 'TRAMPA_HU40_INTERNA';
   const period = 'desde=2026-08-01&hasta=2026-11-01';
   const now = new Date('2026-11-16T15:00:00Z');
   let siteId: string, hiddenSiteId: string, foreignSiteId: string;
@@ -108,7 +108,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
           companyId,
           firebaseUid: `${prefix}-${role}`,
           email: `${prefix}-${role}@example.invalid`,
-          firstName: role === 'guard' ? secret : role,
+          firstName: role === 'guard' ? trap : role,
           lastName: 'PDF',
           role,
           status: 'active',
@@ -157,9 +157,8 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
       })
     ).id;
     await db.siteSupervisor.create({ data: { companyId, siteId, userId: supervisorId } });
-    const roundId = (
-      await db.round.create({ data: { companyId, siteId, name: `${secret}_RONDA` } })
-    ).id;
+    const roundId = (await db.round.create({ data: { companyId, siteId, name: `${trap}_RONDA` } }))
+      .id;
     const windows = [];
     for (let day = 0; day < 92; day++) {
       const startsAt = new Date(Date.UTC(2026, 7, day + 1, 3));
@@ -218,7 +217,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
           guardId,
           incidentId: randomUUID(),
           type: 'intrusion',
-          description: `${secret}_DESCRIPCION`,
+          description: `${trap}_DESCRIPCION`,
           classificationStatus: 'client_visible',
           occurredAtDevice: startsAt,
           trustedAt: startsAt,
@@ -229,7 +228,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
             create: {
               companyId,
               classification: 'client_visible',
-              internalComment: `${secret}_COMENTARIO`,
+              internalComment: `${trap}_COMENTARIO`,
               clientNote: day === 91 ? 'ULTIMA_NOTA_PERIODO' : 'Acceso reparado',
               decidedById: supervisorId,
               decidedAt: startsAt,
@@ -254,7 +253,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
           confirmedById: supervisorId,
           resolvedAt: new Date(startsAt.getTime() + 60000),
           resolvedById: supervisorId,
-          resolutionComment: `${secret}_RESOLUCION`,
+          resolutionComment: `${trap}_RESOLUCION`,
           locationStatus: 'ok',
         },
       });
@@ -286,7 +285,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
                   shiftId: shift.id,
                   type: 'out_of_range',
                   severity: 'grave',
-                  reason: `${secret}_MARCA`,
+                  reason: `${trap}_MARCA`,
                 },
               },
             },
@@ -301,7 +300,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
             guardId,
             incidentId: randomUUID(),
             type: 'other' as const,
-            description: `${secret}_INCIDENTE`,
+            description: `${trap}_INCIDENTE`,
             classificationStatus: classificationStatus as 'internal' | 'pending',
             occurredAtDevice: startsAt,
             locationStatus: 'ok' as const,
@@ -329,7 +328,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
     await db.incidentPhoto.create({
       data: {
         incidentId: visibleIncidentId,
-        cloudinaryPublicId: `${secret}_FOTO`,
+        cloudinaryPublicId: `${trap}_FOTO`,
         width: 100,
         height: 100,
         bytes: 1000,
@@ -380,7 +379,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
       'Rondas por estado',
       'Evolución diaria del cumplimiento',
       'Comparación de cumplimiento por vigilador',
-      secret,
+      trap,
       'PUNTO_HU40',
       'Listado de rondas del período',
     ])
@@ -418,7 +417,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
     ])
       expect(text.replace(/\n/g, '')).toContain(expected);
     for (const forbidden of [
-      secret,
+      trap,
       'CLIENTE_AJENO_HU40',
       'PREDIO_AJENO_HU40',
       'EMPRESA_AJENA_HU40',
@@ -509,7 +508,7 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
     for (const [path, schema] of paths) {
       const response = await get(`portal/${path}`, 'client').expect(200);
       expect(schema.safeParse(response.body).success).toBe(true);
-      expect(JSON.stringify(response.body)).not.toContain(secret);
+      expect(JSON.stringify(response.body)).not.toContain(trap);
     }
     expect(portalSitesSchema.parse((await get('portal/predios', 'client')).body)).toEqual([
       { id: siteId, name: 'Depósito PDF propio' },
