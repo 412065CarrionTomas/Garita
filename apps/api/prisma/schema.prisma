@@ -833,6 +833,10 @@ enum PanicSmsDeliveryStatus {
 }
 
 model PanicAlert {
+  shortId String? @db.VarChar(8)
+  unverified Boolean @default(false)
+  phoneMismatch Boolean @default(false)
+  inboundSms SmsInbound[]
   id             String            @id @db.Uuid
   companyId      String
   siteId         String
@@ -870,6 +874,7 @@ model PanicAlert {
 
   @@index([companyId, status])
   @@index([siteId, createdAt])
+  @@unique([shiftId, shortId])
   @@index([shiftId, status])
   @@index([companyId, receivedAt])
   @@index([companyId, triggeredAt])
@@ -1202,4 +1207,30 @@ model ReportExport {
 
   @@index([companyId, createdAt])
   @@index([userId, createdAt])
+}
+model SmsInbound {
+  id String @id @default(cuid())
+  provider String @default("http")
+  messageId String @db.VarChar(100)
+  fromOriginal String @db.VarChar(40)
+  fromNormalized String @db.VarChar(40)
+  text String @db.VarChar(1600)
+  gatewayReceivedAt DateTime @db.Timestamptz(3)
+  receivedAt DateTime @db.Timestamptz(3)
+  result SmsInboundAuthResult @default(unknown)
+  companyId String?
+  shiftId String?
+  alertId String? @db.Uuid
+  processedAt DateTime? @db.Timestamptz(3)
+  alert PanicAlert? @relation(fields: [alertId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  @@unique([provider, messageId])
+  @@index([shiftId])
+  @@index([fromNormalized])
+  @@index([companyId, receivedAt])
+}
+
+enum SmsInboundAuthResult {
+  valid
+  unverified
+  unknown
 }

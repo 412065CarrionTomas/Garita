@@ -31,6 +31,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { ReportExportsModule } from './modules/report-exports/report-exports.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { SmsModule } from './modules/sms/sms.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
     CoverageNoticesModule,
     NotificationPreferencesModule,
     SubscriptionsModule,
+    SmsModule,
   ],
 })
 export class AppModule {}

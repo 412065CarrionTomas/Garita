@@ -237,6 +237,14 @@ import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-err
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
   let app: INestApplication<App>;
+  it('HU-37: SMS recibidos solo admite administrador y el webhook exige firma', async () => {
+    const http = request(app.getHttpServer());
+    await http.get('/api/v1/sms-recibidos').expect(401);
+    for (const token of ['token-supervisor', 'token-guard', 'token-client'])
+      await http.get('/api/v1/sms-recibidos').set('Authorization', `Bearer ${token}`).expect(403);
+    await http.get('/api/v1/sms-recibidos').set('Authorization', 'Bearer token-admin').expect(200);
+    await http.post('/api/v1/webhooks/sms').send({}).expect(401);
+  });
   let northInvitationId: string;
   let southInvitationId: string;
   let northAssignedSiteId: string;

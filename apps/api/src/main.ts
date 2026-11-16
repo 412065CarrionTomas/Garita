@@ -7,7 +7,7 @@ import type { Env } from './config/env';
 import { setupApp } from './setup-app';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   setupApp(app);
 
   const config = app.get<ConfigService<Env, true>>(ConfigService);
