@@ -47,7 +47,6 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
   const queue = { add: jest.fn().mockResolvedValue({}), upsertJobScheduler: jest.fn() };
   const mp = {
     createPreference: jest.fn(),
-    expirePreference: jest.fn(),
     updatePreapprovalAmount: jest.fn(),
     getPreapproval: jest.fn(),
     searchAuthorizedPayments: jest.fn(),
@@ -183,7 +182,6 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
     mp.createPreference.mockImplementation(() =>
       Promise.resolve({ id: randomUUID(), initPoint: 'https://mp.example.invalid/pay' }),
     );
-    mp.expirePreference.mockResolvedValue(undefined);
     mp.updatePreapprovalAmount.mockResolvedValue({ id: prefix, status: 'authorized' });
     mp.getPreapproval.mockResolvedValue({
       id: prefix,
@@ -339,6 +337,28 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
       rejectionReason: 'cc_rejected_insufficient_amount',
     });
     expect(mp.updatePreapprovalAmount).not.toHaveBeenCalled();
+  });
+  it('cancelar rechaza el pago pendiente; si igual se aprueba, el plan no cambia y queda para reintegro', async () => {
+    await change(premium).expect(200);
+    mp.getPreapproval
+      .mockResolvedValueOnce({
+        id: prefix,
+        status: 'authorized',
+        next_payment_date: end.toISOString(),
+      })
+      .mockResolvedValue({ id: prefix, status: 'paused', next_payment_date: end.toISOString() });
+    await request(app.getHttpServer()).post(`${url}/cancelar`).set(auth()).send({}).expect(200);
+    expect(
+      await db.planChangePayment.count({ where: { subscriptionId: subId, status: 'rejected' } }),
+    ).toBe(1);
+    const paymentId = await notify('approved');
+    expect((await current()).planId).toBe(basic);
+    expect(
+      await db.planChangePayment.findFirstOrThrow({ where: { subscriptionId: subId } }),
+    ).toMatchObject({
+      mpPaymentId: paymentId,
+      rejectionReason: expect.stringContaining('reintegrar') as unknown,
+    });
   });
   it('recupera un PUT fallido después de aprobar, y la pasada diaria corrige diferencias', async () => {
     await change(premium).expect(200);

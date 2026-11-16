@@ -5,7 +5,11 @@ import type { Env } from '../../config/env';
 import type { AccountStatePort } from '../../common/ports/account-state.port';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ResendInvitationMailer } from '../users/email.service';
-import type { MercadoPagoClient, MercadoPagoPayment } from './mercadopago.client';
+import {
+  MercadoPagoRejectedError,
+  type MercadoPagoClient,
+  type MercadoPagoPayment,
+} from './mercadopago.client';
 import { GraceService } from './grace.service';
 
 function fixture(status = 'active') {
@@ -88,7 +92,6 @@ function fixture(status = 'active') {
     }),
     searchGracePayments: jest.fn().mockResolvedValue([]),
     createPreference: jest.fn().mockResolvedValue({ id: 'pref', initPoint: 'https://mp.test/pay' }),
-    expirePreference: jest.fn().mockResolvedValue(undefined),
   };
   const service = new GraceService(
     prisma as unknown as PrismaService,
@@ -226,6 +229,17 @@ describe('HU-30 gracia', () => {
     await expect(f.service.retry('company')).rejects.toThrow('timeout');
     await expect(f.service.retry('company')).rejects.toThrow('confirmando');
     expect(f.mp.createPreference).toHaveBeenCalledTimes(1);
+  });
+  it('un rechazo definitivo de Mercado Pago libera el intento y permite reintentar de inmediato', async () => {
+    const f = fixture();
+    await f.reject();
+    f.mp.createPreference.mockRejectedValueOnce(new MercadoPagoRejectedError());
+    await expect(f.service.retry('company')).rejects.toBeInstanceOf(MercadoPagoRejectedError);
+    expect((await f.service.retry('company')).expiresAt).toBe('2030-12-02T15:00:00.000Z');
+    expect(f.mp.createPreference).toHaveBeenCalledTimes(2);
+    expect(f.mp.createPreference).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expiresAt: new Date('2030-12-02T15:00:00.000Z') }),
+    );
   });
   it('pago único aprobado es idempotente; pago rechazado no modifica la cuenta', async () => {
     const f = fixture();

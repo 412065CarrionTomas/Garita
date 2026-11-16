@@ -258,14 +258,20 @@ export class SubscriptionsService {
       where: { id: { in: syncedChargeIds }, status: { not: 'pending' } },
       orderBy: [{ chargedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
-    for (const charge of charges) {
-      if (charge.effectsAppliedStatus === charge.status) continue;
-      if (charge.status === 'approved') await this.effects.onChargeApproved(charge);
-      else await this.effects.onChargeRejected(charge);
-      await this.prisma.systemPrisma.subscriptionCharge.updateMany({
-        where: { id: charge.id, status: charge.status },
-        data: { effectsAppliedStatus: charge.status },
-      });
+    // The first failure stops the later charges (their order matters) but not the guard selection.
+    let failure: Error | undefined;
+    try {
+      for (const charge of charges) {
+        if (charge.effectsAppliedStatus === charge.status) continue;
+        if (charge.status === 'approved') await this.effects.onChargeApproved(charge);
+        else await this.effects.onChargeRejected(charge);
+        await this.prisma.systemPrisma.subscriptionCharge.updateMany({
+          where: { id: charge.id, status: charge.status },
+          data: { effectsAppliedStatus: charge.status },
+        });
+      }
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
     }
     if (subscription.status === 'authorized')
       await this.guardSelection.apply(
@@ -273,6 +279,7 @@ export class SubscriptionsService {
         subscription.companyId,
         subscription.guardSelection,
       );
+    if (failure) throw failure;
   }
 
   private async syncLocked(
@@ -427,11 +434,9 @@ export class SubscriptionsService {
     if (!open) throw new NotFoundException('No hay una suscripción para cancelar');
     if (open.cancelAt) throw new ConflictException('La suscripción ya está cancelada');
     if (open.status === 'pending') {
-      await this.cancelPending(open.id, open.mpPreapprovalId);
-      await db.subscriptionChange.create({
-        data: {
+      await this.cancelPending(open.id, open.mpPreapprovalId, {
+        create: {
           companyId,
-          subscriptionId: open.id,
           type: 'cancellation',
           planId: open.planId,
           adminId: userId,
@@ -455,6 +460,11 @@ export class SubscriptionsService {
         const now = this.clock.now();
         const cancelAt = fresh.nextChargeAt && fresh.nextChargeAt > now ? fresh.nextChargeAt : now;
         await this.planChanges.clearDowngrade(fresh, tx as unknown as Prisma.TransactionClient);
+        // A pending upgrade payment can no longer be applied once the subscription is cancelled.
+        await tx.planChangePayment.updateMany({
+          where: { subscriptionId: open.id, status: 'pending' },
+          data: { status: 'rejected', rejectionReason: 'La suscripción fue cancelada.' },
+        });
         if (!fresh.mpPreapprovalId)
           throw new ConflictException('Falta la suscripción en Mercado Pago.');
         await this.mercadoPago.setPreapprovalStatus(fresh.mpPreapprovalId, 'paused');
@@ -546,7 +556,11 @@ export class SubscriptionsService {
     subscription.status = 'cancelled';
   }
 
-  private async cancelPending(id: string, mpPreapprovalId: string | null): Promise<void> {
+  private async cancelPending(
+    id: string,
+    mpPreapprovalId: string | null,
+    history?: { create: Prisma.SubscriptionChangeUncheckedCreateWithoutSubscriptionInput },
+  ): Promise<void> {
     if (mpPreapprovalId) {
       await this.mercadoPago.cancelPreapproval(mpPreapprovalId).catch((error: unknown) => {
         this.logger.warn(
@@ -556,7 +570,7 @@ export class SubscriptionsService {
     }
     await this.prisma.tenantPrisma.subscription.update({
       where: { id },
-      data: { status: 'cancelled' },
+      data: { status: 'cancelled', ...(history ? { changes: history } : {}) },
     });
   }
 }
