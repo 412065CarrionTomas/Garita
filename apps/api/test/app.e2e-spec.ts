@@ -583,6 +583,30 @@ describe('Aplicación (e2e)', () => {
       .expect(200);
   });
 
+  it.each(['reportes/rondas/pdf', 'reportes/incidentes/pdf', 'portal/reporte/pdf'])(
+    'HU-40 permisos de %s',
+    async (endpoint) => {
+      const path = `/api/v1/${endpoint}`;
+      await request(app.getHttpServer()).get(path).expect(401);
+      const denied = endpoint.startsWith('portal')
+        ? ['token-admin', 'token-supervisor', 'token-guard']
+        : ['token-client', 'token-guard'];
+      for (const token of denied)
+        await request(app.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+      const permitted = endpoint.startsWith('portal') ? 'token-client' : 'token-supervisor';
+      for (const siteId of [northUnassignedSiteId, southSiteId]) {
+        if (endpoint.startsWith('portal') && siteId === northUnassignedSiteId) continue;
+        await request(app.getHttpServer())
+          .get(`${path}?predio=${siteId}`)
+          .set('Authorization', `Bearer ${permitted}`)
+          .expect(404);
+      }
+    },
+  );
+
   beforeAll(async () => {
     process.env.NFC_MASTER_KEY =
       process.env.NFC_MASTER_KEY ?? Buffer.alloc(16, 0x11).toString('hex');
