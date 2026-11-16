@@ -261,6 +261,8 @@ describe('Aplicación (e2e)', () => {
       ['post', 'suscripcion'],
       ['post', 'suscripcion/cancelar'],
       ['post', 'suscripcion/revertir-cancelacion'],
+      ['get', 'suscripcion/medio-de-pago'],
+      ['post', 'suscripcion/reintentar-cobro'],
     ] as const) {
       await request(app.getHttpServer())[method](`/api/v1/${path}`).expect(401);
       await request(app.getHttpServer())

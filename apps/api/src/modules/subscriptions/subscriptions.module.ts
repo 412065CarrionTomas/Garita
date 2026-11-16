@@ -1,3 +1,7 @@
+import { GraceService } from './grace.service';
+import { GraceController } from './grace.controller';
+import { GraceProcessor, SUBSCRIPTION_GRACE_QUEUE } from './grace.processor';
+import { ResendInvitationMailer } from '../users/email.service';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { UsersModule } from '../users/users.module';
@@ -22,10 +26,17 @@ import { SubscriptionsService } from './subscriptions.service';
     PrismaModule,
     UsersModule,
     ClockModule,
-    BullModule.registerQueue({ name: MP_NOTIFICATIONS_QUEUE }, { name: MP_RECONCILIATION_QUEUE }),
+    BullModule.registerQueue(
+      { name: MP_NOTIFICATIONS_QUEUE },
+      { name: MP_RECONCILIATION_QUEUE },
+      { name: SUBSCRIPTION_GRACE_QUEUE },
+    ),
   ],
-  controllers: [MercadoPagoWebhookController, SubscriptionsController],
+  controllers: [MercadoPagoWebhookController, SubscriptionsController, GraceController],
   providers: [
+    GraceService,
+    GraceProcessor,
+    ResendInvitationMailer,
     MercadoPagoClient,
     MercadoPagoWebhookService,
     SubscriptionsService,
