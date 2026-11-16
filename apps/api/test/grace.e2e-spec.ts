@@ -50,7 +50,7 @@ describe('HU-30 HTTP, reloj simulado y Mercado Pago mockeado', () => {
     createPreference: jest
       .fn()
       .mockResolvedValue({ id: 'preference', initPoint: 'https://mp.test/grace' }),
-    expireGracePreference: jest.fn().mockResolvedValue(undefined),
+    expirePreference: jest.fn().mockResolvedValue(undefined),
     getPayment: jest.fn(),
   };
   const auth = (role = 'admin') => ({ Authorization: `Bearer ${companyId}-${role}` });

@@ -46,7 +46,9 @@ export class AccountService implements AccountStatePort {
       },
     });
     // HU-42 completa el plan pendiente en este único punto.
-    const pendingPlanMaxGuards: number | null = null;
+    const pendingPlanMaxGuards = subscription?.pendingPlanId
+      ? (await db.plan.findUniqueOrThrow({ where: { id: subscription.pendingPlanId } })).maxGuards
+      : null;
     const guardLimit = effectiveGuardLimit({
       planMaxGuards: subscription?.plan.maxGuards ?? null,
       pendingPlanMaxGuards,

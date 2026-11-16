@@ -88,7 +88,7 @@ function fixture(status = 'active') {
     }),
     searchGracePayments: jest.fn().mockResolvedValue([]),
     createPreference: jest.fn().mockResolvedValue({ id: 'pref', initPoint: 'https://mp.test/pay' }),
-    expireGracePreference: jest.fn().mockResolvedValue(undefined),
+    expirePreference: jest.fn().mockResolvedValue(undefined),
   };
   const service = new GraceService(
     prisma as unknown as PrismaService,

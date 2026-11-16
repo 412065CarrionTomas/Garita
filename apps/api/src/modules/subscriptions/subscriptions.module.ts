@@ -1,3 +1,6 @@
+import { PlanChangeController } from './plan-change.controller';
+import { PlanChangeService } from './plan-change.service';
+import { PlanChangeProcessor, PLAN_CHANGE_QUEUE } from './plan-change.processor';
 import { GraceService } from './grace.service';
 import { GraceController } from './grace.controller';
 import { GraceProcessor, SUBSCRIPTION_GRACE_QUEUE } from './grace.processor';
@@ -29,11 +32,19 @@ import { SubscriptionsService } from './subscriptions.service';
     BullModule.registerQueue(
       { name: MP_NOTIFICATIONS_QUEUE },
       { name: MP_RECONCILIATION_QUEUE },
+      { name: PLAN_CHANGE_QUEUE },
       { name: SUBSCRIPTION_GRACE_QUEUE },
     ),
   ],
-  controllers: [MercadoPagoWebhookController, SubscriptionsController, GraceController],
+  controllers: [
+    MercadoPagoWebhookController,
+    SubscriptionsController,
+    PlanChangeController,
+    GraceController,
+  ],
   providers: [
+    PlanChangeService,
+    PlanChangeProcessor,
     GraceService,
     GraceProcessor,
     ResendInvitationMailer,

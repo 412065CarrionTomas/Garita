@@ -58,7 +58,7 @@ export class SubscriptionsController {
   @ApiResponse({ status: 403, description: 'Solo administradores' })
   @ApiResponse({ status: 409, description: 'El ciclo pagado ya terminó' })
   revertCancellation(@CurrentUser() user: AuthenticatedUser) {
-    return this.subscriptions.revertCancellation(user.companyId);
+    return this.subscriptions.revertCancellation(user.companyId, user.userId);
   }
 
   @Get('suscripcion')

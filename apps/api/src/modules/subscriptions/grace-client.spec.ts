@@ -38,7 +38,7 @@ describe('Checkout Pro para gracia (HTTP mockeado)', () => {
       }),
     ).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
-    await client.expireGracePreference('pref', new Date('2030-12-02T15:00:00Z'));
+    await client.expirePreference('pref', new Date('2030-12-02T15:00:00Z'));
     expect(fetch).toHaveBeenCalledWith(
       'https://api.mercadopago.com/checkout/preferences/pref',
       expect.objectContaining({

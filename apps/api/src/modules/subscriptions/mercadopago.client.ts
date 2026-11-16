@@ -16,6 +16,13 @@ export const preapprovalSchema = z.object({
   init_point: z.string().optional(),
   external_reference: z.string().nullish(),
   next_payment_date: z.string().nullish(),
+  auto_recurring: z
+    .object({
+      transaction_amount: z
+        .union([z.string().regex(/^\d+(?:\.\d{1,2})?$/), z.number().nonnegative()])
+        .nullish(),
+    })
+    .nullish(),
 });
 export type MercadoPagoPreapproval = z.infer<typeof preapprovalSchema>;
 
@@ -161,12 +168,16 @@ export class MercadoPagoClient {
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      // Validated decimal strings become JSON numbers without a floating point conversion.
       body:
         body === undefined
           ? undefined
           : serialized && typeof body === 'string'
             ? body
-            : JSON.stringify(body),
+            : JSON.stringify(body).replace(
+                /"(unit_price|transaction_amount)":"(\d+(?:\.\d{1,2})?)"/g,
+                '"$1":$2',
+              ),
       signal: AbortSignal.timeout(10_000),
     });
     const data: unknown = await res.json().catch(() => null);
@@ -195,6 +206,15 @@ export class MercadoPagoClient {
     return parsed.data;
   }
 
+  updatePreapprovalAmount(id: string, amount: string): Promise<MercadoPagoPreapproval> {
+    z.string()
+      .regex(/^\d+\.\d{2}$/)
+      .parse(amount);
+    return this.request('PUT', `/preapproval/${encodeURIComponent(id)}`, preapprovalSchema, {
+      auto_recurring: { transaction_amount: amount, currency_id: 'ARS' },
+    });
+  }
+
   // https://www.mercadopago.com.ar/developers/es/reference/online-payments/subscriptions/search-payments/get
   async searchGracePayments(externalReference: string): Promise<MercadoPagoPayment[]> {
     const payments: MercadoPagoPayment[] = [];
@@ -218,7 +238,7 @@ export class MercadoPagoClient {
   }
 
   // https://www.mercadopago.com.ar/developers/es/docs/checkout-pro-preferences/additional-settings/term-of-preference
-  async expireGracePreference(id: string, expiresAt: Date): Promise<void> {
+  async expirePreference(id: string, expiresAt: Date): Promise<void> {
     await this.request(
       'PUT',
       `/checkout/preferences/${encodeURIComponent(id)}`,
@@ -236,6 +256,7 @@ export class MercadoPagoClient {
     title: string;
     amount: string;
     backUrl: string;
+    excludeOffline?: boolean;
   }): Promise<{ id: string; initPoint: string }> {
     const amount = z
       .string()
@@ -250,6 +271,10 @@ export class MercadoPagoClient {
       back_urls: { success: input.backUrl, failure: input.backUrl, pending: input.backUrl },
       expires: true,
       expiration_date_to: new Date(Date.now() + 86_400_000).toISOString(),
+      // Avoid vouchers that can settle long after the upgrade quote expires.
+      ...(input.excludeOffline && {
+        payment_methods: { excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }] },
+      }),
     }).replace('"unit_price":"__DECIMAL_AMOUNT__"', '"unit_price":' + amount);
     const preference = await this.request(
       'POST',

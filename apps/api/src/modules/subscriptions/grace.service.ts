@@ -215,7 +215,7 @@ export class GraceService {
           throw new ConflictException(
             'Se está confirmando la creación del enlace de pago. Contactá al administrador del sistema si persiste.',
           );
-        await this.mercadoPago.expireGracePreference(
+        await this.mercadoPago.expirePreference(
           charge.gracePreferenceId,
           charge.gracePreferenceExpiresAt,
         );
@@ -249,7 +249,7 @@ export class GraceService {
         where: { id: charge.id },
         data: { gracePreferenceId: preference.id, graceInitPoint: preference.initPoint },
       });
-      await this.mercadoPago.expireGracePreference(preference.id, expiresAt);
+      await this.mercadoPago.expirePreference(preference.id, expiresAt);
       return { initPoint: preference.initPoint, expiresAt: expiresAt.toISOString() };
     });
   }

@@ -531,6 +531,18 @@ describe('aislamiento del portal por cliente', () => {
   );
 });
 
+describe('aislamiento de los cambios de plan', () => {
+  it.each(['PlanChangePayment', 'SubscriptionChange'])(
+    '%s pertenece únicamente a su empresa',
+    (model) => {
+      expect(COMPANY_ID_MODELS).toContain(model);
+      expect(scopeArgs(model, 'findMany', { where: { companyId: 'otra' } }, 'propia')).toEqual({
+        where: { companyId: 'propia' },
+      });
+    },
+  );
+});
+
 it('HU-37: los SMS sin empresa y los de otra empresa no entran en la consulta tenant', () => {
   expect(scopeArgs('SmsInbound', 'findMany', { where: { result: 'unknown' } }, 'north')).toEqual({
     where: { result: 'unknown', companyId: 'north' },

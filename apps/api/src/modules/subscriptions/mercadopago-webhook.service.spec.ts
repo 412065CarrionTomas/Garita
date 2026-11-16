@@ -1,3 +1,4 @@
+import type { PlanChangeService } from './plan-change.service';
 import type { Queue } from 'bullmq';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { MercadoPagoClient } from './mercadopago.client';
@@ -32,11 +33,14 @@ describe('MercadoPagoWebhookService', () => {
       getAuthorizedPayment: jest.fn().mockResolvedValue({ id: 'payment', preapproval_id: 'mp' }),
       getPayment: jest.fn().mockResolvedValue({ id: 'payment', status: 'approved' }),
     };
-    const effects = new NoopSubscriptionEffects({
-      approved: jest.fn().mockResolvedValue(undefined),
-      rejected: jest.fn().mockResolvedValue(undefined),
-      oneTimePayment: jest.fn().mockResolvedValue(undefined),
-    } as unknown as GraceService);
+    const effects = new NoopSubscriptionEffects(
+      { onPayment: jest.fn() } as unknown as PlanChangeService,
+      {
+        approved: jest.fn().mockResolvedValue(undefined),
+        rejected: jest.fn().mockResolvedValue(undefined),
+        oneTimePayment: jest.fn().mockResolvedValue(undefined),
+      } as unknown as GraceService,
+    );
     const service = new MercadoPagoWebhookService(
       client as unknown as MercadoPagoClient,
       subscriptions as unknown as SubscriptionsService,
@@ -91,11 +95,14 @@ describe('MercadoPagoWebhookService', () => {
     expect(hook).toHaveBeenCalledWith(await client.getPayment());
   });
   it('mantiene el despacho por prefijo sin ejecutar pagos ajenos', async () => {
-    const noop = new NoopSubscriptionEffects({
-      approved: jest.fn().mockResolvedValue(undefined),
-      rejected: jest.fn().mockResolvedValue(undefined),
-      oneTimePayment: jest.fn().mockResolvedValue(undefined),
-    } as unknown as GraceService);
+    const noop = new NoopSubscriptionEffects(
+      { onPayment: jest.fn() } as unknown as PlanChangeService,
+      {
+        approved: jest.fn().mockResolvedValue(undefined),
+        rejected: jest.fn().mockResolvedValue(undefined),
+        oneTimePayment: jest.fn().mockResolvedValue(undefined),
+      } as unknown as GraceService,
+    );
     await expect(noop.onChargeApproved({} as SubscriptionCharge)).resolves.toBeUndefined();
     await expect(noop.onChargeRejected({} as SubscriptionCharge)).resolves.toBeUndefined();
     await expect(
@@ -103,7 +110,7 @@ describe('MercadoPagoWebhookService', () => {
         id: 'p',
         status: 'approved',
         transaction_amount: '1.00',
-        external_reference: 'plan-change:other',
+        external_reference: 'otro:pago',
       }),
     ).resolves.toBeUndefined();
   });
