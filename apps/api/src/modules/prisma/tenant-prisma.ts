@@ -22,6 +22,7 @@ export const COMPANY_ID_MODELS = [
   'RecordFlag',
   'Incident',
   'PanicAlert',
+  'SmsInbound',
   'PanicSmsDelivery',
   'IncidentClassification',
   'ShiftCredential',

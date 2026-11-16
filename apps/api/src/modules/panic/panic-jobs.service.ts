@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { CLOCK, type Clock } from '../../common/clock';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
-import { SMS_PORT, type SmsPort } from '../../common/ports/sms.port';
+import { NoopSms, SMS_PORT, type SmsPort } from '../../common/ports/sms.port';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildStaffPanicSms } from './panic-sms-message';
 
@@ -97,7 +97,10 @@ export class PanicJobsService {
             })
           ).sent
             ? 'accepted'
-            : 'skipped';
+            : this.sms instanceof NoopSms
+              ? 'skipped'
+              : 'failed';
+          if (status === 'failed') failed = true;
         } catch {
           status = 'failed';
           failed = true;

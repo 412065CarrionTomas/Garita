@@ -12,6 +12,7 @@ import { SitesMap } from '@/features/mapa/sites-map';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { panicOutcomes, panicStatuses } from './queries';
 import { ResolvePanicDialog } from './resolve-dialog';
+import { SmsBadges } from './sms-badges';
 
 export function PanicDetailPage() {
   const { id } = useParams();
@@ -80,7 +81,7 @@ export function PanicDetailPage() {
       >
         {panicStatuses[alert.status]}
       </StatusBadge>
-      {/* TODO(HU-37): SMS ingestion will provide authenticated=false for unverified alerts. */}
+      <SmsBadges {...alert} />
       {alert.channel === 'sms' && !alert.authenticated && (
         <Alert variant="destructive">No verificada. Atendé la alerta igualmente.</Alert>
       )}

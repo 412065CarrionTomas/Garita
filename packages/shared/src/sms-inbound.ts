@@ -10,6 +10,46 @@ export const SMS_INBOUND_AUTH_RESULTS = ['valid', 'unverified', 'unknown'] as co
 export const smsInboundAuthResultSchema = z.enum(SMS_INBOUND_AUTH_RESULTS);
 export type SmsInboundAuthResult = z.infer<typeof smsInboundAuthResultSchema>;
 
+export const smsWebhookBodySchema = z
+  .object({
+    id: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),
+    from: z
+      .string()
+      .min(7)
+      .max(40)
+      .regex(/^\+?[\d ()-]+$/),
+    text: z.string().min(1).max(1600),
+    receivedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict();
+export type SmsWebhookBody = z.infer<typeof smsWebhookBodySchema>;
+export const smsInboundQuerySchema = z
+  .object({
+    estado: smsInboundAuthResultSchema.optional(),
+    pagina: z.coerce.number().int().min(1).max(100000).default(1),
+  })
+  .strict();
+export const smsInboundListSchema = z.object({
+  items: z.array(
+    z.object({
+      id: z.string(),
+      provider: z.string(),
+      messageId: z.string(),
+      fromOriginal: z.string(),
+      fromNormalized: z.string(),
+      text: z.string(),
+      receivedAt: z.iso.datetime({ offset: true }),
+      gatewayReceivedAt: z.iso.datetime({ offset: true }),
+      result: smsInboundAuthResultSchema,
+      alertId: z.uuid().nullable(),
+      shiftId: z.string().nullable(),
+    }),
+  ),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+});
+
 /**
  * Argentine number reduced to its 10 national digits (area code + subscriber), so
  * `+54 9 351 123-4567`, `+543511234567` and `0351 15 1234567` compare equal.
