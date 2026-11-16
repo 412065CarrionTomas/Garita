@@ -121,6 +121,7 @@ model Company {
   notices Notice[]
   subscriptions Subscription[]
   subscriptionCharges SubscriptionCharge[]
+  reportExports ReportExport[]
 }
 
 model User {
@@ -159,6 +160,7 @@ model User {
   notificationPreferences NotificationPreference[]
   noticeViews NoticeView[]
   cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
+  reportExports ReportExport[]
 
   @@index([companyId])
   @@index([clientId])
@@ -1170,4 +1172,34 @@ model MercadoPagoNotification {
   error       String?
   receivedAt  DateTime                      @default(now())
   processedAt DateTime?
+}
+
+enum ReportExportType {
+  rounds
+  incidents
+  portal
+}
+
+enum ReportExportResult {
+  ok
+  failed
+}
+
+model ReportExport {
+  id            String @id @default(cuid())
+  companyId     String
+  userId        String
+  role          UserRole
+  siteIds       String[]
+  periodStart   String? @db.VarChar(10)
+  periodEnd     String? @db.VarChar(10)
+  reportType    ReportExportType
+  result        ReportExportResult
+  correlationId String
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user          User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
 }
