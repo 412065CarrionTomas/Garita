@@ -6,6 +6,7 @@ import { USER_ROLE_LABELS } from '@garita/shared';
 import type { UserRole } from '@garita/shared';
 
 import { AppShell } from '@/components/app-shell';
+import type { NavSection } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { useAuth } from './auth-context';
 import { LoginPage } from './login-page';
@@ -51,31 +52,57 @@ function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode
   return children;
 }
 
-const SECTIONS: Record<UserRole, { path: string; title: string }[]> = {
-  admin: [
-    { path: '/cumplimiento', title: 'Cumplimiento' },
-    { path: '/incidentes-y-respuesta', title: 'Incidentes y respuesta' },
-    { path: '/resumen', title: 'Resumen' },
+interface PendingCounts {
+  panic: number;
+  notices: number;
+  reviews: number;
+  incidents: number;
+}
+
+/** Barra de administrador y supervisor: lo que se mira, lo pendiente, incidentes y gestión agrupados. */
+function staffSections(admin: boolean, counts: PendingCounts): NavSection[] {
+  return [
+    ...(admin ? [{ path: '/resumen', title: 'Resumen' }] : []),
     { path: '/supervision', title: 'En vivo' },
+    {
+      title: 'Pendientes',
+      children: [
+        {
+          path: '/alertas-panico',
+          title: 'Alertas de pánico',
+          count: counts.panic,
+          tone: 'danger',
+        },
+        { path: '/avisos', title: 'Avisos', count: counts.notices },
+        { path: '/revision', title: 'Rondas en revisión', count: counts.reviews, tone: 'danger' },
+      ],
+    },
     { path: '/turnos', title: 'Turnos' },
-    { path: '/personal', title: 'Personal' },
-    { path: '/clientes', title: 'Clientes' },
-    { path: '/predios', title: 'Predios' },
-    { path: '/incidentes', title: 'Incidentes' },
-    { path: '/suscripcion', title: 'Suscripción' },
-  ],
-  supervisor: [
+    {
+      // Todo lo de incidentes vive en un solo lugar: el listado, la cola y su reporte.
+      title: 'Incidentes',
+      children: [
+        { path: '/incidentes', title: 'Listado' },
+        {
+          path: '/incidentes/cola',
+          title: 'Por clasificar',
+          count: counts.incidents,
+          tone: 'warning',
+        },
+        { path: '/incidentes-y-respuesta', title: 'Reporte de respuesta' },
+      ],
+    },
     { path: '/cumplimiento', title: 'Cumplimiento' },
-    { path: '/incidentes-y-respuesta', title: 'Incidentes y respuesta' },
-    { path: '/supervision', title: 'En vivo' },
-    { path: '/turnos', title: 'Turnos' },
-    { path: '/personal', title: 'Personal' },
-    { path: '/predios', title: 'Predios' },
-    { path: '/incidentes', title: 'Incidentes' },
-  ],
-  client: [{ path: '/reportes', title: 'Reportes' }],
-  guard: [{ path: '/mis-turnos', title: 'Mis turnos' }],
-};
+    {
+      title: 'Gestión',
+      children: [
+        { path: '/personal', title: 'Personal' },
+        ...(admin ? [{ path: '/clientes', title: 'Clientes' }] : []),
+        { path: '/predios', title: 'Predios' },
+      ],
+    },
+  ];
+}
 
 export function RoleLayout() {
   const { user, logout } = useAuth();
@@ -85,36 +112,34 @@ export function RoleLayout() {
   const realtime = useRealtime(user?.role === 'admin' || user?.role === 'supervisor');
   const panic = useActivePanicAlerts(user?.role === 'admin' || user?.role === 'supervisor');
   if (!user) return null;
+  const staff = user.role === 'admin' || user.role === 'supervisor';
+  const panicCount = panic.data?.activeCount ?? 0;
   return (
     <AppShell
       homePath={homePathForRole(user.role)}
       sections={
-        user.role === 'admin' || user.role === 'supervisor'
-          ? [
-              ...SECTIONS[user.role],
-              {
-                path: '/alertas-panico',
-                title: `Alertas de pánico (${panic.data?.activeCount ?? 0})`,
-              },
-              { path: '/avisos', title: `Avisos (${notices.data?.unseenOpenCount ?? 0})` },
-              { path: '/revision', title: `Rondas en revisión (${reviews.data?.count ?? 0})` },
-              {
-                path: '/incidentes/cola',
-                title: `Cola de clasificación (${pending.data?.count ?? 0})`,
-              },
-            ]
-          : SECTIONS[user.role]
+        staff
+          ? staffSections(user.role === 'admin', {
+              panic: panicCount,
+              notices: notices.data?.unseenOpenCount ?? 0,
+              reviews: reviews.data?.count ?? 0,
+              incidents: pending.data?.count ?? 0,
+            })
+          : user.role === 'client'
+            ? [{ path: '/reportes', title: 'Reportes' }]
+            : []
       }
+      accountLinks={[
+        ...(staff ? [{ path: '/avisos/preferencias', title: 'Preferencias de notificación' }] : []),
+        ...(user.role === 'admin' ? [{ path: '/suscripcion', title: 'Suscripción y cobros' }] : []),
+      ]}
+      alert={staff ? { path: '/alertas-panico', title: 'Pánico', count: panicCount } : undefined}
+      notice={staff && !realtime.connected ? 'Reconectando…' : undefined}
       userName={`${user.firstName} ${user.lastName}`}
       roleLabel={USER_ROLE_LABELS[user.role]}
       companyName={user.company.name}
       onLogout={() => void logout()}
     >
-      {(user.role === 'admin' || user.role === 'supervisor') && (
-        <p role="status" className="t-label text-muted-foreground">
-          ● {realtime.connected ? 'Conectado' : 'Reconectando…'}
-        </p>
-      )}
       <p aria-live="polite" className="sr-only">
         {realtime.announcement}
       </p>

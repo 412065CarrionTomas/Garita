@@ -251,7 +251,7 @@ Lenguaje rectangular de formulario: radios de 2 a 4 px (controles 3, botones de 
 
 ### Barra de navegación
 
-Barra de 52 px en tinta con el logotipo (ícono y GARITA en condensada con tracking), pestañas de texto y, a la derecha, usuario y reloj en un sello. La pestaña activa lleva 3 px de subrayado y texto en peso 600; el contador de Revisión es un recuadro rojo.
+Barra de 52 px en tinta con el logotipo (ícono y GARITA en condensada con tracking), pestañas de texto y, a la derecha, el reloj en un sello y el menú de la cuenta (estado de las notificaciones, preferencias, suscripción, cierre de sesión y, al final, el interruptor de tema claro u oscuro; sin elección guardada manda el sistema). La pestaña activa lleva 3 px de subrayado y texto en peso 600. Las secciones afines se agrupan en una pestaña con desplegable (Pendientes, Incidentes, Gestión); bajo 1280 px toda la navegación pasa a un panel lateral con los grupos desplegados bajo su rótulo. Los contadores son sellos que solo aparecen si hay pendientes: rojo para pánico y rondas en revisión, ámbar para incidentes por clasificar y recuadro en tinta para avisos. Un pánico activo suma además un sello rojo directo en la barra, la campana de activar notificaciones queda a la vista hasta que el dispositivo las tenga activas, y la pérdida de la conexión en vivo se avisa con un sello punteado.
 
 ### Botones
 

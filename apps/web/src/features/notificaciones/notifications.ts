@@ -22,6 +22,19 @@ export function isInstalledPwa(): boolean {
   return standalone.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
 }
 
+/** Hay permiso concedido y este navegador quedó registrado como dispositivo. */
+export function notificationsEnabled(): boolean {
+  try {
+    return (
+      'Notification' in window &&
+      Notification.permission === 'granted' &&
+      localStorage.getItem(DEVICE_ID_KEY) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function activateNotifications(): Promise<string> {
   if (!env.VITE_FIREBASE_MESSAGING_SENDER_ID || !env.VITE_FIREBASE_VAPID_KEY)
     throw new Error('Notificaciones no configuradas');

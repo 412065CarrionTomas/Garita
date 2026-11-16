@@ -43,6 +43,9 @@ export function Navigate() {
 export function useNavigate() {
   return jest.fn();
 }
+export function useLocation(): { pathname: string } {
+  return { pathname: window.location.pathname };
+}
 export function useSearchParams(): [URLSearchParams] {
   return [new URLSearchParams(window.location.search)];
 }
