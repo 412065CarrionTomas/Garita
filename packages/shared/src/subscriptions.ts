@@ -116,6 +116,8 @@ export const subscriptionResponseSchema = z.object({
       charges: z.array(subscriptionChargeResponseSchema),
       chargePage: z.number().int().optional(),
       hasMoreCharges: z.boolean().optional(),
+      /** Over the whole history, not only the page of charges in this response. */
+      hasApprovedCharge: z.boolean().optional(),
     })
     .nullable(),
 });
