@@ -1,3 +1,4 @@
+import { PlanChange } from './plan-change';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -121,6 +122,7 @@ export function SubscriptionPage() {
               onPageChange={setChargePage}
             />
           )}
+          {current && <PlanChange subscription={current} />}
           {canSubscribe && (
             <SubscribeForm
               trialEndsAt={subscription.data.trialEndsAt}

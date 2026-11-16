@@ -39,7 +39,15 @@ const plan = {
 function mockApi(state: SubscriptionResponse) {
   jest
     .mocked(apiGet)
-    .mockImplementation((path: string) => Promise.resolve(path === '/planes' ? plans : state));
+    .mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/planes'
+          ? plans
+          : path === '/suscripcion/historial'
+            ? { pendingPlan: null, pendingEffectiveAt: null, payments: [], changes: [] }
+            : state,
+      ),
+    );
 }
 
 beforeEach(() => {
