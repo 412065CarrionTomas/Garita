@@ -34,3 +34,4 @@ export * from './subscriptions';
 export * from './account';
 export * from './sms-inbound';
 export * from './portal';
+export * from './reports/export';

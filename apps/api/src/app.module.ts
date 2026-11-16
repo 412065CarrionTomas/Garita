@@ -29,6 +29,7 @@ import { NoticesModule } from './modules/notices/notices.module';
 import { CompanyModule } from './modules/company/company.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { PortalModule } from './modules/portal/portal.module';
+import { ReportExportsModule } from './modules/report-exports/report-exports.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { SmsModule } from './modules/sms/sms.module';
 
@@ -66,6 +67,7 @@ import { SmsModule } from './modules/sms/sms.module';
     CompanyModule,
     ReportsModule,
     PortalModule,
+    ReportExportsModule,
     CoverageNoticesModule,
     NotificationPreferencesModule,
     SubscriptionsModule,
