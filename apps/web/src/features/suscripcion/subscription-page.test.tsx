@@ -84,6 +84,32 @@ describe('SubscriptionPage', () => {
       );
     });
   });
+  it('does not submit an empty guard choice and shows the real error of a later attempt', async () => {
+    mockApi({ trialEndsAt: null, subscription: null });
+    jest
+      .mocked(apiPost)
+      .mockRejectedValueOnce(
+        new ApiError('choice', 409, {
+          code: 'guard_selection_required',
+          maxGuards: 1,
+          guards: [{ id: 'a', name: 'Ana', futureShiftCount: 0 }],
+        }),
+      )
+      .mockRejectedValueOnce(new ApiError('La empresa ya tiene una suscripción activa', 409));
+    renderWithQueryClient(<SubscriptionPage />);
+    await userEvent.click(await screen.findByRole('radio', { name: /Hasta 10 vigiladores/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }));
+    await screen.findByRole('checkbox', { name: 'Ana' });
+    await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }));
+    expect(screen.getByText('Elegí al menos un vigilador que siga activo.')).toBeInTheDocument();
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Ana' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }));
+    expect(
+      await screen.findByText('Tu empresa ya tiene una suscripción activa.'),
+    ).toBeInTheDocument();
+  });
+
   it('subscribes to the chosen plan and goes to Mercado Pago', async () => {
     mockApi({ trialEndsAt: null, subscription: null });
     jest.mocked(apiPost).mockResolvedValue({ initPoint: 'https://mp.test/checkout' });

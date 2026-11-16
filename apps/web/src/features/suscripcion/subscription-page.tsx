@@ -148,7 +148,10 @@ function CurrentSubscription({
     subscription.lastFailureReason !== null &&
     (subscription.status === 'pending' ||
       (subscription.status === 'cancelled' &&
-        !subscription.charges.some((charge) => charge.status === 'approved')));
+        !(
+          subscription.hasApprovedCharge ??
+          subscription.charges.some((charge) => charge.status === 'approved')
+        )));
   const status = cancelAt
     ? { label: `Activa hasta el ${formatDate(cancelAt)}`, tone: 'neutral' as const }
     : rejected
@@ -287,6 +290,11 @@ function useUpdateSubscription(
     mutationFn,
     onSuccess: (data) => {
       queryClient.setQueryData(['suscripcion'], data);
+      // The response is page 1; any other page of charges on screen has to be read again.
+      void queryClient.invalidateQueries({
+        queryKey: ['suscripcion'],
+        predicate: (query) => query.queryKey.length > 1,
+      });
       onDone?.();
     },
   });
@@ -468,6 +476,10 @@ function SubscribeForm({
               setFormError(planId ? 'Ingresá un email válido.' : 'Elegí un plan.');
               return;
             }
+            if (requiredSelection && guardSelection.guardsToKeep.length === 0) {
+              setFormError('Elegí al menos un vigilador que siga activo.');
+              return;
+            }
             setFormError('');
             subscribe.mutate({ body: parsed.data, tab: openCheckoutTab() });
           }}
@@ -566,7 +578,9 @@ function SubscribeForm({
             <Alert variant="destructive">
               {subscribe.error instanceof ApiError && subscribe.error.status === 502
                 ? 'Mercado Pago no aceptó la suscripción. Revisá que el email sea el de tu cuenta de Mercado Pago.'
-                : requiredSelection
+                : guardSelectionRequiredSchema.safeParse(
+                      subscribe.error instanceof ApiError ? subscribe.error.body : null,
+                    ).success
                   ? 'Elegí qué vigiladores siguen activos y confirmá la decisión sobre sus turnos antes de continuar.'
                   : errorMessage(subscribe.error, 'Tu empresa ya tiene una suscripción activa.')}
             </Alert>
