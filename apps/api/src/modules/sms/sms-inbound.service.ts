@@ -27,18 +27,24 @@ export class SmsInboundService {
     // System webhook: no tenant exists until the shift code or sender identifies one.
     this.logger.log({ event: 'sms.inbound_system' });
     const db = this.prisma.systemPrisma;
-    const record = await db.smsInbound.upsert({
+    // Prisma's upsert races when the gateway delivers the same message twice at once (P2002);
+    // ON CONFLICT DO NOTHING does not.
+    await db.smsInbound.createMany({
+      data: [
+        {
+          provider: 'http',
+          messageId: input.id,
+          fromOriginal: input.from,
+          fromNormalized: normalizeArPhone(input.from),
+          text: input.text,
+          gatewayReceivedAt: new Date(input.receivedAt),
+          receivedAt: now,
+        },
+      ],
+      skipDuplicates: true,
+    });
+    const record = await db.smsInbound.findUniqueOrThrow({
       where: { provider_messageId: { provider: 'http', messageId: input.id } },
-      create: {
-        provider: 'http',
-        messageId: input.id,
-        fromOriginal: input.from,
-        fromNormalized: normalizeArPhone(input.from),
-        text: input.text,
-        gatewayReceivedAt: new Date(input.receivedAt),
-        receivedAt: now,
-      },
-      update: {},
     });
     // Retry the original persisted message; a reused provider id cannot change its contents.
     if (record.processedAt && !record.alertId) return;
