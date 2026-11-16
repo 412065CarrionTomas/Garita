@@ -34,4 +34,5 @@ export * from './subscriptions';
 export * from './account';
 export * from './sms-inbound';
 export * from './portal';
+export * from './grace';
 export * from './reports/export';

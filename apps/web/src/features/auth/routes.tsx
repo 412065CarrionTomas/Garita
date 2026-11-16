@@ -1,3 +1,4 @@
+import { GraceBanner } from '../cuenta/grace-banner';
 import { NotificationPreferencesPage } from '../avisos/notification-preferences-page';
 import { TrialBanner } from '../cuenta/trial-banner';
 import { Navigate, Outlet, Route, Routes } from 'react-router';
@@ -164,6 +165,7 @@ export function RoleLayout() {
         <PanicBanner alerts={panic.data?.items ?? []} count={panic.data?.activeCount ?? 0} />
       )}
       <TrialBanner />
+      <GraceBanner />
       <Outlet />
     </AppShell>
   );
