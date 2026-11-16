@@ -96,6 +96,9 @@ model Company {
   graceEndsAt DateTime?
   suspendedAt DateTime?
   trialRemindersSent Int[] @default([])
+  graceRemindersSent Int[] @default([])
+  /// Originating monthly invoice; scalar so account does not depend on subscriptions.
+  graceChargeId String?
   guardPhone        String?
   id                String             @id @default(cuid())
   name              String
@@ -1144,6 +1147,11 @@ model SubscriptionCharge {
   statusDetail          String?
   retryAttempt          Int                      @default(0)
   effectsAppliedStatus  SubscriptionChargeStatus?
+  gracePreferenceId String?
+  graceInitPoint String?
+  gracePreferenceExpiresAt DateTime?
+  /// The approved Checkout Pro payment regularizing this invoice; does not overwrite MP's debit.
+  gracePaidPaymentId String? @unique
   chargedAt             DateTime?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
