@@ -68,11 +68,11 @@ export class MercadoPagoReconciliationProcessor extends WorkerHost implements On
       const before = subscription.status;
       await this.subscriptions.finishDueCancellation(subscription);
       if (before !== subscription.status)
-        this.logger.error({
-          event: 'subscription.reconciliation_diff',
+        // End of the paid cycle of a cancelled subscription: the expected flow, not a difference.
+        this.logger.log({
+          event: 'subscription.cancellation_finished',
           subscriptionId: subscription.id,
           before,
-          corrected: subscription.status,
         });
       if (subscription.status !== 'cancelled' && subscription.mpPreapprovalId)
         await this.subscriptions.syncPreapproval(
@@ -94,7 +94,8 @@ export class MercadoPagoReconciliationProcessor extends WorkerHost implements On
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
       for (const subscription of batch) {
-        if (input.kind === 'daily')
+        if (input.kind === 'daily') {
+          // Its job runs syncPreapproval, which already applies the pending guard selection.
           await this.queue.add(
             'subscription',
             { kind: 'subscription', id: subscription.id },
@@ -106,6 +107,8 @@ export class MercadoPagoReconciliationProcessor extends WorkerHost implements On
               removeOnFail: 100,
             },
           );
+          continue;
+        }
         try {
           if (subscription.status === 'authorized')
             await this.selection.apply(
