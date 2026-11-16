@@ -24,6 +24,7 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
     findUnique: jest.fn().mockResolvedValue(options.local ?? null),
     create: jest.fn().mockResolvedValue({ id: 'sub-new' }),
     update: jest.fn().mockResolvedValue({}),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     findUniqueOrThrow: jest.fn(),
   };
   const db = {
@@ -190,6 +191,64 @@ describe('SubscriptionsService.syncPreapproval', () => {
     });
   });
 
+  it('takes the failure reason from the latest settled charge, whatever the order of the search', async () => {
+    const { service, db, mercadoPago } = setup({
+      local: { id: 'sub-1', companyId: 'company-1', status: 'paused' },
+    });
+    mercadoPago.getPreapproval.mockResolvedValue({ id: 'mp-1', status: 'paused' });
+    const charge = (id: string, date: string, status: string, detail: string) => ({
+      id,
+      preapproval_id: 'mp-1',
+      transaction_amount: 45000,
+      date_created: date,
+      payment: { id: `p${id}`, status, status_detail: detail },
+    });
+    mercadoPago.searchAuthorizedPayments.mockResolvedValue([
+      charge('1', '2026-09-15T12:00:00.000Z', 'rejected', 'cc_rejected_other_reason'),
+      charge('3', '2026-11-15T12:00:00.000Z', 'rejected', 'cc_rejected_insufficient_amount'),
+      charge('2', '2026-10-15T12:00:00.000Z', 'approved', 'accredited'),
+    ]);
+    await service.syncPreapproval('mp-1');
+    expect(db.subscription.update).toHaveBeenLastCalledWith({
+      where: { id: 'sub-1' },
+      data: {
+        status: 'paused',
+        nextChargeAt: null,
+        lastFailureReason: 'cc_rejected_insufficient_amount',
+      },
+    });
+
+    mercadoPago.searchAuthorizedPayments.mockResolvedValue([
+      charge('1', '2026-09-15T12:00:00.000Z', 'rejected', 'cc_rejected_other_reason'),
+      charge('2', '2026-10-15T12:00:00.000Z', 'approved', 'accredited'),
+    ]);
+    await service.syncPreapproval('mp-1');
+    expect(db.subscription.update).toHaveBeenLastCalledWith({
+      where: { id: 'sub-1' },
+      data: { status: 'paused', nextChargeAt: null, lastFailureReason: null },
+    });
+  });
+
+  it('links by external reference a webhook that arrives before the preapproval id is stored', async () => {
+    const { service, db, mercadoPago } = setup();
+    db.subscription.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: 'sub-1', companyId: 'company-1', status: 'pending' });
+    mercadoPago.getPreapproval.mockResolvedValue({
+      id: 'mp-1',
+      status: 'pending',
+      external_reference: 'sub-1',
+    });
+    await service.syncPreapproval('mp-1');
+    expect(db.subscription.updateMany).toHaveBeenCalledWith({
+      where: { id: 'sub-1', mpPreapprovalId: null },
+      data: { mpPreapprovalId: 'mp-1' },
+    });
+    expect(db.subscription.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'sub-1' } }),
+    );
+  });
+
   it('cancels in Mercado Pago a replaced checkout that was completed later', async () => {
     const { service, db, mercadoPago } = setup({
       local: { id: 'sub-old', companyId: 'company-1', status: 'cancelled' },
@@ -294,6 +353,7 @@ describe('SubscriptionsService cancellation', () => {
       id: 'sub-1',
       status: 'cancelled',
       plan,
+      _count: { charges: 0 },
       payerEmail: 'buyer@testuser.com',
       startsAt: NOW,
       nextChargeAt: null,

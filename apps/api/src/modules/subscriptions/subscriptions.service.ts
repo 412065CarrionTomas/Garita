@@ -174,6 +174,7 @@ export class SubscriptionsService {
           where: { id: latest.id },
           include: {
             plan: true,
+            _count: { select: { charges: { where: { status: 'approved' } } } },
             charges: {
               orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               skip: (chargePage - 1) * 24,
@@ -195,6 +196,7 @@ export class SubscriptionsService {
         cancelAt: subscription.cancelAt?.toISOString() ?? null,
         chargePage,
         hasMoreCharges: subscription.charges.length > 24,
+        hasApprovedCharge: subscription._count.charges > 0,
         charges: subscription.charges.slice(0, 24).map((charge) => ({
           id: charge.id,
           amount: charge.amount.toFixed(2),
@@ -218,17 +220,28 @@ export class SubscriptionsService {
   ): Promise<void> {
     // Webhooks/jobs have no authenticated tenant; serialize all reads and writes for this MP resource.
     this.logger.log({ event: 'subscription.sync_system_query', correlationId, mpPreapprovalId });
-    await this.prisma.systemPrisma.$transaction(
+    const justAuthorized = await this.prisma.systemPrisma.$transaction(
       async (db) => {
         await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${mpPreapprovalId}, 0))`;
-        await this.syncLocked(db, mpPreapprovalId, correlationId, paymentId, reconciliation);
+        return this.syncLocked(db, mpPreapprovalId, correlationId, paymentId, reconciliation);
       },
       { timeout: 120_000 },
     );
     const subscription = await this.prisma.systemPrisma.subscription.findUnique({
       where: { mpPreapprovalId },
     });
-    if (subscription?.status === 'authorized')
+    if (!subscription) return;
+    // The account port uses its own connection: it runs after the commit so it sees the
+    // authorized subscription and never waits for a connection while this one holds another.
+    // shortcut: a crash between the commit and this call loses the activation; store the pending
+    // activation in the row if that ever happens.
+    if (justAuthorized) {
+      const account = await this.account.get(subscription.companyId);
+      if (!(account.status === 'trial' && subscription.startsAt > this.clock.now())) {
+        await this.account.transition({ companyId: subscription.companyId, to: 'active' });
+      }
+    }
+    if (subscription.status === 'authorized')
       await this.guardSelection.apply(
         subscription.id,
         subscription.companyId,
@@ -242,16 +255,25 @@ export class SubscriptionsService {
     correlationId: string,
     paymentId: string | undefined,
     reconciliation: boolean,
-  ): Promise<void> {
-    const subscription = await db.subscription.findUnique({ where: { mpPreapprovalId } });
-    if (!subscription) {
-      this.logger.warn(`Suscripción de Mercado Pago desconocida: ${mpPreapprovalId}`);
-      return;
-    }
+  ): Promise<boolean> {
     const [remote, searched] = await Promise.all([
       this.mercadoPago.getPreapproval(mpPreapprovalId),
       this.mercadoPago.searchAuthorizedPayments(mpPreapprovalId),
     ]);
+    let subscription = await db.subscription.findUnique({ where: { mpPreapprovalId } });
+    if (!subscription && remote.external_reference) {
+      // The first webhook can arrive before create() stores the preapproval id: link the row by
+      // the reference we sent, instead of dropping the notification as unknown.
+      await db.subscription.updateMany({
+        where: { id: remote.external_reference, mpPreapprovalId: null },
+        data: { mpPreapprovalId },
+      });
+      subscription = await db.subscription.findUnique({ where: { mpPreapprovalId } });
+    }
+    if (!subscription) {
+      this.logger.warn(`Suscripción de Mercado Pago desconocida: ${mpPreapprovalId}`);
+      return false;
+    }
     const payments = [...searched];
     if (paymentId) {
       const current = await this.mercadoPago.getAuthorizedPayment(paymentId);
@@ -263,7 +285,7 @@ export class SubscriptionsService {
       // A replaced checkout was completed in an old tab: stop it instead of charging twice.
       this.logger.warn(`Se cancela ${mpPreapprovalId}: fue reemplazada por otra suscripción`);
       await this.mercadoPago.cancelPreapproval(mpPreapprovalId);
-      return;
+      return false;
     }
     for (const payment of payments) {
       if (payment.preapproval_id !== mpPreapprovalId)
@@ -325,7 +347,13 @@ export class SubscriptionsService {
         });
       }
     }
-    const lastRejected = payments.find((payment) => toChargeStatus(payment.payment) === 'rejected');
+    // The search has no guaranteed order: the reason shown is the one of the latest settled charge.
+    const latest = payments
+      .filter((payment) => toChargeStatus(payment.payment) !== 'pending')
+      .sort(
+        (a, b) => (Date.parse(b.date_created ?? '') || 0) - (Date.parse(a.date_created ?? '') || 0),
+      )[0];
+    const lastRejected = latest && toChargeStatus(latest.payment) === 'rejected' ? latest : null;
     const status = toSubscriptionStatus(remote.status) ?? subscription.status;
     await db.subscription.update({
       where: { id: subscription.id },
@@ -359,12 +387,7 @@ export class SubscriptionsService {
         value: 1,
       });
     }
-    if (status === 'authorized' && subscription.status === 'pending') {
-      const account = await this.account.get(subscription.companyId);
-      if (!(account.status === 'trial' && subscription.startsAt > this.clock.now())) {
-        await this.account.transition({ companyId: subscription.companyId, to: 'active' });
-      }
-    }
+    return status === 'authorized' && subscription.status === 'pending';
   }
 
   /**
