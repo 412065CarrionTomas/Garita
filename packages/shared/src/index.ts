@@ -34,3 +34,6 @@ export * from './subscriptions';
 export * from './account';
 export * from './sms-inbound';
 export * from './portal';
+
+export * from './proration';
+export * from './plan-change';
