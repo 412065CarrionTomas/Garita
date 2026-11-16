@@ -29,6 +29,7 @@ import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { errorMessage } from '@/lib/error-message';
 import { GuardSelectionStep } from './guard-selection-step';
 import { openCheckoutTab, sendToCheckout } from './checkout-redirect';
+import { paymentDetail } from './payment-detail';
 
 const date = (iso: string) => new Date(iso).toLocaleString('es-AR');
 const money = (amount: string) =>
@@ -120,7 +121,7 @@ export function PlanChange({
             Baja a {history.data.pendingPlan.name} programada para el{' '}
             {history.data.pendingEffectiveAt
               ? date(history.data.pendingEffectiveAt)
-              : 'pr�ximo ciclo'}
+              : 'próximo ciclo'}
             . Las altas ya respetan el cupo menor. Elegí el plan vigente para anularla.
           </Alert>
         )}
@@ -226,7 +227,9 @@ export function PlanChange({
                 que se resuelva.
               </p>
             )}
-            {payment.rejectionReason && <p role="alert">Motivo: {payment.rejectionReason}</p>}
+            {payment.rejectionReason && (
+              <p role="alert">Motivo: {paymentDetail(payment.rejectionReason)}</p>
+            )}
             {payment.amountUpdatePending && (
               <p role="status">
                 El cupo nuevo ya está disponible. Falta actualizar el débito mensual; se reintenta
