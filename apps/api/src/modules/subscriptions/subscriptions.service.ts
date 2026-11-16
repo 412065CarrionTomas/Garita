@@ -1,3 +1,4 @@
+import { PlanChangeService } from './plan-change.service';
 import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -67,6 +68,7 @@ export class SubscriptionsService {
     @Inject(ACCOUNT_STATE_PORT) private readonly account: AccountStatePort,
     @Inject(SUBSCRIPTION_EFFECTS_PORT) private readonly effects: SubscriptionEffectsPort,
     private readonly guardSelection: GuardSelectionService,
+    private readonly planChanges: PlanChangeService,
   ) {}
 
   async listPlans(): Promise<PlanResponse[]> {
@@ -408,6 +410,17 @@ export class SubscriptionsService {
     if (open.cancelAt) throw new ConflictException('La suscripción ya está cancelada');
     if (open.status === 'pending') {
       await this.cancelPending(open.id, open.mpPreapprovalId);
+      await db.subscriptionChange.create({
+        data: {
+          companyId,
+          subscriptionId: open.id,
+          type: 'cancellation',
+          planId: open.planId,
+          adminId: userId,
+          effectiveAt: this.clock.now(),
+          reason,
+        },
+      });
       return this.get(companyId);
     }
     if (open.status !== 'authorized' || !open.mpPreapprovalId) {
@@ -415,24 +428,45 @@ export class SubscriptionsService {
     }
     // The next charge date is where the paid cycle ends; refresh it before relying on it.
     await this.syncPreapproval(open.mpPreapprovalId);
-    const fresh = await db.subscription.findUniqueOrThrow({ where: { id: open.id } });
-    const now = this.clock.now();
-    const cancelAt = fresh.nextChargeAt && fresh.nextChargeAt > now ? fresh.nextChargeAt : now;
-    await this.mercadoPago.setPreapprovalStatus(open.mpPreapprovalId, 'paused');
-    await db.subscription.update({
-      where: { id: open.id },
-      data: {
-        status: 'paused',
-        cancelAt,
-        cancelReason: reason ?? null,
-        cancelRequestedAt: now,
-        cancelRequestedById: userId,
+    await db.$transaction(
+      async (tx) => {
+        // Serialize cancellation with plan changes and guard-slot mutations.
+        await tx.company.update({ where: { id: companyId }, data: { id: companyId } });
+        const fresh = await tx.subscription.findUniqueOrThrow({ where: { id: open.id } });
+        if (fresh.cancelAt) throw new ConflictException('La suscripci�n ya est� cancelada');
+        const now = this.clock.now();
+        const cancelAt = fresh.nextChargeAt && fresh.nextChargeAt > now ? fresh.nextChargeAt : now;
+        await this.planChanges.clearDowngrade(fresh, tx as unknown as Prisma.TransactionClient);
+        if (!fresh.mpPreapprovalId)
+          throw new ConflictException('Falta la suscripci�n en Mercado Pago.');
+        await this.mercadoPago.setPreapprovalStatus(fresh.mpPreapprovalId, 'paused');
+        await tx.subscription.update({
+          where: { id: open.id },
+          data: {
+            status: 'paused',
+            cancelAt,
+            cancelReason: reason ?? null,
+            cancelRequestedAt: now,
+            cancelRequestedById: userId,
+            changes: {
+              create: {
+                companyId,
+                type: 'cancellation',
+                planId: fresh.planId,
+                adminId: userId,
+                effectiveAt: cancelAt,
+                reason,
+              },
+            },
+          },
+        });
       },
-    });
+      { timeout: 120_000 },
+    );
     return this.get(companyId);
   }
 
-  async revertCancellation(companyId: string): Promise<SubscriptionResponse> {
+  async revertCancellation(companyId: string, adminId: string): Promise<SubscriptionResponse> {
     const db = this.prisma.tenantPrisma;
     const scheduled = await db.subscription.findFirst({
       where: { companyId, status: 'paused', cancelAt: { not: null } },
@@ -452,6 +486,15 @@ export class SubscriptionsService {
         cancelReason: null,
         cancelRequestedAt: null,
         cancelRequestedById: null,
+        changes: {
+          create: {
+            companyId,
+            type: 'cancellation_reverted',
+            planId: scheduled.planId,
+            adminId,
+            effectiveAt: this.clock.now(),
+          },
+        },
       },
     });
     return this.get(companyId);
@@ -470,6 +513,11 @@ export class SubscriptionsService {
       // If Mercado Pago fails, the row stays paused and the next read retries.
       await this.mercadoPago.cancelPreapproval(subscription.mpPreapprovalId);
     }
+    await this.account.transition({
+      companyId: subscription.companyId,
+      to: 'suspended',
+      reason: 'cancelled',
+    });
     await this.prisma.systemPrisma.subscription.update({
       where: { id: subscription.id, companyId: subscription.companyId },
       data: { status: 'cancelled' },

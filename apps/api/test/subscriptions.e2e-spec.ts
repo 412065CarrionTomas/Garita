@@ -1,3 +1,4 @@
+import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Logger, type INestApplication, type Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -87,6 +88,8 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
         setDisabled: jest.fn(),
         revokeRefreshTokens: jest.fn(),
       })
+      .overrideProvider(PlanChangeProcessor)
+      .useValue({})
       .compile();
     app = module.createNestApplication();
     setupApp(app);

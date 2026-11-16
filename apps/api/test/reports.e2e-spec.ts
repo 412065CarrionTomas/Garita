@@ -1,3 +1,4 @@
+import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { Test } from '@nestjs/testing';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -55,6 +56,8 @@ describe('HU-25 cumplimiento por HTTP', () => {
       .useValue(notifications)
       .overrideProvider(REALTIME_PORT)
       .useValue({ emitToSite: jest.fn() })
+      .overrideProvider(PlanChangeProcessor)
+      .useValue({})
       .compile();
     app = module.createNestApplication();
     setupApp(app);

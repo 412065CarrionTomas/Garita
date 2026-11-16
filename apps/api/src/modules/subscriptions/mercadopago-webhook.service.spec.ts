@@ -1,3 +1,4 @@
+import type { PlanChangeService } from './plan-change.service';
 import type { Queue } from 'bullmq';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { MercadoPagoClient } from './mercadopago.client';
@@ -30,7 +31,9 @@ describe('MercadoPagoWebhookService', () => {
       getAuthorizedPayment: jest.fn().mockResolvedValue({ id: 'payment', preapproval_id: 'mp' }),
       getPayment: jest.fn().mockResolvedValue({ id: 'payment', status: 'approved' }),
     };
-    const effects = new NoopSubscriptionEffects();
+    const effects = new NoopSubscriptionEffects({
+      onPayment: jest.fn(),
+    } as unknown as PlanChangeService);
     const service = new MercadoPagoWebhookService(
       client as unknown as MercadoPagoClient,
       subscriptions as unknown as SubscriptionsService,
@@ -85,9 +88,13 @@ describe('MercadoPagoWebhookService', () => {
     expect(hook).toHaveBeenCalledWith(await client.getPayment());
   });
   it('provides harmless extension points for HU-30, HU-42 and HU-43', async () => {
-    const noop = new NoopSubscriptionEffects();
+    const noop = new NoopSubscriptionEffects({
+      onPayment: jest.fn(),
+    } as unknown as PlanChangeService);
     await expect(noop.onChargeApproved()).resolves.toBeUndefined();
     await expect(noop.onChargeRejected()).resolves.toBeUndefined();
-    await expect(noop.onOneTimePayment()).resolves.toBeUndefined();
+    await expect(
+      noop.onOneTimePayment({ id: 'unrelated', status: 'approved', transaction_amount: '1.00' }),
+    ).resolves.toBeUndefined();
   });
 });

@@ -1,3 +1,4 @@
+import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { Test } from '@nestjs/testing';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -59,6 +60,8 @@ describe('HU-28 portal del cliente por HTTP', () => {
       .useValue({ emitToSite: jest.fn() })
       .overrideProvider(PHOTO_STORAGE_PORT)
       .useValue({ signedUrl })
+      .overrideProvider(PlanChangeProcessor)
+      .useValue({})
       .compile();
     app = module.createNestApplication();
     setupApp(app);

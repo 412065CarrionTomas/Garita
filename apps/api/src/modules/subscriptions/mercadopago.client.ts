@@ -16,6 +16,13 @@ export const preapprovalSchema = z.object({
   init_point: z.string().optional(),
   external_reference: z.string().nullish(),
   next_payment_date: z.string().nullish(),
+  auto_recurring: z
+    .object({
+      transaction_amount: z
+        .union([z.string().regex(/^\d+(?:\.\d{1,2})?$/), z.number().nonnegative()])
+        .nullish(),
+    })
+    .nullish(),
 });
 export type MercadoPagoPreapproval = z.infer<typeof preapprovalSchema>;
 
@@ -157,7 +164,14 @@ export class MercadoPagoClient {
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      // Validated decimal strings become JSON numbers without a floating point conversion.
+      body:
+        body === undefined
+          ? undefined
+          : JSON.stringify(body).replace(
+              /"(unit_price|transaction_amount)":"(\d+(?:\.\d{1,2})?)"/g,
+              '"$1":$2',
+            ),
       signal: AbortSignal.timeout(10_000),
     });
     const data: unknown = await res.json().catch(() => null);
@@ -184,5 +198,55 @@ export class MercadoPagoClient {
       throw new BadGatewayException('Respuesta inesperada de Mercado Pago');
     }
     return parsed.data;
+  }
+
+  updatePreapprovalAmount(id: string, amount: string): Promise<MercadoPagoPreapproval> {
+    z.string()
+      .regex(/^\d+\.\d{2}$/)
+      .parse(amount);
+    return this.request('PUT', `/preapproval/${encodeURIComponent(id)}`, preapprovalSchema, {
+      auto_recurring: { transaction_amount: amount, currency_id: 'ARS' },
+    });
+  }
+
+  async setPreferenceExpiration(id: string, expiresAt: Date): Promise<void> {
+    await this.request(
+      'PUT',
+      `/checkout/preferences/${encodeURIComponent(id)}`,
+      z.object({ id: z.string() }),
+      {
+        expires: true,
+        expiration_date_to: expiresAt.toISOString(),
+      },
+    );
+  }
+
+  async createPreference(input: {
+    externalReference: string;
+    title: string;
+    amount: string;
+    backUrl: string;
+  }): Promise<{ id: string; initPoint: string }> {
+    z.string()
+      .regex(/^\d+\.\d{2}$/)
+      .parse(input.amount);
+    const preference = await this.request(
+      'POST',
+      '/checkout/preferences',
+      z.object({
+        id: z.string(),
+        init_point: z.url(),
+      }),
+      {
+        external_reference: input.externalReference,
+        items: [{ title: input.title, quantity: 1, currency_id: 'ARS', unit_price: input.amount }],
+        back_urls: { success: input.backUrl, pending: input.backUrl, failure: input.backUrl },
+        expires: true,
+        expiration_date_to: new Date(Date.now() + 86_400_000).toISOString(),
+        // Avoid vouchers that can settle long after the upgrade quote expires.
+        payment_methods: { excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }] },
+      },
+    );
+    return { id: preference.id, initPoint: preference.init_point };
   }
 }

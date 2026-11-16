@@ -1,3 +1,4 @@
+import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { z } from 'zod';
 import { Test } from '@nestjs/testing';
 import { BadRequestException, type INestApplication, Logger } from '@nestjs/common';
@@ -63,6 +64,8 @@ describe('HU-27 usuarios del portal (e2e)', () => {
       .useValue(identity)
       .overrideProvider(ResendInvitationMailer)
       .useValue(mailer)
+      .overrideProvider(PlanChangeProcessor)
+      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);

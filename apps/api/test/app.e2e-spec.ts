@@ -1,3 +1,4 @@
+import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { FcmMessaging } from '../src/modules/notifications/fcm-messaging';
 import { MercadoPagoClient } from '../src/modules/subscriptions/mercadopago.client';
 import { MercadoPagoNotificationsProcessor } from '../src/modules/subscriptions/mercadopago-notifications.processor';
@@ -261,12 +262,16 @@ describe('Aplicación (e2e)', () => {
       ['post', 'suscripcion'],
       ['post', 'suscripcion/cancelar'],
       ['post', 'suscripcion/revertir-cancelacion'],
+      ['get', 'suscripcion/cambio-plan/simular?plan=plan-basico'],
+      ['post', 'suscripcion/cambio-plan'],
+      ['get', 'suscripcion/historial'],
     ] as const) {
       await request(app.getHttpServer())[method](`/api/v1/${path}`).expect(401);
-      await request(app.getHttpServer())
-        [method](`/api/v1/${path}`)
-        .set('Authorization', 'Bearer token-supervisor')
-        .expect(403);
+      for (const token of ['token-supervisor', 'token-guard', 'token-client'])
+        await request(app.getHttpServer())
+          [method](`/api/v1/${path}`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
     }
   });
 
@@ -640,6 +645,8 @@ describe('Aplicación (e2e)', () => {
           }),
         ),
       })
+      .overrideProvider(PlanChangeProcessor)
+      .useValue({})
       .compile();
 
     app = moduleRef.createNestApplication();

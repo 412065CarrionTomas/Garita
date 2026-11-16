@@ -1,3 +1,6 @@
+import { PlanChangeController } from './plan-change.controller';
+import { PlanChangeService } from './plan-change.service';
+import { PlanChangeProcessor, PLAN_CHANGE_QUEUE } from './plan-change.processor';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { UsersModule } from '../users/users.module';
@@ -22,10 +25,16 @@ import { SubscriptionsService } from './subscriptions.service';
     PrismaModule,
     UsersModule,
     ClockModule,
-    BullModule.registerQueue({ name: MP_NOTIFICATIONS_QUEUE }, { name: MP_RECONCILIATION_QUEUE }),
+    BullModule.registerQueue(
+      { name: MP_NOTIFICATIONS_QUEUE },
+      { name: MP_RECONCILIATION_QUEUE },
+      { name: PLAN_CHANGE_QUEUE },
+    ),
   ],
-  controllers: [MercadoPagoWebhookController, SubscriptionsController],
+  controllers: [MercadoPagoWebhookController, SubscriptionsController, PlanChangeController],
   providers: [
+    PlanChangeService,
+    PlanChangeProcessor,
     MercadoPagoClient,
     MercadoPagoWebhookService,
     SubscriptionsService,

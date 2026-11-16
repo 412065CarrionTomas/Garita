@@ -1,3 +1,4 @@
+import type { PlanChangeService } from './plan-change.service';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../generated/prisma/client';
@@ -28,8 +29,10 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
     findUniqueOrThrow: jest.fn(),
   };
   const db = {
+    $transaction: jest.fn(),
     plan: { findFirst: jest.fn().mockResolvedValue(plan) },
     company: {
+      update: jest.fn(),
       findUniqueOrThrow: jest.fn().mockResolvedValue({ trialEndsAt: options.trialEndsAt ?? null }),
     },
     subscription,
@@ -44,6 +47,7 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
     },
     $executeRaw: jest.fn(),
   };
+  db.$transaction.mockImplementation((run: (tx: typeof db) => Promise<unknown>) => run(db));
   const mercadoPago = {
     createPreapproval: jest
       .fn()
@@ -66,8 +70,9 @@ function setup(options: { open?: object | null; trialEndsAt?: Date | null; local
     config as unknown as ConfigService<Env, true>,
     { now: () => NOW },
     account as unknown as AccountStatePort,
-    new NoopSubscriptionEffects(),
+    new NoopSubscriptionEffects({ onPayment: jest.fn() } as unknown as PlanChangeService),
     selection as unknown as GuardSelectionService,
+    { clearDowngrade: jest.fn().mockResolvedValue(undefined) } as unknown as PlanChangeService,
   );
   return { service, db, mercadoPago, account };
 }
@@ -271,7 +276,11 @@ describe('SubscriptionsService cancellation', () => {
     const get = jest
       .spyOn(service, 'get')
       .mockResolvedValue({ trialEndsAt: null, subscription: null });
-    db.subscription.findUniqueOrThrow.mockResolvedValue({ nextChargeAt: paidUntil });
+    db.subscription.findUniqueOrThrow.mockResolvedValue({
+      nextChargeAt: paidUntil,
+      planId: plan.id,
+      mpPreapprovalId: 'mp-1',
+    });
 
     await service.cancel('company-1', 'user-1', 'Cerramos la empresa');
 
@@ -285,6 +294,16 @@ describe('SubscriptionsService cancellation', () => {
         cancelReason: 'Cerramos la empresa',
         cancelRequestedAt: NOW,
         cancelRequestedById: 'user-1',
+        changes: {
+          create: {
+            companyId: 'company-1',
+            type: 'cancellation',
+            planId: plan.id,
+            adminId: 'user-1',
+            effectiveAt: paidUntil,
+            reason: 'Cerramos la empresa',
+          },
+        },
       },
     });
     expect(get).toHaveBeenCalledWith('company-1');
@@ -306,7 +325,7 @@ describe('SubscriptionsService cancellation', () => {
     });
     jest.spyOn(service, 'get').mockResolvedValue({ trialEndsAt: null, subscription: null });
 
-    await service.revertCancellation('company-1');
+    await service.revertCancellation('company-1', 'user-1');
 
     expect(mercadoPago.setPreapprovalStatus).toHaveBeenCalledWith('mp-1', 'authorized');
     expect(db.subscription.update).toHaveBeenCalledWith({
@@ -317,6 +336,15 @@ describe('SubscriptionsService cancellation', () => {
         cancelReason: null,
         cancelRequestedAt: null,
         cancelRequestedById: null,
+        changes: {
+          create: {
+            companyId: 'company-1',
+            type: 'cancellation_reverted',
+            planId: undefined,
+            adminId: 'user-1',
+            effectiveAt: NOW,
+          },
+        },
       },
     });
   });
@@ -330,13 +358,17 @@ describe('SubscriptionsService cancellation', () => {
         cancelAt: new Date('2026-11-01T00:00:00.000Z'),
       },
     });
-    await expect(service.revertCancellation('company-1')).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.revertCancellation('company-1', 'user-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(mercadoPago.setPreapprovalStatus).not.toHaveBeenCalled();
   });
 
   it('refuses to revert when nothing was cancelled', async () => {
     const { service } = setup();
-    await expect(service.revertCancellation('company-1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.revertCancellation('company-1', 'user-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('ends the subscription in Mercado Pago once the paid cycle is over', async () => {
