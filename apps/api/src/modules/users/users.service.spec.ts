@@ -19,7 +19,10 @@ describe('UsersService invitation lifecycle', () => {
     clientId: null,
   };
   const db = {
-    shift: { findMany: jest.fn().mockResolvedValue([{ id: 'future' }]) },
+    shift: {
+      findMany: jest.fn().mockResolvedValue([{ id: 'future' }]),
+      count: jest.fn().mockResolvedValue(1),
+    },
     user: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
     invitation: { count: jest.fn(), updateMany: jest.fn(), create: jest.fn() },
     client: { updateMany: jest.fn() },
@@ -52,7 +55,7 @@ describe('UsersService invitation lifecycle', () => {
 
   it('counts only future scheduled shifts assigned to the owned guard', async () => {
     await expect(service.countFutureShifts('user')).resolves.toBe(1);
-    expect(db.shift.findMany).toHaveBeenCalledWith(
+    expect(db.shift.count).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           status: 'scheduled',

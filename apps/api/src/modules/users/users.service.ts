@@ -511,16 +511,20 @@ export class UsersService {
 
   async countFutureShifts(id: string): Promise<number> {
     await this.getUser(id);
-    return (await this.findFutureShifts(id)).length;
+    return this.prisma.tenantPrisma.shift.count({ where: this.futureShiftsWhere(id) });
+  }
+
+  private futureShiftsWhere(id: string) {
+    return {
+      status: 'scheduled' as const,
+      startsAt: { gt: this.clock.now() },
+      assignments: { some: { guardId: id, isCurrent: true, active: true } },
+    };
   }
 
   private findFutureShifts(id: string) {
     return this.prisma.tenantPrisma.shift.findMany({
-      where: {
-        status: 'scheduled',
-        startsAt: { gt: this.clock.now() },
-        assignments: { some: { guardId: id, isCurrent: true, active: true } },
-      },
+      where: this.futureShiftsWhere(id),
       include: { assignments: { where: { guardId: id, isCurrent: true } } },
       orderBy: { startsAt: 'asc' },
     });
