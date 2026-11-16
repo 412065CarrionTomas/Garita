@@ -433,12 +433,12 @@ export class SubscriptionsService {
         // Serialize cancellation with plan changes and guard-slot mutations.
         await tx.company.update({ where: { id: companyId }, data: { id: companyId } });
         const fresh = await tx.subscription.findUniqueOrThrow({ where: { id: open.id } });
-        if (fresh.cancelAt) throw new ConflictException('La suscripci�n ya est� cancelada');
+        if (fresh.cancelAt) throw new ConflictException('La suscripción ya está cancelada');
         const now = this.clock.now();
         const cancelAt = fresh.nextChargeAt && fresh.nextChargeAt > now ? fresh.nextChargeAt : now;
         await this.planChanges.clearDowngrade(fresh, tx as unknown as Prisma.TransactionClient);
         if (!fresh.mpPreapprovalId)
-          throw new ConflictException('Falta la suscripci�n en Mercado Pago.');
+          throw new ConflictException('Falta la suscripción en Mercado Pago.');
         await this.mercadoPago.setPreapprovalStatus(fresh.mpPreapprovalId, 'paused');
         await tx.subscription.update({
           where: { id: open.id },
@@ -513,11 +513,14 @@ export class SubscriptionsService {
       // If Mercado Pago fails, the row stays paused and the next read retries.
       await this.mercadoPago.cancelPreapproval(subscription.mpPreapprovalId);
     }
-    await this.account.transition({
-      companyId: subscription.companyId,
-      to: 'suspended',
-      reason: 'cancelled',
-    });
+    // Only an active account is suspended by the cancellation: a trial keeps running until it
+    // ends and a grace until it expires, and each has its own sweep to suspend the account.
+    if ((await this.account.get(subscription.companyId)).status === 'active')
+      await this.account.transition({
+        companyId: subscription.companyId,
+        to: 'suspended',
+        reason: 'cancelled',
+      });
     await this.prisma.systemPrisma.subscription.update({
       where: { id: subscription.id, companyId: subscription.companyId },
       data: { status: 'cancelled' },
