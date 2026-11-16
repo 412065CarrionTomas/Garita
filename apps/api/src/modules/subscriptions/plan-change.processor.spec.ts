@@ -1,6 +1,5 @@
 import type { Job, Queue } from 'bullmq';
 import type { PrismaService } from '../prisma/prisma.service';
-import type { GuardSelectionService } from './guard-selection';
 import type { PlanChangeService } from './plan-change.service';
 import { PlanChangeProcessor } from './plan-change.processor';
 
@@ -15,12 +14,10 @@ describe('barrido de cambios de plan', () => {
       },
     };
     const changes = { applyDowngrade: jest.fn(), repairAmount: jest.fn() };
-    const selection = { apply: jest.fn() };
     const queue = { upsertJobScheduler: jest.fn() };
     const processor = new PlanChangeProcessor(
       { systemPrisma: db } as unknown as PrismaService,
       changes as unknown as PlanChangeService,
-      selection as unknown as GuardSelectionService,
       { now: () => new Date('2030-11-11T12:00:00Z') },
       queue as unknown as Queue,
     );

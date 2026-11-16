@@ -1,4 +1,3 @@
-import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { syncBatchResponseSchema } from '@garita/shared';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -46,8 +45,6 @@ describe('HU-14 integración de hora confiable', () => {
       })
       .overrideProvider(CLOCK)
       .useValue({ now: () => testNow })
-      .overrideProvider(PlanChangeProcessor)
-      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);

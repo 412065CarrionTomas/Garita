@@ -1,4 +1,3 @@
-import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { randomUUID, createHash } from 'node:crypto';
@@ -45,8 +44,6 @@ describe('Flujos de gestión de personal (e2e)', () => {
       .useValue(identity)
       .overrideProvider(ResendInvitationMailer)
       .useValue(mailer)
-      .overrideProvider(PlanChangeProcessor)
-      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);

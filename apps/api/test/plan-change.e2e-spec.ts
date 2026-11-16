@@ -23,7 +23,6 @@ import {
   PLAN_CHANGE_QUEUE,
 } from '../src/modules/subscriptions/plan-change.processor';
 import { PlanChangeService } from '../src/modules/subscriptions/plan-change.service';
-import { GuardSelectionService } from '../src/modules/subscriptions/guard-selection';
 import { ResendInvitationMailer } from '../src/modules/users/email.service';
 import { FcmMessaging } from '../src/modules/notifications/fcm-messaging';
 import { SubscriptionsService } from '../src/modules/subscriptions/subscriptions.service';
@@ -256,7 +255,6 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
     return new PlanChangeProcessor(
       app.get(PrismaService),
       app.get(PlanChangeService),
-      app.get(GuardSelectionService),
       { now: () => now },
       queue as never,
     );
@@ -475,5 +473,27 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
       suspensionReason: 'cancelled',
     });
     expect((await current()).status).toBe('cancelled');
+  });
+  it('cancelación vencida durante la prueba: cancela la suscripción sin suspender la cuenta', async () => {
+    await db.company.update({ where: { id: companyId }, data: { accountStatus: 'trial' } });
+    await db.subscription.update({
+      where: { id: subId },
+      data: { status: 'paused', cancelAt: end },
+    });
+    now = end;
+    await app.get(SubscriptionsService).finishDueCancellation(await current());
+    expect((await current()).status).toBe('cancelled');
+    expect((await db.company.findUniqueOrThrow({ where: { id: companyId } })).accountStatus).toBe(
+      'trial',
+    );
+  });
+  it('una suscripción todavía sin autorizar no puede simular ni cambiar de plan', async () => {
+    await db.subscription.update({ where: { id: subId }, data: { status: 'pending' } });
+    await request(app.getHttpServer())
+      .get(`${url}/cambio-plan/simular`)
+      .query({ plan: premium })
+      .set(auth())
+      .expect(409);
+    await change(premium).expect(409);
   });
 });

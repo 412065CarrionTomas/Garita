@@ -3,8 +3,8 @@ import { Inject, Logger, type OnModuleInit } from '@nestjs/common';
 import type { Job, Queue } from 'bullmq';
 import { z } from 'zod';
 import { CLOCK, type Clock } from '../../common/clock';
+import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { GuardSelectionService } from './guard-selection';
 import { PlanChangeService } from './plan-change.service';
 
 export const PLAN_CHANGE_QUEUE = 'subscription-plan-change';
@@ -16,7 +16,6 @@ export class PlanChangeProcessor extends WorkerHost implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly changes: PlanChangeService,
-    private readonly selection: GuardSelectionService,
     @Inject(CLOCK) private readonly clock: Clock,
     @InjectQueue(PLAN_CHANGE_QUEUE) private readonly queue: Queue,
   ) {
@@ -58,20 +57,40 @@ export class PlanChangeProcessor extends WorkerHost implements OnModuleInit {
         rejectionReason: 'El enlace de pago venció. Podés volver a simular el cambio.',
       },
     });
+    const now = this.clock.now();
+    // The 5 minute sweep only visits subscriptions with work to do; the daily pass compares
+    // the remote amount of every open one.
+    const where: Prisma.SubscriptionWhereInput =
+      kind === 'daily'
+        ? { status: { in: ['pending', 'authorized', 'paused'] }, mpPreapprovalId: { not: null } }
+        : {
+            OR: [
+              {
+                status: 'authorized',
+                cancelAt: null,
+                pendingPlanId: { not: null },
+                pendingPlanAt: { lte: now },
+              },
+              {
+                status: { not: 'cancelled' },
+                mpPreapprovalId: { not: null },
+                planChangePayments: { some: { amountUpdatePending: true } },
+              },
+            ],
+          };
     let failed = false;
     for (let cursor: string | undefined; ;) {
       const batch = await db.subscription.findMany({
-        where: { status: { in: ['pending', 'authorized', 'paused'] } },
+        where,
+        select: { id: true },
         orderBy: { id: 'asc' },
         take: 50,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
       for (const s of batch) {
         try {
+          // Pending guards of an applied downgrade are retried by the reconciliation sweep.
           await this.changes.applyDowngrade(s.id);
-          const fresh = await db.subscription.findUniqueOrThrow({ where: { id: s.id } });
-          if (fresh.status === 'authorized')
-            await this.selection.apply(fresh.id, fresh.companyId, fresh.guardSelection);
           await this.changes.repairAmount(s.id, kind === 'daily');
         } catch (error) {
           failed = true;

@@ -1,4 +1,3 @@
-import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import {
   startShiftResponseSchema,
   syncBatchResponseSchema,
@@ -96,8 +95,6 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       .useValue(realtimePort)
       .overrideProvider(PHOTO_STORAGE_PORT)
       .useValue(photoStorage)
-      .overrideProvider(PlanChangeProcessor)
-      .useValue({})
       .compile();
 
     app = moduleRef.createNestApplication();

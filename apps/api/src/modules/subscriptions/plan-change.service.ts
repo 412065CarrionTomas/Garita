@@ -40,7 +40,7 @@ export class PlanChangeService {
       throw new ConflictException(
         'Todavía no tenés una suscripción: elegí el plan al suscribirte.',
       );
-    if (row.cancelAt || row.status === 'paused' || !row.mpPreapprovalId)
+    if (row.cancelAt || row.status !== 'authorized' || !row.mpPreapprovalId)
       throw new ConflictException(
         'Revertí la cancelación o autorizá la suscripción antes de cambiar de plan.',
       );
@@ -297,7 +297,12 @@ export class PlanChangeService {
         return;
       }
       const s = await tx.subscription.findUniqueOrThrow({ where: { id: row.subscriptionId } });
-      if (s.planId !== row.previousPlanId || s.status !== 'authorized' || s.cancelAt)
+      if (
+        s.planId !== row.previousPlanId ||
+        s.status !== 'authorized' ||
+        s.cancelAt ||
+        s.pendingPlanId
+      )
         throw new ConflictException(
           'El pago requiere revisión: la suscripción cambió desde la simulación.',
         );
@@ -346,9 +351,36 @@ export class PlanChangeService {
 
   async repairAmount(subscriptionId: string, compare: boolean): Promise<void> {
     const root = this.prisma.systemPrisma;
+    // Everything that can end without a change is checked before taking the Company lock, and
+    // the remote read never runs while holding it.
+    const initial = await root.subscription.findUnique({
+      where: { id: subscriptionId },
+      include: { plan: true, pendingPlan: true },
+    });
+    if (!initial?.mpPreapprovalId || initial.status === 'cancelled') return;
+    if (await root.planChangePayment.count({ where: { subscriptionId, status: 'pending' } }))
+      return;
+    if (
+      !compare &&
+      !(await root.planChangePayment.count({
+        where: { subscriptionId, amountUpdatePending: true },
+      }))
+    )
+      return;
+    const before = compare
+      ? (await this.mercadoPago.getPreapproval(initial.mpPreapprovalId)).auto_recurring
+          ?.transaction_amount
+      : null;
+    if (compare) {
+      if (before === null || before === undefined) {
+        this.logger.warn({ event: 'subscription.amount_unavailable', subscriptionId });
+        return;
+      }
+      if ((initial.pendingPlan ?? initial.plan).monthlyPrice.equals(new Prisma.Decimal(before)))
+        return;
+    }
     await root.$transaction(
       async (tx) => {
-        const initial = await tx.subscription.findUniqueOrThrow({ where: { id: subscriptionId } });
         await tx.company.update({
           where: { id: initial.companyId },
           data: { id: initial.companyId },
@@ -361,19 +393,6 @@ export class PlanChangeService {
         if (await tx.planChangePayment.count({ where: { subscriptionId, status: 'pending' } }))
           return;
         const expected = (s.pendingPlan ?? s.plan).monthlyPrice;
-        if (
-          !compare &&
-          !(await tx.planChangePayment.count({
-            where: { subscriptionId, amountUpdatePending: true },
-          }))
-        )
-          return;
-        const remote = compare ? await this.mercadoPago.getPreapproval(s.mpPreapprovalId) : null;
-        const before = remote?.auto_recurring?.transaction_amount;
-        if (compare && (before === null || before === undefined)) {
-          this.logger.warn({ event: 'subscription.amount_unavailable', subscriptionId });
-          return;
-        }
         if (
           !compare ||
           (before !== null && before !== undefined && !expected.equals(new Prisma.Decimal(before)))
@@ -398,8 +417,17 @@ export class PlanChangeService {
 
   async applyDowngrade(subscriptionId: string): Promise<void> {
     const root = this.prisma.systemPrisma;
+    // No Company lock unless there is a downgrade to apply.
+    const initial = await root.subscription.findUnique({ where: { id: subscriptionId } });
+    if (
+      !initial?.pendingPlanId ||
+      !initial.pendingPlanAt ||
+      initial.pendingPlanAt > this.clock.now() ||
+      initial.status !== 'authorized' ||
+      initial.cancelAt
+    )
+      return;
     const result = await root.$transaction(async (tx) => {
-      const initial = await tx.subscription.findUniqueOrThrow({ where: { id: subscriptionId } });
       await tx.company.update({
         where: { id: initial.companyId },
         data: { id: initial.companyId },
@@ -493,7 +521,7 @@ export class PlanChangeService {
     db: Prisma.TransactionClient = this.prisma.tenantPrisma as unknown as Prisma.TransactionClient,
   ): Promise<void> {
     if (!s.pendingPlanId) return;
-    if (!s.mpPreapprovalId) throw new ConflictException('Falta la suscripci�n en Mercado Pago.');
+    if (!s.mpPreapprovalId) throw new ConflictException('Falta la suscripción en Mercado Pago.');
     const plan = await db.plan.findUniqueOrThrow({ where: { id: s.planId } });
     await this.mercadoPago.updatePreapprovalAmount(s.mpPreapprovalId, plan.monthlyPrice.toFixed(2));
     await db.subscription.update({
