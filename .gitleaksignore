@@ -1,3 +1,7 @@
 e7ebdba5dbb58244abc07fd230c19121d6497179:apps/api/test/app.e2e-spec.ts:generic-api-key:221
 # Fixture del e2e de no exposición de HU-28; no es un secreto.
 39d180d79ca2bfc7960cac9211845d90f304cb5e:apps/api/test/portal.e2e-spec.ts:generic-api-key:42
+# Dato trampa ficticio del e2e de no exposición de HU-40 (variable ya renombrada); no es un secreto.
+07c547d41d1de1a3aa132bd75d2a85effe44f4a0:apps/api/test/report-exports.e2e-spec.ts:generic-api-key:32
+# Secreto ficticio del e2e de HU-37 (ya reemplazado por una cadena generada); no es un secreto.
+4de0c53e9762f2241dec372782d2c10188e63c56:apps/api/test/sms.e2e-spec.ts:generic-api-key:35

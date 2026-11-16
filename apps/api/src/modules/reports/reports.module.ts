@@ -12,5 +12,6 @@ import { IncidentReportsController } from './incident-reports.controller';
   imports: [PrismaModule, ClockModule],
   controllers: [ReportsController, IncidentReportsController],
   providers: [ReportsService, TenantResourceService, ReportScopeService, IncidentReportsService],
+  exports: [ReportsService, IncidentReportsService],
 })
 export class ReportsModule {}

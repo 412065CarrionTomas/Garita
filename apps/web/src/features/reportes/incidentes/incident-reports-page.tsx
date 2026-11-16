@@ -22,6 +22,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { CountChart } from '../charts/count-chart';
 import { ResponseTimes } from './response-times';
 import { SegmentDetail } from './segment-detail';
+import { ExportPdfButton } from '../export-pdf-button';
 
 const periods = [
   { value: 'hoy', label: 'Hoy', days: 1 },
@@ -181,6 +182,11 @@ export function IncidentReportsPage() {
           </form>
         </CardContent>
       </Card>
+      <ExportPdfButton
+        endpoint="/reportes/incidentes/pdf"
+        filters={{ ...filters, ...(data ? { desde: data.desde, hasta: data.hasta } : {}) }}
+        disabled={!data || incidents.isFetching || times.isFetching || panic.isFetching}
+      />
       {(incidents.isPending || times.isPending || panic.isPending) && (
         <p role="status">Cargando reportes…</p>
       )}

@@ -416,6 +416,46 @@ describe('aislamiento del portal por cliente', () => {
     status: 'active' as const,
     clientId: 'client-a',
   };
+  it('HU-40 registra ReportExport y limita consultas de clientes al propio activo sin borrar el intento ajeno', () => {
+    expect(COMPANY_ID_MODELS).toContain('ReportExport');
+    expect(scopeArgs('ReportExport', 'create', { data: { userId: user.userId } }, 'north')).toEqual(
+      { data: { userId: user.userId, companyId: 'north' } },
+    );
+    expect(addClientFilter('Client', {}, user)).toEqual({
+      where: { AND: [{}, { id: 'client-a', status: 'active' }] },
+    });
+    for (const where of [{ id: 'client-b' }, { status: 'inactive' }, { companyId: 'south' }]) {
+      expect(addClientFilter('Client', { where }, user)).toEqual({
+        where: { ...where, AND: [where, { id: 'client-a', status: 'active' }] },
+      });
+    }
+  });
+  it('HU-40 filtra exportaciones propias aun sin where y rechaza escrituras con otro usuario', () => {
+    expect(addClientFilter('ReportExport', {}, user)).toEqual({
+      where: { AND: [{}, { userId: user.userId }] },
+    });
+    const where = { id: 'other-export', userId: 'other-user', companyId: 'north' };
+    expect(addClientFilter('ReportExport', { where }, user)).toEqual({
+      where: { ...where, AND: [where, { userId: user.userId }] },
+    });
+    expect(() =>
+      addClientFilter('ReportExport', { data: { userId: 'other-user' } }, user, 'create'),
+    ).toThrow();
+    expect(() =>
+      addClientFilter(
+        'ReportExport',
+        { where: {}, data: { userId: { set: 'other-user' } } },
+        user,
+        'updateMany',
+      ),
+    ).toThrow();
+    const data = { userId: user.userId, companyId: 'north' };
+    expect(addClientFilter('ReportExport', { data }, user, 'create')).toEqual({ data });
+    expect(addClientFilter('ReportExport', { data }, user, 'updateMany')).toEqual({
+      data,
+      where: { AND: [{}, { userId: user.userId }] },
+    });
+  });
   it('conserva el filtro tenant y exige predio y cliente activos aunque se intente otro filtro', () => {
     expect(
       addClientFilter(
@@ -489,4 +529,10 @@ describe('aislamiento del portal por cliente', () => {
       expect(() => addClientFilter(model, {}, { ...user, clientId: null })).toThrow();
     },
   );
+});
+
+it('HU-37: los SMS sin empresa y los de otra empresa no entran en la consulta tenant', () => {
+  expect(scopeArgs('SmsInbound', 'findMany', { where: { result: 'unknown' } }, 'north')).toEqual({
+    where: { result: 'unknown', companyId: 'north' },
+  });
 });

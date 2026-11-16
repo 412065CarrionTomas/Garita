@@ -29,10 +29,17 @@ const credential = {
 
 describe('SMS twin extension contract for HU-37', () => {
   afterEach(() => jest.restoreAllMocks());
-  it('has no SMS arrivals before HU-37', async () => {
+  it('consulta la gemela por turno, empresa e identificador corto', async () => {
+    const findFirst = jest.fn().mockResolvedValue(null);
     await expect(
-      panicSmsTwinFinder.find({ companyId: 'company', shiftId: 'shift', shortId: 'A1234567' }),
+      panicSmsTwinFinder.find({ companyId: 'company', shiftId: 'shift', shortId: 'A1234567' }, {
+        panicAlert: { findFirst },
+      } as unknown as Prisma.TransactionClient),
     ).resolves.toBeNull();
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { companyId: 'company', shiftId: 'shift', shortId: 'A1234567', channel: 'sms' },
+      select: { id: true },
+    });
   });
   it('PanicService.create consults the extension inside its locked transaction', async () => {
     const find = jest.spyOn(panicSmsTwinFinder, 'find');
@@ -74,11 +81,14 @@ describe('SMS twin extension contract for HU-37', () => {
       { schedule: jest.fn().mockResolvedValue(undefined) } as never,
     );
     expect(await service.create(input, credential)).toMatchObject({ alertId: input.alertId });
-    expect(find).toHaveBeenCalledWith({
-      companyId: 'company',
-      shiftId: 'shift',
-      shortId: 'A1234567',
-    });
+    expect(find).toHaveBeenCalledWith(
+      {
+        companyId: 'company',
+        shiftId: 'shift',
+        shortId: 'A1234567',
+      },
+      tx,
+    );
     expect(tx.panicAlert.create).toHaveBeenCalledTimes(1);
   });
   it('completes a future SMS twin preserving its origin and first receipt', async () => {

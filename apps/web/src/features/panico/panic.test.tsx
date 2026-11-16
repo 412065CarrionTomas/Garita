@@ -29,6 +29,7 @@ const alert = {
   guard: { name: 'Pedro Díaz', phone: '+5493511234567' },
   timezone: 'America/Argentina/Buenos_Aires',
   authenticated: true,
+  phoneMismatch: false,
   latitude: -31.4,
   longitude: -64.2,
   accuracyMeters: 20,
@@ -287,7 +288,7 @@ it('filtra el historial por predio y estado', async () => {
 });
 
 it('muestra la indicación preparada para una alerta SMS no verificada', async () => {
-  jest.mocked(apiGet).mockResolvedValue({ ...alert, authenticated: false });
+  jest.mocked(apiGet).mockResolvedValue({ ...alert, authenticated: false, phoneMismatch: true });
   renderWithQueryClient(
     <MemoryRouter>
       <PanicDetailPage />
@@ -296,4 +297,30 @@ it('muestra la indicación preparada para una alerta SMS no verificada', async (
   expect(
     await screen.findByText('No verificada. Atendé la alerta igualmente.'),
   ).toBeInTheDocument();
+  expect(screen.getByText('Por SMS')).toBeVisible();
+  expect(screen.getByText('El número no coincide')).toBeVisible();
+});
+
+it('indica SMS, falta de verificación y número diferente también en el listado', async () => {
+  jest.mocked(apiGet).mockImplementation((path) =>
+    Promise.resolve(
+      path === '/predios'
+        ? []
+        : {
+            items: [{ ...alert, authenticated: false, phoneMismatch: true }],
+            total: 1,
+            page: 1,
+            pageSize: 25,
+            activeCount: 1,
+          },
+    ),
+  );
+  renderWithQueryClient(
+    <MemoryRouter>
+      <PanicListPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText('Por SMS')).toBeVisible();
+  expect(screen.getByText('No verificada')).toBeVisible();
+  expect(screen.getByText('El número no coincide')).toBeVisible();
 });
