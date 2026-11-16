@@ -1,6 +1,10 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { cancelSubscriptionRequestSchema, createSubscriptionRequestSchema } from '@garita/shared';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  cancelSubscriptionRequestSchema,
+  createSubscriptionRequestSchema,
+  subscriptionQuerySchema,
+} from '@garita/shared';
 import { parseOrBadRequest } from '../../common/parse-or-bad-request';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -23,11 +27,16 @@ export class SubscriptionsController {
   @Roles('admin')
   @ApiOperation({ summary: 'Crea la suscripción y devuelve el enlace de Mercado Pago' })
   @ApiResponse({ status: 403, description: 'Solo administradores' })
-  @ApiResponse({ status: 409, description: 'La empresa ya tiene una suscripción activa' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Suscripción activa o elección de vigiladores requerida (guard_selection_required)',
+  })
   create(@Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
     return this.subscriptions.create(
       user.companyId,
       parseOrBadRequest(createSubscriptionRequestSchema, body),
+      user.userId,
     );
   }
 
@@ -55,8 +64,17 @@ export class SubscriptionsController {
   @Get('suscripcion')
   @Roles('admin')
   @ApiOperation({ summary: 'Plan, estado, próximo cobro e historial de cobros' })
+  @ApiQuery({
+    name: 'chargePage',
+    required: false,
+    type: Number,
+    description: 'Página del historial de cobros (24 por página)',
+  })
   @ApiResponse({ status: 403, description: 'Solo administradores' })
-  get(@CurrentUser() user: AuthenticatedUser) {
-    return this.subscriptions.get(user.companyId);
+  get(@CurrentUser() user: AuthenticatedUser, @Query() query: unknown) {
+    return this.subscriptions.get(
+      user.companyId,
+      parseOrBadRequest(subscriptionQuerySchema, query).chargePage,
+    );
   }
 }

@@ -10,6 +10,12 @@ import {
   type SubscriptionResponse,
   type SubscriptionStatus,
 } from '@garita/shared';
+import { ACCOUNT_STATE_PORT, type AccountStatePort } from '../../common/ports/account-state.port';
+import {
+  SUBSCRIPTION_EFFECTS_PORT,
+  type SubscriptionEffectsPort,
+} from './subscription-effects.port';
+import { GuardSelectionService } from './guard-selection';
 import { CLOCK, type Clock } from '../../common/clock';
 import type { Env } from '../../config/env';
 import { Prisma } from '../../generated/prisma/client';
@@ -58,6 +64,9 @@ export class SubscriptionsService {
     private readonly mercadoPago: MercadoPagoClient,
     private readonly config: ConfigService<Env, true>,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(ACCOUNT_STATE_PORT) private readonly account: AccountStatePort,
+    @Inject(SUBSCRIPTION_EFFECTS_PORT) private readonly effects: SubscriptionEffectsPort,
+    private readonly guardSelection: GuardSelectionService,
   ) {}
 
   async listPlans(): Promise<PlanResponse[]> {
@@ -71,6 +80,7 @@ export class SubscriptionsService {
   async create(
     companyId: string,
     input: CreateSubscriptionRequest,
+    adminId: string,
   ): Promise<CreateSubscriptionResponse> {
     const db = this.prisma.tenantPrisma;
     const plan = await db.plan.findFirst({ where: { id: input.planId, active: true } });
@@ -82,6 +92,11 @@ export class SubscriptionsService {
     if (open && open.status !== 'pending') {
       throw new ConflictException('La empresa ya tiene una suscripción activa');
     }
+    const selection = await this.guardSelection.validate(
+      plan.maxGuards,
+      input.guardSelection,
+      adminId,
+    );
     // An abandoned checkout is replaced so the admin can pick another plan or payer.
     if (open) await this.cancelPending(open.id, open.mpPreapprovalId);
 
@@ -96,7 +111,13 @@ export class SubscriptionsService {
 
     const subscription = await db.subscription
       .create({
-        data: { companyId, planId: plan.id, payerEmail: input.payerEmail, startsAt },
+        data: {
+          companyId,
+          planId: plan.id,
+          payerEmail: input.payerEmail,
+          startsAt,
+          guardSelection: selection ?? Prisma.DbNull,
+        },
       })
       .catch((error: unknown) => {
         // Partial unique index: another request opened a subscription at the same time.
@@ -131,7 +152,7 @@ export class SubscriptionsService {
     }
   }
 
-  async get(companyId: string): Promise<SubscriptionResponse> {
+  async get(companyId: string, chargePage = 1): Promise<SubscriptionResponse> {
     const db = this.prisma.tenantPrisma;
     const company = await db.company.findUniqueOrThrow({
       where: { id: companyId },
@@ -151,7 +172,15 @@ export class SubscriptionsService {
     const subscription = latest
       ? await db.subscription.findUniqueOrThrow({
           where: { id: latest.id },
-          include: { plan: true, charges: { orderBy: { createdAt: 'desc' } } },
+          include: {
+            plan: true,
+            _count: { select: { charges: { where: { status: 'approved' } } } },
+            charges: {
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: (chargePage - 1) * 24,
+              take: 25,
+            },
+          },
         })
       : null;
     return {
@@ -165,7 +194,10 @@ export class SubscriptionsService {
         nextChargeAt: subscription.nextChargeAt?.toISOString() ?? null,
         lastFailureReason: subscription.lastFailureReason,
         cancelAt: subscription.cancelAt?.toISOString() ?? null,
-        charges: subscription.charges.map((charge) => ({
+        chargePage,
+        hasMoreCharges: subscription.charges.length > 24,
+        hasApprovedCharge: subscription._count.charges > 0,
+        charges: subscription.charges.slice(0, 24).map((charge) => ({
           id: charge.id,
           amount: charge.amount.toFixed(2),
           status: charge.status,
@@ -180,33 +212,96 @@ export class SubscriptionsService {
    * Copies the real state of a preapproval and its charges from Mercado Pago. Idempotent:
    * running it twice with the same remote state changes nothing. Used by reads and webhooks.
    */
-  async syncPreapproval(mpPreapprovalId: string): Promise<void> {
-    const db = this.prisma.systemPrisma;
-    const subscription = await db.subscription.findUnique({ where: { mpPreapprovalId } });
-    if (!subscription) {
-      this.logger.warn(`Suscripción de Mercado Pago desconocida: ${mpPreapprovalId}`);
-      return;
+  async syncPreapproval(
+    mpPreapprovalId: string,
+    correlationId = mpPreapprovalId,
+    paymentId?: string,
+    reconciliation = false,
+  ): Promise<void> {
+    // Webhooks/jobs have no authenticated tenant; serialize all reads and writes for this MP resource.
+    this.logger.log({ event: 'subscription.sync_system_query', correlationId, mpPreapprovalId });
+    const justAuthorized = await this.prisma.systemPrisma.$transaction(
+      async (db) => {
+        await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${mpPreapprovalId}, 0))`;
+        return this.syncLocked(db, mpPreapprovalId, correlationId, paymentId, reconciliation);
+      },
+      { timeout: 120_000 },
+    );
+    const subscription = await this.prisma.systemPrisma.subscription.findUnique({
+      where: { mpPreapprovalId },
+    });
+    if (!subscription) return;
+    // The account port uses its own connection: it runs after the commit so it sees the
+    // authorized subscription and never waits for a connection while this one holds another.
+    // shortcut: a crash between the commit and this call loses the activation; store the pending
+    // activation in the row if that ever happens.
+    if (justAuthorized) {
+      const account = await this.account.get(subscription.companyId);
+      if (!(account.status === 'trial' && subscription.startsAt > this.clock.now())) {
+        await this.account.transition({ companyId: subscription.companyId, to: 'active' });
+      }
     }
-    const [remote, payments] = await Promise.all([
+    if (subscription.status === 'authorized')
+      await this.guardSelection.apply(
+        subscription.id,
+        subscription.companyId,
+        subscription.guardSelection,
+      );
+  }
+
+  private async syncLocked(
+    db: Prisma.TransactionClient,
+    mpPreapprovalId: string,
+    correlationId: string,
+    paymentId: string | undefined,
+    reconciliation: boolean,
+  ): Promise<boolean> {
+    const [remote, searched] = await Promise.all([
       this.mercadoPago.getPreapproval(mpPreapprovalId),
       this.mercadoPago.searchAuthorizedPayments(mpPreapprovalId),
     ]);
+    let subscription = await db.subscription.findUnique({ where: { mpPreapprovalId } });
+    if (!subscription && remote.external_reference) {
+      // The first webhook can arrive before create() stores the preapproval id: link the row by
+      // the reference we sent, instead of dropping the notification as unknown.
+      await db.subscription.updateMany({
+        where: { id: remote.external_reference, mpPreapprovalId: null },
+        data: { mpPreapprovalId },
+      });
+      subscription = await db.subscription.findUnique({ where: { mpPreapprovalId } });
+    }
+    if (!subscription) {
+      this.logger.warn(`Suscripción de Mercado Pago desconocida: ${mpPreapprovalId}`);
+      return false;
+    }
+    const payments = [...searched];
+    if (paymentId) {
+      const current = await this.mercadoPago.getAuthorizedPayment(paymentId);
+      const index = payments.findIndex((payment) => payment.id === paymentId);
+      if (index < 0) payments.push(current);
+      else payments[index] = current;
+    }
     if (subscription.status === 'cancelled' && remote.status !== 'cancelled') {
       // A replaced checkout was completed in an old tab: stop it instead of charging twice.
       this.logger.warn(`Se cancela ${mpPreapprovalId}: fue reemplazada por otra suscripción`);
       await this.mercadoPago.cancelPreapproval(mpPreapprovalId);
-      return;
+      return false;
     }
     for (const payment of payments) {
+      if (payment.preapproval_id !== mpPreapprovalId)
+        throw new Error('El cobro pertenece a otra suscripción');
+      const before = await db.subscriptionCharge.findUnique({
+        where: { mpAuthorizedPaymentId: payment.id },
+      });
       const data = {
         mpPaymentId: payment.payment?.id ?? null,
-        amount: new Prisma.Decimal(payment.transaction_amount.toFixed(2)),
+        amount: new Prisma.Decimal(payment.transaction_amount),
         status: toChargeStatus(payment.payment),
         statusDetail: payment.payment?.status_detail ?? null,
         retryAttempt: payment.retry_attempt ?? 0,
         chargedAt: payment.date_created ? new Date(payment.date_created) : null,
       };
-      await db.subscriptionCharge.upsert({
+      const charge = await db.subscriptionCharge.upsert({
         where: { mpAuthorizedPaymentId: payment.id },
         create: {
           ...data,
@@ -216,8 +311,49 @@ export class SubscriptionsService {
         },
         update: data,
       });
+      if (
+        reconciliation &&
+        (before?.status !== charge.status ||
+          before.retryAttempt !== charge.retryAttempt ||
+          !before.amount.equals(charge.amount) ||
+          before.statusDetail !== charge.statusDetail ||
+          before.mpPaymentId !== charge.mpPaymentId ||
+          before.chargedAt?.getTime() !== charge.chargedAt?.getTime())
+      ) {
+        this.logger.error({
+          event: 'subscription.reconciliation_diff',
+          correlationId,
+          subscriptionId: subscription.id,
+          chargeId: charge.id,
+          before: before?.status ?? null,
+          corrected: charge.status,
+        });
+      }
+      if (before?.status !== charge.status && charge.status !== 'pending') {
+        this.logger.log({
+          event: 'subscription.metric',
+          correlationId,
+          metric: 'charges',
+          status: charge.status,
+          value: 1,
+        });
+      }
+      if (charge.effectsAppliedStatus !== charge.status && charge.status !== 'pending') {
+        if (charge.status === 'approved') await this.effects.onChargeApproved(charge);
+        else await this.effects.onChargeRejected(charge);
+        await db.subscriptionCharge.update({
+          where: { id: charge.id },
+          data: { effectsAppliedStatus: charge.status },
+        });
+      }
     }
-    const lastRejected = payments.find((payment) => toChargeStatus(payment.payment) === 'rejected');
+    // The search has no guaranteed order: the reason shown is the one of the latest settled charge.
+    const latest = payments
+      .filter((payment) => toChargeStatus(payment.payment) !== 'pending')
+      .sort(
+        (a, b) => (Date.parse(b.date_created ?? '') || 0) - (Date.parse(a.date_created ?? '') || 0),
+      )[0];
+    const lastRejected = latest && toChargeStatus(latest.payment) === 'rejected' ? latest : null;
     const status = toSubscriptionStatus(remote.status) ?? subscription.status;
     await db.subscription.update({
       where: { id: subscription.id },
@@ -228,6 +364,30 @@ export class SubscriptionsService {
           status === 'authorized' ? null : (lastRejected?.payment?.status_detail ?? null),
       },
     });
+    if (
+      reconciliation &&
+      (status !== subscription.status ||
+        subscription.nextChargeAt?.toISOString() !==
+          (remote.next_payment_date ? new Date(remote.next_payment_date).toISOString() : undefined))
+    ) {
+      this.logger.error({
+        event: 'subscription.reconciliation_diff',
+        correlationId,
+        subscriptionId: subscription.id,
+        before: { status: subscription.status, nextChargeAt: subscription.nextChargeAt },
+        corrected: { status, nextChargeAt: remote.next_payment_date ?? null },
+      });
+    }
+    if (status !== subscription.status) {
+      this.logger.log({
+        event: 'subscription.metric',
+        correlationId,
+        metric: 'subscriptions',
+        status,
+        value: 1,
+      });
+    }
+    return status === 'authorized' && subscription.status === 'pending';
   }
 
   /**
@@ -297,9 +457,9 @@ export class SubscriptionsService {
     return this.get(companyId);
   }
 
-  /** shortcut: applied on read; the daily job (ID-337) will also run it for companies that never log in. */
-  private async finishDueCancellation(subscription: {
+  async finishDueCancellation(subscription: {
     id: string;
+    companyId: string;
     status: SubscriptionStatus;
     cancelAt: Date | null;
     mpPreapprovalId: string | null;
@@ -310,8 +470,8 @@ export class SubscriptionsService {
       // If Mercado Pago fails, the row stays paused and the next read retries.
       await this.mercadoPago.cancelPreapproval(subscription.mpPreapprovalId);
     }
-    await this.prisma.tenantPrisma.subscription.update({
-      where: { id: subscription.id },
+    await this.prisma.systemPrisma.subscription.update({
+      where: { id: subscription.id, companyId: subscription.companyId },
       data: { status: 'cancelled' },
     });
     subscription.status = 'cancelled';

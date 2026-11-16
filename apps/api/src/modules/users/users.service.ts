@@ -208,15 +208,7 @@ export class UsersService {
         code: 'GUARD_HAS_SHIFT_IN_PROGRESS',
         shiftId: inProgressShift,
       });
-    const futureShifts = await this.prisma.tenantPrisma.shift.findMany({
-      where: {
-        status: 'scheduled',
-        startsAt: { gt: this.clock.now() },
-        assignments: { some: { guardId: id, isCurrent: true, active: true } },
-      },
-      include: { assignments: { where: { guardId: id, isCurrent: true } } },
-      orderBy: { startsAt: 'asc' },
-    });
+    const futureShifts = await this.findFutureShifts(id);
     if (choice.deriveToUserId && choice.leaveUnassigned)
       throw new ConflictException('Elegí derivar o dejar sin vigilador, no ambas opciones');
     if (futureShifts.length && !choice.deriveToUserId && !choice.leaveUnassigned)
@@ -515,6 +507,27 @@ export class UsersService {
       status: user.status,
       invitationStatus: user.invitations?.[0]?.sendStatus ?? null,
     };
+  }
+
+  async countFutureShifts(id: string): Promise<number> {
+    await this.getUser(id);
+    return this.prisma.tenantPrisma.shift.count({ where: this.futureShiftsWhere(id) });
+  }
+
+  private futureShiftsWhere(id: string) {
+    return {
+      status: 'scheduled' as const,
+      startsAt: { gt: this.clock.now() },
+      assignments: { some: { guardId: id, isCurrent: true, active: true } },
+    };
+  }
+
+  private findFutureShifts(id: string) {
+    return this.prisma.tenantPrisma.shift.findMany({
+      where: this.futureShiftsWhere(id),
+      include: { assignments: { where: { guardId: id, isCurrent: true } } },
+      orderBy: { startsAt: 'asc' },
+    });
   }
 }
 

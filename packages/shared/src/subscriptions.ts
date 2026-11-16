@@ -18,6 +18,46 @@ export const OPEN_SUBSCRIPTION_STATUSES = [
 export const SUBSCRIPTION_CHARGE_STATUSES = ['pending', 'approved', 'rejected'] as const;
 export type SubscriptionChargeStatus = (typeof SUBSCRIPTION_CHARGE_STATUSES)[number];
 
+export const guardShiftDecisionSchema = z.discriminatedUnion('shiftAction', [
+  z
+    .object({
+      guardId: z.string().min(1),
+      shiftAction: z.literal('derive'),
+      deriveToUserId: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      guardId: z.string().min(1),
+      shiftAction: z.literal('unassign'),
+      confirmUnassignedCount: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
+export const guardSelectionSchema = z
+  .object({
+    guardsToKeep: z.array(z.string().min(1)),
+    shiftDecisions: z.array(guardShiftDecisionSchema),
+  })
+  .strict();
+export type GuardSelection = z.infer<typeof guardSelectionSchema>;
+export const guardSelectionRequiredSchema = z.object({
+  code: z.literal('guard_selection_required'),
+  maxGuards: z.number().int().nonnegative(),
+  guards: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      futureShiftCount: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type GuardSelectionRequired = z.infer<typeof guardSelectionRequiredSchema>;
+
+export const subscriptionQuerySchema = z.object({
+  chargePage: z.coerce.number().int().min(1).default(1),
+});
+
 export const createSubscriptionRequestSchema = z
   .object({
     planId: z.string().min(1),
@@ -25,6 +65,7 @@ export const createSubscriptionRequestSchema = z
     payerEmail: z.email(),
     /** During a free trial, true defers the first charge to the end of the trial. */
     keepTrial: z.boolean().default(false),
+    guardSelection: guardSelectionSchema.optional(),
   })
   .strict();
 export type CreateSubscriptionRequest = z.infer<typeof createSubscriptionRequestSchema>;
@@ -73,6 +114,10 @@ export const subscriptionResponseSchema = z.object({
       /** Set when the admin cancelled: service runs until this date, then the subscription ends. */
       cancelAt: z.string().nullable(),
       charges: z.array(subscriptionChargeResponseSchema),
+      chargePage: z.number().int().optional(),
+      hasMoreCharges: z.boolean().optional(),
+      /** Over the whole history, not only the page of charges in this response. */
+      hasApprovedCharge: z.boolean().optional(),
     })
     .nullable(),
 });
