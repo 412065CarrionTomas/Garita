@@ -187,7 +187,7 @@ export function IncidentsQueuePage() {
   return (
     <main className="space-y-6">
       <PageHeader
-        title="Revisión de incidentes"
+        title="Incidentes por clasificar"
         description="Decidí quién ve cada incidente: solo la empresa o también el cliente del predio."
         actions={
           <Button asChild variant="outline">

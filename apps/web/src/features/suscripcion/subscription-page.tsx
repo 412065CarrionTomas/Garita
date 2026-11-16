@@ -102,7 +102,7 @@ export function SubscriptionPage() {
     <section aria-labelledby="subscription-title" className="space-y-6">
       <PageHeader
         id="subscription-title"
-        title="Suscripción"
+        title="Suscripción y cobros"
         description="Elegí tu plan y autorizá el débito automático mensual en Mercado Pago."
       />
       {subscription.isPending ? (

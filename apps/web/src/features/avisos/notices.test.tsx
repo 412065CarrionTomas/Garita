@@ -182,7 +182,7 @@ it('abrir el aviso marca visto, baja el contador del menú y enlaza al turno', a
       </ThemeProvider>
     </MemoryRouter>,
   );
-  expect(await screen.findByRole('link', { name: 'Avisos (2)' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Pendientes (2)' })).toBeInTheDocument();
   const openButton = (await screen.findAllByRole('button', { name: 'Abrir aviso' }))[0];
   if (!openButton) throw new Error('Falta el aviso de prueba');
   await userEvent.click(openButton);
@@ -194,7 +194,7 @@ it('abrir el aviso marca visto, baja el contador del menú y enlaza al turno', a
       expect.anything(),
     );
   });
-  expect(await screen.findByRole('link', { name: 'Avisos (1)' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Pendientes (1)' })).toBeInTheDocument();
   expect(screen.getByText('Visto', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Ver turno' })).toHaveAttribute(
     'href',
@@ -226,13 +226,13 @@ it('refresca y anuncia un aviso nuevo sin recargar; actualizado mueve al histori
     'aria-live',
     'polite',
   );
-  expect(await screen.findByRole('link', { name: 'Avisos (1)' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Pendientes (1)' })).toBeInTheDocument();
   current = [];
   act(() => {
     mockListeners.get('aviso.actualizado')?.({ noticeId: 'n1', siteId: 'p1' });
   });
   expect(await screen.findByText('No hay avisos para estos filtros')).toBeInTheDocument();
-  expect(await screen.findByRole('link', { name: 'Avisos (0)' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Pendientes' })).toBeInTheDocument();
 });
 
 it('al entrar desde una notificación marca visto y ofrece cierre desde el aviso', async () => {
