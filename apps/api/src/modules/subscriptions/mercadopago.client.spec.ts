@@ -8,7 +8,7 @@ describe('MercadoPagoClient (HTTP simulado)', () => {
     true
   >);
   afterEach(() => jest.restoreAllMocks());
-  it('crea preferencia y actualiza importe/expiraci�n con decimales JSON exactos', async () => {
+  it('crea preferencia y actualiza importe/expiración con decimales JSON exactos', async () => {
     const fetch = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
