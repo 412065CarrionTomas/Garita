@@ -78,6 +78,14 @@ describe('GuardSelectionService', () => {
       { ...selection, guardsToKeep: ['g0', 'g0'] },
       { ...selection, shiftDecisions: [] },
       {
+        guardsToKeep: [],
+        shiftDecisions: guards.map((g) => ({
+          guardId: g.id,
+          shiftAction: 'unassign' as const,
+          confirmUnassignedCount: 2,
+        })),
+      },
+      {
         ...selection,
         shiftDecisions: [
           { guardId: 'g10', shiftAction: 'derive' as const, deriveToUserId: 'g11' },
@@ -102,5 +110,14 @@ describe('GuardSelectionService', () => {
     await service.apply('sub', 'company', done);
     expect(users.deactivate).toHaveBeenCalledTimes(5);
     expect(db.subscription.update).toHaveBeenCalled();
+  });
+  it('keeps deactivating the other guards when one fails, and leaves that one pending', async () => {
+    const { service, users, save } = setup();
+    const stored = await service.validate(10, selection, 'admin');
+    save(stored);
+    users.deactivate.mockRejectedValueOnce(new Error('Vigilador destino no encontrado'));
+    const remaining = await service.apply('sub', 'company', stored);
+    expect(remaining?.pendingGuardIds).toEqual(['g10']);
+    expect(users.deactivate).toHaveBeenCalledTimes(4);
   });
 });

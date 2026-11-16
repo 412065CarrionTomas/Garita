@@ -45,6 +45,7 @@ export class GuardSelectionService {
     const excluded = guards.filter((g) => !keep.has(g.id));
     if (
       keep.size !== selection.guardsToKeep.length ||
+      keep.size === 0 ||
       keep.size > maxGuards ||
       [...keep].some((id) => !counted.has(id)) ||
       selection.shiftDecisions.length !== excluded.length ||
@@ -68,6 +69,9 @@ export class GuardSelectionService {
 
   async apply(subscriptionId: string, companyId: string, raw: unknown) {
     if (raw === null || raw === undefined) return null;
+    // The selection stays stored as a record; once applied there is nothing to lock or read.
+    const stored = storedGuardSelectionSchema.safeParse(raw);
+    if (stored.success && stored.data.pendingGuardIds.length === 0) return null;
     // A subscription can be picked by a webhook and a sweep concurrently.
     return this.prisma.systemPrisma.$transaction(
       async (db) => {
@@ -113,14 +117,21 @@ export class GuardSelectionService {
                   data: { guardSelection: selection },
                 });
               } catch (error) {
-                if (
+                // deactivate() commits on its own connection: throwing here would roll back the
+                // progress already saved. The guard stays pending and the next sweep retries it.
+                if (!(
                   error instanceof ConflictException &&
                   z
                     .object({ code: z.literal('GUARD_HAS_SHIFT_IN_PROGRESS') })
                     .safeParse(error.getResponse()).success
-                )
-                  continue;
-                throw error;
+                ))
+                  this.logger.error({
+                    event: 'subscription.guard_deactivation_failed',
+                    subscriptionId,
+                    companyId,
+                    guardId,
+                    error: error instanceof Error ? error.message : 'Error desconocido',
+                  });
               }
             }
             return selection;
