@@ -240,6 +240,18 @@ export class SubscriptionsService {
       where: { mpPreapprovalId },
     });
     if (!subscription) return;
+    // The account port uses its own connection: it runs after the commit so it sees the
+    // authorized subscription and never waits for a connection while this one holds another.
+    // shortcut: a crash between the commit and this call loses the activation; store the pending
+    // activation in the row if that ever happens.
+    if (justAuthorized) {
+      const account = await this.account.get(subscription.companyId);
+      if (!(account.status === 'trial' && subscription.startsAt > this.clock.now())) {
+        await this.account.transition({ companyId: subscription.companyId, to: 'active' });
+      }
+    }
+    // Charge effects run after the first activation: a first charge rejected in the same sync
+    // must find the account already active to start the grace.
     const charges = await this.prisma.systemPrisma.subscriptionCharge.findMany({
       where: { id: { in: syncedChargeIds }, status: { not: 'pending' } },
       orderBy: [{ chargedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
@@ -252,16 +264,6 @@ export class SubscriptionsService {
         where: { id: charge.id, status: charge.status },
         data: { effectsAppliedStatus: charge.status },
       });
-    }
-    // The account port uses its own connection: it runs after the commit so it sees the
-    // authorized subscription and never waits for a connection while this one holds another.
-    // shortcut: a crash between the commit and this call loses the activation; store the pending
-    // activation in the row if that ever happens.
-    if (justAuthorized) {
-      const account = await this.account.get(subscription.companyId);
-      if (!(account.status === 'trial' && subscription.startsAt > this.clock.now())) {
-        await this.account.transition({ companyId: subscription.companyId, to: 'active' });
-      }
     }
     if (subscription.status === 'authorized')
       await this.guardSelection.apply(
