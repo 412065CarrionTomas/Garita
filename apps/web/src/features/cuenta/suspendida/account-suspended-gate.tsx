@@ -12,7 +12,7 @@ export function AccountSuspendedGate({
   role: UserRole;
   children: ReactNode;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, key } = useLocation();
   const [denied, setDenied] = useState<string | null>(null);
   const live =
     role !== 'client' &&
@@ -29,18 +29,14 @@ export function AccountSuspendedGate({
           : pathname.startsWith('/supervision/turnos/')
             ? path.startsWith(`/turnos/${pathname.split('/').at(-1)}/`)
             : path.split('?')[0] === pathname;
-      if (ownRequest) setDenied(pathname);
+      if (ownRequest) setDenied(key);
     };
     window.addEventListener('garita:account-suspended', reject);
     return () => {
       window.removeEventListener('garita:account-suspended', reject);
     };
-  }, [pathname]);
-  if (
-    !suspended ||
-    (role === 'admin' && pathname === '/suscripcion') ||
-    (live && denied !== pathname)
-  )
+  }, [pathname, key]);
+  if (!suspended || (role === 'admin' && pathname === '/suscripcion') || (live && denied !== key))
     return children;
   return (
     <div className="space-y-4">
