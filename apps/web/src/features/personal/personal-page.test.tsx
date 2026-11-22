@@ -98,6 +98,7 @@ describe('PersonalPage', () => {
       .mockImplementation((_path, _body, _request, response) =>
         Promise.resolve(response.parse({ ...page.items[0], status: 'invitation_pending' })),
       );
+    await screen.findByText(/Ana Pérez/, {}, { timeout: 10000 });
     await userEvent.click(await screen.findByRole('button', { name: 'Acciones' }));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Reenviar invitación' }));
     await waitFor(() => {
