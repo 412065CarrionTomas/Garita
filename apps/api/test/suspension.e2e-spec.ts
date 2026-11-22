@@ -68,7 +68,11 @@ describe('HU-43 HTTP: permissions, started shifts and full-cycle recovery', () =
   let now = new Date('2030-12-08T22:30:00Z');
   const next = '2031-01-01T12:00:00.000Z';
   const notificationIds: string[] = [];
-  const remote = { id: companyId, status: 'authorized', next_payment_date: next };
+  const remote: { id: string; status: string; next_payment_date: string | null } = {
+    id: companyId,
+    status: 'authorized',
+    next_payment_date: next,
+  };
   const mp = {
     getPreapproval: jest.fn().mockImplementation(() => Promise.resolve({ ...remote })),
     setPreapprovalStatus: jest.fn().mockImplementation((_id: string, status: string) => {
@@ -607,6 +611,92 @@ describe('HU-43 HTTP: permissions, started shifts and full-cycle recovery', () =
     expect((await db.shift.findUniqueOrThrow({ where: { id: shiftId } })).status).toBe(
       'in_progress',
     );
+    // V9 H2: la asignación del turno cancelado se libera; la del turno en curso sigue activa.
+    expect(await db.shiftAssignment.count({ where: { shiftId: fresh.id, active: true } })).toBe(0);
+    expect(
+      (await db.shiftAssignment.findUniqueOrThrow({ where: { id: assignmentId } })).active,
+    ).toBe(true);
+  });
+
+  it('V9 H2: after reactivation the guard of a shift cancelled by suspension can be rescheduled', async () => {
+    const other = await db.user.create({
+      data: {
+        companyId,
+        firebaseUid: `${companyId}-guard-h2`,
+        email: `${companyId}-guard-h2@example.invalid`,
+        firstName: 'HU43',
+        lastName: 'guard-h2',
+        role: 'guard',
+        status: 'active',
+      },
+    });
+    const due = await db.shift.create({
+      data: {
+        companyId,
+        siteId,
+        createdById: adminId,
+        startsAt: new Date('2030-12-08T23:30:00Z'),
+        endsAt: new Date('2030-12-09T08:00:00Z'),
+        serviceDate: new Date('2030-12-08'),
+        assignments: {
+          create: {
+            guardId: other.id,
+            assignedById: adminId,
+            startsAt: new Date('2030-12-08T23:30:00Z'),
+            endsAt: new Date('2030-12-09T08:00:00Z'),
+          },
+        },
+      },
+    });
+    await suspend();
+    expect((await db.shift.findUniqueOrThrow({ where: { id: due.id } })).status).toBe(
+      'cancelled_by_suspension',
+    );
+    expect(await db.shiftAssignment.count({ where: { shiftId: due.id, active: true } })).toBe(0);
+    await db.company.update({
+      where: { id: companyId },
+      data: { accountStatus: 'active', suspendedAt: null, suspensionReason: null },
+    });
+    now = new Date('2030-12-09T00:30:00Z');
+    await http('POST', '/api/v1/turnos')
+      .set(auth())
+      .send({
+        siteId,
+        guardId: other.id,
+        roundIds: [roundId],
+        startsAt: '2030-12-09T01:00:00.000Z',
+        endsAt: '2030-12-09T08:00:00.000Z',
+      })
+      .expect(201);
+    await db.shift.deleteMany({ where: { companyId } });
+    await db.user.delete({ where: { id: other.id } });
+  });
+
+  it('V9 H1: a paused preapproval without next_payment_date keeps the expected charge date', async () => {
+    const errors = jest.spyOn(Logger.prototype, 'error');
+    await suspend();
+    await app.get(SuspensionService).reconcile(companyId);
+    expect(mp.setPreapprovalStatus).toHaveBeenCalledWith(companyId, 'paused');
+    remote.next_payment_date = null;
+    await http('GET', '/api/v1/suscripcion').set(auth()).expect(200);
+    expect(
+      (
+        await db.subscription.findUniqueOrThrow({ where: { id: subId } })
+      ).nextChargeAt?.toISOString(),
+    ).toBe(next);
+    remote.next_payment_date = next;
+    await db.company.update({
+      where: { id: companyId },
+      data: { accountStatus: 'active', suspendedAt: null, suspensionReason: null },
+    });
+    await app.get(SuspensionService).reconcile(companyId);
+    const resumed = await db.subscription.findUniqueOrThrow({ where: { id: subId } });
+    expect(resumed.status).toBe('authorized');
+    expect(resumed.nextChargeAt?.toISOString()).toBe(next);
+    expect(errors).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'subscription.next_payment_date_diff' }),
+    );
+    errors.mockRestore();
   });
 
   it.each([next, '2031-01-20T12:00:00.000Z'])(
