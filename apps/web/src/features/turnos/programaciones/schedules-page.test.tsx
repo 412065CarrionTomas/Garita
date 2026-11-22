@@ -142,14 +142,14 @@ it('previsualiza una modificación, invalida la vista al cambiar datos y confirm
   expect(screen.queryByRole('button', { name: 'Confirmar modificación' })).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Previsualizar' }));
   await user.click(await screen.findByRole('button', { name: 'Confirmar modificación' }));
-  await waitFor(() =>
+  await waitFor(() => {
     expect(apiPatch).toHaveBeenCalledWith(
       '/programaciones-turnos/schedule',
       expect.objectContaining({ startTime: '21:00' }),
       expect.anything(),
       expect.anything(),
-    ),
-  );
+    );
+  });
   expect(
     await screen.findByText(/1 turnos generados, 1 afectados y 1 conservados/),
   ).toBeInTheDocument();
@@ -165,18 +165,19 @@ it.each(['Extender', 'Cancelar programación'])(
         target: { value: '2030-11-06' },
       });
     await user.click(screen.getByRole('button', { name: 'Confirmar' }));
-    await waitFor(() =>
+    await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith(
         `/programaciones-turnos/schedule/${name === 'Extender' ? 'extender' : 'cancelar'}`,
         name === 'Extender' ? { endDate: '2030-11-06' } : {},
         expect.anything(),
         expect.anything(),
-      ),
-    );
+      );
+    });
   },
 );
 it('muestra ambos distintivos dentro de la pantalla de turnos', async () => {
   const fallback = jest.mocked(apiGet).getMockImplementation();
+  if (!fallback) throw new Error('Falta el mock de las consultas');
   jest.mocked(apiGet).mockImplementation((path, schema) =>
     path.startsWith('/turnos')
       ? Promise.resolve(
@@ -196,7 +197,7 @@ it('muestra ambos distintivos dentro de la pantalla de turnos', async () => {
             },
           ]),
         )
-      : fallback!(path, schema),
+      : fallback(path, schema),
   );
   renderWithQueryClient(<ShiftsPanel />);
   expect(await screen.findByText('De programación')).toBeInTheDocument();

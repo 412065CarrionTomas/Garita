@@ -67,9 +67,9 @@ export function WeekdaySelector({
               aria-label={days[day]}
               name="weekdays"
               checked={value.includes(day)}
-              onCheckedChange={(checked) =>
-                onChange(checked ? [...value, day] : value.filter((item) => item !== day))
-              }
+              onCheckedChange={(checked) => {
+                onChange(checked ? [...value, day] : value.filter((item) => item !== day));
+              }}
               className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             />
             {days[day]}
@@ -297,7 +297,15 @@ export function SchedulesPage() {
       <PageHeader
         title="Programaciones de turnos"
         description="Guardias semanales en el horario local de la empresa. Feriados y esquemas rotativos se cargan como turnos individuales."
-        actions={<Button onClick={() => edit()}>Nueva programación</Button>}
+        actions={
+          <Button
+            onClick={() => {
+              edit();
+            }}
+          >
+            Nueva programación
+          </Button>
+        }
       />
       {error && (
         <div
@@ -373,7 +381,12 @@ export function SchedulesPage() {
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={() => edit(schedule)}>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        edit(schedule);
+                      }}
+                    >
                       Modificar
                     </Button>
                     <Button
@@ -432,7 +445,9 @@ export function SchedulesPage() {
                   name="siteId"
                   required
                   value={form.siteId}
-                  onChange={(event) => set({ siteId: event.target.value, roundIds: [] })}
+                  onChange={(event) => {
+                    set({ siteId: event.target.value, roundIds: [] });
+                  }}
                 >
                   <NativeSelectOption value="">Elegí un predio</NativeSelectOption>
                   {sites.data?.map((site) => (
@@ -449,7 +464,9 @@ export function SchedulesPage() {
                   name="guardId"
                   required
                   value={form.guardId}
-                  onChange={(event) => set({ guardId: event.target.value })}
+                  onChange={(event) => {
+                    set({ guardId: event.target.value });
+                  }}
                 >
                   <NativeSelectOption value="">Elegí un vigilador</NativeSelectOption>
                   {guards.data?.items.map((guard) => (
@@ -461,7 +478,12 @@ export function SchedulesPage() {
                 </NativeSelect>
               </div>
             </div>
-            <WeekdaySelector value={form.weekdays} onChange={(weekdays) => set({ weekdays })} />
+            <WeekdaySelector
+              value={form.weekdays}
+              onChange={(weekdays) => {
+                set({ weekdays });
+              }}
+            />
             <div className="grid gap-4 md:grid-cols-2">
               {(['startTime', 'endTime', 'startDate', 'endDate'] as const).map((key) => (
                 <div key={key} className="space-y-2">
@@ -482,7 +504,9 @@ export function SchedulesPage() {
                     type={key.endsWith('Time') ? 'time' : 'date'}
                     required
                     value={form[key]}
-                    onChange={(event) => set({ [key]: event.target.value })}
+                    onChange={(event) => {
+                      set({ [key]: event.target.value });
+                    }}
                   />
                 </div>
               ))}
@@ -501,13 +525,13 @@ export function SchedulesPage() {
                       name="roundIds"
                       aria-label={round.name}
                       checked={form.roundIds.includes(round.id)}
-                      onCheckedChange={(checked) =>
+                      onCheckedChange={(checked) => {
                         set({
                           roundIds: checked
                             ? [...form.roundIds, round.id]
                             : form.roundIds.filter((id) => id !== round.id),
-                        })
-                      }
+                        });
+                      }}
                       className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     />
                     {round.name}
@@ -518,7 +542,13 @@ export function SchedulesPage() {
               <Button type="submit" disabled={pending}>
                 {preview.isPending ? 'Previsualizando…' : 'Previsualizar'}
               </Button>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setOpen(false);
+                }}
+              >
                 Cerrar formulario
               </Button>
             </div>
@@ -528,7 +558,12 @@ export function SchedulesPage() {
             JSON.stringify(parsedForm.data) === JSON.stringify(preview.variables) && (
               <>
                 <SchedulePreviewTable preview={preview.data} />
-                <Button disabled={pending} onClick={() => save.mutate(parsedForm.data)}>
+                <Button
+                  disabled={pending}
+                  onClick={() => {
+                    save.mutate(parsedForm.data);
+                  }}
+                >
                   {save.isPending
                     ? 'Confirmando…'
                     : editingId
@@ -570,7 +605,9 @@ export function SchedulesPage() {
                   type="date"
                   required
                   value={extensionEnd}
-                  onChange={(event) => setExtensionEnd(event.target.value)}
+                  onChange={(event) => {
+                    setExtensionEnd(event.target.value);
+                  }}
                 />
               </>
             )}
