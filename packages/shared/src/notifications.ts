@@ -82,7 +82,6 @@ type ShiftChange =
   | { kind: 'shift_schedule_summary'; count: number; from: Date; to: Date; timezone: string };
 
 export function buildShiftNotification(change: ShiftChange) {
-  // TODO(HU-32): emit the schedule summary when weekly scheduling exists.
   if (change.kind === 'shift_schedule_summary') {
     const day = (date: Date) =>
       new Intl.DateTimeFormat('es-AR', { day: 'numeric', timeZone: change.timezone }).format(date);
@@ -90,14 +89,29 @@ export function buildShiftNotification(change: ShiftChange) {
       month: 'long',
       timeZone: change.timezone,
     }).format(change.to);
+    const yearMonth = new Intl.DateTimeFormat('en-CA', {
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: change.timezone,
+    });
+    const fullDate = new Intl.DateTimeFormat('es-AR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: change.timezone,
+    });
+    const body =
+      yearMonth.format(change.from) === yearMonth.format(change.to)
+        ? `Te programaron ${change.count} turnos del ${day(change.from)} al ${day(change.to)} de ${month}`
+        : `Te programaron ${change.count} turnos del ${fullDate.format(change.from)} al ${fullDate.format(change.to)}`;
     return {
       kind: change.kind,
       payload: {
         kind: change.kind,
         link: '/mis-turnos',
-        body: `Te programaron ${change.count} turnos del ${day(change.from)} al ${day(change.to)} de ${month}`,
+        body,
       },
-      body: `Te programaron ${change.count} turnos del ${day(change.from)} al ${day(change.to)} de ${month}`,
+      body,
       priority: 'normal' as const,
     };
   }
