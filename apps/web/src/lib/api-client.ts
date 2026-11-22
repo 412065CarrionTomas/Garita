@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
-import { authMeResponseSchema } from '@garita/shared';
+import { accountSuspendedResponseSchema, authMeResponseSchema } from '@garita/shared';
 
 import { env } from '@/config/env';
 
@@ -66,6 +66,7 @@ export async function apiRequest<TSchema extends z.ZodType>(
     } catch {
       errorBody = undefined;
     }
+    announceSuspension(response.status, errorBody, path);
     throw new ApiError(
       `La API respondió con el estado ${response.status}`,
       response.status,
@@ -85,9 +86,16 @@ export async function apiDownload(path: string): Promise<Blob> {
   const response = await fetch(`${env.VITE_API_URL}${path}`, { headers });
   if (!response.ok) {
     if (response.status === 401) await expireSession('Tu sesión venció. Ingresá nuevamente.');
+    const body: unknown = await response.json().catch(() => undefined);
+    announceSuspension(response.status, body, path);
     throw new ApiError(`La API respondió con el estado ${response.status}`, response.status);
   }
   return response.blob();
+}
+
+function announceSuspension(status: number, body: unknown, path: string) {
+  if (status === 402 && accountSuspendedResponseSchema.safeParse(body).success)
+    window.dispatchEvent(new CustomEvent('garita:account-suspended', { detail: path }));
 }
 
 async function expireSession(message: string) {

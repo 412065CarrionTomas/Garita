@@ -1,4 +1,6 @@
 import { GraceBanner } from '../cuenta/grace-banner';
+import { AccountSuspendedGate } from '../cuenta/suspendida/account-suspended-gate';
+import { useAccountSuspension } from '../cuenta/suspendida/use-account-suspension';
 import { NotificationPreferencesPage } from '../avisos/notification-preferences-page';
 import { TrialBanner } from '../cuenta/trial-banner';
 import { Navigate, Outlet, Route, Routes } from 'react-router';
@@ -109,8 +111,13 @@ function staffSections(admin: boolean, counts: PendingCounts): NavSection[] {
 
 export function RoleLayout() {
   const { user, logout } = useAuth();
-  const pending = useIncidentPendingCount(user?.role === 'admin' || user?.role === 'supervisor');
-  const reviews = useReviewCount(user?.role === 'admin' || user?.role === 'supervisor');
+  const suspended = useAccountSuspension();
+  const pending = useIncidentPendingCount(
+    !suspended && (user?.role === 'admin' || user?.role === 'supervisor'),
+  );
+  const reviews = useReviewCount(
+    !suspended && (user?.role === 'admin' || user?.role === 'supervisor'),
+  );
   const notices = useOpenNotices(user?.role === 'admin' || user?.role === 'supervisor');
   const realtime = useRealtime(user?.role === 'admin' || user?.role === 'supervisor');
   const panic = useActivePanicAlerts(user?.role === 'admin' || user?.role === 'supervisor');
@@ -122,12 +129,18 @@ export function RoleLayout() {
       homePath={homePathForRole(user.role)}
       sections={
         staff
-          ? staffSections(user.role === 'admin', {
-              panic: panicCount,
-              notices: notices.data?.unseenOpenCount ?? 0,
-              reviews: reviews.data?.count ?? 0,
-              incidents: pending.data?.count ?? 0,
-            })
+          ? suspended
+            ? [
+                { path: '/supervision', title: 'Turnos en curso' },
+                { path: '/avisos', title: 'Avisos' },
+                { path: '/alertas-panico', title: 'Alertas de pánico' },
+              ]
+            : staffSections(user.role === 'admin', {
+                panic: panicCount,
+                notices: notices.data?.unseenOpenCount ?? 0,
+                reviews: reviews.data?.count ?? 0,
+                incidents: pending.data?.count ?? 0,
+              })
           : user.role === 'client'
             ? [{ path: '/reportes', title: 'Reportes' }]
             : []
@@ -166,7 +179,9 @@ export function RoleLayout() {
       )}
       <TrialBanner />
       <GraceBanner />
-      <Outlet />
+      <AccountSuspendedGate suspended={suspended} role={user.role}>
+        <Outlet />
+      </AccountSuspendedGate>
     </AppShell>
   );
 }
