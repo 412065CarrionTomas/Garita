@@ -35,6 +35,9 @@ interface ShiftListQuery {
   sinVigilador?: 'true' | 'false';
 }
 
+/** Motivo de los turnos reemplazados al modificar una programación (HU-32): no se listan. */
+export const SCHEDULE_REGENERATION_REASON = 'Regeneración de programación';
+
 @Injectable()
 export class ShiftsService {
   private readonly logger = new Logger(ShiftsService.name);
@@ -56,6 +59,7 @@ export class ShiftsService {
         ...(query.vigilador
           ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
           : {}),
+        NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
         ...(query.sinVigilador === 'true' ? { status: 'unassigned' } : {}),
         ...(query.sinVigilador === 'false' ? { status: { not: 'unassigned' } } : {}),
         ...(query.desde || query.hasta
