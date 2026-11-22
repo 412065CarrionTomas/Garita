@@ -32,6 +32,7 @@ import { PortalModule } from './modules/portal/portal.module';
 import { ReportExportsModule } from './modules/report-exports/report-exports.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { SmsModule } from './modules/sms/sms.module';
+import { ShiftSchedulesModule } from './modules/shift-schedules/shift-schedules.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { SmsModule } from './modules/sms/sms.module';
     NotificationPreferencesModule,
     SubscriptionsModule,
     SmsModule,
+    ShiftSchedulesModule,
   ],
 })
 export class AppModule {}
