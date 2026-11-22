@@ -759,6 +759,10 @@ export class ShiftExecutionService {
         },
         data: { status: 'cancelled_by_suspension' },
       });
+      await this.prisma.systemPrisma.shiftAssignment.updateMany({
+        where: { shiftId: shift.id, active: true, shift: { status: 'cancelled_by_suspension' } },
+        data: { active: false },
+      });
       return 0;
     }
     const changed = await this.prisma.systemPrisma.$transaction(async (tx) => {

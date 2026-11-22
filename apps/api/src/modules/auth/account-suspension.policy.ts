@@ -74,15 +74,21 @@ export async function enforceAccountSuspension(
   if (classification === 'blocked') {
     if (request.method === 'POST' && path === 'turnos/:id/iniciar' && user.role === 'guard') {
       // The rejected start claims only this guard's unstarted shift, never a running assignment.
-      await prisma.tenantPrisma.shift.updateMany({
+      const shiftId = String(request.params.id);
+      const claimed = await prisma.tenantPrisma.shift.updateMany({
         where: {
-          id: String(request.params.id),
+          id: shiftId,
           startedAt: null,
           status: { in: ['scheduled', 'unassigned'] },
           assignments: { some: { guardId: user.userId, isCurrent: true, active: true } },
         },
         data: { status: 'cancelled_by_suspension' },
       });
+      if (claimed.count)
+        await prisma.tenantPrisma.shiftAssignment.updateMany({
+          where: { shiftId, active: true },
+          data: { active: false },
+        });
     }
     throw suspensionError(user.role);
   }

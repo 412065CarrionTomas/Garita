@@ -196,6 +196,14 @@ export class AccountService implements AccountStatePort {
         },
         data: { status: 'cancelled_by_suspension' },
       });
+      // Libera al vigilador: un turno cancelado no bloquea reprogramarlo al reactivar.
+      await tx.shiftAssignment.updateMany({
+        where: {
+          active: true,
+          shift: { companyId: company.id, status: 'cancelled_by_suspension' },
+        },
+        data: { active: false },
+      });
     }
     await tx.company.update({
       where: { id: company.id },

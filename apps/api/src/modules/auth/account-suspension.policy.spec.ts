@@ -21,7 +21,11 @@ function setup(path: string, method = 'GET', role: AuthenticatedUser['role'] = '
     syncState: null,
   };
   const db = {
-    shift: { findMany: jest.fn().mockResolvedValue([shift]), updateMany: jest.fn() },
+    shift: {
+      findMany: jest.fn().mockResolvedValue([shift]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    shiftAssignment: { updateMany: jest.fn() },
     panicAlert: { findMany: jest.fn().mockResolvedValue([{ id: 'panic' }]) },
     notice: { findFirst: jest.fn().mockResolvedValue({ id: 'notice' }) },
   };
@@ -87,6 +91,11 @@ describe('HU-43 policy', () => {
         data: { status: 'cancelled_by_suspension' },
       }),
     );
+    // V9 H2: el turno reclamado libera su asignación.
+    expect(f.db.shiftAssignment.updateMany).toHaveBeenCalledWith({
+      where: { shiftId: 'shift', active: true },
+      data: { active: false },
+    });
   });
   it('keeps a started shift and the guard close enabled', async () => {
     await expect(setup('turnos/:id/cerrar', 'POST', 'guard').run()).resolves.toBeUndefined();

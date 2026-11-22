@@ -52,6 +52,7 @@ function setup() {
         findUnique: jest.fn().mockResolvedValue(closed),
         updateMany: jest.fn(),
       },
+      shiftAssignment: { updateMany: jest.fn() },
       shiftEvent: { findFirst: jest.fn().mockResolvedValue(event) },
       user: { findFirst: jest.fn().mockResolvedValue({ firstName: 'Pedro', lastName: 'Díaz' }) },
     },

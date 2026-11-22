@@ -52,6 +52,17 @@ export class CoverageNoticesService {
           },
           data: { status: 'cancelled_by_suspension' },
         });
+        await this.prisma.systemPrisma.shiftAssignment.updateMany({
+          where: {
+            active: true,
+            shift: {
+              companyId: site.companyId,
+              siteId: site.id,
+              status: 'cancelled_by_suspension',
+            },
+          },
+          data: { active: false },
+        });
         continue;
       }
       const connectivity = siteConnectivitySchema.parse({
