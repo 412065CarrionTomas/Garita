@@ -11,6 +11,7 @@ import type { SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { loadAvailableGuards } from '../personal/available-guards';
+import { ScheduleBadges } from './programaciones/schedule-badges';
 
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
@@ -43,6 +44,8 @@ const shiftRowsSchema = z.array(
     endsAt: z.string(),
     serviceDate: z.string(),
     status: z.string(),
+    scheduleId: z.string().nullable().optional(),
+    individuallyModified: z.boolean().optional(),
     site: z.looseObject({ name: z.string(), company: z.looseObject({ timezone: z.string() }) }),
     assignments: z.array(
       z.looseObject({
@@ -537,6 +540,10 @@ export function ShiftsPanel() {
                     <StatusBadge tone={shiftStates[shift.status]?.tone ?? 'neutral'}>
                       {shiftStates[shift.status]?.label ?? 'Estado desconocido'}
                     </StatusBadge>
+                    <ScheduleBadges
+                      scheduleId={shift.scheduleId}
+                      individuallyModified={shift.individuallyModified}
+                    />
                   </TableCell>
                   <TableCell>
                     {!cancelled &&

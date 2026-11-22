@@ -97,8 +97,9 @@ export class SitesService {
     ).map((site) => site.id);
     const guardsToNotify = await this.guardsInProgress(siteIds);
     const { client, users } = await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
+      // Antes de cancelar: el conteo de turnos de programaciones no depende del instante de la baja.
       await this.weeklySchedules.terminateForSites(tx, siteIds);
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
       await this.inProgress.closeForSites(tx, siteIds, adminId);
       // La actualización del cliente bloquea altas concurrentes hasta terminar la cascada.
       await tx.client.update({ where: { id }, data: { status: 'inactive' } });
@@ -238,8 +239,9 @@ export class SitesService {
     this.requireConfirmation(impact, confirm);
     const guardsToNotify = await this.guardsInProgress([id]);
     const site = await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
+      // Antes de cancelar: el conteo de turnos de programaciones no depende del instante de la baja.
       await this.weeklySchedules.terminateForSites(tx, [id]);
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
       await this.inProgress.closeForSites(tx, [id], adminId);
       await tx.siteSupervisor.deleteMany({ where: { siteId: id } });
       await this.removeSiteTags(tx as unknown as Prisma.TransactionClient, [id], adminId);

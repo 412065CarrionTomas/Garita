@@ -18,6 +18,7 @@ import {
   type ShiftInput,
 } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../../generated/prisma/client';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
@@ -33,6 +34,9 @@ interface ShiftListQuery {
   hasta?: string;
   sinVigilador?: 'true' | 'false';
 }
+
+/** Motivo de los turnos reemplazados al modificar una programación (HU-32): no se listan. */
+export const SCHEDULE_REGENERATION_REASON = 'Regeneración de programación';
 
 @Injectable()
 export class ShiftsService {
@@ -55,6 +59,7 @@ export class ShiftsService {
         ...(query.vigilador
           ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
           : {}),
+        NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
         ...(query.sinVigilador === 'true' ? { status: 'unassigned' } : {}),
         ...(query.sinVigilador === 'false' ? { status: { not: 'unassigned' } } : {}),
         ...(query.desde || query.hasta
@@ -185,6 +190,7 @@ export class ShiftsService {
           where: { id },
           data: {
             siteId: input.siteId,
+            individuallyModified: true,
             startsAt: new Date(input.startsAt),
             endsAt: new Date(input.endsAt),
             serviceDate: new Date(`${serviceDate}T00:00:00.000Z`),
@@ -373,7 +379,7 @@ export class ShiftsService {
             closeReason: null,
             closedBy: null,
             closedByUserId: null,
-            individuallyModified: true, // TODO(HU-32): weekly scheduling must preserve individually modified shifts.
+            individuallyModified: true,
           },
         });
         if (updated.count !== 1)
@@ -468,39 +474,51 @@ export class ShiftsService {
     // Un vigilador puede iniciar antes de startsAt (margen de inicio): el estado manda.
     if (shift.startsAt <= this.clock.now() || !isEditableStatus(shift.status))
       throw shiftStartedError();
-    const result = await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      const current = await tx.shiftAssignment.updateMany({
-        where: { shiftId: id, isCurrent: true, result: 'scheduled' },
-        data: { active: false },
-      });
-      if (!current.count) throw shiftStartedError();
-      await tx.shiftAssignment.updateMany({
-        where: { shiftId: id, active: true },
-        data: { active: false },
-      });
-      return tx.shift.update({
-        where: { id },
-        data: {
-          status: 'cancelled',
-          cancelledAt: this.clock.now(),
-          cancelledById: user.userId,
-          cancellationReason: 'Cancelación manual',
-        },
-      });
+    const result = await this.prisma.tenantPrisma.$transaction((tx) =>
+      this.cancelInTransaction(tx as unknown as Prisma.TransactionClient, id, user),
+    );
+    await this.afterCancellation(shift, assignment?.guardId ?? null, user);
+    return result;
+  }
+
+  async cancelInTransaction(tx: Prisma.TransactionClient, id: string, user: AuthenticatedUser) {
+    const current = await tx.shiftAssignment.updateMany({
+      where: { shiftId: id, isCurrent: true, result: 'scheduled' },
+      data: { active: false },
     });
-    this.logger.log({ action: 'shift.cancelled', shiftId: id, userId: user.userId });
-    if (assignment?.guardId) {
+    if (!current.count) throw shiftStartedError();
+    await tx.shiftAssignment.updateMany({
+      where: { shiftId: id, active: true },
+      data: { active: false },
+    });
+    return tx.shift.update({
+      where: { id },
+      data: {
+        status: 'cancelled',
+        cancelledAt: this.clock.now(),
+        cancelledById: user.userId,
+        cancellationReason: 'Cancelación manual',
+      },
+    });
+  }
+
+  async afterCancellation(
+    shift: { id: string; siteId: string; startsAt: Date },
+    guardId: string | null,
+    user: AuthenticatedUser,
+  ) {
+    this.logger.log({ action: 'shift.cancelled', shiftId: shift.id, userId: user.userId });
+    if (guardId) {
       const timezone = (await this.site(shift.siteId)).company.timezone;
       await this.notifyGuard(
         user.companyId,
-        assignment.guardId,
+        guardId,
         'shift_cancelled',
-        id,
+        shift.id,
         shift.startsAt,
         timezone,
       );
     }
-    return result;
   }
 
   async mine(user: AuthenticatedUser) {
@@ -535,6 +553,50 @@ export class ShiftsService {
   }
 
   private async validateInput(input: ShiftInput, user: AuthenticatedUser) {
+    if (new Date(input.startsAt) <= this.clock.now())
+      throw new BadRequestException({
+        code: 'SHIFT_START_IN_PAST',
+        message: 'El inicio no puede estar en el pasado',
+      });
+    const context = await this.loadValidation(input, user);
+    return this.validatePrepared(input, context);
+  }
+
+  async loadValidation(
+    input: Pick<ShiftInput, 'siteId' | 'guardId' | 'roundIds'>,
+    user: AuthenticatedUser,
+    db: Prisma.TransactionClient = this.prisma.tenantPrisma as unknown as Prisma.TransactionClient,
+  ) {
+    const site = await db.site.findUnique({
+      where: { id: input.siteId },
+      include: { company: true, supervisors: true },
+    });
+    if (site?.status !== 'active') throw new NotFoundException('Predio no encontrado');
+    if (user.role === 'supervisor' && !site.supervisors.some((item) => item.userId === user.userId))
+      throw new NotFoundException('Predio no encontrado');
+    const guard = input.guardId
+      ? await db.user.findFirst({
+          where: {
+            id: input.guardId,
+            role: 'guard',
+            status: { in: ['active', 'invitation_pending'] },
+          },
+        })
+      : null;
+    if (input.guardId && !guard) throw new NotFoundException('Vigilador no encontrado');
+    const rounds = await db.round.findMany({
+      where: { id: { in: input.roundIds }, siteId: input.siteId, status: 'active' },
+      include: { currentVersion: true },
+    });
+    if (rounds.length !== input.roundIds.length)
+      throw new NotFoundException('Una o más rondas no pertenecen al predio o están inactivas');
+    return { site, guard, rounds };
+  }
+
+  validatePrepared(
+    input: ShiftInput,
+    { site, guard, rounds }: Awaited<ReturnType<ShiftsService['loadValidation']>>,
+  ) {
     const startsAt = new Date(input.startsAt);
     const endsAt = new Date(input.endsAt);
     if (startsAt <= this.clock.now())
@@ -542,17 +604,6 @@ export class ShiftsService {
         code: 'SHIFT_START_IN_PAST',
         message: 'El inicio no puede estar en el pasado',
       });
-    const site = await this.site(input.siteId);
-    if (site.status !== 'active') throw new NotFoundException('Predio no encontrado');
-    if (user.role === 'supervisor' && !site.supervisors.some((item) => item.userId === user.userId))
-      throw new NotFoundException('Predio no encontrado');
-    const guard = input.guardId ? await this.assertGuard(input.guardId) : null;
-    const rounds = await this.prisma.tenantPrisma.round.findMany({
-      where: { id: { in: input.roundIds }, siteId: input.siteId, status: 'active' },
-      include: { currentVersion: true },
-    });
-    if (rounds.length !== input.roundIds.length)
-      throw new NotFoundException('Una o más rondas no pertenecen al predio o están inactivas');
     const startDate = localDate(startsAt, site.company.timezone);
     const roundDates = [previousDate(startDate), startDate];
     const endsInShift = rounds.some((round) => {
@@ -578,7 +629,7 @@ export class ShiftsService {
         code: 'NO_WINDOWS_IN_SHIFT',
         message: 'Ninguna ventana termina dentro del turno',
       });
-    return { invitationPending: guard?.invitationPending ?? false };
+    return { invitationPending: guard?.status === 'invitation_pending' };
   }
 
   private async withWarnings<
