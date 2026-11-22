@@ -16,6 +16,7 @@ export const COMPANY_ID_MODELS = [
   'Round',
   'RoundVersionCheckpoint',
   'Shift',
+  'ShiftSchedule',
   'ShiftEvent',
   'CheckpointRecord',
   'InvalidScanAttempt',
@@ -112,6 +113,7 @@ export function addSiteAssignmentFilter(
   if (model === 'RoundVersionCheckpoint')
     return { ...args, where: { AND: [where, { roundVersion: { round: { site: assignment } } }] } };
   if (model === 'Shift') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'ShiftSchedule') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'RoundWindowState')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'NoticeView')
