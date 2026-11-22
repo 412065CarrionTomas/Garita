@@ -69,9 +69,7 @@ export class ScheduleLifecycleService
       where: {
         siteId: { in: siteIds },
         scheduleId: { not: null },
-        startsAt: { gt: this.clock.now() },
-        status: 'cancelled',
-        cancelledAt: this.clock.now(),
+        status: { in: ['scheduled', 'unassigned', 'uncovered'] },
       },
     });
     const result = await tx.shiftSchedule.updateMany({
