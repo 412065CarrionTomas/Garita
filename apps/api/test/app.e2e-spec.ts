@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { FcmMessaging } from '../src/modules/notifications/fcm-messaging';
 import { MercadoPagoClient } from '../src/modules/subscriptions/mercadopago.client';
@@ -710,6 +711,8 @@ describe('Aplicación (e2e)', () => {
         ),
       })
       .overrideProvider(PlanChangeProcessor)
+      .useValue({})
+      .overrideProvider(SuspensionProcessor)
       .useValue({})
       .compile();
 

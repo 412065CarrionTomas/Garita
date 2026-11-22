@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
@@ -96,6 +97,8 @@ describe('HU-30 HTTP, reloj simulado y Mercado Pago mockeado', () => {
       .overrideProvider(MercadoPagoNotificationsProcessor)
       .useValue({})
       .overrideProvider(MercadoPagoReconciliationProcessor)
+      .useValue({})
+      .overrideProvider(SuspensionProcessor)
       .useValue({})
       .compile();
     app = module.createNestApplication();

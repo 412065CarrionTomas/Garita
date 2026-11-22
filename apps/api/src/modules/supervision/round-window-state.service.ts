@@ -64,7 +64,7 @@ export function windowCoverage(
   );
   const siteClosed = shift.closeReason === 'baja del predio';
   const coverage =
-    shift.status === 'cancelled'
+    shift.status === 'cancelled' || shift.status === 'cancelled_by_suspension'
       ? 'cancelled'
       : siteClosed && shift.closedAt && window.endsAt > shift.closedAt
         ? 'site_closed_after'

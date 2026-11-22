@@ -18,6 +18,7 @@ function fixture(status = 'active') {
     id: 'company',
     accountStatus: status,
     graceChargeId: null as string | null,
+    suspensionReason: null as string | null,
     graceEndsAt: null as Date | null,
     graceRemindersSent: [] as number[],
     timezone: 'America/Argentina/Buenos_Aires',
@@ -128,6 +129,26 @@ function fixture(status = 'active') {
 }
 
 describe('HU-30 gracia', () => {
+  it('HU-43 reuses the complete rejected cycle after grace expiry and reactivates idempotently', async () => {
+    const f = fixture();
+    await f.reject();
+    f.company.accountStatus = 'suspended';
+    f.company.suspensionReason = 'grace_expired';
+    f.setNow('2030-12-20T12:00:00Z');
+    await f.service.retry('company');
+    expect(f.mp.createPreference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: '45000.00',
+        externalReference: 'grace:charge',
+        expiresAt: new Date('2030-12-21T12:00:00Z'),
+      }),
+    );
+    await f.service.oneTimePayment(f.payment);
+    await f.service.oneTimePayment(f.payment);
+    expect(f.company.accountStatus).toBe('active');
+    expect(f.account.transition).toHaveBeenCalledTimes(2);
+    expect(f.account.transition).toHaveBeenLastCalledWith({ companyId: 'company', to: 'active' });
+  });
   it('CA1/CA2: 1/12 hasta 8/12 a las 23:59 locales; repetición y segundo rechazo no reinician', async () => {
     const f = fixture();
     await f.reject();

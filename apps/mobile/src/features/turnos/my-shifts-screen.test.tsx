@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import { MyShiftsScreen } from './my-shifts-screen';
 import { apiGet } from '@/lib/api-client';
 
-jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn(), ApiError: class extends Error {} }));
 const mockPush = jest.fn();
 let mockFocus: (() => void) | undefined;
 jest.mock('expo-router', () => ({

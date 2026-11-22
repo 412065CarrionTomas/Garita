@@ -28,6 +28,8 @@ function setup(status: AccountStatus = 'trial') {
     { role: 'supervisor', status: 'active' },
   ];
   const db = {
+    shift: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    shiftAssignment: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
     company: {
       findUniqueOrThrow: jest.fn(() => Promise.resolve(company)),
       update: jest.fn(({ data }: { data: Partial<typeof company> }) =>

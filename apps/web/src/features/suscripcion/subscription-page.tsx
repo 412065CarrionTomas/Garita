@@ -1,6 +1,7 @@
 import { paymentDetail } from './payment-detail';
 import { PlanChange } from './plan-change';
 import { GraceActions } from './grace-actions';
+import { SuspensionPayment } from './suspension-payment';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -92,6 +93,9 @@ export function SubscriptionPage() {
         description="Elegí tu plan y autorizá el débito automático mensual en Mercado Pago."
       />
       <GraceActions />
+      <SuspensionPayment
+        amountDue={current?.charges.find((charge) => charge.status === 'rejected')?.amount}
+      />
       {subscription.isPending ? (
         <div role="status" className="space-y-3">
           <span className="sr-only">Cargando la suscripción…</span>

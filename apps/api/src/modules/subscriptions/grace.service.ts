@@ -114,7 +114,12 @@ export class GraceService {
   private async activate(charge: SubscriptionCharge): Promise<void> {
     const db = this.prisma.systemPrisma;
     const company = await db.company.findUniqueOrThrow({ where: { id: charge.companyId } });
-    if (company.accountStatus !== 'grace' || company.graceChargeId !== charge.id) return;
+    if (
+      (company.accountStatus !== 'grace' &&
+        !(company.accountStatus === 'suspended' && company.suspensionReason === 'grace_expired')) ||
+      company.graceChargeId !== charge.id
+    )
+      return;
     await this.account.transition({ companyId: company.id, to: 'active' });
     await db.company.update({
       where: { id: company.id },
@@ -156,11 +161,11 @@ export class GraceService {
       where: { id: charge.id },
       data: { gracePaidPaymentId: payment.id },
     });
-    const { accountStatus } = await db.company.findUniqueOrThrow({
+    const { accountStatus, suspensionReason } = await db.company.findUniqueOrThrow({
       where: { id: charge.companyId },
-      select: { accountStatus: true },
+      select: { accountStatus: true, suspensionReason: true },
     });
-    if (accountStatus === 'suspended')
+    if (accountStatus === 'suspended' && suspensionReason !== 'grace_expired')
       this.logger.error({
         event: 'subscription.grace_payment_after_suspension',
         companyId: charge.companyId,
@@ -188,9 +193,10 @@ export class GraceService {
       const company = await db.company.findUniqueOrThrow({ where: { id: companyId } });
       const now = this.clock.now();
       if (
-        company.accountStatus !== 'grace' ||
-        !company.graceEndsAt ||
-        company.graceEndsAt <= now ||
+        !(
+          (company.accountStatus === 'grace' && company.graceEndsAt && company.graceEndsAt > now) ||
+          (company.accountStatus === 'suspended' && company.suspensionReason === 'grace_expired')
+        ) ||
         !company.graceChargeId
       )
         throw new ConflictException('La cuenta no está en un período de gracia vigente');
@@ -236,7 +242,12 @@ export class GraceService {
         };
       }
       const expiresAt = new Date(
-        Math.min(now.getTime() + 86_400_000, company.graceEndsAt.getTime()),
+        Math.min(
+          now.getTime() + 86_400_000,
+          company.accountStatus === 'grace' && company.graceEndsAt
+            ? company.graceEndsAt.getTime()
+            : Infinity,
+        ),
       );
       // Una respuesta perdida al crear la preferencia no habilita otra creación a ciegas.
       await db.subscriptionCharge.update({

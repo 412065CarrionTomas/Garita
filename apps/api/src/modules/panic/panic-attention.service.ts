@@ -5,6 +5,7 @@ import { CLOCK, type Clock } from '../../common/clock';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import type { Prisma } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { suspendedVisiblePanicWhere } from '../auth/account-suspension.policy';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -26,8 +27,9 @@ export class PanicAttentionService {
     @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
   ) {}
 
-  async list(filters: z.infer<typeof panicAlertsQuerySchema>) {
+  async list(filters: z.infer<typeof panicAlertsQuerySchema>, user?: AuthenticatedUser) {
     const where: Prisma.PanicAlertWhereInput = {
+      ...suspendedVisiblePanicWhere(user),
       ...(filters.estado ? { status: filters.estado } : {}),
       ...(filters.predio ? { siteId: filters.predio } : {}),
     };
@@ -40,7 +42,9 @@ export class PanicAttentionService {
         take: 25,
       }),
       this.prisma.tenantPrisma.panicAlert.count({ where }),
-      this.prisma.tenantPrisma.panicAlert.count({ where: { status: 'active' } }),
+      this.prisma.tenantPrisma.panicAlert.count({
+        where: { ...suspendedVisiblePanicWhere(user), status: 'active' },
+      }),
     ]);
     return {
       items: items.map((row) => this.summary(row)),

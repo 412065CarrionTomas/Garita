@@ -119,6 +119,7 @@ const shiftStates: Partial<Record<string, { label: string; tone: StatusTone }>> 
   closed: { label: 'Cerrado', tone: 'info' },
   auto_closed: { label: 'Cerrado por el sistema', tone: 'warning' },
   cancelled: { label: 'Cancelado', tone: 'neutral' },
+  cancelled_by_suspension: { label: 'Cancelado por suspensión', tone: 'neutral' },
   no_show: { label: 'No presentado', tone: 'warning' },
   uncovered: { label: 'Sin cobertura', tone: 'warning' },
 };
@@ -135,7 +136,7 @@ const filterStatuses: Record<Exclude<StateFilter, 'all'>, readonly Shift['status
   curso: ['in_progress'],
   prog: ['scheduled', 'unassigned'],
   fin: ['closed', 'auto_closed'],
-  canc: ['cancelled'],
+  canc: ['cancelled', 'cancelled_by_suspension'],
 };
 
 const emptyForm: FormValues = {
@@ -245,7 +246,10 @@ export function ShiftsPanel() {
         startsAt: shift.startsAt,
         endsAt: shift.endsAt,
         // La cobertura solo distingue los turnos cancelados.
-        status: shift.status === 'cancelled' ? ('cancelled' as const) : undefined,
+        status:
+          shift.status === 'cancelled' || shift.status === 'cancelled_by_suspension'
+            ? ('cancelled' as const)
+            : undefined,
         roundIds: shift.rounds.map((item) => item.roundId),
       }))
       .filter((shift) => shift.id !== editing?.id);
@@ -489,7 +493,8 @@ export function ShiftsPanel() {
             {visibleShifts.flatMap((shift) => {
               const guard = shift.assignments[0]?.guard;
               const started = Date.parse(shift.startsAt) <= now;
-              const cancelled = shift.status === 'cancelled';
+              const cancelled =
+                shift.status === 'cancelled' || shift.status === 'cancelled_by_suspension';
               const windowCount = windowCounts.get(shift.id) ?? 0;
               const rows = [
                 <TableRow

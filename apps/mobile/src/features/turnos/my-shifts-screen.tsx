@@ -4,11 +4,13 @@ import { space } from '@garita/tokens';
 import { Badge, Banner, Button, Card, ListItem, Loading, Text, useTheme } from '@/ui';
 import { z } from 'zod';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { apiGet } from '@/lib/api-client';
+import { apiGet, ApiError } from '@/lib/api-client';
+import { accountSuspendedResponseSchema, SUSPENSION_MESSAGES } from '@garita/shared';
 
 const shiftsSchema = z.array(
   z.looseObject({
     id: z.string(),
+    status: z.string().optional(),
     startsAt: z.string(),
     endsAt: z.string(),
     serviceDate: z.string(),
@@ -26,12 +28,19 @@ export function MyShiftsScreen() {
   const [shifts, setShifts] = useState<ShiftList>([]);
   const [refreshing, setRefreshing] = useState(true);
   const [error, setError] = useState(false);
+  const [suspended, setSuspended] = useState(false);
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
       setShifts(await apiGet('/mis-turnos', shiftsSchema));
       setError(false);
-    } catch {
+      setSuspended(false);
+    } catch (error) {
+      setSuspended(
+        error instanceof ApiError &&
+          error.status === 402 &&
+          accountSuspendedResponseSchema.safeParse(error.payload).success,
+      );
       setError(true);
     } finally {
       setRefreshing(false);
@@ -45,12 +54,18 @@ export function MyShiftsScreen() {
           if (mounted) {
             setShifts(data);
             setError(false);
+            setSuspended(false);
             setRefreshing(false);
           }
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (mounted) {
             setError(true);
+            setSuspended(
+              error instanceof ApiError &&
+                error.status === 402 &&
+                accountSuspendedResponseSchema.safeParse(error.payload).success,
+            );
             setRefreshing(false);
           }
         });
@@ -87,7 +102,11 @@ export function MyShiftsScreen() {
       />
       {refreshing && shifts.length === 0 && <Loading label="Cargando turnos…" />}
       {error && (
-        <Banner tone="danger">No se pudieron cargar los turnos. Deslizá para reintentar.</Banner>
+        <Banner tone="danger">
+          {suspended
+            ? SUSPENSION_MESSAGES.guard
+            : 'No se pudieron cargar los turnos. Deslizá para reintentar.'}
+        </Banner>
       )}
       {!refreshing && !error && shifts.length === 0 && (
         <Card style={styles.empty}>
@@ -104,7 +123,13 @@ export function MyShiftsScreen() {
             <Badge
               tone="neutral"
               variant={shift.status === 'in_progress' ? 'now' : 'dashed'}
-              label={shift.status === 'in_progress' ? 'En curso' : 'Programado'}
+              label={
+                shift.status === 'cancelled_by_suspension'
+                  ? 'Cancelado por suspensión'
+                  : shift.status === 'in_progress'
+                    ? 'En curso'
+                    : 'Programado'
+              }
             />
           }
           accessibilityRole="button"

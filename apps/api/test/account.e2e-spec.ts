@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types';
@@ -65,6 +66,8 @@ describe('HU-41 cuenta y cupo por HTTP', () => {
       .overrideProvider(CLOCK)
       .useValue({ now: () => now })
       .overrideProvider(AccountTrialProcessor)
+      .useValue({})
+      .overrideProvider(SuspensionProcessor)
       .useValue({})
       .compile();
     app = module.createNestApplication();

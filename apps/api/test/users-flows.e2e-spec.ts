@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { randomUUID, createHash } from 'node:crypto';
@@ -44,6 +45,8 @@ describe('Flujos de gestión de personal (e2e)', () => {
       .useValue(identity)
       .overrideProvider(ResendInvitationMailer)
       .useValue(mailer)
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);

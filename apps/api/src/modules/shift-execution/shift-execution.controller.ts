@@ -5,6 +5,7 @@ import {
   ApiConflictResponse,
   ApiOperation,
   ApiTags,
+  ApiResponse,
 } from '@nestjs/swagger';
 import {
   closeShiftRequestSchema,
@@ -32,6 +33,18 @@ export class ShiftExecutionController {
   @ApiOperation({ summary: 'Inicia el turno y descarga sus datos sin conexión' })
   @ApiBody({ schema: { type: 'object' } })
   @ApiConflictResponse({ description: 'El turno no se puede iniciar' })
+  @ApiResponse({
+    status: 402,
+    description: 'Cuenta suspendida: no se inician turnos nuevos',
+    schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', enum: ['ACCOUNT_SUSPENDED'] },
+        accountStatus: { type: 'string', enum: ['suspended'] },
+        message: { type: 'string' },
+      },
+    },
+  })
   start(@Param('id') id: string, @Body() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
     return this.execution.start(id, parseOrBadRequest(startShiftRequestSchema, raw), user);
   }

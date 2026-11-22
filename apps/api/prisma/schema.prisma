@@ -95,6 +95,7 @@ model Company {
   suspensionReason SuspensionReason?
   graceEndsAt DateTime?
   suspendedAt DateTime?
+  suspensionEffectsPending Boolean @default(false)
   trialRemindersSent Int[] @default([])
   graceRemindersSent Int[] @default([])
   /// Originating monthly invoice; scalar so account does not depend on subscriptions.
@@ -414,6 +415,7 @@ enum ShiftStatus {
   in_progress
   closed
   auto_closed
+  cancelled_by_suspension
 }
 
 enum ShiftAssignmentResult {
@@ -1152,6 +1154,8 @@ enum SubscriptionStatus {
 }
 
 model Subscription {
+  suspensionPausedAt DateTime?
+  suspensionPlanId String?
   id                String               @id @default(cuid())
   companyId         String
   planId            String

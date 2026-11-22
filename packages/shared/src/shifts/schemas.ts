@@ -33,7 +33,7 @@ export const shiftOutputSchema = z.object({
   startsAt: isoDateTime,
   endsAt: isoDateTime,
   serviceDate: z.iso.date(),
-  status: z.enum(['scheduled', 'unassigned', 'cancelled']),
+  status: z.enum(['scheduled', 'unassigned', 'cancelled', 'cancelled_by_suspension']),
 });
 
 export type ShiftInput = z.infer<typeof shiftInputSchema>;

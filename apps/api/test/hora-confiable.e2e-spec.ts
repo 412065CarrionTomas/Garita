@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { syncBatchResponseSchema } from '@garita/shared';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -45,6 +46,8 @@ describe('HU-14 integración de hora confiable', () => {
       })
       .overrideProvider(CLOCK)
       .useValue({ now: () => testNow })
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);

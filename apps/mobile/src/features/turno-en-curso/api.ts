@@ -9,6 +9,8 @@ import {
   type CloseShiftRequest,
   type ShiftExecutionErrorCode,
   type StartShiftRequest,
+  accountSuspendedResponseSchema,
+  SUSPENSION_MESSAGES,
 } from '@garita/shared';
 import { ApiError, apiRequest } from '@/lib/api-client';
 
@@ -39,6 +41,12 @@ function getExecutionError(error: unknown): ShiftExecutionApiError | null {
   const payload = error.payload;
   if (typeof payload !== 'object' || payload === null || !('code' in payload)) return null;
   const code = payload.code;
+  if (error.status === 402 && code === 'ACCOUNT_SUSPENDED') {
+    const suspended = accountSuspendedResponseSchema.safeParse(payload);
+    const result = new ShiftExecutionApiError(undefined);
+    result.message = suspended.success ? suspended.data.message : SUSPENSION_MESSAGES.guard;
+    return result;
+  }
   const knownCodes = Object.values(SHIFT_EXECUTION_ERROR_CODES);
   const allowedStart = allowedStartSchema.safeParse(payload);
   return new ShiftExecutionApiError(

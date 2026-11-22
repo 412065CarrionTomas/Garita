@@ -9,6 +9,27 @@ const round = {
 };
 
 describe('shift window allocation', () => {
+  it('HU-43 excludes windows cancelled by suspension', () => {
+    const windows = computeRoundWindows('2026-10-12', round);
+    const shifts = [
+      {
+        id: 'suspended',
+        startsAt: '2026-10-12T23:00:00.000Z',
+        endsAt: '2026-10-13T11:00:00.000Z',
+        status: 'cancelled_by_suspension' as const,
+        roundIds: ['round'],
+      },
+    ];
+    expect(assignWindowsToShifts(windows, shifts).every((window) => window.notEvaluable)).toBe(
+      true,
+    );
+    expect(
+      findUncoveredWindows(
+        windows.map((window) => ({ ...window, roundId: 'round' })),
+        shifts,
+      ),
+    ).toEqual([]);
+  });
   it('allocates four expected windows to an overnight shift', () => {
     const windows = computeRoundWindows('2026-10-12', round);
     const shift = {

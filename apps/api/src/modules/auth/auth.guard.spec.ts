@@ -59,6 +59,17 @@ describe('AuthGuard', () => {
       },
     };
     const prisma = { systemPrisma } as unknown as PrismaService;
+    systemPrisma.user.findUnique.mockImplementation(() =>
+      Promise.resolve({
+        ...(options.user ?? {
+          id: 'user-1',
+          companyId: 'company-1',
+          role: 'guard',
+          status: 'active',
+        }),
+        company: { accountStatus: 'active', suspendedAt: null },
+      }),
+    );
     const identity: FirebaseIdentityProvider = {
       verifyIdToken: () => Promise.resolve({ uid: 'firebase-user' }),
       createDisabledUser: () => Promise.resolve({ uid: 'new-user' }),
