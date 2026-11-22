@@ -382,11 +382,17 @@ export class SubscriptionsService {
       )[0];
     const lastRejected = latest && toChargeStatus(latest.payment) === 'rejected' ? latest : null;
     const status = toSubscriptionStatus(remote.status) ?? subscription.status;
+    // Pausada, Mercado Pago puede no informar el próximo cobro: se conserva el anterior (HU-43, CA7).
+    const nextChargeAt = remote.next_payment_date
+      ? new Date(remote.next_payment_date)
+      : status === 'paused'
+        ? (subscription.nextChargeAt ?? null)
+        : null;
     await db.subscription.update({
       where: { id: subscription.id },
       data: {
         status,
-        nextChargeAt: remote.next_payment_date ? new Date(remote.next_payment_date) : null,
+        nextChargeAt,
         lastFailureReason:
           status === 'authorized' ? null : (lastRejected?.payment?.status_detail ?? null),
       },
@@ -394,8 +400,7 @@ export class SubscriptionsService {
     if (
       reconciliation &&
       (status !== subscription.status ||
-        subscription.nextChargeAt?.toISOString() !==
-          (remote.next_payment_date ? new Date(remote.next_payment_date).toISOString() : undefined))
+        subscription.nextChargeAt?.toISOString() !== nextChargeAt?.toISOString())
     ) {
       this.logger.error({
         event: 'subscription.reconciliation_diff',

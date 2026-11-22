@@ -41,6 +41,7 @@ function fixture(suspended = true) {
         ),
     },
     shift: { updateMany: jest.fn() },
+    shiftAssignment: { updateMany: jest.fn() },
   };
   const remote = {
     id: 'mp',
@@ -119,7 +120,8 @@ describe('HU-43 suspension effects', () => {
         }),
       );
       expect(f.company.accountStatus).toBe('active');
-      expect(f.subscription.nextChargeAt.toISOString()).toBe('2031-01-01T12:00:00.000Z');
+      // V9 H1: después de comparar, la fecha visible es la que informa Mercado Pago.
+      expect(f.subscription.nextChargeAt.toISOString()).toBe('2031-01-20T12:00:00.000Z');
     } finally {
       log.mockRestore();
     }

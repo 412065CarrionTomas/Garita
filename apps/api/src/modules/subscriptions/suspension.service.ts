@@ -95,7 +95,7 @@ export class SuspensionService {
         await tx.company.update({ where: { id: companyId }, data: { id: companyId } });
         const company = await tx.company.findUniqueOrThrow({ where: { id: companyId } });
         const suspended = company.accountStatus === 'suspended';
-        if (suspended)
+        if (suspended) {
           await tx.shift.updateMany({
             where: {
               companyId,
@@ -106,6 +106,11 @@ export class SuspensionService {
             },
             data: { status: 'cancelled_by_suspension' },
           });
+          await tx.shiftAssignment.updateMany({
+            where: { active: true, shift: { companyId, status: 'cancelled_by_suspension' } },
+            data: { active: false },
+          });
+        }
         const subscription = await tx.subscription.findFirst({
           where: { companyId, status: { in: ['authorized', 'paused'] }, cancelAt: null },
         });
@@ -157,6 +162,8 @@ export class SuspensionService {
                 status: 'authorized',
                 suspensionPausedAt: null,
                 suspensionPlanId: null,
+                // Después de comparar: la fecha visible es la que cobrará Mercado Pago.
+                ...(actual ? { nextChargeAt: actual } : {}),
                 ...(subscription.suspensionPlanId ? { planId: subscription.suspensionPlanId } : {}),
               },
             });
