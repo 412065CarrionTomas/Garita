@@ -110,7 +110,13 @@ export type CloseShiftResponse = z.infer<typeof closeShiftResponseSchema>;
 
 /** Response of `GET /turnos/:id/estado`: current window of each round and its pending points, in order. */
 export const shiftStateResponseSchema = z.object({
-  status: z.enum(['scheduled', 'unassigned', 'cancelled', ...SHIFT_EXECUTION_STATUSES]),
+  status: z.enum([
+    'scheduled',
+    'unassigned',
+    'cancelled',
+    'cancelled_by_suspension',
+    ...SHIFT_EXECUTION_STATUSES,
+  ]),
   rounds: z.array(
     z.object({
       roundId: z.string(),

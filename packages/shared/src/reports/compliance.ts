@@ -99,6 +99,7 @@ export function computeCompliance(
   for (const window of windows) {
     if (
       window.shiftStatus === 'cancelled' ||
+      window.shiftStatus === 'cancelled_by_suspension' ||
       ['pending', 'in_progress', 'late'].includes(window.status)
     )
       continue;

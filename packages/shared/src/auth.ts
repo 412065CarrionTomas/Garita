@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { accountStatusSchema } from './account';
 
 export const USER_STATUSES = ['invitation_pending', 'active', 'deactivated'] as const;
 export const userStatusSchema = z.enum(USER_STATUSES);
@@ -13,7 +14,11 @@ export const authMeResponseSchema = z.object({
   email: z.email(),
   role: z.enum(['admin', 'supervisor', 'guard', 'client']),
   status: userStatusSchema,
-  company: z.object({ id: z.string(), name: z.string() }),
+  company: z.object({
+    id: z.string(),
+    name: z.string(),
+    accountStatus: accountStatusSchema.optional(),
+  }),
   allowedChannels: allowedChannelsSchema,
 });
 

@@ -38,3 +38,4 @@ export * from './proration';
 export * from './plan-change';
 export * from './grace';
 export * from './reports/export';
+export * from './suspension';
