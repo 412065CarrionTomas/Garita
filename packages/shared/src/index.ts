@@ -39,3 +39,4 @@ export * from './plan-change';
 export * from './grace';
 export * from './reports/export';
 export * from './suspension';
+export * from './shifts/schedules';

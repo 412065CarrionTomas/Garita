@@ -5,19 +5,18 @@ import { ClientUsersController, InvitationsController, UsersController } from '.
 import { ResendInvitationMailer } from './email.service';
 import { UsersService } from './users.service';
 import { ShiftExecutionModule } from '../shift-execution/shift-execution.module';
-import {
-  NoopWeeklyScheduleDerivation,
-  WEEKLY_SCHEDULE_DERIVATION_PORT,
-} from './weekly-schedule-derivation.port';
+import { WEEKLY_SCHEDULE_DERIVATION_PORT } from './weekly-schedule-derivation.port';
+import { ShiftSchedulesModule } from '../shift-schedules/shift-schedules.module';
+import { ScheduleLifecycleService } from '../shift-schedules/schedule-lifecycle.service';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ShiftExecutionModule],
+  imports: [PrismaModule, AuthModule, ShiftExecutionModule, ShiftSchedulesModule],
   exports: [UsersService],
   controllers: [UsersController, InvitationsController, ClientUsersController],
   providers: [
     UsersService,
     ResendInvitationMailer,
-    { provide: WEEKLY_SCHEDULE_DERIVATION_PORT, useClass: NoopWeeklyScheduleDerivation },
+    { provide: WEEKLY_SCHEDULE_DERIVATION_PORT, useExisting: ScheduleLifecycleService },
   ],
 })
 export class UsersModule {}

@@ -20,6 +20,7 @@ import { ActivationPage } from '../activacion/activation-page';
 import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
 import { SitesPage } from '../predios/sites-page';
 import { ShiftsPanel } from '../turnos/shifts-panel';
+import { SchedulesPage } from '../turnos/programaciones/schedules-page';
 import {
   IncidentsListPage,
   IncidentsQueuePage,
@@ -81,7 +82,13 @@ function staffSections(admin: boolean, counts: PendingCounts): NavSection[] {
         { path: '/revision', title: 'Rondas en revisión', count: counts.reviews, tone: 'danger' },
       ],
     },
-    { path: '/turnos', title: 'Turnos' },
+    {
+      title: 'Turnos',
+      children: [
+        { path: '/turnos', title: 'Listado' },
+        { path: '/programaciones-turnos', title: 'Programaciones' },
+      ],
+    },
     {
       // Todo lo de incidentes vive en un solo lugar: el listado, la cola y su reporte.
       title: 'Incidentes',
@@ -326,6 +333,14 @@ export function AppRoutes() {
           element={
             <Protected roles={['admin', 'supervisor']}>
               <ShiftsPanel />
+            </Protected>
+          }
+        />
+        <Route
+          path="/programaciones-turnos"
+          element={
+            <Protected roles={['admin', 'supervisor']}>
+              <SchedulesPage />
             </Protected>
           }
         />

@@ -1,4 +1,4 @@
-import { ShiftsService } from './shifts.service';
+import { SCHEDULE_REGENERATION_REASON, ShiftsService } from './shifts.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
 
@@ -97,7 +97,12 @@ describe('audit shift list filters', () => {
   it('excludes only unassigned shifts when sinVigilador is false', async () => {
     await service.list({ sinVigilador: 'false' });
     expect(findMany).toHaveBeenLastCalledWith(
-      expect.objectContaining({ where: { status: { not: 'unassigned' } } }),
+      expect.objectContaining({
+        where: {
+          NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
+          status: { not: 'unassigned' },
+        },
+      }),
     );
   });
   it('includes current running assignments even after scheduled end', async () => {

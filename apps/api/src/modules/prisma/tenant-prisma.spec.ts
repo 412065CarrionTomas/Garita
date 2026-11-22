@@ -13,6 +13,22 @@ import {
 } from './tenant-prisma';
 
 describe('registro del aislamiento tenant', () => {
+  it('aísla programaciones por empresa y por predio del supervisor', () => {
+    expect(
+      scopeArgs('ShiftSchedule', 'findMany', { where: { status: 'active' } }, 'norte'),
+    ).toEqual({ where: { status: 'active', companyId: 'norte' } });
+    expect(
+      addSiteAssignmentFilter(
+        'ShiftSchedule',
+        { where: { id: 'schedule' } },
+        { userId: 'supervisor', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [{ id: 'schedule' }, { site: { supervisors: { some: { userId: 'supervisor' } } } }],
+      },
+    });
+  });
   it('cubre todos los modelos del schema Prisma con un campo companyId', () => {
     const schema = readFileSync(resolve(process.cwd(), 'prisma/schema.prisma'), 'utf8');
     const schemaTenantModels = [...schema.matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\}/g)]

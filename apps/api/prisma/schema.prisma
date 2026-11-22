@@ -113,6 +113,7 @@ model Company {
   sites             Site[]
   rounds            Round[]
   shifts            Shift[]
+  shiftSchedules    ShiftSchedule[]
   recordFlags       RecordFlag[]
   roundWindowStates RoundWindowState[]
   incidents   Incident[]
@@ -151,6 +152,8 @@ model User {
   invitations      Invitation[]
   siteAssignments  SiteSupervisor[]
   createdShifts    Shift[]           @relation("ShiftCreator")
+  createdShiftSchedules ShiftSchedule[] @relation("ScheduleCreator")
+  guardedShiftSchedules ShiftSchedule[] @relation("ScheduleGuard")
   shiftAssignments ShiftAssignment[]
   assignedShifts    ShiftAssignment[] @relation("ShiftAssignmentAssigner")
   shiftCredentials ShiftCredential[]
@@ -225,6 +228,7 @@ enum ConnectivityType {
 }
 
 model Site {
+  shiftSchedules ShiftSchedule[]
   id                 String           @id @default(cuid())
   companyId          String
   clientId           String
@@ -518,6 +522,8 @@ enum ShiftClosedBy {
 }
 
 model Shift {
+  scheduleId String?
+  schedule ShiftSchedule? @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
   panicSmsCode        String?
   id                  String               @id @default(cuid())
   companyId           String
@@ -568,8 +574,39 @@ model Shift {
   closedWithoutDataBy User? @relation("ClosedWithoutDataBy", fields: [closedWithoutDataById], references: [id], onDelete: Restrict)
 
   @@index([companyId, startsAt])
+  @@index([scheduleId])
   @@index([siteId, serviceDate])
   @@index([status, startsAt])
+}
+
+enum ShiftScheduleStatus {
+  active
+  finished
+  cancelled
+}
+
+model ShiftSchedule {
+  id String @id @default(cuid())
+  companyId String
+  siteId String
+  guardId String
+  weekdays Int[]
+  startTime String
+  endTime String
+  roundIds String[]
+  startDate DateTime @db.Date
+  endDate DateTime @db.Date
+  status ShiftScheduleStatus @default(active)
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  guard User @relation("ScheduleGuard", fields: [guardId], references: [id], onDelete: Restrict)
+  createdBy User @relation("ScheduleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  shifts Shift[]
+
+  @@index([companyId, status])
 }
 
 model NoticeView {

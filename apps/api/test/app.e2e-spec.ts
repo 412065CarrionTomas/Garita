@@ -238,6 +238,36 @@ import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-err
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
+  it('HU-32: todos los endpoints requieren sesión y rol de planificación', async () => {
+    for (const [method, path] of [
+      ['get', ''],
+      ['post', ''],
+      ['post', '/previsualizar'],
+      ['patch', '/missing'],
+      ['post', '/missing/extender'],
+      ['post', '/missing/cancelar'],
+    ] as const) {
+      const url = `/api/v1/programaciones-turnos${path}`;
+      await request(app.getHttpServer())[method](url).expect(401);
+      for (const token of ['token-guard', 'token-client'])
+        await request(app.getHttpServer())
+          [method](url)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+    }
+    await request(app.getHttpServer())
+      .get('/api/v1/programaciones-turnos')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v1/programaciones-turnos?predio=${northUnassignedSiteId}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/programaciones-turnos?predio=${southSiteId}`)
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+  });
   let app: INestApplication<App>;
   it('HU-37: SMS recibidos solo admite administrador y el webhook exige firma', async () => {
     const http = request(app.getHttpServer());

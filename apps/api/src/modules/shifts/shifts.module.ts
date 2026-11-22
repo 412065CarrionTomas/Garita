@@ -8,5 +8,6 @@ import { ShiftsService } from './shifts.service';
   imports: [PrismaModule],
   controllers: [ShiftsController],
   providers: [TenantResourceService, ShiftsService],
+  exports: [ShiftsService],
 })
 export class ShiftsModule {}
