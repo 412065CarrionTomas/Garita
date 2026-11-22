@@ -93,7 +93,7 @@ export function SuspensionPayment({ amountDue }: { amountDue?: string }) {
           <GuardSelectionStep required={required} value={selection} onChange={setSelection} />
         )}
         <Button
-          disabled={pay.isPending}
+          disabled={pay.isPending || Boolean(required && selection.guardsToKeep.length === 0)}
           onClick={() => {
             pay.mutate(openCheckoutTab());
           }}
@@ -107,7 +107,10 @@ export function SuspensionPayment({ amountDue }: { amountDue?: string }) {
               ? 'Pago abierto en Mercado Pago. Esperando su aprobación.'
               : ''}
         </p>
-        {pay.error && !required && <Alert variant="destructive">{errorMessage(pay.error)}</Alert>}
+        {pay.error &&
+          !guardSelectionRequiredSchema.safeParse(
+            pay.error instanceof ApiError ? pay.error.body : undefined,
+          ).success && <Alert variant="destructive">{errorMessage(pay.error)}</Alert>}
       </CardContent>
     </Card>
   );
