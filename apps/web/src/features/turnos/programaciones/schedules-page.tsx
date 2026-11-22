@@ -276,9 +276,8 @@ export function SchedulesPage() {
   const edit = (schedule?: Schedule) => {
     if (schedule) {
       const { id, status: _status, ...values } = schedule;
-      const zone = sites.data?.find((site) => site.id === values.siteId)?.company.timezone;
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date());
-      setForm({ ...values, startDate: values.startDate < today ? today : values.startDate });
+      // El período aprobado no se toca: la API regenera solo desde hoy.
+      setForm(values);
       setEditingId(id);
     } else {
       setForm(emptyForm);
