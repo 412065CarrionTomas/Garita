@@ -124,6 +124,18 @@ it('encola SMS inicial y escalamiento a los 120 segundos con claves estables', a
   );
 });
 
+it('HU-43 conserva SMS, push y escalamiento con la empresa suspendida', async () => {
+  const f = fixture();
+  Object.assign(f.alert.company, { accountStatus: 'suspended' });
+  await f.jobs.schedule(input, f.alert.receivedAt);
+  jest.advanceTimersByTime(120000);
+  await f.jobs.escalate(input);
+  expect(f.smsQueue.add).toHaveBeenCalled();
+  expect(f.notifications.notifySiteStaff).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'panic', priority: 'high' }),
+  );
+});
+
 it('a los 120 segundos escala una sola vez, reenvía push alta y encola SMS de escalamiento', async () => {
   const f = fixture();
   jest.advanceTimersByTime(119000);

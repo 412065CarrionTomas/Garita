@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Test } from '@nestjs/testing';
 import { type INestApplication, type Type } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
@@ -136,6 +137,8 @@ describe('HU-37 SMS por HTTP con proveedor simulado', () => {
       .useValue({ sendEachForMulticast: jest.fn() })
       .overrideProvider(FIREBASE_IDENTITY_PROVIDER)
       .useValue({ verifyIdToken: (token: string) => Promise.resolve({ uid: token }) })
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = module.createNestApplication({ rawBody: true });
     setupApp(app);

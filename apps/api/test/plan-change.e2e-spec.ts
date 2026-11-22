@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Logger, type INestApplication, type Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -93,6 +94,8 @@ describe('HU-42 por HTTP, sin servicios externos', () => {
         setDisabled: jest.fn().mockResolvedValue(undefined),
         revokeRefreshTokens: jest.fn().mockResolvedValue(undefined),
       })
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = module.createNestApplication();
     setupApp(app);

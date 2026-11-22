@@ -9,6 +9,7 @@ import {
 import { CLOCK, type Clock } from '../../common/clock';
 import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { PrismaService } from '../prisma/prisma.service';
+import { ACCOUNT_STATE_PORT, type AccountStatePort } from '../../common/ports/account-state.port';
 
 @Injectable()
 export class CoverageNoticesService {
@@ -17,11 +18,11 @@ export class CoverageNoticesService {
     private readonly prisma: PrismaService,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(NOTICES_PORT) private readonly notices: NoticesPort,
+    @Inject(ACCOUNT_STATE_PORT) private readonly account: AccountStatePort,
   ) {}
 
-  isCompanySuspended(_companyId: string): Promise<boolean> {
-    // TODO(HU-43): consultar la suspensión de la empresa cuando esté implementada.
-    return Promise.resolve(false);
+  async isCompanySuspended(companyId: string): Promise<boolean> {
+    return (await this.account.get(companyId)).status === 'suspended';
   }
 
   async sweep(): Promise<void> {
@@ -39,7 +40,20 @@ export class CoverageNoticesService {
       },
     });
     for (const site of sites) {
-      if (await this.isCompanySuspended(site.companyId)) continue;
+      if (await this.isCompanySuspended(site.companyId)) {
+        await this.prisma.systemPrisma.shift.updateMany({
+          where: {
+            companyId: site.companyId,
+            siteId: site.id,
+            status: { in: ['scheduled', 'unassigned'] },
+            startedAt: null,
+            startsAt: { lte: now },
+            company: { accountStatus: 'suspended' },
+          },
+          data: { status: 'cancelled_by_suspension' },
+        });
+        continue;
+      }
       const connectivity = siteConnectivitySchema.parse({
         type: site.connectivityType,
         minutesToSignal: site.minutesToSignal,

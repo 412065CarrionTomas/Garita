@@ -7,6 +7,7 @@ import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/n
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { suspendedVisibleShiftWhere } from '../auth/account-suspension.policy';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 
 @Injectable()
@@ -85,8 +86,10 @@ export class NoticesService implements NoticesPort {
       });
   }
 
-  async list(query: NoticesQuery, userId: string) {
+  async list(query: NoticesQuery, userId: string, user?: AuthenticatedUser) {
+    const suspension = user?.suspension ? { shift: suspendedVisibleShiftWhere(user) } : {};
     const where = {
+      ...suspension,
       ...(query.status ? { status: query.status } : {}),
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.siteId ? { siteId: query.siteId } : {}),
@@ -101,9 +104,9 @@ export class NoticesService implements NoticesPort {
           shift: { select: { startsAt: true, endsAt: true } },
         },
       }),
-      this.prisma.tenantPrisma.notice.count({ where: { status: 'open' } }),
+      this.prisma.tenantPrisma.notice.count({ where: { ...suspension, status: 'open' } }),
       this.prisma.tenantPrisma.notice.count({
-        where: { status: 'open', views: { none: { userId } } },
+        where: { ...suspension, status: 'open', views: { none: { userId } } },
       }),
     ]);
     return {

@@ -7,6 +7,7 @@ export interface AuthenticatedUser {
   role: UserRole;
   status: UserStatus;
   clientId?: string | null;
+  suspension?: { shiftIds: string[]; panicIds: string[] };
 }
 
 export interface AuthenticatedRequest extends Request {

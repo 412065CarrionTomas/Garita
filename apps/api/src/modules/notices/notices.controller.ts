@@ -34,7 +34,7 @@ export class NoticesController {
       siteId: parsed.data.predio,
     });
     if (!query.success) throw new BadRequestException(query.error.issues);
-    return this.notices.list(query.data, user.userId);
+    return this.notices.list(query.data, user.userId, user);
   }
 
   @Post(':id/marcar-visto')

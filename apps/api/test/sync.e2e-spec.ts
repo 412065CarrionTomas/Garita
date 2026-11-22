@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import {
   startShiftResponseSchema,
   syncBatchResponseSchema,
@@ -95,6 +96,8 @@ describe('Sincronización sin señal HU-13 (e2e)', () => {
       .useValue(realtimePort)
       .overrideProvider(PHOTO_STORAGE_PORT)
       .useValue(photoStorage)
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
 
     app = moduleRef.createNestApplication();

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MarcasService } from '../marcas/marcas.service';
 import { CLOCK, type Clock } from '../../common/clock';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { suspendedVisibleShiftWhere } from '../auth/account-suspension.policy';
 
 @Injectable()
 export class SupervisionService {
@@ -28,7 +29,8 @@ export class SupervisionService {
     const serviceDate = new Date(`${input.fecha ?? localToday}T00:00:00.000Z`);
     const shifts = await this.prisma.tenantPrisma.shift.findMany({
       where: {
-        serviceDate,
+        ...(user.suspension ? {} : { serviceDate }),
+        ...suspendedVisibleShiftWhere(user),
         ...(input.predio ? { siteId: input.predio } : {}),
       },
       orderBy: { startsAt: 'asc' },

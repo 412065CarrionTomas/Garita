@@ -43,6 +43,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { RoundWindowStateService } from '../supervision/round-window-state.service';
+import { ACCOUNT_STATE_PORT, type AccountStatePort } from '../../common/ports/account-state.port';
 
 export const SHIFT_AUTO_CLOSE_QUEUE = 'shift-auto-close';
 export const SHIFT_AUTO_CLOSE_JOB = 'close-shift';
@@ -77,6 +78,7 @@ export class ShiftExecutionService {
     @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
     @Optional() private readonly config?: ConfigService<Env, true>,
     @Optional() @Inject(NOTICES_PORT) private readonly notices?: NoticesPort,
+    @Optional() @Inject(ACCOUNT_STATE_PORT) private readonly account?: AccountStatePort,
   ) {}
 
   async start(id: string, input: StartShiftRequest, user: AuthenticatedUser) {
@@ -96,7 +98,12 @@ export class ShiftExecutionService {
     const shift = await this.ownedShift(id);
     if (shift.site.status === 'inactive' || shift.site.client.status === 'inactive')
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
-    if (shift.status === 'cancelled' || shift.status === 'closed' || shift.status === 'auto_closed')
+    if (
+      shift.status === 'cancelled' ||
+      shift.status === 'cancelled_by_suspension' ||
+      shift.status === 'closed' ||
+      shift.status === 'auto_closed'
+    )
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
     const assignment = await this.currentAssignment(shift.id);
     if (assignment?.guardId !== user.userId) {
@@ -149,6 +156,7 @@ export class ShiftExecutionService {
           where: {
             id,
             status: 'scheduled',
+            company: { accountStatus: { not: 'suspended' } },
             site: { status: 'active', client: { status: 'active' } },
           },
           data: {
@@ -740,11 +748,25 @@ export class ShiftExecutionService {
     shift: { id: string; companyId: string; siteId: string },
     now: Date,
   ): Promise<number> {
+    if (this.account && (await this.account.get(shift.companyId)).status === 'suspended') {
+      await this.prisma.systemPrisma.shift.updateMany({
+        where: {
+          id: shift.id,
+          companyId: shift.companyId,
+          startedAt: null,
+          status: { in: ['scheduled', 'unassigned'] },
+          company: { accountStatus: 'suspended' },
+        },
+        data: { status: 'cancelled_by_suspension' },
+      });
+      return 0;
+    }
     const changed = await this.prisma.systemPrisma.$transaction(async (tx) => {
       const result = await tx.shift.updateMany({
         where: {
           id: shift.id,
           status: 'scheduled',
+          company: { accountStatus: { not: 'suspended' } },
           endsAt: { lte: now },
           assignments: { some: { isCurrent: true, active: true, guard: { status: 'active' } } },
         },

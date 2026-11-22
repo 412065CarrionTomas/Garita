@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Test } from '@nestjs/testing';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -58,6 +59,8 @@ describe('HU-40 exportaciones PDF por HTTP', () => {
       .overrideProvider(PHOTO_STORAGE_PORT)
       .useValue({ signedUrl: () => 'https://photos.invalid/hu40' })
       .overrideProvider(MercadoPagoClient)
+      .useValue({})
+      .overrideProvider(SuspensionProcessor)
       .useValue({})
       .compile();
     app = module.createNestApplication();

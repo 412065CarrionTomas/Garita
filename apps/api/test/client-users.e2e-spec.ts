@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { z } from 'zod';
 import { Test } from '@nestjs/testing';
 import { BadRequestException, type INestApplication, Logger } from '@nestjs/common';
@@ -63,6 +64,8 @@ describe('HU-27 usuarios del portal (e2e)', () => {
       .useValue(identity)
       .overrideProvider(ResendInvitationMailer)
       .useValue(mailer)
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);

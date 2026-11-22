@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Test } from '@nestjs/testing';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -52,6 +53,8 @@ describe('HU-26 incidentes y respuesta por HTTP', () => {
       .useValue({ notifySiteStaff: jest.fn(), notifyUsers: jest.fn() })
       .overrideProvider(REALTIME_PORT)
       .useValue({ emitToSite: jest.fn() })
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = module.createNestApplication();
     setupApp(app);

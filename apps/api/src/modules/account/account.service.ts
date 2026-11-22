@@ -156,7 +156,7 @@ export class AccountService implements AccountStatePort {
 
   private async change(
     tx: Prisma.TransactionClient,
-    company: { id: string; accountStatus: string },
+    company: { id: string; accountStatus: string; suspendedAt: Date | null },
     input: Parameters<AccountStatePort['transition']>[0],
   ) {
     const from = company.accountStatus;
@@ -184,6 +184,19 @@ export class AccountService implements AccountStatePort {
       });
       throw new BadRequestException('Transición de cuenta inválida.');
     }
+    if (input.to === 'suspended' || from === 'suspended') {
+      // Claim due, unstarted shifts in the same transaction as suspension/reactivation.
+      await tx.shift.updateMany({
+        where: {
+          companyId: company.id,
+          status: { in: ['scheduled', 'unassigned'] },
+          startedAt: null,
+          startsAt: { lte: this.clock.now() },
+          endsAt: { gt: company.suspendedAt ?? this.clock.now() },
+        },
+        data: { status: 'cancelled_by_suspension' },
+      });
+    }
     await tx.company.update({
       where: { id: company.id },
       data: {
@@ -191,6 +204,9 @@ export class AccountService implements AccountStatePort {
         suspensionReason: input.to === 'suspended' ? input.reason : null,
         graceEndsAt: input.to === 'grace' ? input.graceEndsAt : null,
         suspendedAt: input.to === 'suspended' ? this.clock.now() : null,
+        ...(input.to === 'suspended' || from === 'suspended'
+          ? { suspensionEffectsPending: true }
+          : {}),
       },
     });
     return from;

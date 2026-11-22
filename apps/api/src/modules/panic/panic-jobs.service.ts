@@ -183,7 +183,7 @@ export class PanicJobsService {
       { ...input, reason: 'escalation' },
       { jobId: `${alert.id}-escalation` },
     );
-    // TODO(HU-43): panic notifications for ongoing shifts must remain enabled under suspension.
+    // HU-43: safety notifications and escalation deliberately continue during suspension.
     await this.notifications.notifySiteStaff({
       companyId: input.companyId,
       siteId: alert.siteId,

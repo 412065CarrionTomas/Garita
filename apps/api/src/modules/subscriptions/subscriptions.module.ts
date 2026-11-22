@@ -23,6 +23,9 @@ import { MercadoPagoWebhookController } from './mercadopago-webhook.controller';
 import { MercadoPagoWebhookService } from './mercadopago-webhook.service';
 import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
+import { SuspensionController } from './suspension.controller';
+import { SuspensionService } from './suspension.service';
+import { SuspensionProcessor, SUBSCRIPTION_SUSPENSION_QUEUE } from './suspension.processor';
 
 @Module({
   imports: [
@@ -34,6 +37,7 @@ import { SubscriptionsService } from './subscriptions.service';
       { name: MP_RECONCILIATION_QUEUE },
       { name: PLAN_CHANGE_QUEUE },
       { name: SUBSCRIPTION_GRACE_QUEUE },
+      { name: SUBSCRIPTION_SUSPENSION_QUEUE },
     ),
   ],
   controllers: [
@@ -41,12 +45,15 @@ import { SubscriptionsService } from './subscriptions.service';
     SubscriptionsController,
     PlanChangeController,
     GraceController,
+    SuspensionController,
   ],
   providers: [
     PlanChangeService,
     PlanChangeProcessor,
     GraceService,
     GraceProcessor,
+    SuspensionService,
+    SuspensionProcessor,
     ResendInvitationMailer,
     MercadoPagoClient,
     MercadoPagoWebhookService,

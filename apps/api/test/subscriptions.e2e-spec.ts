@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Logger, type INestApplication, type Type } from '@nestjs/common';
@@ -89,6 +90,8 @@ describe('HU-29 por HTTP (Mercado Pago simulado)', () => {
         revokeRefreshTokens: jest.fn(),
       })
       .overrideProvider(PlanChangeProcessor)
+      .useValue({})
+      .overrideProvider(SuspensionProcessor)
       .useValue({})
       .compile();
     app = module.createNestApplication();

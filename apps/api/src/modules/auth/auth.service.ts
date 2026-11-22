@@ -24,7 +24,7 @@ export class AuthService {
   async me(userId: string): Promise<AuthMeResponse> {
     const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({
       where: { id: userId },
-      include: { company: { select: { id: true, name: true } } },
+      include: { company: { select: { id: true, name: true, accountStatus: true } } },
     });
     if (user.status === 'invitation_pending') {
       const validInvitation = await this.prisma.tenantPrisma.invitation.findFirst({

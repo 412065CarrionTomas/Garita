@@ -20,6 +20,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { suspendedVisibleShiftWhere } from '../auth/account-suspension.policy';
 import { CLOCK, type Clock } from '../../common/clock';
 import { isShiftOverlapViolation } from './shift-overlap-error';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
@@ -508,10 +509,13 @@ export class ShiftsService {
     const until = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
     return this.prisma.tenantPrisma.shift.findMany({
       where: {
-        OR: [
-          { status: 'in_progress' },
-          { status: { in: ['scheduled', 'unassigned'] }, endsAt: { gte: now } },
-        ],
+        ...suspendedVisibleShiftWhere(user),
+        OR: user.suspension
+          ? [suspendedVisibleShiftWhere(user)]
+          : [
+              { status: 'in_progress' },
+              { status: { in: ['scheduled', 'unassigned'] }, endsAt: { gte: now } },
+            ],
         assignments: {
           some: { guardId: user.userId, isCurrent: true, active: true, startsAt: { lte: until } },
         },
