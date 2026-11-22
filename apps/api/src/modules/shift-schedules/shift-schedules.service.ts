@@ -18,7 +18,7 @@ import type { Prisma, ShiftSchedule } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { ShiftsService } from '../shifts/shifts.service';
+import { SCHEDULE_REGENERATION_REASON, ShiftsService } from '../shifts/shifts.service';
 import { isShiftOverlapViolation } from '../shifts/shift-overlap-error';
 
 @Injectable()
@@ -57,6 +57,7 @@ export class ShiftSchedulesService {
     db: Prisma.TransactionClient = this.prisma.tenantPrisma as unknown as Prisma.TransactionClient,
     excludedIds: string[] = [],
     conservedDates: string[] = [],
+    skipStarted = false,
   ) {
     const context = await this.shifts.loadValidation(input, user, db);
     const timezone = context.site.company.timezone;
@@ -69,7 +70,12 @@ export class ShiftSchedulesService {
       if (error instanceof RangeError) throw new BadRequestException(error.message);
       throw error;
     }
-    generated = generated.filter((shift) => !conservedDates.includes(shift.serviceDate));
+    generated = generated.filter(
+      (shift) =>
+        !conservedDates.includes(shift.serviceDate) &&
+        // Al recortar a hoy una programación en curso, los días cuyo inicio ya pasó no se regeneran.
+        (!skipStarted || Date.parse(shift.startsAt) > this.clock.now().getTime()),
+    );
     const windows = new Map<
       string,
       ReturnType<typeof computeRoundWindows>[number] & { roundId: string }
@@ -190,21 +196,27 @@ export class ShiftSchedulesService {
       const previous = presentSchedule(schedule);
       const company = await tx.company.findFirstOrThrow({ select: { timezone: true } });
       const today = this.today(company.timezone);
+      const inheritedStart = this.inheritedStart(patch.startDate, previous.startDate, today);
       const input = this.parse(
         {
           ...previous,
-          startDate: previous.startDate < today ? today : previous.startDate,
           ...patch,
+          startDate: this.regenerationStart(previous.startDate, today, patch.startDate),
         },
-        (!patch.startDate || patch.startDate === previous.startDate || patch.startDate === today) &&
-          (!patch.endDate || patch.endDate === previous.endDate),
+        inheritedStart && (!patch.endDate || patch.endDate === previous.endDate),
       );
-      const existing = await tx.shift.findMany({
-        where: { scheduleId: id },
-        include: { assignments: { where: { isCurrent: true } } },
-      });
+      const existing = (
+        await tx.shift.findMany({
+          where: { scheduleId: id },
+          include: { assignments: { where: { isCurrent: true } } },
+        })
+      ).filter((shift) => !isRegenerated(shift));
+      const started = this.startedDates(input, company.timezone);
       const replace = existing.filter(
-        (shift) => this.mutable(shift) && !shift.individuallyModified,
+        (shift) =>
+          this.mutable(shift) &&
+          !shift.individuallyModified &&
+          !started.has(shift.serviceDate.toISOString().slice(0, 10)),
       );
       const conserved = existing.filter((shift) => !replace.includes(shift));
       const preview = await this.preview(
@@ -213,17 +225,18 @@ export class ShiftSchedulesService {
         tx,
         replace.map((shift) => shift.id),
         this.conservedDates(conserved),
+        input.startDate === today,
       );
       for (const shift of replace) await this.shifts.cancelInTransaction(tx, shift.id, user);
       await tx.shift.updateMany({
         where: { id: { in: replace.map((shift) => shift.id) } },
-        data: { cancellationReason: 'Regeneración de programación' },
+        data: { cancellationReason: SCHEDULE_REGENERATION_REASON },
       });
       const updated = await tx.shiftSchedule.update({
         where: { id },
         data: {
           ...input,
-          startDate: new Date(patch.startDate ?? previous.startDate),
+          startDate: new Date(inheritedStart ? previous.startDate : input.startDate),
           endDate: new Date(input.endDate),
         },
       });
@@ -238,8 +251,12 @@ export class ShiftSchedulesService {
         cancelled: replace,
       };
     });
-    for (const shift of result.cancelled)
-      await this.shifts.afterCancellation(shift, shift.assignments[0]?.guardId ?? null, user);
+    // El vigilador de la programación recibe el resumen; solo se avisa uno a uno a quien deja de tener el turno.
+    for (const shift of result.cancelled) {
+      const guardId = shift.assignments[0]?.guardId ?? null;
+      if (guardId !== result.schedule.guardId)
+        await this.shifts.afterCancellation(shift, guardId, user);
+    }
     await this.summary(result, user, result.schedule.guardId, 'updated');
     return result;
   }
@@ -250,34 +267,69 @@ export class ShiftSchedulesService {
       where: { id },
       include: { company: { select: { timezone: true } } },
     });
-    const today = this.today(schedule.company.timezone);
-    this.parse(
+    const timezone = schedule.company.timezone;
+    const today = this.today(timezone);
+    const previousStart = schedule.startDate.toISOString().slice(0, 10);
+    const parsed = this.parse(
       input,
       input.endDate === schedule.endDate.toISOString().slice(0, 10) &&
-        (input.startDate === schedule.startDate.toISOString().slice(0, 10) ||
-          input.startDate === today),
+        this.inheritedStart(input.startDate, previousStart, today),
     );
-    const existing = await this.prisma.tenantPrisma.shift.findMany({ where: { scheduleId: id } });
-    const replace = existing.filter((shift) => this.mutable(shift) && !shift.individuallyModified);
+    const regeneration = {
+      ...parsed,
+      startDate: this.regenerationStart(previousStart, today, input.startDate),
+    };
+    const existing = (
+      await this.prisma.tenantPrisma.shift.findMany({ where: { scheduleId: id } })
+    ).filter((shift) => !isRegenerated(shift));
+    const started = this.startedDates(regeneration, timezone);
+    const replace = existing.filter(
+      (shift) =>
+        this.mutable(shift) &&
+        !shift.individuallyModified &&
+        !started.has(shift.serviceDate.toISOString().slice(0, 10)),
+    );
     return this.preview(
-      input,
+      regeneration,
       user,
       this.prisma.tenantPrisma as unknown as Prisma.TransactionClient,
       replace.map((shift) => shift.id),
       this.conservedDates(existing.filter((shift) => !replace.includes(shift))),
+      regeneration.startDate === today,
     );
   }
 
-  private conservedDates(
-    shifts: { serviceDate: Date; status: string; cancellationReason: string | null }[],
-  ) {
-    return shifts
-      .filter(
-        (shift) =>
-          shift.status !== 'cancelled' ||
-          shift.cancellationReason !== 'Regeneración de programación',
-      )
-      .map((shift) => shift.serviceDate.toISOString().slice(0, 10));
+  private conservedDates(shifts: { serviceDate: Date }[]) {
+    return shifts.map((shift) => shift.serviceDate.toISOString().slice(0, 10));
+  }
+
+  /** El período aprobado se hereda si no se manda inicio, se manda el mismo, o se manda hoy en una programación ya empezada. */
+  private inheritedStart(requested: string | undefined, previous: string, today: string) {
+    return !requested || requested === previous || (requested === today && previous < today);
+  }
+
+  /** Inicio interno de la regeneración: nunca antes de hoy; no se guarda como inicio del período. */
+  private regenerationStart(previous: string, today: string, requested?: string) {
+    const start = this.inheritedStart(requested, previous, today)
+      ? previous
+      : (requested ?? previous);
+    return start < today ? today : start;
+  }
+
+  /** Días en los que el turno, con el horario nuevo, ya habría empezado: su turno actual se conserva. */
+  private startedDates(input: ShiftScheduleInput, timezone: string) {
+    let generated;
+    try {
+      generated = generateScheduledShifts(input, timezone);
+    } catch {
+      return new Set<string>(); // preview() informa el error de rango.
+    }
+    const now = this.clock.now().getTime();
+    return new Set(
+      generated
+        .filter((shift) => Date.parse(shift.startsAt) <= now)
+        .map((shift) => shift.serviceDate),
+    );
   }
 
   async extend(id: string, endDate: string, user: AuthenticatedUser) {
@@ -313,10 +365,12 @@ export class ShiftSchedulesService {
     await this.resources.findOwnedOrThrow('ShiftSchedule', id);
     const result = await this.transaction(async (tx) => {
       await this.lock(tx, id);
-      const existing = await tx.shift.findMany({
-        where: { scheduleId: id },
-        include: { assignments: { where: { isCurrent: true } } },
-      });
+      const existing = (
+        await tx.shift.findMany({
+          where: { scheduleId: id },
+          include: { assignments: { where: { isCurrent: true } } },
+        })
+      ).filter((shift) => !isRegenerated(shift));
       const cancelled = existing.filter((shift) => this.mutable(shift));
       for (const shift of cancelled) await this.shifts.cancelInTransaction(tx, shift.id, user);
       const schedule = await tx.shiftSchedule.update({
@@ -476,6 +530,10 @@ export class ShiftSchedulesService {
       });
     }
   }
+}
+
+function isRegenerated(shift: { status: string; cancellationReason: string | null }) {
+  return shift.status === 'cancelled' && shift.cancellationReason === SCHEDULE_REGENERATION_REASON;
 }
 
 function presentSchedule(schedule: ShiftSchedule) {
