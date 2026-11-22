@@ -256,7 +256,9 @@ describe('HU-32 programaciones semanales por HTTP', () => {
           siteId,
           guardId: guard,
           roundIds: [roundId],
-          startsAt: shift.startsAt.toISOString(),
+          startsAt: new Date(
+            shift.startsAt.getTime() + (shift.id === edited.id ? 60 * 60 * 1000 : 0),
+          ).toISOString(),
           endsAt: shift.endsAt.toISOString(),
         })
         .expect(200);
@@ -278,6 +280,9 @@ describe('HU-32 programaciones semanales por HTTP', () => {
         expect.arrayContaining([edited.id, changed.id, reassigned.id]),
       );
       expect(result.generated).toHaveLength(17);
+      expect(
+        (await db.shift.findUniqueOrThrow({ where: { id: edited.id } })).startsAt.getTime(),
+      ).toBe(edited.startsAt.getTime() + 60 * 60 * 1000);
       const active = await db.shift.findMany({
         where: { scheduleId: created.schedule.id, status: 'scheduled' },
       });
@@ -321,6 +326,23 @@ describe('HU-32 programaciones semanales por HTTP', () => {
       (await db.shiftSchedule.findUniqueOrThrow({ where: { id: created.schedule.id } })).startTime,
     ).toBe('22:00');
     expect(notifyUsers).not.toHaveBeenCalled();
+  });
+  it('CA3: modificar solo la hora conserva el período y los turnos pasados', async () => {
+    const created = await create();
+    now = new Date('2026-10-15T15:00Z');
+    const result = scheduleOperationSchema.parse(
+      (
+        await http()
+          .patch(`/api/v1/programaciones-turnos/${created.schedule.id}`)
+          .set(auth())
+          .send({ startTime: '21:00' })
+          .expect(200)
+      ).body,
+    );
+    expect(result.schedule.startDate).toBe(input.startDate);
+    expect(result.schedule.endDate).toBe(input.endDate);
+    expect(result.conserved).toHaveLength(8);
+    expect(result.generated).toHaveLength(12);
   });
   it('CA4 cancela 12 futuros y conserva 8 realizados', async () => {
     const created = await create();

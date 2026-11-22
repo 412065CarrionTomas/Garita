@@ -221,7 +221,11 @@ export class ShiftSchedulesService {
       });
       const updated = await tx.shiftSchedule.update({
         where: { id },
-        data: { ...input, startDate: new Date(input.startDate), endDate: new Date(input.endDate) },
+        data: {
+          ...input,
+          startDate: new Date(patch.startDate ?? previous.startDate),
+          endDate: new Date(input.endDate),
+        },
       });
       const generated = await this.generate(tx, id, input, preview, user);
       return {
