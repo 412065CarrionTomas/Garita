@@ -267,6 +267,7 @@ describe('HU-32 programaciones semanales por HTTP', () => {
       startsAt: reassigned.startsAt.toISOString(),
     }).expect(201);
     for (const startTime of ['21:00', '20:00']) {
+      notifyUsers.mockClear();
       const result = scheduleOperationSchema.parse(
         (
           await http()
@@ -279,7 +280,13 @@ describe('HU-32 programaciones semanales por HTTP', () => {
       expect(result.conserved).toEqual(
         expect.arrayContaining([edited.id, changed.id, reassigned.id]),
       );
+      // V10 H1: los cancelados por una regeneración anterior no cuentan como conservados.
+      expect(result.conserved).toHaveLength(3);
       expect(result.generated).toHaveLength(17);
+      // V10 H4: el vigilador recibe solo el resumen, no un aviso por cada turno reemplazado.
+      expect(notifyUsers).toHaveBeenCalledTimes(1);
+      const listed = await http().get(`/api/v1/turnos?predio=${siteId}`).set(auth()).expect(200);
+      expect(listed.body).toHaveLength(20);
       expect(
         (await db.shift.findUniqueOrThrow({ where: { id: edited.id } })).startsAt.getTime(),
       ).toBe(edited.startsAt.getTime() + 60 * 60 * 1000);
@@ -289,6 +296,11 @@ describe('HU-32 programaciones semanales por HTTP', () => {
       expect(active).toHaveLength(20);
       expect(new Set(active.map((shift) => shift.serviceDate.toISOString())).size).toBe(20);
     }
+    const cancelled = scheduleOperationSchema.parse(
+      (await post(`programaciones-turnos/${created.schedule.id}/cancelar`, {}).expect(201)).body,
+    );
+    expect(cancelled.replaced).toHaveLength(20);
+    expect(cancelled.conserved).toHaveLength(0);
   });
   it('revierte una falla inyectada a mitad de la regeneración y no entrega notificaciones', async () => {
     const created = await create();
@@ -343,6 +355,54 @@ describe('HU-32 programaciones semanales por HTTP', () => {
     expect(result.schedule.endDate).toBe(input.endDate);
     expect(result.conserved).toHaveLength(8);
     expect(result.generated).toHaveLength(12);
+  });
+  it('V10 H2: editar una programación ya empezada acepta y conserva la fecha inicial original', async () => {
+    const created = await create();
+    now = new Date('2026-10-15T15:00Z');
+    const preview = schedulePreviewSchema.parse(
+      (
+        await post(`programaciones-turnos/previsualizar?programacion=${created.schedule.id}`, {
+          ...input,
+          startTime: '21:00',
+        }).expect(201)
+      ).body,
+    );
+    expect(preview.shifts).toHaveLength(12);
+    for (const startDate of [input.startDate, '2026-10-15']) {
+      const result = scheduleOperationSchema.parse(
+        (
+          await http()
+            .patch(`/api/v1/programaciones-turnos/${created.schedule.id}`)
+            .set(auth())
+            .send({ ...input, startDate, startTime: '21:00' })
+            .expect(200)
+        ).body,
+      );
+      expect(result.schedule.startDate).toBe(input.startDate);
+    }
+  });
+  it('V10 H3: modificar después de la hora de hoy conserva el turno de hoy y no falla', async () => {
+    const created = await create();
+    // Jueves 15 a las 21:30 locales: el turno de las 22:00 todavía no empezó.
+    now = new Date('2026-10-16T00:30Z');
+    const today = await db.shift.findFirstOrThrow({
+      where: { scheduleId: created.schedule.id, serviceDate: new Date('2026-10-15') },
+    });
+    const result = scheduleOperationSchema.parse(
+      (
+        await http()
+          .patch(`/api/v1/programaciones-turnos/${created.schedule.id}`)
+          .set(auth())
+          .send({ startTime: '21:00' })
+          .expect(200)
+      ).body,
+    );
+    expect(result.conserved).toContain(today.id);
+    expect(result.conserved).toHaveLength(9);
+    expect(result.generated).toHaveLength(11);
+    expect((await db.shift.findUniqueOrThrow({ where: { id: today.id } })).status).toBe(
+      'scheduled',
+    );
   });
   it('CA4 cancela 12 futuros y conserva 8 realizados', async () => {
     const created = await create();
@@ -475,9 +535,15 @@ describe('HU-32 programaciones semanales por HTTP', () => {
     'ID-121: la baja de %s termina la programación y cancela sus turnos',
     async (kind) => {
       const created = await create();
+      const log = jest.spyOn(Logger.prototype, 'log');
       await post(kind === 'predio' ? `predios/${siteId}/baja` : `clientes/${clientId}/baja`, {
         confirm: true,
       }).expect(201);
+      // V10 H5: el conteo no depende de que el reloj no avance entre la cancelación y el log.
+      expect(log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'schedule.sites_deactivated', shifts: 20 }),
+      );
+      log.mockRestore();
       expect(
         (await db.shiftSchedule.findUniqueOrThrow({ where: { id: created.schedule.id } })).status,
       ).toBe('finished');
