@@ -103,7 +103,9 @@ export const shiftDetailSchema = z.object({
       id: z.string(),
       checkpointId: z.string(),
       occurredAtDevice: z.string(),
-      flags: z.array(z.object({ id: z.string(), reason: z.string(), severity: severitySchema })),
+      flags: z.array(
+        z.object({ id: z.string(), reason: z.string().nullable(), severity: severitySchema }),
+      ),
     }),
   ),
   rejectedAttempts: z.array(

@@ -29,7 +29,7 @@ export function ActivationPage() {
   useEffect(() => {
     const token = params.get('token');
     if (!token) return;
-    void fetch(`${env.VITE_API_URL}/api/v1/invitaciones/canjear`, {
+    void fetch(`${env.VITE_API_URL}/invitaciones/canjear`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),

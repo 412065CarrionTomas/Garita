@@ -25,7 +25,8 @@ export function useActivePanicAlerts(enabled: boolean) {
   return useQuery({
     queryKey: ['panico', 'active'],
     queryFn: () => apiGet('/alertas-panico?estado=active', panicListSchema),
-    refetchInterval: 15_000,
+    // Ante un error (p. ej. 500) se espacia el polling para no saturar la API.
+    refetchInterval: (query) => (query.state.status === 'error' ? 60_000 : 15_000),
     enabled,
   });
 }
