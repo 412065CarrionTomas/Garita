@@ -7,7 +7,6 @@ import {
   type RoundRoute,
   routeInputSchema,
   roundRoutePreviewInputSchema,
-  routePreviewInputSchema,
   sectionEndpoints,
   staleLegs,
   validateRouteInput,
@@ -126,21 +125,6 @@ describe('tramos desactualizados', () => {
 
   it('marca todo si cambió la cantidad de puntos', () => {
     expect(staleLegs(route, [a, b])).toEqual([0, 1]);
-  });
-});
-
-describe('vista previa de un tramo', () => {
-  it('exige una sección más que puntos de paso', () => {
-    const leg = { siteId: 'predio', from: a, to: b, waypoints: [c] };
-    expect(
-      routePreviewInputSchema.safeParse({ ...leg, sections: [{ mode: 'streets', via: [] }] })
-        .success,
-    ).toBe(false);
-    const sections = [
-      { mode: 'streets', via: [] },
-      { mode: 'manual', via: [] },
-    ];
-    expect(routePreviewInputSchema.safeParse({ ...leg, sections }).success).toBe(true);
   });
 });
 

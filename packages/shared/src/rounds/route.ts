@@ -126,15 +126,6 @@ export const roundRoutePreviewResponseSchema = z.object({
   failures: z.array(routeFailureSchema),
 });
 export type RoundRoutePreviewResponse = z.infer<typeof roundRoutePreviewResponseSchema>;
-
-/** Vista previa de un solo tramo en el editor: la API devuelve sus secciones con geometría. */
-export const routePreviewInputSchema = z
-  .object({ siteId: z.string().min(1), from: lngLatSchema, to: lngLatSchema, ...legShape })
-  .refine(sectionsMatchWaypoints, sectionsMatchWaypointsIssue);
-export type RoutePreviewInput = z.infer<typeof routePreviewInputSchema>;
-
-export const routePreviewResponseSchema = z.object({ sections: z.array(sectionSchema).min(1) });
-export type RoutePreviewResponse = z.infer<typeof routePreviewResponseSchema>;
 export type RouteLeg = RoundRoute['legs'][number];
 export type RouteSection = RouteLeg['sections'][number];
 
