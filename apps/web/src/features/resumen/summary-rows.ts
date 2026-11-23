@@ -1,4 +1,4 @@
-import { adminSummaryCatalog, type ComplianceReport } from '@garita/shared';
+import { adminSummaryCatalog } from '@garita/shared';
 import type { ChartTone } from '@/features/reportes/charts/compliance-tone';
 import { shiftLabels, shiftTones, type ShiftRow } from '@/features/supervision/contracts';
 
@@ -51,15 +51,19 @@ export function shiftStatusRows(shifts: readonly ShiftRow[]): CategoryRow[] {
   return [...rows.values()];
 }
 
-type SiteRow = ComplianceReport['bySite'][number];
+/** Lo mínimo para ordenar por cumplimiento: nombre y porcentaje (null si no hubo ventanas). */
+interface Ranked {
+  name: string;
+  totals: { percentage: number | null };
+}
 
 /** Peor cumplimiento primero (los sin datos al final) o por nombre; luego se corta al límite. */
-export function sortSites(
-  sites: readonly SiteRow[],
+export function sortByCompliance<T extends Ranked>(
+  rows: readonly T[],
   sort: 'worst' | 'name',
   limit: '5' | '10' | 'all',
-): SiteRow[] {
-  const sorted = [...sites].sort((a, b) => {
+): T[] {
+  const sorted = [...rows].sort((a, b) => {
     if (sort === 'name') return a.name.localeCompare(b.name, 'es');
     const pa = a.totals.percentage ?? Number.POSITIVE_INFINITY;
     const pb = b.totals.percentage ?? Number.POSITIVE_INFINITY;

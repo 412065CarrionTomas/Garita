@@ -1,6 +1,11 @@
 import { computeCompliance, type ComplianceReport } from '@garita/shared';
 import type { ShiftRow } from '@/features/supervision/contracts';
-import { categoryPresentation, shiftStatusRows, sortSites, widgetTitle } from './summary-rows';
+import {
+  categoryPresentation,
+  shiftStatusRows,
+  sortByCompliance,
+  widgetTitle,
+} from './summary-rows';
 
 const shift = (id: string, status: ShiftRow['status']): ShiftRow => ({
   id,
@@ -30,7 +35,7 @@ describe('shiftStatusRows', () => {
   });
 });
 
-describe('sortSites', () => {
+describe('sortByCompliance', () => {
   const totals = computeCompliance([], 'UTC').totals;
   const site = (id: string, name: string, percentage: number | null) => ({
     id,
@@ -45,17 +50,17 @@ describe('sortSites', () => {
   ];
 
   it('ordena del peor al mejor, desempata por nombre y deja sin datos al final', () => {
-    expect(sortSites(sites, 'worst', 'all').map((s) => s.id)).toEqual(['d', 'b', 'a', 'c']);
+    expect(sortByCompliance(sites, 'worst', 'all').map((s) => s.id)).toEqual(['d', 'b', 'a', 'c']);
   });
 
   it('ordena por nombre y respeta el límite', () => {
-    expect(sortSites(sites, 'name', '5').map((s) => s.name)).toEqual([
+    expect(sortByCompliance(sites, 'name', '5').map((s) => s.name)).toEqual([
       'Barrio',
       'Country',
       'Depósito',
       'Oficinas',
     ]);
-    expect(sortSites([...sites, ...sites, ...sites], 'worst', '10')).toHaveLength(10);
+    expect(sortByCompliance([...sites, ...sites, ...sites], 'worst', '10')).toHaveLength(10);
   });
 });
 
