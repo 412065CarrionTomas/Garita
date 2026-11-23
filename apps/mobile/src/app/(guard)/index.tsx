@@ -1,4 +1,5 @@
 import { Alert } from 'react-native';
+import { Link } from 'expo-router';
 import { Button, Screen, Text, ThemeSwitch } from '@/ui';
 import { useAuth } from '@/features/auth/auth-context';
 import { MyShiftsScreen } from '@/features/turnos/my-shifts-screen';
@@ -45,6 +46,9 @@ export default function GuardHome() {
         {greeting(new Date().getHours())}
       </Text>
       <MyShiftsScreen />
+      <Link href="/ayuda" asChild>
+        <Button variant="ghost" label="Preguntas frecuentes" accessibilityRole="link" />
+      </Link>
       <ThemeSwitch />
       <Button
         variant="ghost"
