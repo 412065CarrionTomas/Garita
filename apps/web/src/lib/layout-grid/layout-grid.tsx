@@ -1,18 +1,21 @@
 import { useId, useMemo, useRef, type Dispatch, type ReactNode } from 'react';
 import { readingOrder, type LayoutItem, type ViewCatalog } from '@garita/shared';
 import { useAnnouncer } from '@/lib/interaction/use-announcer';
+import { useFlipAnimation } from '@/lib/interaction/use-flip-animation';
 import { cn } from '@/lib/utils';
 import { EditableItem } from './editable-item';
 import type { EditorAction } from './editor-state';
 import { scaleLayout } from './engine';
+import { GRID_GUTTER, GRID_ROW } from './grid-metrics';
 import { useGridColumns } from './use-grid-columns';
 
 /**
- * Dibuja un diseño de bloques con CSS Grid: cada bloque ocupa `w` columnas y `h` filas de 48 px
- * con 24 px de separación (escala del sistema). Los bloques se emiten en orden de lectura, así el
- * orden del teclado y del lector de pantalla coincide con el visual. En pantallas más angostas el
- * diseño se adapta sin guardarse. Con `edit`, y solo con la grilla completa, cada bloque muestra
- * sus asas de edición.
+ * Dibuja un diseño de bloques con CSS Grid: cada bloque ocupa `w` columnas y `h` filas de
+ * `GRID_ROW` px, y deja `GRID_GUTTER` px de separación a la derecha (hueco entre columnas) y abajo
+ * (relleno propio: las filas no tienen hueco, así son finas). Los bloques se emiten en orden de
+ * lectura, así el orden del teclado y del lector de pantalla coincide con el visual. En pantallas
+ * más angostas el diseño se adapta sin guardarse. Con `edit`, y solo con la grilla completa, cada
+ * bloque muestra sus asas de edición y los demás se deslizan a su lugar nuevo al reacomodarse.
  */
 export function LayoutGrid({
   catalog,
@@ -51,6 +54,7 @@ export function LayoutGrid({
     const last = order.length;
     return [...visible].sort((a, b) => (rank.get(a.id) ?? last) - (rank.get(b.id) ?? last));
   }, [items, catalog.columns, columns, order]);
+  useFlipAnimation(gridRef, editing, [placed]);
   return (
     <>
       {editing && (
@@ -68,26 +72,34 @@ export function LayoutGrid({
         data-editing={editing || undefined}
         // En una sola columna (celular) cada bloque toma su alto natural y se desplaza la página,
         // no cada bloque: cajas con desplazamiento propio apiladas se manejan mal con el dedo.
-        className={cn(
-          'grid gap-6',
-          stacked ? 'auto-rows-auto' : 'auto-rows-[--spacing(12)]',
-          className,
-        )}
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        className={cn('grid', className)}
+        style={{
+          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+          columnGap: GRID_GUTTER,
+          rowGap: stacked ? GRID_GUTTER : 0,
+          gridAutoRows: stacked ? 'auto' : GRID_ROW,
+        }}
       >
         {placed.map((item) => (
           <div
             key={item.id}
             data-layout-item={item.id}
+            data-flip-id={item.id}
             className="min-h-0 min-w-0"
             style={{
               gridColumn: `${item.x + 1} / span ${item.w}`,
               gridRow: stacked ? undefined : `${item.y + 1} / span ${item.h}`,
+              paddingBottom: stacked ? undefined : GRID_GUTTER,
             }}
           >
             {editing ? (
               <EditableItem
                 item={item}
+                limits={
+                  Object.hasOwn(catalog.widgets, item.id)
+                    ? catalog.widgets[item.id]?.size
+                    : undefined
+                }
                 title={edit.titleOf(item.id)}
                 gridRef={gridRef}
                 columns={columns}

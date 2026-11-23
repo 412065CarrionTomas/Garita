@@ -1,11 +1,20 @@
-import { useEffect, useRef, type Dispatch, type ReactNode, type RefObject } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Dispatch,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { GripVertical, MoveDiagonal2 } from 'lucide-react';
-import type { LayoutItem } from '@garita/shared';
+import type { LayoutItem, WidgetDefinition } from '@garita/shared';
 import { useKeyboardGrab } from '@/lib/interaction/use-keyboard-grab';
 import { usePointerDrag } from '@/lib/interaction/use-pointer-drag';
 import { cn } from '@/lib/utils';
+import { dragPreviewGeometry, type DragPreview } from './drag-preview';
 import type { EditorAction } from './editor-state';
-import { deltaToCells, readGridMetrics, type GridMetrics } from './grid-metrics';
+import { deltaToCells, readGridMetrics } from './grid-metrics';
 
 const handleClass =
   'absolute z-10 inline-flex size-9 items-center justify-center rounded-md border-[1.5px] border-foreground bg-card text-foreground hover:bg-muted';
@@ -15,16 +24,25 @@ function describePlacement(item: LayoutItem): string {
   return `columna ${item.x + 1}, fila ${item.y + 1}, ${item.w} de ancho y ${item.h} de alto`;
 }
 
+/** Estilo del bloque mientras sigue al puntero (ver `dragPreviewGeometry`). */
+function previewStyle(geometry: ReturnType<typeof dragPreviewGeometry>): CSSProperties {
+  return geometry.kind === 'move'
+    ? { transform: `translate(${geometry.dx}px, ${geometry.dy}px)` }
+    : { position: 'absolute', top: 0, left: 0, width: geometry.width, height: geometry.height };
+}
+
 /**
  * Bloque en modo edición: su contenido queda inerte (no se navega ni se enfoca adentro) y
  * aparecen dos asas, mover y cambiar tamaño, que funcionan con puntero y con teclado. Con el
  * puntero, el desplazamiento se traduce a celdas desde la posición que tenía el bloque al
- * empezar (así no "deriva" mientras los demás se acomodan). Con el teclado, el asa se toma con
+ * empezar (así no "deriva" mientras los demás se acomodan); mientras tanto el bloque sigue al
+ * puntero de a píxel y un marco muestra la celda donde va a quedar. Con el teclado, el asa se toma con
  * Enter o Espacio y las flechas mueven o redimensionan de a un paso. En los dos casos el gesto
  * entero es un solo paso de "deshacer" y Escape vuelve a como estaba.
  */
 export function EditableItem({
   item,
+  limits,
   title,
   gridRef,
   columns,
@@ -34,6 +52,8 @@ export function EditableItem({
   children,
 }: {
   item: LayoutItem;
+  /** Tamaños mínimo y máximo del bloque, para que la vista previa no pase de lo que se guarda. */
+  limits: WidgetDefinition['size'] | undefined;
   title: string;
   gridRef: RefObject<HTMLElement | null>;
   columns: number;
@@ -43,23 +63,39 @@ export function EditableItem({
   instructionsId: string;
   children: ReactNode;
 }) {
-  const origin = useRef<{ item: LayoutItem; metrics: GridMetrics } | null>(null);
+  // El gesto vive en una ref para los manejadores y en estado para dibujar la vista previa.
+  const origin = useRef<DragPreview | null>(null);
+  const [preview, setPreview] = useState<DragPreview | null>(null);
   const busy = useRef(false);
   const current = useRef(item);
   useEffect(() => {
     current.current = item;
   });
 
-  const beginPointer = () => {
+  const beginPointer = (kind: DragPreview['kind']) => {
     const grid = gridRef.current;
     if (!grid || busy.current) return;
     busy.current = true;
-    origin.current = { item, metrics: readGridMetrics(grid, columns) };
+    origin.current = {
+      kind,
+      start: item,
+      metrics: readGridMetrics(grid, columns),
+      delta: { dx: 0, dy: 0 },
+    };
+    setPreview(origin.current);
     dispatch({ type: 'gestureStart' });
+  };
+  const trackPointer = (delta: DragPreview['delta']) => {
+    const start = origin.current;
+    if (!start) return null;
+    origin.current = { ...start, delta };
+    setPreview(origin.current);
+    return { start: start.start, cells: deltaToCells(delta, start.metrics) };
   };
   const endPointer = () => {
     if (!origin.current) return;
     origin.current = null;
+    setPreview(null);
     busy.current = false;
     dispatch({ type: 'gestureEnd' });
     announce(`${title}: ${describePlacement(current.current)}.`);
@@ -67,35 +103,38 @@ export function EditableItem({
   const cancelPointer = () => {
     if (!origin.current) return;
     origin.current = null;
+    setPreview(null);
     busy.current = false;
     dispatch({ type: 'gestureCancel' });
     announce(`Se canceló el cambio de ${title}.`);
   };
   const pointerMove = usePointerDrag({
-    onStart: beginPointer,
+    onStart: () => {
+      beginPointer('move');
+    },
     onMove: (delta) => {
-      const start = origin.current;
-      if (!start) return;
-      const cells = deltaToCells(delta, start.metrics);
+      const step = trackPointer(delta);
+      if (!step) return;
       dispatch({
         type: 'move',
         id: item.id,
-        to: { x: start.item.x + cells.dx, y: start.item.y + cells.dy },
+        to: { x: step.start.x + step.cells.dx, y: step.start.y + step.cells.dy },
       });
     },
     onEnd: endPointer,
     onCancel: cancelPointer,
   });
   const pointerResize = usePointerDrag({
-    onStart: beginPointer,
+    onStart: () => {
+      beginPointer('resize');
+    },
     onMove: (delta) => {
-      const start = origin.current;
-      if (!start) return;
-      const cells = deltaToCells(delta, start.metrics);
+      const step = trackPointer(delta);
+      if (!step) return;
       dispatch({
         type: 'resize',
         id: item.id,
-        size: { w: start.item.w + cells.dx, h: start.item.h + cells.dy },
+        size: { w: step.start.w + step.cells.dx, h: step.start.h + step.cells.dy },
       });
     },
     onEnd: endPointer,
@@ -146,55 +185,76 @@ export function EditableItem({
   }, [grabbed, placement, title, announce]);
 
   const active = pointerMove.dragging || pointerResize.dragging || grabbed;
+  const geometry = preview && dragPreviewGeometry(preview, item, limits, columns);
   return (
     <div className="relative h-full" data-editing-item={item.id}>
-      <div inert className="h-full select-none">
-        {children}
-      </div>
-      {/* Marco punteado: el bloque todavía no está fijo (sistema Foja); sólido mientras se mueve. */}
+      {/* La celda donde va a quedar el bloque al soltarlo. */}
+      {geometry && (
+        <div
+          aria-hidden="true"
+          data-drop-target
+          className="absolute inset-0 rounded-md border-2 border-dashed border-foreground/50 bg-foreground/5"
+        />
+      )}
       <div
-        aria-hidden="true"
+        // Mientras sigue al puntero va por encima de los demás y no lo anima el reacomodo.
+        data-flip-skip={geometry ? '' : undefined}
         className={cn(
-          'pointer-events-none absolute inset-0 rounded-md border-2 border-dashed border-foreground/60',
-          active && 'border-solid border-foreground bg-foreground/5',
+          'relative h-full',
+          geometry
+            ? 'z-20 shadow-xl'
+            : 'transition-transform duration-150 ease-out motion-reduce:transition-none',
         )}
-      />
-      <button
-        type="button"
-        aria-label={`Mover ${title}`}
-        aria-describedby={instructionsId}
-        aria-pressed={keyMove.grabbed}
-        className={cn(
-          handleClass,
-          // Sobre el borde superior, centrada: no tapa el título ni el contenido del bloque.
-          'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none',
-          (pointerMove.dragging || keyMove.grabbed) &&
-            'cursor-grabbing bg-foreground text-background hover:bg-foreground',
-        )}
-        onPointerDown={pointerMove.onPointerDown}
-        onKeyDown={keyMove.onKeyDown}
-        onBlur={keyMove.onBlur}
+        style={geometry ? previewStyle(geometry) : undefined}
       >
-        <GripVertical aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        aria-label={`Cambiar el tamaño de ${title}`}
-        aria-describedby={instructionsId}
-        aria-pressed={keyResize.grabbed}
-        className={cn(
-          handleClass,
-          // Montada sobre la esquina inferior derecha, mitad afuera, en la separación entre bloques.
-          'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize touch-none',
-          (pointerResize.dragging || keyResize.grabbed) &&
-            'bg-foreground text-background hover:bg-foreground',
-        )}
-        onPointerDown={pointerResize.onPointerDown}
-        onKeyDown={keyResize.onKeyDown}
-        onBlur={keyResize.onBlur}
-      >
-        <MoveDiagonal2 aria-hidden="true" />
-      </button>
+        <div inert className="h-full select-none">
+          {children}
+        </div>
+        {/* Marco punteado: el bloque todavía no está fijo (sistema Foja); sólido mientras se mueve. */}
+        <div
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute inset-0 rounded-md border-2 border-dashed border-foreground/60',
+            active && 'border-solid border-foreground bg-foreground/5',
+          )}
+        />
+        <button
+          type="button"
+          aria-label={`Mover ${title}`}
+          aria-describedby={instructionsId}
+          aria-pressed={keyMove.grabbed}
+          className={cn(
+            handleClass,
+            // Sobre el borde superior, centrada: no tapa el título ni el contenido del bloque.
+            'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none',
+            (pointerMove.dragging || keyMove.grabbed) &&
+              'cursor-grabbing bg-foreground text-background hover:bg-foreground',
+          )}
+          onPointerDown={pointerMove.onPointerDown}
+          onKeyDown={keyMove.onKeyDown}
+          onBlur={keyMove.onBlur}
+        >
+          <GripVertical aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label={`Cambiar el tamaño de ${title}`}
+          aria-describedby={instructionsId}
+          aria-pressed={keyResize.grabbed}
+          className={cn(
+            handleClass,
+            // Montada sobre la esquina inferior derecha, mitad afuera, en la separación entre bloques.
+            'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize touch-none',
+            (pointerResize.dragging || keyResize.grabbed) &&
+              'bg-foreground text-background hover:bg-foreground',
+          )}
+          onPointerDown={pointerResize.onPointerDown}
+          onKeyDown={keyResize.onKeyDown}
+          onBlur={keyResize.onBlur}
+        >
+          <MoveDiagonal2 aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 }

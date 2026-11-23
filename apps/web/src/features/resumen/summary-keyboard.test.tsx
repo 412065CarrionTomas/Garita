@@ -51,13 +51,13 @@ it('redimensiona con el teclado, anuncia cada paso y guarda', async () => {
   await user.keyboard('{ArrowRight}');
   await waitFor(() => {
     expect(announcer()).toHaveTextContent(
-      'Cumplimiento: columna 1, fila 7, 9 de ancho y 8 de alto.',
+      'Cumplimiento: columna 1, fila 19, 17 de ancho y 24 de alto.',
     );
   });
   await user.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}{Enter}');
   await waitFor(() => {
     expect(announcer()).toHaveTextContent(
-      'Cumplimiento quedó en columna 1, fila 7, 12 de ancho y 8 de alto.',
+      'Cumplimiento quedó en columna 1, fila 19, 20 de ancho y 24 de alto.',
     );
   });
   // El foco sigue en el asa: el DOM no se reordena mientras se edita.
@@ -67,7 +67,7 @@ it('redimensiona con el teclado, anuncia cada paso y guarda', async () => {
     expect(apiPut).toHaveBeenCalledTimes(1);
   });
   const body = jest.mocked(apiPut).mock.calls[0]?.[1] as ViewPreferenceInput;
-  expect(body.layout.items.find((item) => item.id === 'compliance')?.w).toBe(12);
+  expect(body.layout.items.find((item) => item.id === 'compliance')?.w).toBe(20);
 });
 
 it('Escape vuelve a como estaba y no deja nada para guardar', async () => {

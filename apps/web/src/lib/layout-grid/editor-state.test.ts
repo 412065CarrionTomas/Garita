@@ -48,7 +48,7 @@ it('un gesto de arrastre entra al historial como un solo paso', () => {
     { type: 'gestureStart' },
     { type: 'move', id: 'shiftsToday', to: { x: 8, y: 12 } },
     { type: 'move', id: 'shiftsToday', to: { x: 8, y: 20 } },
-    { type: 'move', id: 'shiftsToday', to: { x: 8, y: 30 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 16, y: 90 } },
   );
   expect(canUndo(state)).toBe(false);
   state = run(state, { type: 'gestureEnd' });
@@ -71,8 +71,8 @@ it('un gesto que termina donde empezó no deja rastro', () => {
   const state = run(
     editing(),
     { type: 'gestureStart' },
-    { type: 'move', id: 'shiftsToday', to: { x: 8, y: 30 } },
-    { type: 'move', id: 'shiftsToday', to: { x: 8, y: 5 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 16, y: 90 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 16, y: 17 } },
     { type: 'gestureEnd' },
   );
   expect(draftOf(state)).toBe(saved);
@@ -80,12 +80,12 @@ it('un gesto que termina donde empezó no deja rastro', () => {
 });
 
 it('restablecer vuelve al diseño por defecto y también se deshace', () => {
-  const moved = run(editing(), { type: 'resize', id: 'compliance', size: { w: 12, h: 8 } });
-  expect(pos(moved, 'compliance')).toEqual([0, 6, 12, 8]);
+  const moved = run(editing(), { type: 'resize', id: 'compliance', size: { w: 24, h: 24 } });
+  expect(pos(moved, 'compliance')).toEqual([0, 18, 24, 24]);
   const reset = run(moved, { type: 'reset' });
   expect(draftOf(reset)).toBe(adminSummaryCatalog.defaultLayout.items);
   expect(run(reset, { type: 'reset' })).toBe(reset);
-  expect(pos(run(reset, { type: 'undo' }), 'compliance')).toEqual([0, 6, 12, 8]);
+  expect(pos(run(reset, { type: 'undo' }), 'compliance')).toEqual([0, 18, 24, 24]);
 });
 
 it('limita el historial', () => {
