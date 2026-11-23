@@ -172,9 +172,10 @@ export class OpenRouteServiceRouting implements RoutingPort {
       const to = wayPoints[start + section.length - 1];
       if (from === undefined || to === undefined) return { failure: 'unavailable' };
       const slice = line.slice(from, to + 1);
+      // Dos puntos fuera de la calle que caen en el mismo lugar de ella: el camino es la recta.
+      if (slice.length < 2) return { line: section };
       // shortcut: una sección de más de 5000 coordenadas queda sin calcular; si pasa, simplificarla.
-      if (slice.length < 2 || slice.length > ROUTE_LIMITS.geometryPerSection)
-        return { failure: 'unavailable' };
+      if (slice.length > ROUTE_LIMITS.geometryPerSection) return { failure: 'unavailable' };
       return { line: slice };
     });
   }

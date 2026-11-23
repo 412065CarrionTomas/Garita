@@ -96,6 +96,19 @@ describe('OpenRouteServiceRouting', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('usa la recta si dos puntos caen en el mismo lugar de la calle', async () => {
+    const { fetchMock, routing } = setup();
+    // b y c se ubican en la misma posición de la línea (índice 2).
+    fetchMock.mockReturnValue(feature([a, mid1, b, mid2, a], [0, 2, 2, 4]));
+    await expect(
+      routing.route('walking', [
+        [a, b],
+        [b, c],
+        [c, a],
+      ]),
+    ).resolves.toEqual([{ line: [a, mid1, b] }, { line: [b, c] }, { line: [b, mid2, a] }]);
+  });
+
   it('deja todo el grupo sin calcular si los way_points no coinciden con lo enviado', async () => {
     const { cache, fetchMock, routing } = setup();
     fetchMock.mockReturnValue(feature([a, b, c], [0, 2]));
