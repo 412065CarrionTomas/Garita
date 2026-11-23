@@ -1,16 +1,18 @@
 import type { LngLat } from '@garita/shared';
 import { routeCacheKey } from './route-cache';
-import { NullRouting, OpenRouteServiceRouting, ORS_TIMEOUT_MS } from './routing.port';
+import {
+  chainSections,
+  NullRouting,
+  OpenRouteServiceRouting,
+  ORS_MAX_COORDINATES,
+  ORS_TIMEOUT_MS,
+} from './routing.port';
 
-const coordinates: LngLat[] = [
-  [-58.38, -34.6],
-  [-58.37, -34.61],
-];
-const line: LngLat[] = [
-  [-58.38, -34.6],
-  [-58.375, -34.605],
-  [-58.37, -34.61],
-];
+const a: LngLat = [-58.38, -34.6];
+const b: LngLat = [-58.37, -34.61];
+const c: LngLat = [-58.36, -34.62];
+const mid1: LngLat = [-58.375, -34.605];
+const mid2: LngLat = [-58.365, -34.615];
 
 function setup() {
   const cache = {
@@ -23,7 +25,25 @@ function setup() {
   return { cache, fetchMock, routing };
 }
 
-const ok = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+const feature = (coordinates: LngLat[], wayPoints: number[]) =>
+  Promise.resolve(
+    new Response(
+      JSON.stringify({
+        type: 'FeatureCollection',
+        features: [
+          {
+            geometry: { type: 'LineString', coordinates },
+            properties: { way_points: wayPoints },
+          },
+        ],
+      }),
+      { status: 200 },
+    ),
+  );
+const sentCoordinates = (fetchMock: jest.Mock, call = 0) => {
+  const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+  return (JSON.parse(init.body as string) as { coordinates: LngLat[] }).coordinates;
+};
 
 describe('OpenRouteServiceRouting', () => {
   afterEach(() => {
@@ -33,40 +53,85 @@ describe('OpenRouteServiceRouting', () => {
 
   it('pide la ruta con el perfil del predio y guarda la línea en caché', async () => {
     const { cache, fetchMock, routing } = setup();
-    fetchMock.mockReturnValue(
-      ok({
-        type: 'FeatureCollection',
-        features: [{ geometry: { type: 'LineString', coordinates: line } }],
-      }),
-    );
-    await expect(routing.route('walking', coordinates)).resolves.toEqual(line);
+    fetchMock.mockReturnValue(feature([a, mid1, b], [0, 2]));
+    await expect(routing.route('walking', [[a, b]])).resolves.toEqual([[a, mid1, b]]);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://ors.test/v2/directions/foot-walking/geojson');
     expect(init.headers).toMatchObject({ Authorization: 'clave' });
-    expect(JSON.parse(init.body as string)).toEqual({ coordinates });
-    expect(cache.set).toHaveBeenCalledWith('walking', coordinates, line);
+    expect(cache.set).toHaveBeenCalledWith('walking', [a, b], [a, mid1, b]);
   });
 
-  it('usa la caché sin llamar al servicio', async () => {
+  it('agrupa secciones encadenadas en un solo pedido y corta la línea por sección', async () => {
     const { cache, fetchMock, routing } = setup();
-    cache.get.mockResolvedValue(line);
-    await expect(routing.route('vehicle', coordinates)).resolves.toEqual(line);
-    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockReturnValue(feature([a, mid1, b, mid2, c, a], [0, 2, 4, 5]));
+    const sections = [
+      [a, b],
+      [b, c],
+      [c, a],
+    ];
+    await expect(routing.route('vehicle', sections)).resolves.toEqual([
+      [a, mid1, b],
+      [b, mid2, c],
+      [c, a],
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sentCoordinates(fetchMock)).toEqual([a, b, c, a]);
+    expect(cache.set).toHaveBeenCalledTimes(3);
   });
 
-  it('devuelve null ante una respuesta mal formada y no la guarda', async () => {
+  it('solo pide las secciones que no están en caché', async () => {
     const { cache, fetchMock, routing } = setup();
-    fetchMock.mockReturnValue(
-      ok({ features: [{ geometry: { type: 'Point', coordinates: [1, 2] } }] }),
+    cache.get.mockImplementation((_profile: string, section: LngLat[]) =>
+      Promise.resolve(section[0] === b ? [b, mid2, c] : null),
     );
-    await expect(routing.route('bicycle', coordinates)).resolves.toBeNull();
+    fetchMock.mockReturnValueOnce(feature([a, mid1, b], [0, 2]));
+    fetchMock.mockReturnValueOnce(feature([c, a], [0, 1]));
+    const lines = await routing.route('walking', [
+      [a, b],
+      [b, c],
+      [c, a],
+    ]);
+    expect(lines).toEqual([
+      [a, mid1, b],
+      [b, mid2, c],
+      [c, a],
+    ]);
+    // La sección del medio salió de caché: las otras dos ya no se tocan y van por separado.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('deja todo el grupo en null si los way_points no coinciden con lo enviado', async () => {
+    const { cache, fetchMock, routing } = setup();
+    fetchMock.mockReturnValue(feature([a, b, c], [0, 2]));
+    await expect(
+      routing.route('walking', [
+        [a, b],
+        [b, c],
+      ]),
+    ).resolves.toEqual([null, null]);
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
+  it('devuelve null ante una respuesta mal formada', async () => {
+    const { cache, fetchMock, routing } = setup();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ features: [{ geometry: { type: 'Point' } }] })),
+    );
+    await expect(routing.route('bicycle', [[a, b]])).resolves.toEqual([null]);
     expect(cache.set).not.toHaveBeenCalled();
   });
 
   it('devuelve null ante un error HTTP', async () => {
     const { fetchMock, routing } = setup();
     fetchMock.mockResolvedValue(new Response('{}', { status: 429 }));
-    await expect(routing.route('walking', coordinates)).resolves.toBeNull();
+    await expect(routing.route('walking', [[a, b]])).resolves.toEqual([null]);
+  });
+
+  it('no pide una sección que sola supera el tope de puntos', async () => {
+    const { fetchMock, routing } = setup();
+    const huge = Array.from({ length: ORS_MAX_COORDINATES + 1 }, (_, i): LngLat => [i / 1000, 0]);
+    await expect(routing.route('walking', [huge])).resolves.toEqual([null]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('corta el pedido a los 5 segundos y devuelve null', async () => {
@@ -80,23 +145,50 @@ describe('OpenRouteServiceRouting', () => {
           });
         }),
     );
-    const result = routing.route('walking', coordinates);
+    const result = routing.route('walking', [[a, b]]);
     await jest.advanceTimersByTimeAsync(ORS_TIMEOUT_MS);
-    await expect(result).resolves.toBeNull();
+    await expect(result).resolves.toEqual([null]);
+  });
+});
+
+describe('chainSections', () => {
+  it('corta la cadena donde una sección no empieza en el fin de la anterior', () => {
+    expect(
+      chainSections(
+        [
+          [a, b],
+          [b, c],
+          [a, c],
+        ],
+        [false, false, false],
+      ),
+    ).toEqual([[0, 1], [2]]);
+  });
+
+  it('parte la cadena al llegar al tope de puntos por pedido', () => {
+    const sections = Array.from({ length: ORS_MAX_COORDINATES + 5 }, (_, i): LngLat[] => [
+      [i / 1000, 0],
+      [(i + 1) / 1000, 0],
+    ]);
+    const chains = chainSections(
+      sections,
+      sections.map(() => false),
+    );
+    expect(chains.map((chain) => chain.length)).toEqual([ORS_MAX_COORDINATES - 1, 6]);
   });
 });
 
 describe('NullRouting', () => {
   it('nunca calcula: todo queda recto', async () => {
-    await expect(new NullRouting().route()).resolves.toBeNull();
+    await expect(new NullRouting().route('walking', [[a, b]])).resolves.toEqual([null]);
   });
 });
 
 describe('routeCacheKey', () => {
   it('es igual con diferencias menores a 6 decimales y distinta por perfil', () => {
-    const key = routeCacheKey('walking', coordinates);
-    expect(routeCacheKey('walking', [[-58.3800001, -34.6], coordinates[1] ?? [0, 0]])).toBe(key);
-    expect(routeCacheKey('vehicle', coordinates)).not.toBe(key);
+    const key = routeCacheKey('walking', [a, b]);
+    expect(routeCacheKey('walking', [[-58.3800001, -34.6], b])).toBe(key);
+    expect(routeCacheKey('vehicle', [a, b])).not.toBe(key);
     expect(key).toMatch(/^routing:v1:[0-9a-f]{64}$/);
   });
 });

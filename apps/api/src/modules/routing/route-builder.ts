@@ -8,9 +8,16 @@ import {
   type RouteInput,
   type RouteLeg,
   type RouteLegInput,
+  type RouteSectionInput,
   type SpeedProfile,
 } from '@garita/shared';
 import { ROUTING_PORT, type RoutingPort } from './routing.port';
+
+interface LegDraft {
+  from: LngLat;
+  to: LngLat;
+  leg: RouteLegInput;
+}
 
 /**
  * Arma el recorrido guardable. La geometría la calcula siempre la API: nunca se acepta la que
@@ -24,14 +31,12 @@ export class RouteBuilder {
     const pairs = legEndpoints(points, input.closed);
     if (pairs.length !== input.legs.length)
       throw new Error('La cantidad de tramos no coincide con los puntos');
-    const legs = await Promise.all(
-      pairs.map(([from, to], i) => {
-        const leg = input.legs[i];
-        if (!leg) throw new Error('Tramo faltante');
-        return this.buildLeg(from, to, leg, profile);
-      }),
-    );
-    return { v: 1, closed: input.closed, legs };
+    const drafts = pairs.map(([from, to], i) => {
+      const leg = input.legs[i];
+      if (!leg) throw new Error('Tramo faltante');
+      return { from, to, leg };
+    });
+    return { v: 1, closed: input.closed, legs: await this.resolve(drafts, profile) };
   }
 
   async buildLeg(
@@ -40,19 +45,40 @@ export class RouteBuilder {
     leg: RouteLegInput,
     profile: SpeedProfile,
   ): Promise<RouteLeg> {
-    const ends = sectionEndpoints(from, to, leg.waypoints);
-    const sections = await Promise.all(
-      leg.sections.map(async (section, i) => {
+    const [built] = await this.resolve([{ from, to, leg }], profile);
+    if (!built) throw new Error('Tramo faltante');
+    return built;
+  }
+
+  /** Todas las secciones por calles van en una sola llamada, en orden, para que se agrupen. */
+  private async resolve(drafts: LegDraft[], profile: SpeedProfile): Promise<RouteLeg[]> {
+    const legs = drafts.map(({ from, to, leg }) => {
+      const ends = sectionEndpoints(from, to, leg.waypoints);
+      const sections = leg.sections.map((section: RouteSectionInput, i) => {
         const pair = ends[i];
         if (!pair) throw new Error('Sección sin extremos');
-        const straight = polyline(pair[0], section.via, pair[1]);
-        if (section.mode === 'manual') return { ...section, geometry: straight, fallback: false };
-        const line = await this.routing.route(profile, straight);
-        return line
-          ? { ...section, geometry: line, fallback: false }
-          : { ...section, geometry: straight, fallback: true };
-      }),
+        return { section, straight: polyline(pair[0], section.via, pair[1]) };
+      });
+      return { from, to, waypoints: leg.waypoints, sections };
+    });
+    const streets = legs
+      .flatMap((leg) => leg.sections)
+      .filter(({ section }) => section.mode === 'streets');
+    const lines = await this.routing.route(
+      profile,
+      streets.map(({ straight }) => straight),
     );
-    return { from, to, waypoints: leg.waypoints, sections };
+    const routed = new Map(streets.map((draft, i) => [draft, lines[i] ?? null]));
+    return legs.map(({ sections, ...leg }) => ({
+      ...leg,
+      sections: sections.map((draft) => {
+        if (draft.section.mode === 'manual')
+          return { ...draft.section, geometry: draft.straight, fallback: false };
+        const line = routed.get(draft);
+        return line
+          ? { ...draft.section, geometry: line, fallback: false }
+          : { ...draft.section, geometry: draft.straight, fallback: true };
+      }),
+    }));
   }
 }
