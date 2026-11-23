@@ -183,14 +183,17 @@ const PATTERNS = [
  * satelital, flechas de sentido y puntos de paso como rombos. Sólida y ancha hasta donde se
  * llegó; fina y atenuada lo que falta.
  */
-function RoutePath({
+export function RouteLayers({
   points,
   routes,
   dark,
+  showWaypoints = true,
 }: {
-  points: LiveMapPoint[];
+  points: Pick<LiveMapPoint, 'id' | 'lat' | 'lng' | 'status'>[];
   routes: LiveMapRoute[];
   dark: boolean;
+  /** El editor dibuja sus propios puntos de paso, que se pueden arrastrar. */
+  showWaypoints?: boolean;
 }) {
   const { current: map } = useMap();
   // Los tokens son hex en :root/.dark; se leen del documento para no repetir colores acá.
@@ -259,20 +262,21 @@ function RoutePath({
           paint={{ 'icon-color': color }}
         />
       </Source>
-      {waypoints.map(([lng, lat], i) => (
-        <Marker
-          key={`${String(i)}-${String(lng)}-${String(lat)}`}
-          latitude={lat}
-          longitude={lng}
-          anchor="center"
-        >
-          {/* Punto de paso: no se registra ni se toca; solo da forma al camino. */}
-          <span
-            aria-hidden="true"
-            className="pointer-events-none block size-2 rotate-45 border-[1.5px] border-muted-foreground bg-card"
-          />
-        </Marker>
-      ))}
+      {showWaypoints &&
+        waypoints.map(([lng, lat], i) => (
+          <Marker
+            key={`${String(i)}-${String(lng)}-${String(lat)}`}
+            latitude={lat}
+            longitude={lng}
+            anchor="center"
+          >
+            {/* Punto de paso: no se registra ni se toca; solo da forma al camino. */}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none block size-2 rotate-45 border-[1.5px] border-muted-foreground bg-card"
+            />
+          </Marker>
+        ))}
       {hasFallback && (
         <p className="absolute bottom-3.5 left-3.5 z-10 rounded-sm border border-border bg-card/90 px-2 py-1 text-xs text-foreground">
           Línea de puntos: tramo sin calcular por calles (se muestra recto).
@@ -362,7 +366,7 @@ function MapContent({
 
   return (
     <>
-      <RoutePath points={points} routes={routes?.length ? routes : straight} dark={dark} />
+      <RouteLayers points={points} routes={routes?.length ? routes : straight} dark={dark} />
       {sites.map((site) => (
         <Marker
           key={site.id}
