@@ -29,6 +29,7 @@ compliance.daily = [
 compliance.bySite = [
   { id: 'p1', name: 'Depósito Sur', totals: { ...compliance.totals, percentage: 82.4 } },
   { id: 'p2', name: 'Oficinas Centro', totals: { ...compliance.totals, percentage: 98.2 } },
+  { id: 'p3', name: 'Planta Este', totals: { ...compliance.totals, percentage: 88.1 } },
 ];
 
 export function createSummaryApi() {
@@ -36,10 +37,13 @@ export function createSummaryApi() {
     savedLayout: null as ViewLayout | null,
     updatedAt: '2026-11-23T10:00:00.000Z',
     failing: new Set<string>(),
+    favoriteSites: [] as string[],
   };
   function respond(path: string): Promise<unknown> {
     const fail = [...state.failing].find((prefix) => path.startsWith(prefix));
     if (fail) return Promise.reject(new ApiError('falla', 500));
+    if (path === '/mis-favoritos/admin-summary/site')
+      return Promise.resolve({ ids: [...state.favoriteSites] });
     if (path.startsWith('/mis-preferencias/vistas/admin-summary'))
       return Promise.resolve({
         layout: state.savedLayout,
@@ -128,6 +132,7 @@ export function createSummaryApi() {
     state.savedLayout = null;
     state.updatedAt = '2026-11-23T10:00:00.000Z';
     state.failing.clear();
+    state.favoriteSites = [];
   }
   return { state, respond, reset };
 }

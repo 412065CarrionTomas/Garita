@@ -40,8 +40,10 @@ it('sin diseño guardado muestra el diseño A con datos reales de cada bloque', 
   expect(within(section(/Cumplimiento · 30 días/)).getByText('1 día bajo 90 %')).toBeVisible();
   const sites = section(/Predios · peor cumplimiento primero/);
   const rows = await within(sites).findAllByRole('row');
-  expect(rows[1]).toHaveTextContent('Depósito Sur');
-  expect(within(sites).getByText('Revisar')).toBeVisible();
+  const worst = rows[1];
+  if (!worst) throw new Error('falta la fila del peor predio');
+  expect(worst).toHaveTextContent('Depósito Sur');
+  expect(within(worst).getByText('Revisar')).toBeVisible();
   expect(await within(section(/Turnos de hoy/)).findByText('2 en total')).toBeVisible();
   expect(
     await within(section(/Incidentes · 30 días/)).findByText('2 sin clasificar'),
