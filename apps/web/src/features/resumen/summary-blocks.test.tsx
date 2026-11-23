@@ -34,7 +34,8 @@ async function openPanel() {
   const user = userEvent.setup();
   renderWithQueryClient(<SummaryPage />);
   await user.click(await screen.findByRole('button', { name: 'Editar diseño' }));
-  await user.click(screen.getByRole('button', { name: 'Bloques' }));
+  // Los casilleros arrancan ocultos: el botón ya cuenta 1 oculto.
+  await user.click(screen.getByRole('button', { name: /^Bloques/ }));
   return { user, panel: await screen.findByRole('dialog', { name: 'Bloques del diseño' }) };
 }
 
@@ -52,7 +53,7 @@ it('oculta, cambia la presentación y los ajustes, y lo guarda todo junto', asyn
   // Los cambios se ven al instante, todavía sin guardar.
   expect(screen.queryByRole('region', { name: 'Cuenta' })).toBeNull();
   expect(await screen.findByRole('region', { name: /Cumplimiento · 7 días/ })).toBeVisible();
-  expect(screen.getByRole('button', { name: /Bloques\s*1 ocultos/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: /Bloques\s*2 ocultos/ })).toBeVisible();
   expect(apiPut).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole('button', { name: 'Guardar diseño' }));
@@ -81,9 +82,33 @@ it('con todos los bloques ocultos avisa cómo recuperarlos', async () => {
   const { user, panel } = await openPanel();
   for (const id of Object.keys(adminSummaryCatalog.widgets)) {
     const title = adminSummaryCatalog.widgets[id as keyof typeof adminSummaryCatalog.widgets].title;
-    await user.click(within(panel).getByRole('switch', { name: title }));
+    const toggle = within(panel).getByRole('switch', { name: title });
+    // Solo los visibles: tocar uno ya oculto (los casilleros) lo mostraría.
+    if (toggle.getAttribute('aria-checked') === 'true') await user.click(toggle);
   }
   await user.keyboard('{Escape}');
   expect(screen.getByText('Todos los bloques están ocultos')).toBeVisible();
   expect(screen.getByText('Mostralos desde Bloques, o restablecé el diseño.')).toBeVisible();
+});
+
+it('los casilleros por predio se activan desde el panel y dicen cada estado en palabras', async () => {
+  const { user, panel } = await openPanel();
+  expect(screen.queryByRole('region', { name: /Casilleros por predio/ })).toBeNull();
+  await user.click(within(panel).getByRole('switch', { name: 'Casilleros por predio' }));
+  await user.keyboard('{Escape}');
+  const block = await screen.findByRole('region', { name: /Casilleros por predio · 14 días/ });
+  const table = await within(block).findByRole('table');
+  const row = within(table).getByRole('row', { name: /Depósito Sur/ });
+  expect(
+    within(row).getByText('22/11: alguna no realizada o incompleta (67 % de 3)'),
+  ).toBeInTheDocument();
+  expect(
+    within(row).getByText('23/11: pendiente de sincronizar o en revisión'),
+  ).toBeInTheDocument();
+  expect(within(row).getByText('1 día con fallas')).toBeVisible();
+  expect(
+    jest
+      .mocked(apiGet)
+      .mock.calls.some(([path]) => path.startsWith('/reportes/rondas/casilleros?')),
+  ).toBe(true);
 });

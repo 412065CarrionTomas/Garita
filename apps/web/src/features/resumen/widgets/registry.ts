@@ -6,6 +6,7 @@ import { ComplianceWidget } from './compliance-widget';
 import { GuardsWidget } from './guards-widget';
 import { IncidentsWidget } from './incidents-widget';
 import { ShiftsTodayWidget } from './shifts-today-widget';
+import { SiteDaysWidget } from './site-days-widget';
 import { SitesWidget } from './sites-widget';
 import type { WidgetProps } from './widget-props';
 
@@ -20,6 +21,7 @@ export const summaryWidgets = {
   sites: SitesWidget,
   guards: GuardsWidget,
   incidents: IncidentsWidget,
+  siteDays: SiteDaysWidget,
   account: AccountWidget,
 } satisfies Record<AdminSummaryWidgetId, ComponentType<WidgetProps>>;
 

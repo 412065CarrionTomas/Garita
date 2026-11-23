@@ -94,6 +94,25 @@ export function createSummaryApi() {
         unassigned: { count: 1, nextAt: '2026-11-23T17:00:00.000Z' },
         message: '',
       });
+    // Antes que /reportes/rondas: empieza igual.
+    if (path.startsWith('/reportes/rondas/casilleros'))
+      return Promise.resolve({
+        desde: '2026-11-21',
+        hasta: '2026-11-24',
+        timezone: 'UTC',
+        days: ['2026-11-21', '2026-11-22', '2026-11-23'],
+        sites: [
+          {
+            id: 'p1',
+            name: 'Depósito Sur',
+            cells: [
+              { day: '2026-11-21', status: 'ok', evaluated: 3, percentage: 100 },
+              { day: '2026-11-22', status: 'failed', evaluated: 3, percentage: 66.7 },
+              { day: '2026-11-23', status: 'pending', evaluated: 0, percentage: null },
+            ],
+          },
+        ],
+      });
     if (path.startsWith('/reportes/rondas')) return Promise.resolve(compliance);
     if (path.startsWith('/reportes/incidentes'))
       return Promise.resolve({

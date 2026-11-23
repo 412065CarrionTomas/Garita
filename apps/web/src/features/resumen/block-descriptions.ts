@@ -10,6 +10,7 @@ const PRESENTATION_LABELS: Readonly<Record<string, string>> = {
   bars: 'Barras',
   pie: 'Torta',
   strip: 'Franja',
+  grid: 'Casilleros',
 };
 
 const PERIOD: readonly Choice[] = [
@@ -75,6 +76,20 @@ const SUMMARY_BLOCKS = {
   incidents: {
     presentations: ['bars', 'pie', 'table'],
     settings: [{ key: 'period', label: 'Período', options: PERIOD }],
+  },
+  siteDays: {
+    presentations: ['grid'],
+    settings: [
+      {
+        key: 'days',
+        label: 'Días',
+        options: [
+          { value: '7', label: '7 días' },
+          { value: '14', label: '14 días' },
+          { value: '30', label: '30 días' },
+        ],
+      },
+    ],
   },
   account: { presentations: ['strip'], settings: [] },
 } satisfies Record<

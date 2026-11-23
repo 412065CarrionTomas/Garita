@@ -4,6 +4,7 @@ import {
   localReportDay,
   reportPendingResponseSchema,
   reportResponseSchema,
+  siteDayGridResponseSchema,
 } from '@garita/shared';
 import { apiGet } from '@/lib/api-client';
 import { shiftListSchema } from '@/features/supervision/contracts';
@@ -20,14 +21,18 @@ function addDays(day: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Últimos 7 o 30 días incluido hoy: el "hasta" de los informes no se incluye. */
-export function periodQuery(period: SummaryPeriod, now = new Date()): string {
+/** Últimos `days` días incluido hoy: el "hasta" de los informes no se incluye. */
+export function lastDaysQuery(days: number, now = new Date()): string {
   const today = localReportDay(now, COMPANY_TIMEZONE);
-  const days = period === '7d' ? 7 : 30;
   return new URLSearchParams({
     desde: addDays(today, 1 - days),
     hasta: addDays(today, 1),
   }).toString();
+}
+
+/** Últimos 7 o 30 días incluido hoy. */
+export function periodQuery(period: SummaryPeriod, now = new Date()): string {
+  return lastDaysQuery(period === '7d' ? 7 : 30, now);
 }
 
 /** Misma clave que la pantalla de Cumplimiento: comparten caché para el mismo período. */
@@ -44,6 +49,15 @@ export function useIncidentReport(period: SummaryPeriod) {
   return useQuery({
     queryKey: ['reports', 'incidents', query],
     queryFn: () => apiGet(`/reportes/incidentes?${query}`, incidentReportResponseSchema),
+  });
+}
+
+/** Casilleros predio × día de los últimos `days` días. */
+export function useSiteDayGrid(days: number) {
+  const query = lastDaysQuery(days);
+  return useQuery({
+    queryKey: ['reports', 'site-days', query],
+    queryFn: () => apiGet(`/reportes/rondas/casilleros?${query}`, siteDayGridResponseSchema),
   });
 }
 

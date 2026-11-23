@@ -14,7 +14,8 @@ const ranking = z.object({
  */
 export const adminSummaryCatalog = defineViewCatalog({
   key: 'admin-summary',
-  // 2: se agrega el bloque de vigiladores; los diseños guardados lo reciben al reconciliarse.
+  // 2: se agregan los bloques de vigiladores y de casilleros; los diseños guardados los reciben al
+  // reconciliarse.
   version: 2,
   columns: 12,
   roles: ['admin'],
@@ -56,6 +57,12 @@ export const adminSummaryCatalog = defineViewCatalog({
       presentations: ['bars', 'pie', 'table'],
       settings: z.object({ period }),
     },
+    siteDays: {
+      title: 'Casilleros por predio',
+      size: { min: { w: 6, h: 4 }, max: { w: 12, h: 14 }, default: { w: 12, h: 6 } },
+      presentations: ['grid'],
+      settings: z.object({ days: z.enum(['7', '14', '30']).default('14') }),
+    },
     account: {
       title: 'Cuenta',
       size: { min: { w: 4, h: 2 }, max: { w: 12, h: 4 }, default: { w: 12, h: 2 } },
@@ -71,6 +78,8 @@ export const adminSummaryCatalog = defineViewCatalog({
     { id: 'sites', x: 0, y: 14 },
     { id: 'guards', x: 0, y: 21 },
     { id: 'account', x: 0, y: 27 },
+    // De la propuesta B: disponible desde Bloques, oculto en el diseño por defecto (A).
+    { id: 'siteDays', x: 0, y: 29, hidden: true },
   ],
 });
 
