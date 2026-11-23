@@ -12,6 +12,8 @@ export const roundInputSchema = z
     graceMinutes: z.number().int(),
     /** Opcional: sin recorrido, la API arma uno por calles con regreso al inicio. */
     route: routeInputSchema.optional(),
+    /** El supervisor aceptó guardar rectas las secciones que no se pudieron calcular por calles. */
+    allowStraight: z.boolean().optional(),
   })
   .superRefine((value, context) => {
     for (const { field, message } of validateWindowConfig(value))

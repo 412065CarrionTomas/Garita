@@ -11,8 +11,11 @@ import { haversineMeters } from '../marcas/haversine';
 export const ROUTE_LIMITS = {
   /** Puntos de paso por tramo. */
   waypointsPerLeg: 10,
-  /** Quiebres de una sección a mano o puntos intermedios de una por calles. */
-  viaPerSection: 50,
+  /**
+   * Quiebres de una sección a mano o puntos intermedios de una por calles. Con inicio y fin suman
+   * 50, el máximo de puntos por pedido de openrouteservice.
+   */
+  viaPerSection: 48,
   /** Coordenadas de la línea calculada de una sección. */
   geometryPerSection: 5000,
   /** Distancia máxima de cualquier coordenada al predio. */
@@ -78,6 +81,51 @@ export const roundRouteSchema = z.object({
   ),
 });
 export type RoundRoute = z.infer<typeof roundRouteSchema>;
+
+/** Por qué una sección por calles quedó recta. */
+export const routeFailureReasons = [
+  /** Un punto de la sección no está cerca de ninguna calle. */
+  'unreachable_point',
+  /** No hay camino por calles entre los puntos de la sección. */
+  'no_route',
+  /** Iba en el mismo pedido que una sección que falló: corrigiendo esa, se calcula. */
+  'skipped',
+  /** Se alcanzó el límite de pedidos del servicio (por minuto o por día). */
+  'rate_limited',
+  /** El servicio no respondió, tardó más de 5 s o devolvió algo inválido. */
+  'unavailable',
+  /** La API no tiene clave del servicio de rutas. */
+  'not_configured',
+] as const;
+export type RouteFailureReason = (typeof routeFailureReasons)[number];
+
+export const routeFailureSchema = z.object({
+  /** Índice del tramo y de la sección dentro del tramo. */
+  leg: z.number().int().min(0),
+  section: z.number().int().min(0),
+  reason: z.enum(routeFailureReasons),
+});
+export type RouteFailure = z.infer<typeof routeFailureSchema>;
+
+/** Cuerpo del 422 al guardar: no se guardó nada; reenviar con allowStraight para dejarlas rectas. */
+export const routeFailuresErrorSchema = z.object({
+  message: z.string(),
+  failures: z.array(routeFailureSchema).min(1),
+});
+
+/** Botón "Calcular recorrido": toda la ronda en el menor número de pedidos. No guarda nada. */
+export const roundRoutePreviewInputSchema = z.object({
+  siteId: z.string().min(1),
+  checkpointIds: z.array(z.string().min(1)).min(2),
+  route: routeInputSchema,
+});
+export type RoundRoutePreviewInput = z.infer<typeof roundRoutePreviewInputSchema>;
+
+export const roundRoutePreviewResponseSchema = z.object({
+  route: roundRouteSchema,
+  failures: z.array(routeFailureSchema),
+});
+export type RoundRoutePreviewResponse = z.infer<typeof roundRoutePreviewResponseSchema>;
 
 /** Vista previa de un solo tramo en el editor: la API devuelve sus secciones con geometría. */
 export const routePreviewInputSchema = z

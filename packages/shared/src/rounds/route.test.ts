@@ -6,6 +6,7 @@ import {
   polyline,
   type RoundRoute,
   routeInputSchema,
+  roundRoutePreviewInputSchema,
   routePreviewInputSchema,
   sectionEndpoints,
   staleLegs,
@@ -140,5 +141,18 @@ describe('vista previa de un tramo', () => {
       { mode: 'manual', via: [] },
     ];
     expect(routePreviewInputSchema.safeParse({ ...leg, sections }).success).toBe(true);
+  });
+});
+
+describe('vista previa de la ronda', () => {
+  it('pide al menos dos puntos y un recorrido válido', () => {
+    const route = defaultRouteInput(2);
+    expect(
+      roundRoutePreviewInputSchema.safeParse({ siteId: 'p', checkpointIds: ['a'], route }).success,
+    ).toBe(false);
+    expect(
+      roundRoutePreviewInputSchema.safeParse({ siteId: 'p', checkpointIds: ['a', 'b'], route })
+        .success,
+    ).toBe(true);
   });
 });
