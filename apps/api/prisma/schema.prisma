@@ -373,6 +373,8 @@ model RoundVersion {
   windowStartLocal String
   windowEndLocal   String
   graceMinutes     Int
+  /// Recorrido ideal (roundRouteSchema de @garita/shared). Null: rondas previas, se dibujan rectas.
+  route            Json?
   createdById      String
   createdAt        DateTime                 @default(now())
   round            Round                    @relation(fields: [roundId], references: [id], onDelete: Restrict)
