@@ -65,6 +65,23 @@ export function compactInOrder<T extends GridRect>(
   return result;
 }
 
+/**
+ * Cambia la resolución de una grilla: multiplica columnas por `columns` y filas por `rows`. Sirve
+ * para migrar diseños guardados cuando una pantalla pasa a una grilla más fina.
+ */
+export function scaleRects<T extends GridRect>(
+  items: readonly T[],
+  factor: { columns: number; rows: number },
+): T[] {
+  return items.map((item) => ({
+    ...item,
+    x: Math.round(item.x * factor.columns),
+    w: Math.max(1, Math.round(item.w * factor.columns)),
+    y: Math.round(item.y * factor.rows),
+    h: Math.max(1, Math.round(item.h * factor.rows)),
+  }));
+}
+
 /** Compactación vertical en orden de lectura: no quedan huecos encima de ningún bloque. */
 export function compactVertical<T extends GridRect>(items: readonly T[]): T[] {
   return compactInOrder(items, readingOrder(items));

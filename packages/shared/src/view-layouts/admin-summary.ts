@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { defineViewCatalog } from './catalog';
+import { scaleRects } from './grid';
 
 const period = z.enum(['7d', '30d']).default('30d');
 const none = z.object({});
@@ -15,72 +16,76 @@ const ranking = z.object({
 export const adminSummaryCatalog = defineViewCatalog({
   key: 'admin-summary',
   // 2: se agregan los bloques de vigiladores y de casilleros; los diseños guardados los reciben al
-  // reconciliarse.
-  version: 2,
-  columns: 12,
+  // reconciliarse. 3: grilla más fina (ver `migrations`), para mover y redimensionar con pasos chicos.
+  version: 3,
+  columns: 24,
   roles: ['admin'],
   favoriteTypes: ['site', 'guard', 'client'],
   widgets: {
     attention: {
       title: 'Atención ahora',
-      size: { min: { w: 3, h: 3 }, max: { w: 12, h: 12 }, default: { w: 12, h: 6 } },
+      size: { min: { w: 6, h: 9 }, max: { w: 24, h: 36 }, default: { w: 24, h: 18 } },
       presentations: ['table', 'column'],
       settings: none,
     },
     compliance: {
       title: 'Cumplimiento',
-      size: { min: { w: 4, h: 5 }, max: { w: 12, h: 12 }, default: { w: 8, h: 8 } },
+      size: { min: { w: 8, h: 15 }, max: { w: 24, h: 36 }, default: { w: 16, h: 24 } },
       presentations: ['line', 'bars', 'table'],
       settings: z.object({ period }),
     },
     shiftsToday: {
       title: 'Turnos de hoy',
-      size: { min: { w: 3, h: 4 }, max: { w: 12, h: 8 }, default: { w: 4, h: 5 } },
+      size: { min: { w: 6, h: 12 }, max: { w: 24, h: 24 }, default: { w: 8, h: 15 } },
       presentations: ['bars', 'pie', 'table'],
       settings: none,
     },
     sites: {
       title: 'Predios',
-      size: { min: { w: 6, h: 4 }, max: { w: 12, h: 14 }, default: { w: 8, h: 7 } },
+      size: { min: { w: 8, h: 9 }, max: { w: 24, h: 42 }, default: { w: 16, h: 17 } },
       presentations: ['table'],
       settings: ranking,
     },
     guards: {
       title: 'Vigiladores',
-      size: { min: { w: 6, h: 4 }, max: { w: 12, h: 14 }, default: { w: 12, h: 6 } },
+      size: { min: { w: 8, h: 9 }, max: { w: 24, h: 42 }, default: { w: 24, h: 17 } },
       presentations: ['table'],
       settings: ranking,
     },
     incidents: {
       title: 'Incidentes',
-      size: { min: { w: 3, h: 5 }, max: { w: 12, h: 12 }, default: { w: 4, h: 8 } },
+      size: { min: { w: 6, h: 15 }, max: { w: 24, h: 36 }, default: { w: 8, h: 24 } },
       presentations: ['bars', 'pie', 'table'],
       settings: z.object({ period }),
     },
     siteDays: {
       title: 'Casilleros por predio',
-      size: { min: { w: 6, h: 4 }, max: { w: 12, h: 14 }, default: { w: 12, h: 6 } },
+      size: { min: { w: 12, h: 12 }, max: { w: 24, h: 42 }, default: { w: 24, h: 18 } },
       presentations: ['grid'],
       settings: z.object({ days: z.enum(['7', '14', '30']).default('14') }),
     },
     account: {
       title: 'Cuenta',
-      size: { min: { w: 4, h: 2 }, max: { w: 12, h: 4 }, default: { w: 12, h: 2 } },
+      size: { min: { w: 8, h: 6 }, max: { w: 24, h: 12 }, default: { w: 24, h: 6 } },
       presentations: ['strip'],
       settings: none,
     },
   },
   defaultLayout: [
     { id: 'attention', x: 0, y: 0 },
-    { id: 'compliance', x: 0, y: 6 },
-    { id: 'shiftsToday', x: 8, y: 6 },
-    { id: 'incidents', x: 8, y: 11 },
-    { id: 'sites', x: 0, y: 14 },
-    { id: 'guards', x: 0, y: 21 },
-    { id: 'account', x: 0, y: 27 },
+    { id: 'compliance', x: 0, y: 18 },
+    { id: 'shiftsToday', x: 16, y: 18 },
+    { id: 'incidents', x: 16, y: 33 },
+    { id: 'sites', x: 0, y: 42 },
+    { id: 'guards', x: 0, y: 59 },
+    { id: 'account', x: 0, y: 76 },
     // De la propuesta B: disponible desde Bloques, oculto en el diseño por defecto (A).
-    { id: 'siteDays', x: 0, y: 29, hidden: true },
+    { id: 'siteDays', x: 0, y: 82, hidden: true },
   ],
+  migrations: {
+    // 3: la grilla pasa de 12 columnas y filas de 72 px a 24 columnas y filas de 24 px.
+    3: (items) => scaleRects(items, { columns: 2, rows: 3 }),
+  },
 });
 
 export type AdminSummaryWidgetId = keyof typeof adminSummaryCatalog.widgets;

@@ -9,6 +9,7 @@ import {
   findOverlap,
   rectsOverlap,
   reconcileLayout,
+  scaleRects,
   validateLayout,
   viewCatalogs,
   viewPreferenceInputSchema,
@@ -116,9 +117,9 @@ describe('validateLayout', () => {
   it('rechaza bloques fuera de la grilla o de su tamaño permitido', () => {
     const layout = edited((items) => {
       const sites = items.find((entry) => entry.id === 'sites');
-      if (sites) Object.assign(sites, { x: 8, w: 6 });
+      if (sites) Object.assign(sites, { x: 20, w: 8 });
       const account = items.find((entry) => entry.id === 'account');
-      if (account) account.h = 9;
+      if (account) account.h = 13;
     });
     expect(codes(layout)).toEqual(expect.arrayContaining(['out_of_bounds', 'size']));
   });
@@ -156,7 +157,7 @@ describe('reconcileLayout', () => {
 
   it('descarta lo inválido, corrige lo corregible y agrega lo que falta', () => {
     const stored = {
-      version: 1,
+      version: adminSummaryCatalog.version,
       items: [
         { ...adminSummaryCatalog.defaultLayout.items[1], w: 40, x: 11, presentation: 'pie' },
         { id: 'ajeno', x: 0, y: 0, w: 1, h: 1, hidden: false, presentation: 'x', settings: {} },
@@ -171,7 +172,7 @@ describe('reconcileLayout', () => {
     const result = reconcileLayout(adminSummaryCatalog, stored);
     expect(validateLayout(adminSummaryCatalog, result)).toEqual([]);
     expect(result.items.filter((entry) => entry.id === 'compliance')).toHaveLength(1);
-    expect(item(result, 'compliance')).toMatchObject({ x: 0, w: 12, presentation: 'line' });
+    expect(item(result, 'compliance')).toMatchObject({ x: 0, w: 24, presentation: 'line' });
     expect(item(result, 'sites').settings).toEqual({ sort: 'worst', limit: '5' });
     expect(item(result, 'attention')).toMatchObject({ hidden: false, presentation: 'table' });
   });
@@ -186,6 +187,66 @@ describe('reconcileLayout', () => {
     expect(item(result, 'attention').y).toBe(0);
     const accountY = item(adminSummaryCatalog.defaultLayout, 'account').y;
     expect(item(result, 'account')).toMatchObject({ hidden: true, y: accountY + 50 });
+  });
+});
+
+describe('migraciones de diseños guardados', () => {
+  const v2 = (id: string, x: number, y: number, w: number, h: number) => ({
+    ...box(id, x, y, w, h),
+    hidden: false,
+    presentation: 'table',
+    settings: {},
+  });
+
+  it('lleva un diseño de la grilla de 12 columnas a la de 24 sin cambiar lo que se ve', () => {
+    const result = reconcileLayout(adminSummaryCatalog, {
+      version: 2,
+      items: [v2('attention', 0, 0, 12, 6), v2('sites', 4, 6, 8, 7)],
+    });
+    expect(item(result, 'attention')).toMatchObject({ x: 0, y: 0, w: 24, h: 18 });
+    expect(item(result, 'sites')).toMatchObject({ x: 8, y: 18, w: 16, h: 21 });
+    expect(validateLayout(adminSummaryCatalog, result)).toEqual([]);
+  });
+
+  it('no migra un diseño de la versión actual ni uno sin versión', () => {
+    const sites = v2('sites', 4, 0, 8, 9);
+    for (const version of [adminSummaryCatalog.version, undefined])
+      expect(
+        item(reconcileLayout(adminSummaryCatalog, { version, items: [sites] }), 'sites'),
+      ).toMatchObject({ x: 4, w: 8, h: 9 });
+  });
+
+  it('aplica las migraciones pendientes en orden de versión', () => {
+    const catalog = defineViewCatalog({
+      key: 'admin-summary',
+      version: 3,
+      columns: 24,
+      roles: ['admin'],
+      favoriteTypes: [],
+      widgets: {
+        a: {
+          ...adminSummaryCatalog.widgets.account,
+          size: { min: { w: 1, h: 1 }, max: { w: 24, h: 24 }, default: { w: 1, h: 1 } },
+        },
+      },
+      defaultLayout: [{ id: 'a', x: 0, y: 0 }],
+      migrations: {
+        3: (items) => items.map((entry) => ({ ...entry, w: entry.w * 2 })),
+        2: (items) => items.map((entry) => ({ ...entry, w: entry.w + 1 })),
+      },
+    });
+    const stored = { version: 1, items: [{ ...v2('a', 0, 0, 2, 1), presentation: 'strip' }] };
+    expect(item(reconcileLayout(catalog, stored), 'a').w).toBe(6);
+  });
+
+  it('scaleRects multiplica columnas y filas sin dejar bloques vacíos', () => {
+    expect(scaleRects([box('a', 1, 2, 3, 4)], { columns: 2, rows: 3 })).toEqual([
+      box('a', 2, 6, 6, 12),
+    ]);
+    expect(scaleRects([box('a', 0, 0, 1, 1)], { columns: 0.5, rows: 0.5 })[0]).toMatchObject({
+      w: 1,
+      h: 1,
+    });
   });
 });
 
@@ -219,6 +280,18 @@ describe('defineViewCatalog', () => {
         defaultLayout: [{ id: 'one', x: 0, y: 0 }],
       }),
     ).toThrow('valor por defecto');
+  });
+
+  it('falla con migraciones a versiones que el catálogo no tiene', () => {
+    for (const to of [1, 2])
+      expect(() =>
+        defineViewCatalog({
+          ...base,
+          widgets: { one: widget },
+          defaultLayout: [{ id: 'one', x: 0, y: 0 }],
+          migrations: { [to]: (items) => items },
+        }),
+      ).toThrow('migración');
   });
 
   it('falla si el diseño por defecto superpone bloques u omite alguno', () => {

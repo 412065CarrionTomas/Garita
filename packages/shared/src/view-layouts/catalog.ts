@@ -26,6 +26,13 @@ export interface WidgetDefinition {
 
 export type WidgetDefinitions = Readonly<Record<string, WidgetDefinition>>;
 
+/**
+ * Lleva los bloques de un diseño guardado con la versión anterior a la versión que la declara.
+ * Hace falta cuando cambia el significado de las celdas (p. ej. una grilla más fina); los
+ * bloques nuevos o los tamaños fuera de rango ya los resuelve `reconcileLayout` sin migrar.
+ */
+export type LayoutMigration = (items: LayoutItem[]) => LayoutItem[];
+
 export interface ViewCatalog<W extends WidgetDefinitions = WidgetDefinitions> {
   readonly key: ViewKey;
   /** Se incrementa cuando cambian los bloques, sus tamaños o sus ajustes. */
@@ -37,6 +44,8 @@ export interface ViewCatalog<W extends WidgetDefinitions = WidgetDefinitions> {
   readonly favoriteTypes: readonly FavoriteEntityType[];
   readonly widgets: W;
   readonly defaultLayout: ViewLayout;
+  /** Migraciones por versión de destino; se aplican en orden a los diseños más viejos. */
+  readonly migrations?: Readonly<Record<number, LayoutMigration>>;
 }
 
 export interface ViewCatalogInput<W extends WidgetDefinitions> extends Omit<
@@ -170,12 +179,26 @@ function normalizeItem(
   };
 }
 
-const storedLayoutShape = z.object({ items: z.array(z.unknown()) });
+// Sin versión (diseños de antes de que existiera) se toma como la actual: no se migra a ciegas.
+const storedLayoutShape = z.object({
+  version: z.number().int().optional(),
+  items: z.array(z.unknown()),
+});
+
+/** Aplica, en orden, las migraciones posteriores a la versión con que se guardó el diseño. */
+function migrate(catalog: ViewCatalog, version: number, items: LayoutItem[]): LayoutItem[] {
+  return Object.entries(catalog.migrations ?? {})
+    .map(([to, migration]) => [Number(to), migration] as const)
+    .filter(([to]) => to > version && to <= catalog.version)
+    .sort(([a], [b]) => a - b)
+    .reduce((current, [, migration]) => migration(current), items);
+}
 
 /**
  * Convierte cualquier diseño guardado (de una versión vieja, editado a mano o roto) en uno válido
  * para el catálogo actual. Nunca falla: descarta bloques desconocidos o repetidos, ajusta tamaños,
- * presentaciones y ajustes, agrega al final los bloques nuevos y compacta hacia arriba.
+ * presentaciones y ajustes, agrega al final los bloques nuevos y compacta hacia arriba. Antes
+ * aplica las migraciones del catálogo si el diseño es de una versión anterior.
  */
 export function reconcileLayout(catalog: ViewCatalog, stored: unknown): ViewLayout {
   const parsed = storedLayoutShape.safeParse(stored);
@@ -187,15 +210,17 @@ export function reconcileLayout(catalog: ViewCatalog, stored: unknown): ViewLayo
         settings: { ...item.settings },
       })),
     };
+  const storedItems = parsed.data.items.flatMap((raw) => {
+    const item = layoutItemSchema.safeParse(raw);
+    return item.success ? [item.data] : [];
+  });
   const items: LayoutItem[] = [];
   const seen = new Set<string>();
-  for (const raw of parsed.data.items) {
-    const item = layoutItemSchema.safeParse(raw);
-    if (!item.success || seen.has(item.data.id)) continue;
-    const widget = widgetOf(catalog, item.data.id);
-    if (!widget) continue;
-    seen.add(item.data.id);
-    items.push(normalizeItem(catalog, widget, item.data));
+  for (const item of migrate(catalog, parsed.data.version ?? catalog.version, storedItems)) {
+    const widget = widgetOf(catalog, item.id);
+    if (!widget || seen.has(item.id)) continue;
+    seen.add(item.id);
+    items.push(normalizeItem(catalog, widget, item));
   }
   for (const [id, widget] of Object.entries(catalog.widgets)) {
     if (seen.has(id)) continue;
@@ -248,6 +273,9 @@ export function defineViewCatalog<W extends WidgetDefinitions>(
     if (!widget.settings.safeParse({}).success)
       problems.push(`${id}: todos los ajustes necesitan valor por defecto`);
   }
+  for (const to of Object.keys(input.migrations ?? {}))
+    if (!Number.isInteger(Number(to)) || Number(to) < 2 || Number(to) > input.version)
+      problems.push(`migración a la versión ${to}: debe estar entre 2 y ${input.version}`);
   const fail = () => new Error(`Catálogo ${input.key} inválido: ${problems.join(' · ')}`);
   // Sin bloques coherentes no se puede armar el diseño por defecto.
   if (problems.length) throw fail();
