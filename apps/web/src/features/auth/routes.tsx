@@ -10,7 +10,6 @@ import type { UserRole } from '@garita/shared';
 
 import { AppShell } from '@/components/app-shell';
 import type { NavSection } from '@/components/app-shell';
-import { PageHeader } from '@/components/page-header';
 import { useAuth } from './auth-context';
 import { LoginPage } from './login-page';
 import { RecoveryPage } from './recovery-page';
@@ -45,6 +44,7 @@ import { IncidentReportsPage } from '../reportes/incidentes/incident-reports-pag
 import { SubscriptionPage } from '../suscripcion/subscription-page';
 import { PrivacyPage, TermsPage } from '../legal/legal-pages';
 import { LegalAcceptanceGate } from '../legal/legal-acceptance-gate';
+import { SummaryPage } from '../resumen/summary-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -197,10 +197,6 @@ export function RoleLayout() {
   );
 }
 
-function HomePlaceholder({ title, role }: { title: string; role: string }) {
-  return <PageHeader title={title} description={role} />;
-}
-
 /** Las rutas de cada sección quedan protegidas por rol dentro del layout autenticado. */
 export function AppRoutes() {
   const { user } = useAuth();
@@ -330,7 +326,7 @@ export function AppRoutes() {
           path="/resumen"
           element={
             <Protected roles={['admin']}>
-              <HomePlaceholder role="Administrador" title="Resumen de la empresa" />
+              <SummaryPage />
             </Protected>
           }
         />
