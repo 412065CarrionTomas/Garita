@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo } from 'react';
+import type { ExpressionSpecification } from 'maplibre-gl';
 import { Layer, Marker, Source, useMap } from 'react-map-gl/maplibre';
 import { EmptyState } from '@/components/empty-state';
 import type { PointStatus } from '@/components/point-path';
 import { cn } from '@/lib/utils';
 import { BaseMap } from './base-map';
 import { DEFAULT_CENTER, useDark } from './map-style';
+import { arrowImage, routeFeatures, type LiveMapRoute } from './route-features';
+
+export type { LiveMapRoute } from './route-features';
 
 export interface LiveMapSite {
   id: string;
@@ -35,6 +39,8 @@ export interface LiveMapProps {
   onHoverSite?: (id: string | null) => void;
   /** Puntos de la ronda seleccionada, en orden; se unen con la ruta. */
   points?: LiveMapPoint[];
+  /** Recorrido ideal por ronda. Sin esto, los puntos se unen en orden con rectas. */
+  routes?: LiveMapRoute[];
   selectedPointId?: string | null;
   onSelectPoint?: (id: string) => void;
 }
@@ -121,7 +127,6 @@ function PointMarker({
   selected: boolean;
   onSelect?: (id: string) => void;
 }) {
-  const labelled = selected || point.status === 'next';
   return (
     <button
       type="button"
@@ -148,64 +153,131 @@ function PointMarker({
           </svg>
         )}
       </span>
-      {labelled && (
-        <span
-          aria-hidden="true"
-          className="font-cond absolute top-full -mt-1 rounded-xs bg-card/85 px-1 text-xs font-semibold text-foreground"
-        >
-          {index + 1}
-        </span>
-      )}
+      <span
+        aria-hidden="true"
+        className="font-cond absolute top-full -mt-1 rounded-xs bg-card/85 px-1 text-xs font-semibold text-foreground"
+      >
+        {index + 1}
+      </span>
     </button>
   );
 }
 
-/** Ruta: sólida hasta donde se llegó, punteada lo que falta (mismo criterio que el camino lineal). */
-function RoutePath({ points, dark }: { points: LiveMapPoint[]; dark: boolean }) {
+const ARROW = 'route-arrow';
+const WIDTH: ExpressionSpecification = ['case', ['get', 'solid'], 3.2, 2];
+const COLOR = (ink: string, muted: string): ExpressionSpecification => [
+  'case',
+  ['get', 'solid'],
+  ink,
+  muted,
+];
+/** Cada tipo de sección se distingue por patrón, no solo por color (WCAG 2.1 AA). */
+const PATTERNS = [
+  { kind: 'streets', dash: undefined },
+  { kind: 'manual', dash: [3, 1.2] },
+  { kind: 'fallback', dash: [0.6, 2] },
+] as const;
+
+/**
+ * Recorrido ideal: línea con borde del color de la tarjeta para que se lea sobre la foto
+ * satelital, flechas de sentido y puntos de paso como rombos. Sólida y ancha hasta donde se
+ * llegó; fina y atenuada lo que falta.
+ */
+function RoutePath({
+  points,
+  routes,
+  dark,
+}: {
+  points: LiveMapPoint[];
+  routes: LiveMapRoute[];
+  dark: boolean;
+}) {
+  const { current: map } = useMap();
   // Los tokens son hex en :root/.dark; se leen del documento para no repetir colores acá.
-  const [ink, muted] = useMemo(() => {
+  const [ink, muted, card] = useMemo(() => {
     const css = getComputedStyle(document.documentElement);
-    return [
-      css.getPropertyValue('--foreground').trim(),
-      css.getPropertyValue('--muted-foreground').trim(),
-    ];
+    return ['--foreground', '--muted-foreground', '--card'].map((token) =>
+      css.getPropertyValue(token).trim(),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dark]);
-  // Cada tramo toma el estado de su destino: registrado o faltante = sólido; el resto, punteado.
-  const segments = (solid: boolean) => ({
-    type: 'FeatureCollection' as const,
-    features: points.slice(1).flatMap((to, i) => {
-      const from = points[i];
-      const isSolid = to.status === 'done' || to.status === 'missed';
-      return from && isSolid === solid
-        ? [
-            {
-              type: 'Feature' as const,
-              properties: {},
-              geometry: {
-                type: 'LineString' as const,
-                coordinates: [
-                  [from.lng, from.lat],
-                  [to.lng, to.lat],
-                ],
-              },
-            },
-          ]
-        : [];
-    }),
-  });
+  const { lines, waypoints, hasFallback } = useMemo(
+    () => routeFeatures(routes, points),
+    [routes, points],
+  );
+  // Al cambiar Mapa/Satélite el estilo nuevo no trae la flecha: se vuelve a registrar.
+  useEffect(() => {
+    const instance = map?.getMap();
+    if (!instance) return;
+    const add = () => {
+      if (!instance.hasImage(ARROW)) instance.addImage(ARROW, arrowImage(), { sdf: true });
+    };
+    const onMissing = (event: { id: string }) => {
+      if (event.id === ARROW) add();
+    };
+    add();
+    instance.on('styleimagemissing', onMissing);
+    return () => {
+      instance.off('styleimagemissing', onMissing);
+    };
+  }, [map]);
+  const color = COLOR(ink ?? '', muted ?? '');
   return (
     <>
-      <Source id="route-solid" type="geojson" data={segments(true)}>
-        <Layer id="route-solid" type="line" paint={{ 'line-color': ink, 'line-width': 2.2 }} />
-      </Source>
-      <Source id="route-dashed" type="geojson" data={segments(false)}>
+      <Source id="route" type="geojson" data={lines}>
         <Layer
-          id="route-dashed"
+          id="route-casing"
           type="line"
-          paint={{ 'line-color': muted, 'line-width': 1.5, 'line-dasharray': [2, 4] }}
+          layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+          paint={{ 'line-color': card, 'line-width': ['+', WIDTH, 3], 'line-opacity': 0.85 }}
+        />
+        {PATTERNS.map(({ kind, dash }) => (
+          <Layer
+            key={kind}
+            id={`route-${kind}`}
+            type="line"
+            filter={['==', ['get', 'kind'], kind]}
+            layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+            paint={{
+              'line-color': color,
+              'line-width': WIDTH,
+              ...(dash ? { 'line-dasharray': [...dash] } : {}),
+            }}
+          />
+        ))}
+        <Layer
+          id="route-arrows"
+          type="symbol"
+          layout={{
+            'symbol-placement': 'line',
+            'symbol-spacing': 90,
+            'icon-image': ARROW,
+            'icon-size': 0.7,
+            'icon-allow-overlap': true,
+            'icon-rotation-alignment': 'map',
+          }}
+          paint={{ 'icon-color': color }}
         />
       </Source>
+      {waypoints.map(([lng, lat], i) => (
+        <Marker
+          key={`${String(i)}-${String(lng)}-${String(lat)}`}
+          latitude={lat}
+          longitude={lng}
+          anchor="center"
+        >
+          {/* Punto de paso: no se registra ni se toca; solo da forma al camino. */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none block size-2 rotate-45 border-[1.5px] border-muted-foreground bg-card"
+          />
+        </Marker>
+      ))}
+      {hasFallback && (
+        <p className="absolute bottom-3.5 left-3.5 z-10 rounded-sm border border-border bg-card/90 px-2 py-1 text-xs text-foreground">
+          Línea de puntos: tramo sin calcular por calles (se muestra recto).
+        </p>
+      )}
     </>
   );
 }
@@ -250,10 +322,15 @@ function MapContent({
   onSelectSite,
   onHoverSite,
   points = [],
+  routes,
   selectedPointId,
   onSelectPoint,
   dark,
 }: LiveMapProps & { dark: boolean }) {
+  const straight = useMemo(
+    () => [{ checkpointIds: points.map((p) => p.id), route: null }],
+    [points],
+  );
   const { current: map } = useMap();
   const selected = sites.find((site) => site.id === selectedSiteId);
   const targets = useMemo(
@@ -285,7 +362,7 @@ function MapContent({
 
   return (
     <>
-      <RoutePath points={points} dark={dark} />
+      <RoutePath points={points} routes={routes?.length ? routes : straight} dark={dark} />
       {sites.map((site) => (
         <Marker
           key={site.id}
