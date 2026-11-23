@@ -22,8 +22,8 @@ const guard: AuthMeResponse = {
   allowedChannels: ['mobile'],
 };
 
-function mockUser(user: AuthMeResponse | null) {
-  useAuthMock.mockReturnValue({ user } as ReturnType<typeof useAuth>);
+function mockUser(user: AuthMeResponse | null, loading = false) {
+  useAuthMock.mockReturnValue({ user, loading } as ReturnType<typeof useAuth>);
 }
 
 const visibleFor = (audience: string) =>
@@ -32,6 +32,13 @@ const visibleFor = (audience: string) =>
   );
 
 describe('FaqScreen', () => {
+  it('espera la sesión antes de elegir qué preguntas mostrar', async () => {
+    mockUser(null, true);
+    const screen = await render(<FaqScreen />);
+    expect(screen.getByLabelText('Verificando sesión…')).toBeTruthy();
+    expect(screen.queryByLabelText('Buscar en las preguntas')).toBeNull();
+  });
+
   it('sin sesión muestra solo lo general', async () => {
     mockUser(null);
     const screen = await render(<FaqScreen />);

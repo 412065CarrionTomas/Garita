@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { faqForRole, groupFaqByTopic, LEGAL_OWNER, searchFaq } from '@garita/shared';
 import type { FaqEntry } from '@garita/shared';
 import { radius, space, touch } from '@garita/tokens';
-import { Button, Input, Screen, Text, fontFamily, useTheme } from '@/ui';
+import { Button, Input, Loading, Screen, Text, fontFamily, useTheme } from '@/ui';
 import { useAuth } from '../auth/auth-context';
 
 /** `**Botón**` → negrita; el resto, texto plano. */
@@ -38,7 +38,7 @@ function FaqItem({ entry }: { entry: FaqEntry }) {
         }}
         style={({ pressed }) => [styles.question, pressed && styles.pressed]}
       >
-        <Text variant="subheading" style={styles.questionText}>
+        <Text variant="subheading" accessibilityRole="none" style={styles.questionText}>
           {entry.question}
         </Text>
         <Text color="mutedForeground" importantForAccessibility="no">
@@ -61,10 +61,17 @@ function FaqItem({ entry }: { entry: FaqEntry }) {
  * general; con sesión suma las del rol.
  */
 export function FaqScreen() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const [query, setQuery] = useState('');
   const entries = searchFaq(faqForRole(user?.role ?? null), query);
   const groups = groupFaqByTopic(entries);
+  // Abierta en frío (enlace), espera la sesión para no mostrar primero la vista sin rol.
+  if (loading)
+    return (
+      <Screen>
+        <Loading label="Verificando sesión…" />
+      </Screen>
+    );
   return (
     <Screen scroll style={styles.screen}>
       <View style={styles.back}>
@@ -98,7 +105,7 @@ export function FaqScreen() {
       ) : (
         groups.map((group) => (
           <View key={group.topic} style={styles.group}>
-            <Text variant="label" color="mutedForeground">
+            <Text variant="label" color="mutedForeground" accessibilityRole="header">
               {group.topic}
             </Text>
             {group.entries.map((entry) => (
