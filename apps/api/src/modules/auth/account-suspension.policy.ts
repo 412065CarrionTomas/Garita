@@ -9,6 +9,7 @@ import { z } from 'zod';
 // their scoped credential must keep accepting field work and late data during suspension.
 export const SUSPENSION_ENDPOINTS = {
   'GET auth/me': 'always', // Session and recovery polling, for every existing role.
+  'POST auth/terminos': 'always', // Accepting the current terms must never lock a user out.
   'GET cuenta/estado': 'always', // Billing state remains admin only.
   'GET planes': 'always', // Plan selection remains admin only.
   'GET supervision/turnos': 'shift', // Only the started shifts still receiving data.

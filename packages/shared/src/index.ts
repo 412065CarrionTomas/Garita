@@ -40,3 +40,4 @@ export * from './grace';
 export * from './reports/export';
 export * from './suspension';
 export * from './shifts/schedules';
+export * from './legal';

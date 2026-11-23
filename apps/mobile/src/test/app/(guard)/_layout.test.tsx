@@ -21,8 +21,11 @@ jest.mock('expo-router', () => ({
   },
   usePathname: jest.fn(() => '/(guard)'),
 }));
+let mockUser: { id?: string; role: 'guard'; legalAcceptanceRequired?: boolean } = {
+  role: 'guard',
+};
 jest.mock('@/features/auth/auth-context', () => ({
-  useAuth: () => ({ user: { role: 'guard' }, loading: false }),
+  useAuth: () => ({ user: mockUser, loading: false }),
 }));
 jest.mock('@/features/permisos/permissions', () => ({ checkFieldPermissions: jest.fn() }));
 jest.mock('@/lib/db/database', () => ({
@@ -45,6 +48,20 @@ describe('guard permissions gate', () => {
       await Promise.resolve();
     });
     expect(screen.getByText('/permisos')).toBeOnTheScreen();
+  });
+
+  it('pide aceptar los términos vigentes aunque se entre directo al área (p. ej. por notificación)', async () => {
+    mockUser = { id: 'g1', role: 'guard', legalAcceptanceRequired: true };
+    jest.mocked(checkFieldPermissions).mockResolvedValue('ok');
+    jest
+      .mocked(createDefaultFieldRepository)
+      .mockResolvedValue({ getShiftData: async () => null } as never);
+    try {
+      await render(<GuardLayout />);
+      await waitFor(() => expect(screen.getByText('/aceptar-terminos')).toBeOnTheScreen());
+    } finally {
+      mockUser = { role: 'guard' };
+    }
   });
 
   it('opens the guard routes when permissions are ready', async () => {

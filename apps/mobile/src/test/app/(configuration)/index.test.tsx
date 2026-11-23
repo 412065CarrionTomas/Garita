@@ -75,6 +75,7 @@ function setUser(role: 'admin' | 'supervisor' = 'supervisor') {
     login: jest.fn(),
     logout: jest.fn(),
     recover: jest.fn(),
+    acceptLegal: jest.fn(),
     error: '',
   });
 }

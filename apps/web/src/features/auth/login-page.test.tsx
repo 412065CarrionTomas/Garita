@@ -31,6 +31,7 @@ function renderLogin(
     login,
     logout: jest.fn(),
     recover: jest.fn(),
+    acceptLegal: jest.fn(),
     error: '',
     clearError: jest.fn(),
   });

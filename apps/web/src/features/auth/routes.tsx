@@ -43,6 +43,8 @@ import { ReportsPage } from '../reportes/reports-page';
 import { PortalPage } from '../portal/portal-page';
 import { IncidentReportsPage } from '../reportes/incidentes/incident-reports-page';
 import { SubscriptionPage } from '../suscripcion/subscription-page';
+import { PrivacyPage, TermsPage } from '../legal/legal-pages';
+import { LegalAcceptanceGate } from '../legal/legal-acceptance-gate';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -186,9 +188,11 @@ export function RoleLayout() {
       )}
       <TrialBanner />
       <GraceBanner />
-      <AccountSuspendedGate suspended={suspended} role={user.role}>
-        <Outlet />
-      </AccountSuspendedGate>
+      <LegalAcceptanceGate>
+        <AccountSuspendedGate suspended={suspended} role={user.role}>
+          <Outlet />
+        </AccountSuspendedGate>
+      </LegalAcceptanceGate>
     </AppShell>
   );
 }
@@ -205,6 +209,8 @@ export function AppRoutes() {
       <Route path="/ingresar" element={<LoginPage />} />
       <Route path="/recuperar" element={<RecoveryPage />} />
       <Route path="/activar" element={<ActivationPage />} />
+      <Route path="/terminos" element={<TermsPage />} />
+      <Route path="/privacidad" element={<PrivacyPage />} />
       <Route
         path="/"
         element={<Navigate to={user ? homePathForRole(user.role) : '/ingresar'} replace />}

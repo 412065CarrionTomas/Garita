@@ -11,6 +11,7 @@ import {
 import { Prisma } from '../../generated/prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import type { CreateClientUserRequest, CreateUserRequest, UpdateUserRequest } from '@garita/shared';
+import { LEGAL_VERSION } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { FIREBASE_IDENTITY_PROVIDER } from '../auth/auth.types';
@@ -428,6 +429,11 @@ export class UsersService {
       });
     if (invitation.user.status === 'deactivated')
       throw new GoneException({ message: 'Invitación inválida', reason: 'invalid' });
+    // El esquema del pedido ya exige la versión vigente: canjear implica aceptarla.
+    await this.prisma.systemPrisma.user.update({
+      where: { id: invitation.user.id },
+      data: { legalVersion: LEGAL_VERSION, legalAcceptedAt: new Date(), legalAcceptedIp: ip },
+    });
     await this.firebase.setDisabled(invitation.user.firebaseUid, false);
     return {
       passwordSetupUrl: await this.firebase.generatePasswordResetLink(invitation.user.email),

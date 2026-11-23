@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { LEGAL_VERSION } from '@garita/shared';
 import { ActivationPage } from './activation-page';
 
 function mockResponse(status: number, body: unknown): Response {
@@ -9,7 +10,34 @@ function mockResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
+function acceptTerms() {
+  fireEvent.click(screen.getByRole('checkbox', { name: /Leí y acepto/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Aceptar y continuar' }));
+}
+
 describe('ActivationPage', () => {
+  it('no canjea la invitación hasta aceptar los términos y envía la versión aceptada', () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockReturnValue(
+      new Promise<Response>(() => {
+        // Sin respuesta: solo interesa el pedido.
+      }),
+    );
+    render(<ActivationPage />);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Aceptar y continuar' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Términos y Condiciones' })).toHaveAttribute(
+      'href',
+      '/terminos',
+    );
+    acceptTerms();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0]?.[1];
+    expect(JSON.parse(init?.body as string)).toEqual({
+      token: 'valid-token',
+      acceptedLegalVersion: LEGAL_VERSION,
+    });
+  });
+
   beforeEach(() => {
     window.history.replaceState({}, '', '/activar?token=valid-token');
   });
@@ -24,6 +52,7 @@ describe('ActivationPage', () => {
         mockResponse(200, { role: 'guard', passwordSetupUrl: 'https://firebase.example/reset' }),
       );
     render(<ActivationPage />);
+    acceptTerms();
     expect(
       await screen.findByText(
         'Una vez definida tu contraseña, ingresá desde la app móvil de Garita.',
@@ -38,6 +67,7 @@ describe('ActivationPage', () => {
   it('muestra el mensaje de invitación vencida ante 410', async () => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(410, { reason: 'expired' }));
     render(<ActivationPage />);
+    acceptTerms();
     expect(await screen.findByText(/Esta invitación venció/i)).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveClass('text-danger');
   });
@@ -60,8 +90,37 @@ describe('ActivationPage', () => {
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(mockResponse(status, { reason, message: 'used expired' }));
     render(<ActivationPage />);
+    acceptTerms();
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Definir contraseña' })).not.toBeInTheDocument();
+  });
+
+  it('pide recargar si la API exige una versión de términos más nueva', async () => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(400, {}));
+    render(<ActivationPage />);
+    acceptTerms();
+    expect(await screen.findByText(/Recargá la página para verla y aceptarla/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Aceptar y continuar' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['límite de intentos', () => Promise.resolve(mockResponse(429, { reason: 'rate_limited' }))],
+    ['corte de red', () => Promise.reject(new Error('red'))],
+  ])('permite reintentar sin recargar ante %s', async (_case, failure) => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(failure)
+      .mockResolvedValueOnce(
+        mockResponse(200, {
+          role: 'supervisor',
+          passwordSetupUrl: 'https://firebase.example/reset',
+        }),
+      );
+    render(<ActivationPage />);
+    acceptTerms();
+    const retry = await screen.findByRole('button', { name: 'Aceptar y continuar' });
+    fireEvent.click(retry);
+    expect(await screen.findByRole('link', { name: 'Definir contraseña' })).toBeInTheDocument();
   });
 
   it('ofrece al supervisor el enlace para definir la contraseña', async () => {
@@ -72,6 +131,7 @@ describe('ActivationPage', () => {
       }),
     );
     render(<ActivationPage />);
+    acceptTerms();
     expect(
       await screen.findByText('Invitación válida. Definí tu contraseña para ingresar.'),
     ).toBeInTheDocument();
@@ -90,6 +150,7 @@ it('mantiene el estado informativo mientras valida', () => {
   );
   window.history.replaceState({}, '', '/activar?token=valid-token');
   render(<ActivationPage />);
+  acceptTerms();
   expect(screen.getByRole('status')).toHaveTextContent('Validando invitación…');
   expect(screen.getByRole('status')).toHaveClass('text-info');
   jest.restoreAllMocks();

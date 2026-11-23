@@ -19,6 +19,7 @@ it.each(['correo-existente@example.com', 'inexistente@example.com'])(
       login: jest.fn(),
       logout: jest.fn(),
       recover,
+      acceptLegal: jest.fn(),
       error: '',
       clearError: jest.fn(),
     });
@@ -38,6 +39,7 @@ it('informa el fallo cuando el envío no pudo realizarse', async () => {
     login: jest.fn(),
     logout: jest.fn(),
     recover,
+    acceptLegal: jest.fn(),
     error: '',
     clearError: jest.fn(),
   });

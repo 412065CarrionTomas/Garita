@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LEGAL_VERSION } from './legal';
 
 export const personnelRoleSchema = z.enum(['supervisor', 'guard']);
 export const personnelStatusSchema = z.enum(['invitation_pending', 'active', 'deactivated']);
@@ -46,7 +47,10 @@ export const usersPageSchema = z.object({
   total: z.number(),
   paginas: z.number(),
 });
-export const invitationRedeemRequestSchema = z.object({ token: z.string().min(1).max(512) });
+export const invitationRedeemRequestSchema = z.object({
+  token: z.string().min(1).max(512),
+  acceptedLegalVersion: z.literal(LEGAL_VERSION),
+});
 export const invitationRedeemResponseSchema = z.object({
   passwordSetupUrl: z.url(),
   role: z.enum(['supervisor', 'guard', 'client']),

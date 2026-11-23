@@ -17,6 +17,7 @@ import {
   authMeResponseSchema,
   invitationRedeemResponseSchema,
   type CreateUserRequest,
+  LEGAL_VERSION,
 } from '@garita/shared';
 
 describe('HU-27 usuarios del portal (e2e)', () => {
@@ -197,7 +198,7 @@ describe('HU-27 usuarios del portal (e2e)', () => {
     ).searchParams.get('token');
     const redeemed = await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token })
+      .send({ token, acceptedLegalVersion: LEGAL_VERSION })
       .expect(201);
     expect(invitationRedeemResponseSchema.parse(redeemed.body).role).toBe('client');
     const profile = await request(app.getHttpServer())
@@ -210,7 +211,7 @@ describe('HU-27 usuarios del portal (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token })
+      .send({ token, acceptedLegalVersion: LEGAL_VERSION })
       .expect(410);
     const sites = await request(app.getHttpServer())
       .get('/api/v1/predios')

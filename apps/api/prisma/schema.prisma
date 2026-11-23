@@ -143,6 +143,9 @@ model User {
   clientId         String?
   position         String?
   lastLoginAt      DateTime?
+  legalVersion     String?
+  legalAcceptedAt  DateTime?
+  legalAcceptedIp  String?
   client           Client?           @relation(fields: [clientId], references: [id], onDelete: Restrict)
   role             UserRole
   status           UserStatus        @default(invitation_pending)
