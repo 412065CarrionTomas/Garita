@@ -5,8 +5,8 @@
 Es la primera pantalla que ves al ingresar. Arriba está **Atención ahora**: alertas de
 pánico, turnos sin vigilador, rondas en revisión, incidentes por clasificar, ventanas sin
 sincronizar y avisos abiertos, cada uno con su acceso directo. Debajo, el cumplimiento de
-los últimos días, los turnos de hoy, los predios con peor cumplimiento, los incidentes y el
-estado de tu cuenta.
+los últimos días, los turnos de hoy, los predios y los vigiladores con peor cumplimiento,
+los incidentes y el estado de tu cuenta.
 
 ### Acomodar el resumen a tu gusto
 
@@ -26,13 +26,14 @@ Nada se guarda hasta que tocás **Guardar diseño**. El diseño es tuyo: no camb
 otros administradores. Si lo cambiaste desde otra pestaña o dispositivo mientras editabas,
 el panel te deja elegir con cuál quedarte.
 
-### Fijar predios
+### Fijar predios y vigiladores
 
-En el bloque de predios, el botón ⋮ de cada fila permite **fijarlo**: los fijados quedan
+En los bloques de predios y de vigiladores, el botón ⋮ de cada fila permite **fijarlo**: los fijados quedan
 primero, en el orden que elijas, y se guardan en el momento (podés deshacer el último
 cambio). Para cambiar el orden, usá las opciones del menú o mantené apretado el ⋮ y
-arrastrá la fila. Mover al principio o al final un predio que no está fijado vale solo
-mientras estás en la pantalla.
+arrastrá la fila. Mover al principio o al final una fila que no está fijada vale solo
+mientras estás en la pantalla. Los vigiladores desactivados se ven en la lista pero no se
+pueden fijar.
 
 ## Período de prueba
 

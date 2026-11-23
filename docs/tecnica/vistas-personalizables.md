@@ -80,7 +80,7 @@ Actualización optimista: la lista cambia enseguida y, si la API falla, vuelve a
 1. **Catálogo** en `packages/shared/src/view-layouts/<pantalla>.ts` con `defineViewCatalog`: columnas, roles, tipos de favoritos, bloques y diseño por defecto. Agregar la clave a `VIEW_KEYS` y el catálogo a `viewCatalogs`. Volver a generar el paquete (`pnpm --filter @garita/shared build`).
 2. **Bloques** en la feature: un componente por bloque que recibe `{ item }` y parsea sus ajustes con el catálogo (`catalog.widgets.<id>.settings.parse(item.settings)`), un registro `satisfies Record<IdDeBloque, ComponentType<WidgetProps>>` (no compila si falta uno) y las descripciones del panel (textos de presentaciones y ajustes), con un test que las compare contra el catálogo como `block-descriptions.test.ts`.
 3. **Página**: `useViewLayoutEditor(catalogo)`, `<EditToolbar>` con `<BlocksPanel>` en las acciones de `PageHeader`, y `<LayoutGrid>` con `edit` mientras se edita.
-4. **Favoritos** (opcional): `useFavorites(vista, tipo)` con `partitionPinned`, `RowMenu` y `useSortableDrag`, como en `sites-widget.tsx`. El tipo debe estar en `favoriteTypes` del catálogo.
+4. **Favoritos** (opcional): para un ranking de cumplimiento, `ComplianceRanking` (`features/resumen/compliance-ranking.tsx`) ya trae fijados, menú ⋮ y arrastre, como en `sites-widget.tsx` y `guards-widget.tsx`. Para otras listas, `useFavorites(vista, tipo)` con `partitionPinned`, `RowMenu` y `useSortableDrag`. El tipo debe estar en `favoriteTypes` del catálogo.
 
 La API no necesita cambios: valida contra el catálogo de la pantalla nueva.
 
@@ -88,5 +88,5 @@ La API no necesita cambios: valida contra el catálogo de la pantalla nueva.
 
 - **Cambios sin guardar:** `useLeaveGuard` (`apps/web/src/lib/use-leave-guard.tsx`) pide confirmación al cerrar o recargar la pestaña y al tocar un enlace interno, frenando el clic antes de que el router navegue. El botón Atrás del navegador no se intercepta: con `BrowserRouter` no hay forma confiable (`useBlocker` requiere un router de datos). Si se migra a `createBrowserRouter`, sumar `useBlocker` en ese hook.
 - **Zona horaria de los períodos del Resumen:** la web no conoce la zona de la empresa antes de pedir un informe y usa `America/Argentina/Buenos_Aires`, igual que Cumplimiento (`features/resumen/queries.ts`). Si se agrega a `/auth/me`, usarla ahí.
-- **Favoritos de vigiladores y clientes:** la API y el hook ya los admiten, pero hoy el Resumen solo lista predios.
+- **Favoritos de clientes:** la API y el hook los admiten, pero el informe de cumplimiento no trae datos por cliente, así que el Resumen no tiene un bloque que los liste. Los predios y los vigiladores sí se pueden fijar.
 - **Casilleros predio × día** (propuesta B): necesitan que `/reportes/rondas` devuelva el cumplimiento cruzado por predio y día.
