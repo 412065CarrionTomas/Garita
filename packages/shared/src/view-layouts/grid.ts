@@ -66,6 +66,34 @@ export function compactInOrder<T extends GridRect>(
 }
 
 /**
+ * Resuelve superposiciones sin compactar: cada bloque, en el orden de prioridad dado (índices de
+ * `items`), se queda en su fila si está libre y, si pisa a uno ya ubicado, baja justo debajo de
+ * él. Nunca sube un bloque: los huecos que deja el usuario se respetan. Devuelve copias en el
+ * mismo orden de entrada; los índices que falten en `order` no se ubican.
+ */
+export function resolveCollisions<T extends GridRect>(
+  items: readonly T[],
+  order: readonly number[],
+): T[] {
+  const placed: T[] = [];
+  const result: T[] = [...items];
+  for (const index of order) {
+    const item = items[index];
+    if (!item) continue;
+    let y = Math.max(0, item.y);
+    for (;;) {
+      const blockers = placed.filter((other) => rectsOverlap({ ...item, y }, other));
+      if (blockers.length === 0) break;
+      y = Math.max(...blockers.map((other) => other.y + other.h));
+    }
+    const moved = { ...item, y };
+    placed.push(moved);
+    result[index] = moved;
+  }
+  return result;
+}
+
+/**
  * Cambia la resolución de una grilla: multiplica columnas por `columns` y filas por `rows`. Sirve
  * para migrar diseños guardados cuando una pantalla pasa a una grilla más fina.
  */

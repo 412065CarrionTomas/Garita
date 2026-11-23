@@ -9,8 +9,10 @@ import {
   findOverlap,
   rectsOverlap,
   reconcileLayout,
+  resolveCollisions,
   scaleRects,
   validateLayout,
+  widgetMinSize,
   viewCatalogs,
   viewPreferenceInputSchema,
   type ViewLayout,
@@ -117,9 +119,9 @@ describe('validateLayout', () => {
   it('rechaza bloques fuera de la grilla o de su tamaño permitido', () => {
     const layout = edited((items) => {
       const sites = items.find((entry) => entry.id === 'sites');
-      if (sites) Object.assign(sites, { x: 20, w: 8 });
+      if (sites) Object.assign(sites, { x: 80, w: 28 });
       const account = items.find((entry) => entry.id === 'account');
-      if (account) account.h = 13;
+      if (account) account.h = 201;
     });
     expect(codes(layout)).toEqual(expect.arrayContaining(['out_of_bounds', 'size']));
   });
@@ -159,7 +161,7 @@ describe('reconcileLayout', () => {
     const stored = {
       version: adminSummaryCatalog.version,
       items: [
-        { ...adminSummaryCatalog.defaultLayout.items[1], w: 40, x: 11, presentation: 'pie' },
+        { ...adminSummaryCatalog.defaultLayout.items[1], w: 400, x: 11, presentation: 'pie' },
         { id: 'ajeno', x: 0, y: 0, w: 1, h: 1, hidden: false, presentation: 'x', settings: {} },
         { id: 'roto' },
         { ...adminSummaryCatalog.defaultLayout.items[1], y: 30 },
@@ -172,21 +174,33 @@ describe('reconcileLayout', () => {
     const result = reconcileLayout(adminSummaryCatalog, stored);
     expect(validateLayout(adminSummaryCatalog, result)).toEqual([]);
     expect(result.items.filter((entry) => entry.id === 'compliance')).toHaveLength(1);
-    expect(item(result, 'compliance')).toMatchObject({ x: 0, w: 24, presentation: 'line' });
+    expect(item(result, 'compliance')).toMatchObject({ x: 0, w: 96, presentation: 'line' });
     expect(item(result, 'sites').settings).toEqual({ sort: 'worst', limit: '5' });
     expect(item(result, 'attention')).toMatchObject({ hidden: false, presentation: 'table' });
   });
 
-  it('compacta los visibles y deja quietos a los ocultos', () => {
+  it('respeta los huecos: no sube a nadie y deja quietos a los ocultos', () => {
     const stored = edited((items) => {
       for (const entry of items) entry.y += 50;
       const account = items.find((entry) => entry.id === 'account');
       if (account) account.hidden = true;
     });
     const result = reconcileLayout(adminSummaryCatalog, stored);
-    expect(item(result, 'attention').y).toBe(0);
+    expect(item(result, 'attention').y).toBe(50);
     const accountY = item(adminSummaryCatalog.defaultLayout, 'account').y;
     expect(item(result, 'account')).toMatchObject({ hidden: true, y: accountY + 50 });
+  });
+
+  it('baja lo justo a los que quedaron superpuestos', () => {
+    const stored = edited((items) => {
+      const shifts = items.find((entry) => entry.id === 'shiftsToday');
+      if (shifts) shifts.y = 10;
+    });
+    const result = reconcileLayout(adminSummaryCatalog, stored);
+    expect(validateLayout(adminSummaryCatalog, result)).toEqual([]);
+    // Pisaba a Atención ahora (alto 54): queda justo debajo, sin subir a los demás.
+    expect(item(result, 'shiftsToday').y).toBe(54);
+    expect(item(result, 'compliance').y).toBe(54);
   });
 });
 
@@ -198,22 +212,23 @@ describe('migraciones de diseños guardados', () => {
     settings: {},
   });
 
-  it('lleva un diseño de la grilla de 12 columnas a la de 24 sin cambiar lo que se ve', () => {
+  it('lleva un diseño de la grilla de 12 columnas a la actual sin cambiar lo que se ve', () => {
     const result = reconcileLayout(adminSummaryCatalog, {
       version: 2,
       items: [v2('attention', 0, 0, 12, 6), v2('sites', 4, 6, 8, 7)],
     });
-    expect(item(result, 'attention')).toMatchObject({ x: 0, y: 0, w: 24, h: 18 });
-    expect(item(result, 'sites')).toMatchObject({ x: 8, y: 18, w: 16, h: 21 });
+    // Versión 3 (× 2 columnas, × 3 filas) y después 4 (× 4 columnas, × 3 filas).
+    expect(item(result, 'attention')).toMatchObject({ x: 0, y: 0, w: 96, h: 54 });
+    expect(item(result, 'sites')).toMatchObject({ x: 32, y: 54, w: 64, h: 63 });
     expect(validateLayout(adminSummaryCatalog, result)).toEqual([]);
   });
 
   it('no migra un diseño de la versión actual ni uno sin versión', () => {
-    const sites = v2('sites', 4, 0, 8, 9);
+    const sites = v2('sites', 4, 0, 40, 40);
     for (const version of [adminSummaryCatalog.version, undefined])
       expect(
         item(reconcileLayout(adminSummaryCatalog, { version, items: [sites] }), 'sites'),
-      ).toMatchObject({ x: 4, w: 8, h: 9 });
+      ).toMatchObject({ x: 4, w: 40, h: 40 });
   });
 
   it('aplica las migraciones pendientes en orden de versión', () => {
@@ -250,6 +265,35 @@ describe('migraciones de diseños guardados', () => {
   });
 });
 
+describe('mínimos por presentación', () => {
+  it('usa el mínimo de la presentación elegida o, si no tiene, el del bloque', () => {
+    const { incidents } = adminSummaryCatalog.widgets;
+    expect(widgetMinSize(incidents, 'pie')).toEqual({ w: 24, h: 37 });
+    expect(widgetMinSize(incidents, 'bars')).toEqual(incidents.size.min);
+  });
+
+  it('valida y corrige el tamaño contra el mínimo de su presentación', () => {
+    const layout = edited((items) => {
+      const incidents = items.find((entry) => entry.id === 'incidents');
+      if (incidents) Object.assign(incidents, { presentation: 'pie', h: 30 });
+    });
+    expect(validateLayout(adminSummaryCatalog, layout).map((issue) => issue.code)).toEqual([
+      'size',
+    ]);
+    expect(item(reconcileLayout(adminSummaryCatalog, layout), 'incidents').h).toBe(37);
+  });
+});
+
+describe('resolveCollisions', () => {
+  it('deja en su lugar a los que no chocan y baja a los que sí, en cascada', () => {
+    const result = resolveCollisions(
+      [box('a', 0, 0, 4, 4), box('b', 0, 2, 4, 2), box('c', 0, 5, 4, 2), box('d', 6, 20, 2, 2)],
+      [0, 1, 2, 3],
+    );
+    expect(result.map((rect) => rect.y)).toEqual([0, 4, 6, 20]);
+  });
+});
+
 describe('defineViewCatalog', () => {
   const widget = {
     title: 'Uno',
@@ -280,6 +324,21 @@ describe('defineViewCatalog', () => {
         defaultLayout: [{ id: 'one', x: 0, y: 0 }],
       }),
     ).toThrow('valor por defecto');
+  });
+
+  it('falla con mínimos por presentación incoherentes', () => {
+    const wrong: Record<string, { w: number; h: number }>[] = [
+      { pie: { w: 2, h: 2 } },
+      { table: { w: 9, h: 2 } },
+    ];
+    for (const minByPresentation of wrong)
+      expect(() =>
+        defineViewCatalog({
+          ...base,
+          widgets: { one: { ...widget, size: { ...widget.size, minByPresentation } } },
+          defaultLayout: [{ id: 'one', x: 0, y: 0 }],
+        }),
+      ).toThrow('incoherente');
   });
 
   it('falla con migraciones a versiones que el catálogo no tiene', () => {

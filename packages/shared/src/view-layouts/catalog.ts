@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { UserRole } from '../roles';
-import { compactVertical, gridHeight, rectsOverlap } from './grid';
+import { gridHeight, readingOrder, rectsOverlap, resolveCollisions } from './grid';
 import type { FavoriteEntityType, ViewKey } from './keys';
 import { layoutItemSchema, type LayoutItem, type ViewLayout } from './layout';
 
@@ -12,6 +12,8 @@ export interface WidgetSize {
 /**
  * Un bloque que una pantalla ofrece. `presentations` son las formas de mostrarlo (la primera es la
  * de por defecto) y `settings` sus ajustes: todos sus campos deben tener valor por defecto.
+ * `size.min` es lo mínimo para que el bloque se entienda; `minByPresentation` lo cambia para las
+ * presentaciones que necesitan otro mínimo (un gráfico de torta pide más alto que una tabla).
  */
 export interface WidgetDefinition {
   readonly title: string;
@@ -19,6 +21,7 @@ export interface WidgetDefinition {
     readonly min: WidgetSize;
     readonly max: WidgetSize;
     readonly default: WidgetSize;
+    readonly minByPresentation?: Readonly<Record<string, WidgetSize>>;
   };
   readonly presentations: readonly [string, ...string[]];
   readonly settings: z.ZodType<Record<string, unknown>>;
@@ -88,6 +91,14 @@ function defaultSettings(widget: WidgetDefinition): Record<string, unknown> {
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
+/** Tamaño mínimo de un bloque mostrado de una forma dada. */
+export function widgetMinSize(widget: WidgetDefinition, presentation: string): WidgetSize {
+  const { min, minByPresentation } = widget.size;
+  return minByPresentation && Object.hasOwn(minByPresentation, presentation)
+    ? (minByPresentation[presentation] ?? min)
+    : min;
+}
+
 /**
  * Revisa un diseño contra el catálogo de su pantalla. Lo usa la API antes de guardar: un diseño
  * válido trae todos los bloques una sola vez, dentro de la grilla, con tamaños, presentación y
@@ -120,7 +131,8 @@ export function validateLayout(catalog: ViewCatalog, layout: ViewLayout): Layout
         itemId: item.id,
         message: `${widget.title} se sale de las ${catalog.columns} columnas.`,
       });
-    const { min, max } = widget.size;
+    const { max } = widget.size;
+    const min = widgetMinSize(widget, item.presentation);
     if (item.w < min.w || item.w > max.w || item.h < min.h || item.h > max.h)
       issues.push({
         code: 'size',
@@ -164,7 +176,11 @@ function normalizeItem(
   widget: WidgetDefinition,
   item: LayoutItem,
 ): LayoutItem {
-  const { min, max } = widget.size;
+  const { max } = widget.size;
+  const presentation = widget.presentations.includes(item.presentation)
+    ? item.presentation
+    : widget.presentations[0];
+  const min = widgetMinSize(widget, presentation);
   const w = clamp(item.w, min.w, Math.min(max.w, catalog.columns));
   const settings = widget.settings.safeParse(item.settings);
   return {
@@ -172,9 +188,7 @@ function normalizeItem(
     w,
     h: clamp(item.h, min.h, max.h),
     x: clamp(item.x, 0, catalog.columns - w),
-    presentation: widget.presentations.includes(item.presentation)
-      ? item.presentation
-      : widget.presentations[0],
+    presentation,
     settings: settings.success ? settings.data : defaultSettings(widget),
   };
 }
@@ -197,8 +211,9 @@ function migrate(catalog: ViewCatalog, version: number, items: LayoutItem[]): La
 /**
  * Convierte cualquier diseño guardado (de una versión vieja, editado a mano o roto) en uno válido
  * para el catálogo actual. Nunca falla: descarta bloques desconocidos o repetidos, ajusta tamaños,
- * presentaciones y ajustes, agrega al final los bloques nuevos y compacta hacia arriba. Antes
- * aplica las migraciones del catálogo si el diseño es de una versión anterior.
+ * presentaciones y ajustes, agrega al final los bloques nuevos y baja los que quedaron
+ * superpuestos (sin subir ninguno: los huecos son del usuario). Antes aplica las migraciones del
+ * catálogo si el diseño es de una versión anterior.
  */
 export function reconcileLayout(catalog: ViewCatalog, stored: unknown): ViewLayout {
   const parsed = storedLayoutShape.safeParse(stored);
@@ -234,19 +249,20 @@ export function reconcileLayout(catalog: ViewCatalog, stored: unknown): ViewLayo
       settings: defaultSettings(widget),
     });
   }
-  return { version: catalog.version, items: compactLayoutItems(items) };
+  return { version: catalog.version, items: settleLayoutItems(items) };
 }
 
-/** Compacta hacia arriba los bloques visibles; los ocultos conservan su lugar para cuando vuelvan. */
-export function compactLayoutItems(items: readonly LayoutItem[]): LayoutItem[] {
-  const visibleIndexes = items.flatMap((item, index) => (item.hidden ? [] : [index]));
-  const compacted = compactVertical(visibleIndexes.flatMap((index) => items[index] ?? []));
-  const result = [...items];
-  visibleIndexes.forEach((index, position) => {
-    const item = compacted[position];
-    if (item) result[index] = item;
-  });
-  return result;
+/**
+ * Deja un diseño sin superposiciones entre visibles, sin mover hacia arriba a nadie. `first` (un
+ * índice) es el bloque que manda: el que el usuario acaba de mover o agrandar; se queda donde lo
+ * puso y los demás, en orden de lectura, bajan lo justo para no pisarlo. Los ocultos no ocupan
+ * lugar y conservan su posición para cuando vuelvan.
+ */
+export function settleLayoutItems(items: readonly LayoutItem[], first?: number): LayoutItem[] {
+  const visible = readingOrder(items).filter((index) => !items[index]?.hidden && index !== first);
+  const order =
+    first !== undefined && items[first] && !items[first].hidden ? [first, ...visible] : visible;
+  return resolveCollisions(items, order);
 }
 
 /**
@@ -259,7 +275,16 @@ export function defineViewCatalog<W extends WidgetDefinitions>(
 ): ViewCatalog<W> {
   const problems: string[] = [];
   for (const [id, widget] of Object.entries(input.widgets)) {
-    const { min, max, default: size } = widget.size;
+    const { min, max, default: size, minByPresentation = {} } = widget.size;
+    for (const [presentation, other] of Object.entries(minByPresentation))
+      if (
+        !widget.presentations.includes(presentation) ||
+        other.w < 1 ||
+        other.h < 1 ||
+        other.w > max.w ||
+        other.h > max.h
+      )
+        problems.push(`${id}: mínimo de ${presentation} incoherente`);
     if (
       min.w < 1 ||
       min.h < 1 ||

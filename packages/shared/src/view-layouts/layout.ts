@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** Límites duros de un diseño guardado: acotan el tamaño de la fila en la base y del body. */
-export const LAYOUT_LIMITS = { maxItems: 50, maxColumns: 24, maxRows: 400 } as const;
+export const LAYOUT_LIMITS = { maxItems: 50, maxColumns: 96, maxRows: 2000 } as const;
 
 const cell = z.number().int().min(0).max(LAYOUT_LIMITS.maxRows);
 const span = z.number().int().min(1).max(LAYOUT_LIMITS.maxRows);
