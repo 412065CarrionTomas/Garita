@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Pencil, RotateCcw, Undo2 } from 'lucide-react';
 import {
   AlertDialog,
@@ -28,7 +28,27 @@ export function EditToolbar({
   /** Acciones extra del modo edición (p. ej. el panel de bloques). */
   children?: ReactNode;
 }) {
-  const { editing, dirty, saving } = editor;
+  const { editing, dirty, saving, dispatch } = editor;
+  // Ctrl+Z (Cmd+Z) deshace mientras se edita, salvo que el foco esté en un campo de texto.
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey)
+        return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      )
+        return;
+      event.preventDefault();
+      dispatch({ type: 'undo' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [editing, dispatch]);
   if (!editing)
     return editable && editor.items ? (
       <Button variant="outline" onClick={editor.start}>

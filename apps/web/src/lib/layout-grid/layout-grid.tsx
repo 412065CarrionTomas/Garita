@@ -1,5 +1,6 @@
-import { useMemo, useRef, type Dispatch, type ReactNode } from 'react';
+import { useId, useMemo, useRef, type Dispatch, type ReactNode } from 'react';
 import { readingOrder, type LayoutItem, type ViewCatalog } from '@garita/shared';
+import { useAnnouncer } from '@/lib/interaction/use-announcer';
 import { cn } from '@/lib/utils';
 import { EditableItem } from './editable-item';
 import type { EditorAction } from './editor-state';
@@ -38,6 +39,8 @@ export function LayoutGrid({
 }) {
   const { columns, editable } = useGridColumns(catalog.columns);
   const gridRef = useRef<HTMLDivElement>(null);
+  const instructionsId = useId();
+  const { announce, region } = useAnnouncer();
   const editing = edit !== undefined && editable;
   const order = editing ? edit.order : undefined;
   const placed = useMemo(() => {
@@ -48,38 +51,51 @@ export function LayoutGrid({
     return [...visible].sort((a, b) => (rank.get(a.id) ?? last) - (rank.get(b.id) ?? last));
   }, [items, catalog.columns, columns, order]);
   return (
-    <div
-      ref={gridRef}
-      aria-label={ariaLabel}
-      data-editing={editing || undefined}
-      className={cn('grid auto-rows-[--spacing(12)] gap-6', className)}
-      style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-    >
-      {placed.map((item) => (
-        <div
-          key={item.id}
-          data-layout-item={item.id}
-          className="min-h-0 min-w-0"
-          style={{
-            gridColumn: `${item.x + 1} / span ${item.w}`,
-            gridRow: `${item.y + 1} / span ${item.h}`,
-          }}
-        >
-          {editing ? (
-            <EditableItem
-              item={item}
-              title={edit.titleOf(item.id)}
-              gridRef={gridRef}
-              columns={columns}
-              dispatch={edit.dispatch}
-            >
-              {renderItem(item)}
-            </EditableItem>
-          ) : (
-            renderItem(item)
-          )}
-        </div>
-      ))}
-    </div>
+    <>
+      {editing && (
+        <>
+          <p id={instructionsId} className="sr-only">
+            Enter o Espacio toma el asa; las flechas mueven o cambian el tamaño de a un paso; Enter
+            suelta y Escape cancela.
+          </p>
+          {region}
+        </>
+      )}
+      <div
+        ref={gridRef}
+        aria-label={ariaLabel}
+        data-editing={editing || undefined}
+        className={cn('grid auto-rows-[--spacing(12)] gap-6', className)}
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+      >
+        {placed.map((item) => (
+          <div
+            key={item.id}
+            data-layout-item={item.id}
+            className="min-h-0 min-w-0"
+            style={{
+              gridColumn: `${item.x + 1} / span ${item.w}`,
+              gridRow: `${item.y + 1} / span ${item.h}`,
+            }}
+          >
+            {editing ? (
+              <EditableItem
+                item={item}
+                title={edit.titleOf(item.id)}
+                gridRef={gridRef}
+                columns={columns}
+                dispatch={edit.dispatch}
+                announce={announce}
+                instructionsId={instructionsId}
+              >
+                {renderItem(item)}
+              </EditableItem>
+            ) : (
+              renderItem(item)
+            )}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
