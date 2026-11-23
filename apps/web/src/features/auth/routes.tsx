@@ -203,6 +203,26 @@ function HomePlaceholder({ title, role }: { title: string; role: string }) {
   return <PageHeader title={title} description={role} />;
 }
 
+/**
+ * Sin sesión, la ayuda general; con sesión, dentro del panel y con las preguntas del rol.
+ * Espera a verificar la sesión para no mostrar la vista pública a quien ya ingresó.
+ */
+export function FaqLayout() {
+  const { user, loading } = useAuth();
+  if (loading)
+    return (
+      <p role="status" className="p-6">
+        Verificando sesión…
+      </p>
+    );
+  if (!user) return <PublicFaqPage />;
+  return (
+    <Protected roles={['admin', 'supervisor', 'client']}>
+      <RoleLayout />
+    </Protected>
+  );
+}
+
 /** Las rutas de cada sección quedan protegidas por rol dentro del layout autenticado. */
 export function AppRoutes() {
   const { user } = useAuth();
@@ -213,19 +233,7 @@ export function AppRoutes() {
       <Route path="/activar" element={<ActivationPage />} />
       <Route path="/terminos" element={<TermsPage />} />
       <Route path="/privacidad" element={<PrivacyPage />} />
-      {/* Sin sesión, la ayuda general; con sesión, dentro del panel y con las preguntas del rol. */}
-      <Route
-        path="/ayuda"
-        element={
-          user ? (
-            <Protected roles={['admin', 'supervisor', 'client']}>
-              <RoleLayout />
-            </Protected>
-          ) : (
-            <PublicFaqPage />
-          )
-        }
-      >
+      <Route path="/ayuda" element={<FaqLayout />}>
         <Route index element={<FaqPage />} />
       </Route>
       <Route

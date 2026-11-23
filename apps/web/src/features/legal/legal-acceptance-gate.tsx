@@ -11,6 +11,7 @@ import { LegalConsent } from './legal-pages';
 /**
  * Pide aceptar la versión vigente de Términos y Privacidad antes de usar el panel.
  * Las alertas de pánico quedan siempre accesibles: una emergencia no espera a un trámite.
+ * La ayuda también, porque es la misma información que se ve sin sesión.
  */
 export function LegalAcceptanceGate({ children }: { children: ReactNode }) {
   const { user, acceptLegal } = useAuth();
@@ -20,6 +21,7 @@ export function LegalAcceptanceGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState('');
   if (
     !user?.legalAcceptanceRequired ||
+    pathname === '/ayuda' ||
     pathname === '/alertas-panico' ||
     pathname.startsWith('/alertas-panico/')
   )

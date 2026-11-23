@@ -87,6 +87,12 @@ describe('LegalAcceptanceGate', () => {
     renderGate(true);
     expect(screen.getByText('Contenido del panel')).toBeInTheDocument();
   });
+
+  it('deja leer las preguntas frecuentes antes de aceptar', () => {
+    window.history.replaceState({}, '', '/ayuda');
+    renderGate(true);
+    expect(screen.getByText('Contenido del panel')).toBeInTheDocument();
+  });
 });
 
 describe('páginas legales', () => {

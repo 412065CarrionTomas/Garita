@@ -70,7 +70,7 @@ function FaqList({ role }: { role: UserRole | null }) {
             <div className="divide-y rounded-lg border bg-card">
               {group.entries.map((entry) => (
                 <details key={entry.id} className="group px-4 py-3">
-                  <summary className="cursor-pointer list-none font-semibold text-foreground marker:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  <summary className="cursor-pointer list-none font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
                     <span aria-hidden="true" className="mr-2 inline-block group-open:rotate-90">
                       ›
                     </span>
