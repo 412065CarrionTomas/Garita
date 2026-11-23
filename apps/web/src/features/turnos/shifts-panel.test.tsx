@@ -260,7 +260,7 @@ describe('<ShiftsPanel />', () => {
       },
     ]);
     renderWithQueryClient(<ShiftsPanel />);
-    expect(await screen.findByText('Solo se puede reasignar (HU-44).')).toBeInTheDocument();
+    expect(await screen.findByText('El turno ya comenzó.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editar turno' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancelar turno' })).not.toBeInTheDocument();
   });

@@ -8,7 +8,7 @@ export const clientInputSchema = z.object({
   phone: z
     .string()
     .trim()
-    .regex(/^\+?[0-9 ().-]{7,30}$/),
+    .regex(/^\+?[0-9 ().-]{7,30}$/, 'Ingresá un teléfono válido'),
   email: z.email().max(320),
   taxId: z.string().trim().max(20).optional(),
 });

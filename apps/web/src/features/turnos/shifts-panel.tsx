@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { useBusy } from '@/lib/use-busy';
 import { loadAvailableGuards } from '../personal/available-guards';
 import { ScheduleBadges } from './programaciones/schedule-badges';
 
@@ -151,6 +152,7 @@ const emptyForm: FormValues = {
 
 export function ShiftsPanel() {
   const [siteId, setSiteId] = useState('');
+  const { busy, run } = useBusy();
   const [now, setNow] = useState(() => Date.now());
   const [guardId, setGuardId] = useState('');
   const [from, setFrom] = useState('');
@@ -282,8 +284,11 @@ export function ShiftsPanel() {
     setConflictingShift('');
   };
 
-  const save = async (event: SyntheticEvent<HTMLFormElement>) => {
+  const save = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
+    return run(saveNow);
+  };
+  const saveNow = async () => {
     setFormError('');
     setFieldErrors({});
     setConflictingShift('');
@@ -495,6 +500,8 @@ export function ShiftsPanel() {
               const started = Date.parse(shift.startsAt) <= now;
               const cancelled =
                 shift.status === 'cancelled' || shift.status === 'cancelled_by_suspension';
+              // Un turno terminado ya no admite acciones.
+              const finished = ['closed', 'auto_closed', 'no_show'].includes(shift.status);
               const windowCount = windowCounts.get(shift.id) ?? 0;
               const rows = [
                 <TableRow
@@ -552,8 +559,9 @@ export function ShiftsPanel() {
                   </TableCell>
                   <TableCell>
                     {!cancelled &&
+                      !finished &&
                       (started ? (
-                        <span className="text-sm">Solo se puede reasignar (HU-44).</span>
+                        <span className="text-sm">El turno ya comenzó.</span>
                       ) : (
                         <div className="flex gap-2">
                           <Button
@@ -636,6 +644,7 @@ export function ShiftsPanel() {
           setEditing(null);
           setFormOpen(false);
         }}
+        busy={busy}
         onSubmit={(event) => void save(event)}
       />
     </section>
@@ -656,6 +665,7 @@ function ShiftFormDialog(props: {
   conflict: string;
   editing: boolean;
   onClose: () => void;
+  busy: boolean;
   onSubmit: (event: SyntheticEvent<HTMLFormElement>) => void;
 }) {
   const set = (patch: Partial<FormValues>) => {
@@ -866,7 +876,9 @@ function ShiftFormDialog(props: {
             </Alert>
           )}
           <div className="flex flex-wrap gap-3">
-            <Button type="submit">Guardar turno</Button>
+            <Button type="submit" disabled={props.busy}>
+              Guardar turno
+            </Button>
             <Button type="button" variant="outline" onClick={props.onClose}>
               Cancelar
             </Button>

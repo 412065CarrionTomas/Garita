@@ -3,6 +3,7 @@ import { checkpointInputSchema, checkpointsResponseSchema } from '@garita/shared
 import { useState, type SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { apiDownload, apiGet, apiPatch, apiPost, ApiError } from '@/lib/api-client';
+import { useBusy } from '@/lib/use-busy';
 import { useAuth } from '../auth/auth-context';
 import { SiteLocation } from '../mapa/site-location';
 import { SitesMap } from '../mapa/sites-map';
@@ -77,6 +78,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
   };
   const [form, setForm] = useState(emptyForm);
   const [formOpen, setFormOpen] = useState(false);
+  const { busy, run } = useBusy();
   const [editingId, setEditingId] = useState<string>();
   const [confirmFar, setConfirmFar] = useState(false);
   const [pendingAction, setPendingAction] = useState<() => Promise<unknown>>();
@@ -88,8 +90,11 @@ export function CheckpointsPanel({ site }: SiteProps) {
     confirmFarLocation,
   });
 
-  const save = async (event?: SyntheticEvent<HTMLFormElement>, confirmed = false) => {
+  const save = (event?: SyntheticEvent<HTMLFormElement>, confirmed = false) => {
     event?.preventDefault();
+    return run(() => saveNow(confirmed));
+  };
+  const saveNow = async (confirmed: boolean) => {
     const parsed = checkpointInputSchema.safeParse(input(confirmed));
     if (!parsed.success) {
       setMessage('Revisá el nombre, la ubicación y el radio de tolerancia (entre 10 y 200 m).');
@@ -245,7 +250,9 @@ export function CheckpointsPanel({ site }: SiteProps) {
                 Punto interior
               </Label>
               <div className="flex gap-3">
-                <Button type="submit">{editingId ? 'Guardar cambios' : 'Crear punto'}</Button>
+                <Button type="submit" disabled={busy}>
+                  {editingId ? 'Guardar cambios' : 'Crear punto'}
+                </Button>
                 {editingId && (
                   <Button
                     type="button"

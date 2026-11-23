@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { z } from 'zod';
 
 import { App } from './App.tsx';
 import { ErrorBoundary } from './components/error-boundary.tsx';
@@ -9,6 +10,9 @@ import { AuthProvider } from './features/auth/auth-context.tsx';
 import { queryClient } from './lib/query-client.ts';
 import { ThemeProvider } from './lib/theme.tsx';
 import './index.css';
+
+// Mensajes de validación de Zod en español para los formularios.
+z.config(z.locales.es());
 
 const rootElement = document.getElementById('root');
 

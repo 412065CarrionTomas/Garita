@@ -38,6 +38,7 @@ export function PanicListPage() {
         <div>
           <Label htmlFor="panic-status">Estado</Label>
           <NativeSelect
+            className="w-full"
             id="panic-status"
             value={filters.estado}
             onChange={(event) => {
@@ -55,6 +56,7 @@ export function PanicListPage() {
         <div>
           <Label htmlFor="panic-site">Predio</Label>
           <NativeSelect
+            className="w-full"
             id="panic-site"
             value={filters.predio}
             onChange={(event) => {

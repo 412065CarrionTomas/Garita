@@ -261,6 +261,7 @@ export function IncidentsListPage() {
         <div>
           <Label htmlFor="incident-site">Predio</Label>
           <NativeSelect
+            className="w-full"
             id="incident-site"
             value={filters.predio}
             onChange={(event) => {
@@ -300,6 +301,7 @@ export function IncidentsListPage() {
         <div>
           <Label htmlFor="incident-type">Tipo</Label>
           <NativeSelect
+            className="w-full"
             id="incident-type"
             value={filters.tipo}
             onChange={(event) => {
@@ -317,6 +319,7 @@ export function IncidentsListPage() {
         <div>
           <Label htmlFor="incident-status">Estado</Label>
           <NativeSelect
+            className="w-full"
             id="incident-status"
             value={filters.clasificacion}
             onChange={(event) => {
