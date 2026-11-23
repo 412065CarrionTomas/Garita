@@ -74,3 +74,62 @@ it('lists current round points before start and ignores invalidated/out-of-windo
     { id: 'outside', registered: false },
   ]);
 });
+
+it('includes the synchronization status in the detail, ignoring closures of replaced assignments', async () => {
+  const lastContactAt = new Date(now.getTime() - 60 * 60_000);
+  const shift = {
+    id: 'shift',
+    status: 'in_progress',
+    startsAt: now,
+    endsAt: new Date(now.getTime() + 60 * 60_000),
+    startedAt: now,
+    connectivityType: 'with_signal',
+    syncDeadlineAt: null,
+    closedWithoutDataAt: null,
+    syncState: { lastContactAt, lastPendingCount: 2, syncedUntil: null },
+    assignments: [
+      { id: 'old', isCurrent: false, guard: null },
+      { id: 'current', isCurrent: true, guard: null },
+    ],
+    events: [{ type: 'close', assignmentId: 'old' }],
+    rounds: [],
+    roundWindowStates: [],
+    checkpointRecords: [],
+    invalidScanAttempts: [],
+  };
+  const service = new SupervisionService(
+    {
+      tenantPrisma: { shift: { findFirst: jest.fn().mockResolvedValue(shift) } },
+    } as unknown as PrismaService,
+    { getShiftRecords: jest.fn().mockResolvedValue({ records: [] }) } as unknown as MarcasService,
+    { now: () => now },
+  );
+  const detail = await service.detail('shift', user, {});
+  expect(detail.syncStatus).toEqual({
+    status: 'sin_contacto',
+    since: lastContactAt,
+    pendingCount: 2,
+  });
+});
+
+it('keeps in-progress overnight shifts in the default today view, but not for an explicit date', async () => {
+  const findMany = jest.fn().mockResolvedValue([]);
+  const service = new SupervisionService(
+    {
+      tenantPrisma: {
+        company: { findUniqueOrThrow: jest.fn().mockResolvedValue({ timezone: 'UTC' }) },
+        shift: { findMany },
+      },
+    } as unknown as PrismaService,
+    {} as MarcasService,
+    { now: () => now },
+  );
+  const serviceDate = new Date('2026-11-01T00:00:00.000Z');
+  await service.list({}, user);
+  expect(findMany.mock.calls[0][0].where).toMatchObject({
+    OR: [{ serviceDate }, { status: 'in_progress' }],
+  });
+  await service.list({ fecha: '2026-11-01' }, user);
+  expect(findMany.mock.calls[1][0].where).toMatchObject({ serviceDate });
+  expect(findMany.mock.calls[1][0].where).not.toHaveProperty('OR');
+});
