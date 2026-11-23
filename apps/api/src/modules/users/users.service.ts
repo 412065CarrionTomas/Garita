@@ -525,7 +525,10 @@ export class UsersService {
   private findFutureShifts(id: string) {
     return this.prisma.tenantPrisma.shift.findMany({
       where: this.futureShiftsWhere(id),
-      include: { assignments: { where: { guardId: id, isCurrent: true } } },
+      include: {
+        assignments: { where: { guardId: id, isCurrent: true } },
+        site: { select: { name: true } },
+      },
       orderBy: { startsAt: 'asc' },
     });
   }

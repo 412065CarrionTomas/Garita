@@ -27,6 +27,12 @@ describe('round windows', () => {
       previewWindows({ windowStartLocal: '06:00', windowEndLocal: '06:00', frequencyMinutes: 120 }),
     ).toHaveLength(12);
   });
+  it('does not loop on a non-positive frequency', () => {
+    for (const frequencyMinutes of [0, -5, Number.NaN])
+      expect(
+        previewWindows({ windowStartLocal: '22:00', windowEndLocal: '06:00', frequencyMinutes }),
+      ).toEqual([]);
+  });
   it('converts local windows to UTC and filters a partial shift', () => {
     const windows = computeRoundWindows('2026-10-13', {
       windowStartLocal: '22:00',

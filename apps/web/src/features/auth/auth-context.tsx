@@ -13,6 +13,7 @@ import type { AuthMeResponse } from '@garita/shared';
 
 import { ApiError, apiGet } from '@/lib/api-client';
 import { auth } from '@/lib/firebase';
+import { queryClient } from '@/lib/query-client';
 import { unregisterCurrentDevice } from '@/features/notificaciones/notifications';
 
 export const DISABLED_MESSAGE =
@@ -61,6 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onAuthStateChanged(auth, (firebaseUser) => {
         void (async () => {
           if (!firebaseUser) {
+            // Cubre logout y sesión vencida: el próximo usuario no ve datos del anterior.
+            queryClient.clear();
             setUser(null);
             setLoading(false);
             return;

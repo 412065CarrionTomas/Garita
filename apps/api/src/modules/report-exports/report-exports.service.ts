@@ -148,8 +148,12 @@ export class ReportExportsService {
         },
       });
     } catch (error) {
-      result = 'failed';
-      failure = error;
+      // El PDF ya está generado: un fallo de auditoría se registra pero no bloquea la descarga.
+      this.logger.error({
+        event: 'report_export.audit_failed',
+        correlationId,
+        error: String(error),
+      });
     }
     this.logger[result === 'ok' ? 'log' : 'error']({
       event: 'report_export.metric',

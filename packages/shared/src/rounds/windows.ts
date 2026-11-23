@@ -124,6 +124,7 @@ export function computeRoundWindows(
 ): RoundWindow[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(localStartDate))
     throw new Error('La fecha debe tener formato YYYY-MM-DD.');
+  if (!(config.frequencyMinutes > 0)) throw new Error('La frecuencia debe ser mayor a 0.');
   const start = minutes(config.windowStartLocal);
   const end = minutes(config.windowEndLocal);
   const duration = (end <= start ? end + 1440 : end) - start;
@@ -145,6 +146,7 @@ export function previewWindows(config: Omit<RoundWindowConfig, 'timezone'>): str
   const end = minutes(config.windowEndLocal);
   const duration = (end <= start ? end + 1440 : end) - start;
   const labels: string[] = [];
+  if (!(config.frequencyMinutes > 0)) return labels;
   for (let offset = 0; offset < duration; offset += config.frequencyMinutes)
     labels.push(
       labelFor(start + offset, start + Math.min(offset + config.frequencyMinutes, duration)),
