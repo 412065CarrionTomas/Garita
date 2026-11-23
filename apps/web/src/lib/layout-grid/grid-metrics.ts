@@ -11,11 +11,11 @@ export interface GridMetrics {
 }
 
 /**
- * Alto de una fila y separación entre bloques (escala del sistema). Las filas no llevan
- * separación propia: cada bloque deja `GRID_GUTTER` abajo, así las filas pueden ser chicas y los
- * bloques crecer de a pasos finos sin sumar una separación por fila.
+ * Alto de una fila y separación entre bloques (escala del sistema). Columnas y filas no llevan
+ * hueco propio: cada bloque deja `GRID_GUTTER` a la derecha y abajo. Así las celdas pueden ser
+ * finas (8 px de alto) y los bloques ubicarse y crecer casi al píxel sin sumar un hueco por celda.
  */
-export const GRID_ROW = 24;
+export const GRID_ROW = 8;
 export const GRID_GUTTER = 24;
 
 const px = (value: string, fallback: number) => {
@@ -23,18 +23,21 @@ const px = (value: string, fallback: number) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-/** Mide la grilla al empezar un gesto: ancho real, columnas, alto de fila y separaciones. */
+/**
+ * Mide la grilla al empezar un gesto. El ancho medido incluye la separación del último bloque
+ * (la grilla se extiende `GRID_GUTTER` a la derecha), así cada columna mide ancho / columnas.
+ */
 export function readGridMetrics(grid: HTMLElement, columns: number): GridMetrics {
   const style = window.getComputedStyle(grid);
-  const gutter = px(style.columnGap, GRID_GUTTER);
+  const columnGap = px(style.columnGap, 0);
   const rowGap = px(style.rowGap, 0);
   const rowHeight = px(style.gridAutoRows, GRID_ROW);
   const width = grid.getBoundingClientRect().width;
-  const column = columns > 0 ? (width - gutter * (columns - 1)) / columns : 0;
+  const column = columns > 0 ? (width - columnGap * (columns - 1)) / columns : 0;
   return {
-    columnStep: Math.max(1, column + gutter),
+    columnStep: Math.max(1, column + columnGap),
     rowStep: Math.max(1, rowHeight + rowGap),
-    gutter,
+    gutter: GRID_GUTTER,
   };
 }
 

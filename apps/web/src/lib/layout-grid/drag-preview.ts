@@ -1,4 +1,4 @@
-import type { LayoutItem, WidgetDefinition } from '@garita/shared';
+import type { LayoutItem, WidgetSize } from '@garita/shared';
 import type { DragDelta } from '@/lib/interaction/use-pointer-drag';
 import { cellsToPixels, type GridMetrics } from './grid-metrics';
 
@@ -12,6 +12,12 @@ export interface DragPreview {
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
+/** Tamaños permitidos del bloque con su presentación actual. */
+export interface SizeLimits {
+  min: WidgetSize;
+  max: WidgetSize;
+}
+
 /**
  * Dónde se dibuja el bloque mientras se arrastra, en píxeles, para que siga al puntero sin saltos
  * aunque el diseño cambie de a celdas. `placed` es la celda que el motor le dio en este momento.
@@ -22,7 +28,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 export function dragPreviewGeometry(
   preview: DragPreview,
   placed: LayoutItem,
-  limits: WidgetDefinition['size'] | undefined,
+  limits: SizeLimits | undefined,
   columns: number,
 ): { kind: 'move'; dx: number; dy: number } | { kind: 'resize'; width: number; height: number } {
   const { start, metrics, delta } = preview;

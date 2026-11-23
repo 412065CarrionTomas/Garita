@@ -1,10 +1,12 @@
 import {
   compactInOrder,
-  compactLayoutItems,
   readingOrder,
   rectsOverlap,
+  settleLayoutItems,
+  widgetMinSize,
   type LayoutItem,
   type ViewCatalog,
+  type WidgetDefinition,
 } from '@garita/shared';
 
 /*
@@ -12,10 +14,9 @@ import {
  * Reglas:
  * - Inmutables: nunca modifican lo recibido. Si la acción no cambia nada devuelven la MISMA
  *   referencia, así quien las use puede saltear renders y no apilar pasos vacíos en "deshacer".
- * - Compactación vertical: después de cada acción ningún bloque visible queda con hueco encima.
- * - Un bloque que se mueve o cambia de tamaño se ubica antes que los bloques cuya mitad
- *   superior alcanza; los demás se acomodan a su alrededor. Eso permite bajar un bloque por
- *   debajo de otro aunque la compactación tienda a subirlo.
+ * - Ubicación libre: un bloque que se mueve o cambia de tamaño queda donde el usuario lo pone.
+ *   Los que pisa bajan lo justo (en cascada) y nadie sube: los huecos los decide el usuario.
+ * - Los tamaños respetan el mínimo de la presentación del bloque y el máximo del bloque.
  * - Los bloques ocultos no ocupan lugar y conservan su posición para cuando vuelvan.
  */
 
@@ -31,30 +32,25 @@ export type Direction = 'up' | 'down' | 'left' | 'right';
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
+/**
+ * Cuánto mueve o redimensiona una flecha del teclado: unas 48 columnas por ancho de grilla y 3
+ * filas. Con la grilla del Resumen (96 columnas, filas de 8 px) son unos 30 × 24 px por paso.
+ */
+export function keyboardStep(catalog: ViewCatalog): { columns: number; rows: number } {
+  return { columns: Math.max(1, Math.round(catalog.columns / 48)), rows: 3 };
+}
+
+function widgetOf(catalog: ViewCatalog, id: string): WidgetDefinition | undefined {
+  return Object.hasOwn(catalog.widgets, id) ? catalog.widgets[id] : undefined;
+}
+
 function indexOf(items: readonly LayoutItem[], id: string): number {
   return items.findIndex((item) => item.id === id);
 }
 
-/** Comparten al menos una columna. */
-function shareColumns(a: LayoutItem, b: LayoutItem): boolean {
-  return a.x < b.x + b.w && b.x < a.x + a.w;
-}
-
-/**
- * Ubica el bloque `index` ya actualizado (posición o tamaño nuevos) y recompacta: va antes de
- * cada bloque cuya mitad superior alcanza y después del resto, en orden de lectura.
- */
+/** Deja el bloque `index` donde está y baja lo justo a los que pisa (ver `settleLayoutItems`). */
 function relocate(items: readonly LayoutItem[], index: number): LayoutItem[] {
-  const target = items[index];
-  if (!target) return [...items];
-  const others = readingOrder(items).filter((i) => i !== index && !items[i]?.hidden);
-  const before = others.findIndex((i) => {
-    const other = items[i];
-    return other !== undefined && target.y < other.y + other.h / 2;
-  });
-  const order = [...others];
-  order.splice(before === -1 ? order.length : before, 0, index);
-  return compactInOrder(items, order);
+  return settleLayoutItems(items, index);
 }
 
 function replaceAt(items: readonly LayoutItem[], index: number, item: LayoutItem): LayoutItem[] {
@@ -126,9 +122,10 @@ export function resizeItem(
 ): readonly LayoutItem[] {
   const index = indexOf(items, id);
   const item = items[index];
-  const widget = Object.hasOwn(catalog.widgets, id) ? catalog.widgets[id] : undefined;
+  const widget = widgetOf(catalog, id);
   if (!item || item.hidden || !widget) return items;
-  const { min, max } = widget.size;
+  const { max } = widget.size;
+  const min = widgetMinSize(widget, item.presentation);
   const resized = {
     ...item,
     w: clamp(Math.round(to.w), min.w, Math.min(max.w, catalog.columns - item.x)),
@@ -137,11 +134,7 @@ export function resizeItem(
   return keepIfSame(items, relocate(replaceAt(items, index, resized), index));
 }
 
-/**
- * Un paso de teclado. Izquierda y derecha corren el bloque una columna; arriba y abajo lo
- * intercambian con el bloque más cercano que comparte columnas en esa dirección (con
- * compactación vertical, bajar una sola fila no cambiaría nada).
- */
+/** Un paso de teclado: mueve el bloque `keyboardStep` en esa dirección; los que pisa bajan. */
 export function stepItem(
   catalog: ViewCatalog,
   items: readonly LayoutItem[],
@@ -150,31 +143,10 @@ export function stepItem(
 ): readonly LayoutItem[] {
   const item = items[indexOf(items, id)];
   if (!item || item.hidden) return items;
-  if (direction === 'left' || direction === 'right')
-    return moveItem(catalog, items, id, {
-      x: item.x + (direction === 'left' ? -1 : 1),
-      y: item.y,
-    });
-  const neighbours = items.filter(
-    (other) =>
-      other.id !== id &&
-      !other.hidden &&
-      shareColumns(item, other) &&
-      (direction === 'up' ? other.y + other.h <= item.y : other.y >= item.y + item.h),
-  );
-  if (neighbours.length === 0) return items;
-  const nearest = neighbours.reduce((best, other) =>
-    direction === 'up'
-      ? other.y + other.h > best.y + best.h
-        ? other
-        : best
-      : other.y < best.y
-        ? other
-        : best,
-  );
-  // Arriba: la fila del vecino lo ubica antes que él. Abajo: su borde inferior, después.
-  const y = direction === 'up' ? nearest.y : nearest.y + nearest.h;
-  return moveItem(catalog, items, id, { x: item.x, y });
+  const step = keyboardStep(catalog);
+  const dx = direction === 'left' ? -step.columns : direction === 'right' ? step.columns : 0;
+  const dy = direction === 'up' ? -step.rows : direction === 'down' ? step.rows : 0;
+  return moveItem(catalog, items, id, { x: item.x + dx, y: item.y + dy });
 }
 
 /** Un paso de teclado de tamaño: derecha e izquierda cambian el ancho; abajo y arriba, el alto. */
@@ -186,15 +158,19 @@ export function stepSize(
 ): readonly LayoutItem[] {
   const item = items[indexOf(items, id)];
   if (!item) return items;
-  const delta = direction === 'right' || direction === 'down' ? 1 : -1;
+  const step = keyboardStep(catalog);
+  const sign = direction === 'right' || direction === 'down' ? 1 : -1;
   const horizontal = direction === 'left' || direction === 'right';
   return resizeItem(catalog, items, id, {
-    w: item.w + (horizontal ? delta : 0),
-    h: item.h + (horizontal ? 0 : delta),
+    w: item.w + (horizontal ? sign * step.columns : 0),
+    h: item.h + (horizontal ? 0 : sign * step.rows),
   });
 }
 
-/** Oculta o muestra un bloque. Al volver, reaparece donde estaba y los demás se acomodan. */
+/**
+ * Oculta o muestra un bloque. Al ocultarlo, su lugar queda libre y nadie se mueve. Al volver,
+ * reaparece donde estaba y los que pisa bajan.
+ */
 export function setHidden(
   items: readonly LayoutItem[],
   id: string,
@@ -204,10 +180,13 @@ export function setHidden(
   const item = items[index];
   if (!item || item.hidden === hidden) return items;
   const next = replaceAt(items, index, { ...item, hidden });
-  return hidden ? compactLayoutItems(next) : relocate(next, index);
+  return hidden ? next : relocate(next, index);
 }
 
-/** Cambia cómo se muestra un bloque; ignora presentaciones que el bloque no ofrece. */
+/**
+ * Cambia cómo se muestra un bloque; ignora presentaciones que el bloque no ofrece. Si la nueva
+ * necesita más lugar (p. ej. una torta), el bloque crece hasta su mínimo y los que pisa bajan.
+ */
 export function setPresentation(
   catalog: ViewCatalog,
   items: readonly LayoutItem[],
@@ -216,10 +195,20 @@ export function setPresentation(
 ): readonly LayoutItem[] {
   const index = indexOf(items, id);
   const item = items[index];
-  const widget = Object.hasOwn(catalog.widgets, id) ? catalog.widgets[id] : undefined;
+  const widget = widgetOf(catalog, id);
   if (!item || !widget?.presentations.includes(presentation) || item.presentation === presentation)
     return items;
-  return replaceAt(items, index, { ...item, presentation });
+  const min = widgetMinSize(widget, presentation);
+  const w = Math.max(item.w, min.w);
+  const grown = {
+    ...item,
+    presentation,
+    w,
+    h: Math.max(item.h, min.h),
+    x: Math.min(item.x, catalog.columns - w),
+  };
+  const next = replaceAt(items, index, grown);
+  return item.hidden ? next : relocate(next, index);
 }
 
 /** Combina ajustes nuevos con los actuales; ignora el cambio si el resultado no es válido. */
@@ -231,7 +220,7 @@ export function setSettings(
 ): readonly LayoutItem[] {
   const index = indexOf(items, id);
   const item = items[index];
-  const widget = Object.hasOwn(catalog.widgets, id) ? catalog.widgets[id] : undefined;
+  const widget = widgetOf(catalog, id);
   if (!item || !widget) return items;
   const parsed = widget.settings.safeParse({ ...item.settings, ...patch });
   if (!parsed.success) return items;

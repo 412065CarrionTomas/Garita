@@ -6,6 +6,7 @@ import {
   type LayoutItem,
 } from '@garita/shared';
 import {
+  keyboardStep,
   moveItem,
   overlappingIds,
   resizeItem,
@@ -21,7 +22,12 @@ import {
 
 const widget = {
   title: 'Bloque',
-  size: { min: { w: 1, h: 1 }, max: { w: 4, h: 6 }, default: { w: 2, h: 2 } },
+  size: {
+    min: { w: 1, h: 1 },
+    max: { w: 4, h: 6 },
+    default: { w: 2, h: 2 },
+    minByPresentation: { bars: { w: 2, h: 2 } },
+  },
   presentations: ['table', 'bars'] as const,
   settings: z.object({ period: z.enum(['7d', '30d']).default('30d') }),
 };
@@ -70,24 +76,20 @@ describe('moveItem', () => {
   it('devuelve la misma referencia si nada cambia', () => {
     const items = start();
     expect(moveItem(catalog, items, 'a', { x: 0, y: 0 })).toBe(items);
-    expect(moveItem(catalog, items, 'a', { x: 0, y: 1 })).toBe(items);
     expect(moveItem(catalog, items, 'nadie', { x: 1, y: 1 })).toBe(items);
   });
 
-  it('baja un bloque por debajo de otro al pasar su mitad', () => {
-    const items = start();
-    // La mitad de c es la fila 3: en la 2 todavía no lo pasa.
-    expect(moveItem(catalog, items, 'd', { x: 0, y: 2 })).not.toBe(items);
-    expect(at(moveItem(catalog, items, 'a', { x: 0, y: 2 }))).toEqual(at(items));
-    expect(at(moveItem(catalog, items, 'a', { x: 0, y: 3 }))).toEqual({
-      a: [0, 4, 2, 2],
+  it('queda donde se suelta, aunque deje un hueco, y nadie más se mueve', () => {
+    expect(at(moveItem(catalog, start(), 'd', { x: 2, y: 7 }))).toEqual({
+      a: [0, 0, 2, 2],
       b: [2, 0, 2, 2],
       c: [0, 2, 4, 2],
-      d: [0, 6, 2, 1],
+      d: [2, 7, 2, 1],
     });
   });
 
-  it('sube un bloque por encima de otro y empuja a los de abajo', () => {
+  it('baja lo justo, en cascada, a los que pisa', () => {
+    // d va arriba de todo: a baja una fila y arrastra a c; b no se toca.
     expect(at(moveItem(catalog, start(), 'd', { x: 0, y: 0 }))).toEqual({
       a: [0, 1, 2, 2],
       b: [2, 0, 2, 2],
@@ -97,9 +99,7 @@ describe('moveItem', () => {
   });
 
   it('mantiene el bloque dentro de las columnas', () => {
-    const moved = moveItem(catalog, start(), 'd', { x: 9, y: 4 });
-    expect(moved.find((item) => item.id === 'd')?.x).toBe(2);
-    expect(at(moved).d).toEqual([2, 4, 2, 1]);
+    expect(at(moveItem(catalog, start(), 'd', { x: 9, y: 4 })).d).toEqual([2, 4, 2, 1]);
   });
 
   it('no mueve bloques ocultos', () => {
@@ -109,13 +109,12 @@ describe('moveItem', () => {
 });
 
 describe('resizeItem', () => {
-  it('crece hacia la derecha y empuja hacia abajo a los que alcanza', () => {
-    // b baja y arrastra a c; d sube al hueco que c deja en las columnas 0-1 (sin huecos).
+  it('crece hacia la derecha y abajo, y baja en cascada a los que alcanza', () => {
     expect(at(resizeItem(catalog, start(), 'a', { w: 4, h: 2 }))).toEqual({
       a: [0, 0, 4, 2],
       b: [2, 2, 2, 2],
       c: [0, 4, 4, 2],
-      d: [0, 2, 2, 1],
+      d: [0, 6, 2, 1],
     });
   });
 
@@ -126,24 +125,28 @@ describe('resizeItem', () => {
     expect(resizeItem(catalog, items, 'a', { w: 2, h: 2 })).toBe(items);
   });
 
-  it('al achicarse, los de abajo suben', () => {
-    expect(at(resizeItem(catalog, start(), 'c', { w: 4, h: 1 })).d).toEqual([0, 3, 2, 1]);
+  it('usa el mínimo de la presentación del bloque', () => {
+    const bars = setPresentation(catalog, start(), 'a', 'bars');
+    expect(at(resizeItem(catalog, bars, 'a', { w: 1, h: 1 })).a).toEqual([0, 0, 2, 2]);
+  });
+
+  it('al achicarse, los de abajo no suben: el hueco queda', () => {
+    expect(at(resizeItem(catalog, start(), 'c', { w: 4, h: 1 })).d).toEqual([0, 4, 2, 1]);
   });
 });
 
 describe('pasos de teclado', () => {
-  it('arriba y abajo intercambian con el vecino más cercano que comparte columnas', () => {
+  // En 4 columnas el paso es de 1 columna y 3 filas.
+  it('arriba y abajo mueven 3 filas; los que pisa bajan', () => {
     const items = start();
-    expect(at(stepItem(catalog, items, 'd', 'up'))).toMatchObject({
-      d: [0, 2, 2, 1],
-      c: [0, 3, 4, 2],
+    expect(at(stepItem(catalog, items, 'd', 'up'))).toEqual({
+      a: [0, 2, 2, 2],
+      b: [2, 0, 2, 2],
+      c: [0, 4, 4, 2],
+      d: [0, 1, 2, 1],
     });
-    expect(at(stepItem(catalog, items, 'c', 'down'))).toMatchObject({
-      d: [0, 2, 2, 1],
-      c: [0, 3, 4, 2],
-    });
+    expect(at(stepItem(catalog, items, 'd', 'down')).d).toEqual([0, 7, 2, 1]);
     expect(stepItem(catalog, items, 'a', 'up')).toBe(items);
-    expect(stepItem(catalog, items, 'd', 'down')).toBe(items);
   });
 
   it('izquierda y derecha corren una columna sin salirse', () => {
@@ -153,21 +156,26 @@ describe('pasos de teclado', () => {
     expect(stepItem(catalog, items, 'b', 'right')).toBe(items);
   });
 
-  it('cambian el tamaño de a una celda', () => {
+  it('cambian el tamaño de a un paso dentro de los límites', () => {
     const items = start();
     expect(at(stepSize(catalog, items, 'd', 'right')).d).toEqual([0, 4, 3, 1]);
-    expect(at(stepSize(catalog, items, 'd', 'down')).d).toEqual([0, 4, 2, 2]);
+    expect(at(stepSize(catalog, items, 'd', 'down')).d).toEqual([0, 4, 2, 4]);
     expect(stepSize(catalog, items, 'd', 'up')).toBe(items);
+  });
+
+  it('el paso crece con las columnas de la grilla', () => {
+    expect(keyboardStep(adminSummaryCatalog)).toEqual({ columns: 2, rows: 3 });
   });
 });
 
 describe('visibilidad, presentación y ajustes', () => {
-  it('al ocultar, los demás ocupan el lugar; al mostrar, vuelve donde estaba', () => {
+  it('al ocultar nadie se mueve; al mostrar vuelve donde estaba y baja a los que pisa', () => {
     const hidden = setHidden(start(), 'c', true);
-    expect(at(hidden)).toMatchObject({ c: [0, 2, 4, 2], d: [0, 2, 2, 1] });
-    expect(overlappingIds(hidden)).toEqual([]);
-    const shown = setHidden(hidden, 'c', false);
-    expect(at(shown)).toEqual(at(start()));
+    expect(at(hidden)).toEqual(at(start()));
+    const moved = moveItem(catalog, hidden, 'd', { x: 0, y: 2 });
+    const shown = setHidden(moved, 'c', false);
+    expect(at(shown)).toMatchObject({ c: [0, 2, 4, 2], d: [0, 4, 2, 1] });
+    expect(overlappingIds(shown)).toEqual([]);
     expect(setHidden(shown, 'c', false)).toBe(shown);
   });
 
@@ -181,6 +189,10 @@ describe('visibilidad, presentación y ajustes', () => {
     expect(setSettings(catalog, items, 'a', { period: '7d' })[0]?.settings).toEqual({
       period: '7d',
     });
+  });
+
+  it('una presentación que necesita más lugar agranda el bloque hasta su mínimo', () => {
+    expect(at(setPresentation(catalog, start(), 'd', 'bars')).d).toEqual([0, 4, 2, 2]);
   });
 });
 
@@ -243,22 +255,26 @@ describe('propiedades del motor sobre el catálogo real', () => {
       let items: readonly LayoutItem[] = adminSummaryCatalog.defaultLayout.items;
       for (let step = 0; step < 500; step++) {
         const id = pick(ids);
-        const action = pick(['move', 'resize', 'step', 'size', 'toggle'] as const);
+        const action = pick(['move', 'resize', 'step', 'size', 'toggle', 'show'] as const);
         if (action === 'move')
           items = moveItem(adminSummaryCatalog, items, id, {
-            x: Math.floor(next() * 14) - 1,
-            y: Math.floor(next() * 30) - 1,
+            x: Math.floor(next() * 100) - 2,
+            y: Math.floor(next() * 300) - 2,
           });
         else if (action === 'resize')
           items = resizeItem(adminSummaryCatalog, items, id, {
-            w: Math.floor(next() * 14),
-            h: Math.floor(next() * 14),
+            w: Math.floor(next() * 110),
+            h: Math.floor(next() * 220),
           });
         else if (action === 'step')
           items = stepItem(adminSummaryCatalog, items, id, pick(directions));
         else if (action === 'size')
           items = stepSize(adminSummaryCatalog, items, id, pick(directions));
-        else items = setHidden(items, id, next() < 0.5);
+        else if (action === 'show') {
+          const { presentations } =
+            adminSummaryCatalog.widgets[id as keyof typeof adminSummaryCatalog.widgets];
+          items = setPresentation(adminSummaryCatalog, items, id, pick(presentations));
+        } else items = setHidden(items, id, next() < 0.5);
         const issues = validateLayout(adminSummaryCatalog, {
           version: adminSummaryCatalog.version,
           items: [...items],

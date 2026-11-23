@@ -19,7 +19,9 @@ import {
  *   hasta que el usuario toca Guardar.
  * - Cada acción con efecto apila el borrador anterior para deshacer (como mucho HISTORY_LIMIT).
  * - Un gesto (arrastrar o redimensionar con el puntero) produce muchos pasos intermedios: solo el
- *   resultado final entra al historial, y cancelarlo vuelve al estado previo al gesto.
+ *   resultado final entra al historial, y cancelarlo vuelve al estado previo al gesto. Cada paso
+ *   se calcula desde el diseño de antes del gesto: así los bloques empujados vuelven a su lugar
+ *   si el puntero se aleja, en vez de quedar corridos por pasos anteriores.
  */
 
 export const HISTORY_LIMIT = 20;
@@ -87,9 +89,9 @@ export function createEditorReducer(catalog: ViewCatalog) {
         // Otro guardó mientras se editaba: el borrador se conserva y pasa a compararse con eso.
         return { ...state, base: action.items };
       case 'move':
-        return commit(state, moveItem(catalog, draft, action.id, action.to));
+        return commit(state, moveItem(catalog, state.gesture ?? draft, action.id, action.to));
       case 'resize':
-        return commit(state, resizeItem(catalog, draft, action.id, action.size));
+        return commit(state, resizeItem(catalog, state.gesture ?? draft, action.id, action.size));
       case 'step':
         return commit(state, stepItem(catalog, draft, action.id, action.direction));
       case 'stepSize':

@@ -34,7 +34,7 @@ beforeEach(() => {
     );
   jest.mocked(apiDelete).mockReset();
   jest.mocked(apiDelete).mockResolvedValue(undefined);
-  // La grilla mide 1236 px: 24 columnas de 28,5 px con 24 de separación (paso de 52,5 px).
+  // La grilla mide 1236 px: 96 columnas de 12,875 px (la separación va adentro de cada bloque).
   jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
     width: 1236,
     height: 800,
@@ -84,8 +84,8 @@ it('entrar y salir sin cambios no guarda nada', async () => {
 
 it('arrastrar el asa cambia el tamaño y solo se guarda al tocar Guardar', async () => {
   const user = await startEditing();
-  // 4 columnas a la derecha: de 16 a 20 de ancho.
-  drag(screen.getByRole('button', { name: 'Cambiar el tamaño de Cumplimiento' }), 210, 0);
+  // 16 columnas a la derecha: de 64 a 80 de ancho.
+  drag(screen.getByRole('button', { name: 'Cambiar el tamaño de Cumplimiento' }), 206, 0);
   expect(apiPut).not.toHaveBeenCalled();
   const save = screen.getByRole('button', { name: 'Guardar diseño' });
   expect(save).toBeEnabled();
@@ -95,9 +95,9 @@ it('arrastrar el asa cambia el tamaño y solo se guarda al tocar Guardar', async
   });
   const body = sentLayout();
   expect(body.baseUpdatedAt).toBeNull();
-  expect(item(body, 'compliance')).toMatchObject({ x: 0, y: 18, w: 20, h: 24 });
-  // Turnos de hoy no entra al lado: baja, sin superponerse.
-  expect(item(body, 'shiftsToday')?.y).toBeGreaterThanOrEqual(42);
+  expect(item(body, 'compliance')).toMatchObject({ x: 0, y: 54, w: 80, h: 72 });
+  // Turnos de hoy queda pisado: baja justo debajo de Cumplimiento.
+  expect(item(body, 'shiftsToday')?.y).toBe(126);
   expect(await screen.findByRole('button', { name: 'Editar diseño' })).toBeVisible();
 });
 
@@ -132,7 +132,7 @@ it('guardar el diseño por defecto borra la preferencia', async () => {
 
 it('cancelar con cambios pide confirmación', async () => {
   const user = await startEditing();
-  drag(screen.getByRole('button', { name: 'Cambiar el tamaño de Cumplimiento' }), 210, 0);
+  drag(screen.getByRole('button', { name: 'Cambiar el tamaño de Cumplimiento' }), 206, 0);
   await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   const dialog = await screen.findByRole('alertdialog', { name: '¿Descartar los cambios?' });
   await user.click(within(dialog).getByRole('button', { name: 'Seguir editando' }));
@@ -145,7 +145,7 @@ it('cancelar con cambios pide confirmación', async () => {
 
 it('si otro guardó mientras tanto, deja elegir y vuelve a guardar sobre lo nuevo', async () => {
   const user = await startEditing();
-  drag(screen.getByRole('button', { name: 'Cambiar el tamaño de Cumplimiento' }), 210, 0);
+  drag(screen.getByRole('button', { name: 'Cambiar el tamaño de Cumplimiento' }), 206, 0);
   jest
     .mocked(apiPut)
     .mockRejectedValueOnce(new ApiError('conflicto', 409, { code: VIEW_PREFERENCE_CONFLICT_CODE }));
@@ -171,7 +171,7 @@ it('si otro guardó mientras tanto, deja elegir y vuelve a guardar sobre lo nuev
   });
   const retry = jest.mocked(apiPut).mock.calls[1]?.[1] as ViewPreferenceInput;
   expect(retry.baseUpdatedAt).toBe('2026-11-23T11:30:00.000Z');
-  expect(item(retry, 'compliance')?.w).toBe(20);
+  expect(item(retry, 'compliance')?.w).toBe(80);
 });
 
 it('en pantallas angostas no ofrece editar', async () => {

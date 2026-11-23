@@ -45,9 +45,9 @@ export function AccountWidget() {
             <dd className="t-numeral">Quedan {graceDaysLeft} días</dd>
           </div>
         )}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <dt className="t-label text-muted-foreground">Vigiladores del plan</dt>
-          <dd className="flex items-center gap-3">
+          <dd className="flex flex-wrap items-center gap-3">
             <span className="t-numeral">
               {guardsCounted} / {guardLimit}
             </span>

@@ -8,11 +8,11 @@ import {
   type RefObject,
 } from 'react';
 import { GripVertical, MoveDiagonal2 } from 'lucide-react';
-import type { LayoutItem, WidgetDefinition } from '@garita/shared';
+import type { LayoutItem } from '@garita/shared';
 import { useKeyboardGrab } from '@/lib/interaction/use-keyboard-grab';
 import { usePointerDrag } from '@/lib/interaction/use-pointer-drag';
 import { cn } from '@/lib/utils';
-import { dragPreviewGeometry, type DragPreview } from './drag-preview';
+import { dragPreviewGeometry, type DragPreview, type SizeLimits } from './drag-preview';
 import type { EditorAction } from './editor-state';
 import { deltaToCells, readGridMetrics } from './grid-metrics';
 
@@ -53,7 +53,7 @@ export function EditableItem({
 }: {
   item: LayoutItem;
   /** Tamaños mínimo y máximo del bloque, para que la vista previa no pase de lo que se guarda. */
-  limits: WidgetDefinition['size'] | undefined;
+  limits: SizeLimits | undefined;
   title: string;
   gridRef: RefObject<HTMLElement | null>;
   columns: number;

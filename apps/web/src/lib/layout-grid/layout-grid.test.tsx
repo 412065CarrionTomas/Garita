@@ -35,8 +35,8 @@ it('ubica cada bloque visible en la grilla, en orden de lectura', () => {
   ]);
   expect(screen.queryByText('account')).toBeNull();
   const compliance = cells[1];
-  expect(compliance?.style.gridColumn).toBe('1 / span 16');
-  expect(compliance?.style.gridRow).toBe('19 / span 24');
+  expect(compliance?.style.gridColumn).toBe('1 / span 64');
+  expect(compliance?.style.gridRow).toBe('55 / span 72');
 });
 
 it('en celular apila los bloques en una sola columna', () => {

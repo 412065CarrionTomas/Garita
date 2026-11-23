@@ -7,7 +7,9 @@ import { cn } from '@/lib/utils';
 /**
  * Hoja de un bloque del resumen: título en condensada, acción hacia la pantalla completa y un
  * cuerpo con desplazamiento propio que se adapta a su tamaño (container queries), no al de la
- * ventana. El cuerpo es enfocable para poder desplazarlo con el teclado.
+ * ventana. El cuerpo es enfocable para poder desplazarlo con el teclado. En bloques angostos el
+ * título se corta con "…" (completo al pasar el puntero) y el dato de `aside` se oculta, así el
+ * encabezado nunca ocupa dos líneas.
  */
 export function WidgetFrame({
   title,
@@ -30,7 +32,7 @@ export function WidgetFrame({
     <section
       aria-labelledby={titleId}
       className={cn(
-        'flex h-full flex-col overflow-hidden rounded-md border',
+        '@container/frame flex h-full flex-col overflow-hidden rounded-md border',
         inverted
           ? 'border-bar bg-bar text-bar-foreground'
           : 'border-border bg-card text-card-foreground',
@@ -39,15 +41,19 @@ export function WidgetFrame({
     >
       <header
         className={cn(
-          'flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b px-5 py-3',
+          'flex items-center justify-between gap-3 border-b px-5 py-3',
           inverted ? 'border-bar-muted/40' : 'border-border',
         )}
       >
-        <h2 id={titleId} className="font-cond text-lg font-semibold tracking-wider uppercase">
+        <h2
+          id={titleId}
+          title={title}
+          className="min-w-0 truncate font-cond text-lg font-semibold tracking-wider uppercase"
+        >
           {title}
         </h2>
-        <div className="flex items-center gap-3">
-          {aside}
+        <div className="flex shrink-0 items-center gap-3">
+          {aside && <span className="hidden items-center @sm/frame:flex">{aside}</span>}
           {link && (
             <Link
               to={link.to}

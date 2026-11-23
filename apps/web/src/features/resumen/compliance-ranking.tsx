@@ -76,15 +76,22 @@ function RankingRowView({
         drag.draggingId === row.id && 'bg-card outline-2 -outline-offset-2 outline-foreground',
       )}
     >
-      <TableCell className="font-semibold">
+      {/* Ancho 0 y máximo 100 %: la columna del nombre cede lugar y el nombre se corta con "…". */}
+      <TableCell className="w-full max-w-0 font-semibold">
         <span className="flex items-center gap-1.5">
           {pinned && <Pin aria-hidden="true" className="size-3.5 shrink-0" />}
-          {row.name}
+          <span title={row.name} className="min-w-0 truncate">
+            {row.name}
+          </span>
           {pinned && <span className="sr-only">(fijado)</span>}
         </span>
       </TableCell>
-      <TableCell className="t-numeral text-right">{row.totals.evaluated}</TableCell>
-      <TableCell className="t-numeral text-right">{row.totals.not_done}</TableCell>
+      <TableCell className="hidden t-numeral text-right @lg:table-cell">
+        {row.totals.evaluated}
+      </TableCell>
+      <TableCell className="hidden t-numeral text-right @lg:table-cell">
+        {row.totals.not_done}
+      </TableCell>
       <TableCell>
         {value === null ? (
           <span className="text-muted-foreground">Sin datos</span>
@@ -94,7 +101,12 @@ function RankingRowView({
             <span className="t-numeral">
               {value.toLocaleString('es-AR', { maximumFractionDigits: 1 })} %
             </span>
-            {value < COMPLIANCE_THRESHOLD && <Stamp variant="fail">Revisar</Stamp>}
+            {/* En bloques angostos el sello cede lugar al nombre; la barra rayada ya marca la falla. */}
+            {value < COMPLIANCE_THRESHOLD && (
+              <span className="hidden @lg:inline-flex">
+                <Stamp variant="fail">Revisar</Stamp>
+              </span>
+            )}
           </span>
         )}
       </TableCell>
@@ -277,8 +289,9 @@ export function ComplianceRanking({
           <TableHeader>
             <TableRow>
               <TableHead>{nouns.column}</TableHead>
-              <TableHead className="text-right">Ventanas</TableHead>
-              <TableHead className="text-right">No realizadas</TableHead>
+              {/* En bloques angostos se ocultan: el nombre y el cumplimiento entran siempre. */}
+              <TableHead className="hidden text-right @lg:table-cell">Ventanas</TableHead>
+              <TableHead className="hidden text-right @lg:table-cell">No realizadas</TableHead>
               <TableHead>Cumplimiento</TableHead>
               <TableHead>
                 <span className="sr-only">Acciones</span>

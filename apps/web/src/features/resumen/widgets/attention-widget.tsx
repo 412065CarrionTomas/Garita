@@ -155,11 +155,14 @@ export function AttentionWidget({ item }: WidgetProps) {
                 <Link
                   to={row.to}
                   aria-label={`${row.label}: ${row.count ?? 'sin dato'}`}
-                  className="block font-semibold underline-offset-4 hover:underline"
+                  title={row.label}
+                  className="block truncate font-semibold underline-offset-4 hover:underline"
                 >
                   {row.label}
                 </Link>
-                <span className="block text-sm text-bar-muted">{row.detail}</span>
+                <span title={row.detail} className="block truncate text-sm text-bar-muted">
+                  {row.detail}
+                </span>
               </span>
             </li>
           ))}
@@ -177,11 +180,15 @@ export function AttentionWidget({ item }: WidgetProps) {
             key={row.key}
             className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3 @2xl:grid-cols-[minmax(0,14rem)_minmax(0,9rem)_minmax(0,1fr)_auto]"
           >
-            <span className="font-semibold">{row.label}</span>
+            <span title={row.label} className="truncate font-semibold">
+              {row.label}
+            </span>
             <span className="justify-self-end @2xl:justify-self-start">
               <CountStamp row={row} />
             </span>
-            <span className="text-sm text-muted-foreground">{row.detail}</span>
+            <span title={row.detail} className="truncate text-sm text-muted-foreground">
+              {row.detail}
+            </span>
             <Link
               to={row.to}
               aria-label={`${row.action}: ${row.label}`}

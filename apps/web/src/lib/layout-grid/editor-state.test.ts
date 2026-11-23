@@ -46,9 +46,9 @@ it('un gesto de arrastre entra al historial como un solo paso', () => {
   let state = run(
     editing(),
     { type: 'gestureStart' },
-    { type: 'move', id: 'shiftsToday', to: { x: 8, y: 12 } },
-    { type: 'move', id: 'shiftsToday', to: { x: 8, y: 20 } },
-    { type: 'move', id: 'shiftsToday', to: { x: 16, y: 90 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 32, y: 36 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 32, y: 60 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 64, y: 270 } },
   );
   expect(canUndo(state)).toBe(false);
   state = run(state, { type: 'gestureEnd' });
@@ -60,7 +60,7 @@ it('cancelar el gesto vuelve a como estaba antes de empezarlo', () => {
   const state = run(
     editing(),
     { type: 'gestureStart' },
-    { type: 'resize', id: 'compliance', size: { w: 12, h: 10 } },
+    { type: 'resize', id: 'compliance', size: { w: 48, h: 40 } },
     { type: 'gestureCancel' },
   );
   expect(draftOf(state)).toBe(saved);
@@ -71,21 +71,32 @@ it('un gesto que termina donde empezó no deja rastro', () => {
   const state = run(
     editing(),
     { type: 'gestureStart' },
-    { type: 'move', id: 'shiftsToday', to: { x: 16, y: 90 } },
-    { type: 'move', id: 'shiftsToday', to: { x: 16, y: 17 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 64, y: 270 } },
+    { type: 'move', id: 'shiftsToday', to: { x: 64, y: 54 } },
     { type: 'gestureEnd' },
   );
   expect(draftOf(state)).toBe(saved);
   expect(canUndo(state)).toBe(false);
 });
 
+it('durante un gesto, los bloques empujados vuelven si el que se mueve se aleja', () => {
+  const pushed = run(
+    editing(),
+    { type: 'gestureStart' },
+    { type: 'move', id: 'shiftsToday', to: { x: 0, y: 54 } },
+  );
+  expect(pos(pushed, 'compliance')?.[1]).toBeGreaterThan(54);
+  const back = run(pushed, { type: 'move', id: 'shiftsToday', to: { x: 64, y: 54 } });
+  expect(pos(back, 'compliance')).toEqual(pos(editing(), 'compliance'));
+});
+
 it('restablecer vuelve al diseño por defecto y también se deshace', () => {
-  const moved = run(editing(), { type: 'resize', id: 'compliance', size: { w: 24, h: 24 } });
-  expect(pos(moved, 'compliance')).toEqual([0, 18, 24, 24]);
+  const moved = run(editing(), { type: 'resize', id: 'compliance', size: { w: 96, h: 72 } });
+  expect(pos(moved, 'compliance')).toEqual([0, 54, 96, 72]);
   const reset = run(moved, { type: 'reset' });
   expect(draftOf(reset)).toBe(adminSummaryCatalog.defaultLayout.items);
   expect(run(reset, { type: 'reset' })).toBe(reset);
-  expect(pos(run(reset, { type: 'undo' }), 'compliance')).toEqual([0, 18, 24, 24]);
+  expect(pos(run(reset, { type: 'undo' }), 'compliance')).toEqual([0, 54, 96, 72]);
 });
 
 it('limita el historial', () => {
