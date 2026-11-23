@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, type Dispatch } from 'react';
+import { useCallback, useMemo, useReducer, type Dispatch } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   reconcileLayout,
@@ -95,19 +95,6 @@ export function useViewLayoutEditor(catalog: ViewCatalog): ViewLayoutEditor {
   });
 
   const dirty = isDirty(state);
-  // Cerrar o recargar con cambios sin guardar pide confirmación al navegador.
-  // shortcut: la navegación interna no se bloquea porque la app usa BrowserRouter (useBlocker
-  // necesita un router de datos); si se migra a createBrowserRouter, sumar useBlocker acá.
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => {
-      window.removeEventListener('beforeunload', warn);
-    };
-  }, [dirty]);
 
   const fetchLatest = useCallback(async () => {
     const latest = await queryClient.query({

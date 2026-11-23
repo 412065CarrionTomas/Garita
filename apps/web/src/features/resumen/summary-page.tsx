@@ -11,6 +11,7 @@ import { EditToolbar } from '@/lib/layout-grid/edit-toolbar';
 import { LayoutGrid } from '@/lib/layout-grid/layout-grid';
 import { useGridColumns } from '@/lib/layout-grid/use-grid-columns';
 import { useViewLayoutEditor } from '@/lib/layout-grid/use-view-layout-editor';
+import { useLeaveGuard } from '@/lib/use-leave-guard';
 import { describeSummaryBlock } from './block-descriptions';
 import { widgetTitle } from './summary-rows';
 import { summaryWidget } from './widgets/registry';
@@ -29,6 +30,8 @@ const today = () => {
 export function SummaryPage() {
   const editor = useViewLayoutEditor(adminSummaryCatalog);
   const { editable } = useGridColumns(adminSummaryCatalog.columns);
+  // Salir (enlace interno, cerrar o recargar) con cambios sin guardar pide confirmación.
+  const leaveDialog = useLeaveGuard(editor.dirty);
   const { state, items } = editor;
   const base = state.mode === 'edit' ? state.base : undefined;
   const editOrder = useMemo(
@@ -37,6 +40,7 @@ export function SummaryPage() {
   );
   return (
     <section aria-labelledby="summary-title" className="space-y-6">
+      {leaveDialog}
       <PageHeader
         id="summary-title"
         title="Resumen de la empresa"
