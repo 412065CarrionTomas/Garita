@@ -72,6 +72,7 @@ const profile = (role: 'admin' | 'supervisor') =>
     login: jest.fn(),
     logout: jest.fn(),
     recover: jest.fn(),
+    acceptLegal: jest.fn(),
     clearError: jest.fn(),
   }) as ReturnType<typeof useAuth>;
 

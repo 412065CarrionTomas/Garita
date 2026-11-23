@@ -8,10 +8,15 @@ import {
   signOut,
 } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { authMeResponseSchema } from '@garita/shared';
+import {
+  authMeResponseSchema,
+  emptyResponseSchema,
+  LEGAL_VERSION,
+  legalAcceptanceRequestSchema,
+} from '@garita/shared';
 import type { AuthMeResponse } from '@garita/shared';
 
-import { ApiError, apiGet } from '@/lib/api-client';
+import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { auth } from '@/lib/firebase';
 import { queryClient } from '@/lib/query-client';
 import { unregisterCurrentDevice } from '@/features/notificaciones/notifications';
@@ -42,6 +47,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<AuthMeResponse>;
   logout: () => Promise<void>;
   recover: (email: string) => Promise<void>;
+  acceptLegal: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -134,6 +140,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sendPasswordResetEmail(auth, email);
   }, []);
 
+  const acceptLegal = useCallback(async () => {
+    await apiPost(
+      '/auth/terminos',
+      { version: LEGAL_VERSION },
+      legalAcceptanceRequestSchema,
+      emptyResponseSchema,
+    );
+    setUser((current) => current && { ...current, legalAcceptanceRequired: false });
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
@@ -142,11 +158,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       recover,
+      acceptLegal,
       clearError: () => {
         setError('');
       },
     }),
-    [user, loading, error, login, logout, recover],
+    [user, loading, error, login, logout, recover, acceptLegal],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
