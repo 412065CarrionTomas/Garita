@@ -17,6 +17,7 @@ describe('LoginScreen', () => {
       login: jest.fn(),
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const view = await render(<LoginScreen />);
@@ -32,6 +33,7 @@ describe('LoginScreen', () => {
       login,
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const view = await render(<LoginScreen />);
@@ -53,6 +55,7 @@ describe('LoginScreen', () => {
       login,
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const view = await render(<LoginScreen />);
@@ -80,6 +83,7 @@ describe('LoginScreen', () => {
       login,
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const replaceMock = jest.mocked(router.replace);

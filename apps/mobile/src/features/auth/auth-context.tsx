@@ -8,10 +8,15 @@ import {
   signOut,
 } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { authMeResponseSchema } from '@garita/shared';
+import {
+  authMeResponseSchema,
+  emptyResponseSchema,
+  LEGAL_VERSION,
+  legalAcceptanceRequestSchema,
+} from '@garita/shared';
 import type { AuthMeResponse } from '@garita/shared';
 import { Alert } from 'react-native';
-import { ApiError, apiGet } from '@/lib/api-client';
+import { ApiError, apiGet, apiRequest } from '@/lib/api-client';
 import { auth } from '@/lib/firebase';
 import { registerGuardDevice, unregisterGuardDevice } from '@/features/notificaciones/guard-device';
 import {
@@ -43,6 +48,7 @@ type AuthContextValue = {
   login(email: string, password: string): Promise<AuthMeResponse>;
   logout(): Promise<void>;
   recover(email: string): Promise<void>;
+  acceptLegal(): Promise<void>;
 };
 const AuthContext = createContext<AuthContextValue | null>(null);
 const profileKey = (uid: string) => `garita:auth-profile:${uid}`;
@@ -165,9 +171,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const recover = useCallback(async (email: string) => {
     await sendPasswordResetEmail(auth, email);
   }, []);
+  const acceptLegal = useCallback(async () => {
+    await apiRequest(
+      'POST',
+      '/auth/terminos',
+      emptyResponseSchema,
+      legalAcceptanceRequestSchema.parse({ version: LEGAL_VERSION }),
+    );
+    const uid = auth.currentUser?.uid;
+    setUser((current) => {
+      if (!current) return current;
+      const accepted = { ...current, legalAcceptanceRequired: false };
+      if (uid) void AsyncStorage.setItem(profileKey(uid), JSON.stringify(accepted));
+      return accepted;
+    });
+  }, []);
   const value = useMemo(
-    () => ({ user, loading, error, login, logout, recover }),
-    [user, loading, error, login, logout, recover],
+    () => ({ user, loading, error, login, logout, recover, acceptLegal }),
+    [user, loading, error, login, logout, recover, acceptLegal],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

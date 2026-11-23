@@ -19,6 +19,7 @@ it.each(['registrado@example.com', 'ausente@example.com'])(
       login: jest.fn(),
       logout: jest.fn(),
       recover,
+      acceptLegal: jest.fn(),
       error: '',
     });
     const view = await render(<RecoveryScreen />);
@@ -41,6 +42,7 @@ it('informa el fallo cuando el envío no pudo realizarse', async () => {
     login: jest.fn(),
     logout: jest.fn(),
     recover,
+    acceptLegal: jest.fn(),
     error: '',
   });
   const view = await render(<RecoveryScreen />);
