@@ -95,6 +95,34 @@ describe('ActivationPage', () => {
     expect(screen.queryByRole('link', { name: 'Definir contraseña' })).not.toBeInTheDocument();
   });
 
+  it('pide recargar si la API exige una versión de términos más nueva', async () => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(400, {}));
+    render(<ActivationPage />);
+    acceptTerms();
+    expect(await screen.findByText(/Recargá la página para verla y aceptarla/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Aceptar y continuar' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['límite de intentos', () => Promise.resolve(mockResponse(429, { reason: 'rate_limited' }))],
+    ['corte de red', () => Promise.reject(new Error('red'))],
+  ])('permite reintentar sin recargar ante %s', async (_case, failure) => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(failure)
+      .mockResolvedValueOnce(
+        mockResponse(200, {
+          role: 'supervisor',
+          passwordSetupUrl: 'https://firebase.example/reset',
+        }),
+      );
+    render(<ActivationPage />);
+    acceptTerms();
+    const retry = await screen.findByRole('button', { name: 'Aceptar y continuar' });
+    fireEvent.click(retry);
+    expect(await screen.findByRole('link', { name: 'Definir contraseña' })).toBeInTheDocument();
+  });
+
   it('ofrece al supervisor el enlace para definir la contraseña', async () => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(
       mockResponse(200, {

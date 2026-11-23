@@ -21,6 +21,8 @@ const failureMessages = {
 
 const PENDING_MESSAGE = 'Para activar tu cuenta, leé y aceptá los Términos y Condiciones.';
 const VALIDATING_MESSAGE = 'Validando invitación…';
+const OUTDATED_TERMS_MESSAGE =
+  'Hay una versión más reciente de los términos. Recargá la página para verla y aceptarla.';
 
 export function ActivationPage() {
   const [params] = useSearchParams();
@@ -31,11 +33,14 @@ export function ActivationPage() {
       : 'Falta el enlace de invitación. Pedile a tu administrador que te envíe uno nuevo.',
   );
   const [accepted, setAccepted] = useState(false);
+  // Los errores transitorios (429, red) permiten reintentar sin recargar.
+  const [retryable, setRetryable] = useState(false);
   const [passwordSetupUrl, setPasswordSetupUrl] = useState<string | null>(null);
   // Canjear registra la aceptación en el servidor, por eso solo ocurre tras marcar la casilla.
   function redeem() {
     if (!token) return;
     setMessage(VALIDATING_MESSAGE);
+    setRetryable(false);
     void fetch(`${env.VITE_API_URL}/invitaciones/canjear`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -45,6 +50,12 @@ export function ActivationPage() {
         if (response.status === 410 || response.status === 429) {
           const body = failureSchema.parse(await response.json());
           setMessage(failureMessages[body.reason]);
+          setRetryable(response.status === 429);
+          return;
+        }
+        // 400: este panel quedó con una versión de los términos anterior a la que exige la API.
+        if (response.status === 400) {
+          setMessage(OUTDATED_TERMS_MESSAGE);
           return;
         }
         if (!response.ok) throw new Error();
@@ -57,7 +68,8 @@ export function ActivationPage() {
         setPasswordSetupUrl(data.passwordSetupUrl);
       })
       .catch(() => {
-        setMessage('No se pudo validar la invitación. Pedile ayuda a tu administrador.');
+        setMessage('No se pudo validar la invitación. Revisá tu conexión e intentá nuevamente.');
+        setRetryable(true);
       });
   }
   const informative =
@@ -72,7 +84,7 @@ export function ActivationPage() {
         >
           {message}
         </Alert>
-        {message === PENDING_MESSAGE && (
+        {(message === PENDING_MESSAGE || retryable) && (
           <>
             <LegalConsent checked={accepted} onCheckedChange={setAccepted} />
             <Button size="lg" className="w-full" disabled={!accepted} onClick={redeem}>

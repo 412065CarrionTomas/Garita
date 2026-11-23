@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { privacyPolicy, termsOfService } from '@garita/shared';
 import type { AuthMeResponse } from '@garita/shared';
 
+import { ApiError } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { LegalAcceptanceGate } from './legal-acceptance-gate';
 import { PrivacyPage, TermsPage } from './legal-pages';
@@ -66,6 +67,19 @@ describe('LegalAcceptanceGate', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Leí y acepto/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Aceptar y continuar' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos registrar');
+  });
+
+  it('pide recargar si la API ya exige una versión más nueva', async () => {
+    renderGate(true, jest.fn().mockRejectedValue(new ApiError('viejo', 400)));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Leí y acepto/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Aceptar y continuar' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Recargá la página');
+  });
+
+  it('no deja pasar rutas que solo comparten el prefijo de pánico', () => {
+    window.history.replaceState({}, '', '/alertas-panico-historial');
+    renderGate(true);
+    expect(screen.queryByText('Contenido del panel')).not.toBeInTheDocument();
   });
 
   it('nunca bloquea la atención de alertas de pánico', () => {

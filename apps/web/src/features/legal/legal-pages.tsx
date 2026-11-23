@@ -1,13 +1,9 @@
+import { useId } from 'react';
 import { Link } from 'react-router';
-import { LEGAL_OWNER, privacyPolicy, termsOfService } from '@garita/shared';
+import { formatLegalDate, LEGAL_OWNER, privacyPolicy, termsOfService } from '@garita/shared';
 import type { LegalDocument } from '@garita/shared';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-
-function formatDate(iso: string) {
-  const [year, month, day] = iso.split('-');
-  return `${day}/${month}/${year}`;
-}
 
 function LegalDocumentPage({ document, other }: { document: LegalDocument; other: ReactLink }) {
   return (
@@ -20,7 +16,7 @@ function LegalDocumentPage({ document, other }: { document: LegalDocument; other
         <header className="space-y-2">
           <h1 className="t-headline">{document.title}</h1>
           <p className="text-sm text-muted-foreground">
-            Última actualización: {formatDate(document.updatedAt)}
+            Última actualización: {formatLegalDate(document.updatedAt)}
           </p>
           <p>{document.intro}</p>
         </header>
@@ -76,17 +72,18 @@ export function LegalConsent({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const id = useId();
   return (
     <div className="flex items-start gap-3">
       <Checkbox
-        id="legal-consent"
+        id={id}
         checked={checked}
         onCheckedChange={(value) => {
           onCheckedChange(value === true);
         }}
         className="mt-0.5"
       />
-      <Label htmlFor="legal-consent" className="block font-normal leading-snug">
+      <Label htmlFor={id} className="block font-normal leading-snug">
         Leí y acepto los{' '}
         <a href="/terminos" target="_blank" rel="noreferrer" className="underline">
           Términos y Condiciones

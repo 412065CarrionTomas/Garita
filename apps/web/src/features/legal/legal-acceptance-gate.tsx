@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router';
+import { ApiError } from '@/lib/api-client';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/page-header';
@@ -17,7 +18,12 @@ export function LegalAcceptanceGate({ children }: { children: ReactNode }) {
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  if (!user?.legalAcceptanceRequired || pathname.startsWith('/alertas-panico')) return children;
+  if (
+    !user?.legalAcceptanceRequired ||
+    pathname === '/alertas-panico' ||
+    pathname.startsWith('/alertas-panico/')
+  )
+    return children;
   return (
     <div className="max-w-xl space-y-6">
       <PageHeader
@@ -36,8 +42,13 @@ export function LegalAcceptanceGate({ children }: { children: ReactNode }) {
           setBusy(true);
           setError('');
           acceptLegal()
-            .catch(() => {
-              setError('No pudimos registrar la aceptación. Intentá nuevamente.');
+            .catch((reason: unknown) => {
+              // 400: la API ya exige una versión más nueva que la de este panel.
+              setError(
+                reason instanceof ApiError && reason.status === 400
+                  ? 'Hay una versión más reciente de los términos. Recargá la página para verla y aceptarla.'
+                  : 'No pudimos registrar la aceptación. Intentá nuevamente.',
+              );
             })
             .finally(() => {
               setBusy(false);
