@@ -22,7 +22,6 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { RouteBuilder } from '../routing/route-builder';
-import { RoutePreviewRateLimit } from '../routing/route-preview-rate-limit';
 
 interface RoundInput {
   name: string;
@@ -41,7 +40,6 @@ export class RoundsService {
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
     private readonly routes: RouteBuilder,
-    private readonly previewLimit: RoutePreviewRateLimit,
   ) {}
 
   async list(siteId: string) {
@@ -176,11 +174,7 @@ export class RoundsService {
 
   /** Checks the points and returns their location in the round's order. */
   /** Un tramo del editor con su geometría calculada. No guarda nada. */
-  async previewRoute(
-    input: RoutePreviewInput,
-    user: AuthenticatedUser,
-  ): Promise<RoutePreviewResponse> {
-    await this.previewLimit.check(user.userId);
+  async previewRoute(input: RoutePreviewInput): Promise<RoutePreviewResponse> {
     await this.resources.findOwnedOrThrow('Site', input.siteId);
     const site = await this.siteRouting(input.siteId);
     const coordinates = [

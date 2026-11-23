@@ -10,7 +10,6 @@ import { PrismaService } from '../src/modules/prisma/prisma.service';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { NullRouting, ROUTING_PORT } from '../src/modules/routing/routing.port';
-import { ROUTE_PREVIEW_PER_MINUTE } from '../src/modules/routing/route-preview-rate-limit';
 
 describe('Recorrido ideal de la ronda por HTTP', () => {
   let app: INestApplication<App>;
@@ -193,20 +192,6 @@ describe('Recorrido ideal de la ronda por HTTP', () => {
         .set(as('seed-norte-admin'))
         .send({ ...body(), to: [0, 0] })
         .expect(400);
-    });
-
-    it('limita los pedidos por usuario y minuto', async () => {
-      const statuses: number[] = [];
-      // Dos ventanas de un minuto suman como mucho el doble: uno más siempre supera el límite.
-      for (let i = 0; i <= ROUTE_PREVIEW_PER_MINUTE * 2; i++) {
-        const response = await request(app.getHttpServer())
-          .post(path)
-          .set(as('seed-norte-supervisor'))
-          .send(body());
-        statuses.push(response.status);
-        if (response.status === 429) break;
-      }
-      expect(statuses.at(-1)).toBe(429);
     });
   });
 });

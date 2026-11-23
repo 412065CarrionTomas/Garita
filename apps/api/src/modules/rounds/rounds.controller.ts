@@ -79,10 +79,9 @@ export class RoundsController {
   @ApiResponse({ status: 400 })
   @ApiResponse({ status: 403 })
   @ApiResponse({ status: 404 })
-  @ApiResponse({ status: 429 })
-  previewRoute(@Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
+  previewRoute(@Body() body: unknown) {
     const parsed = routePreviewInputSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
-    return this.rounds.previewRoute(parsed.data, user);
+    return this.rounds.previewRoute(parsed.data);
   }
 }
