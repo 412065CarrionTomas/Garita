@@ -201,7 +201,6 @@ export function ComplianceRanking({
 
   const pinnedGroups = (id: string): RowActionGroup[] => [
     {
-      label: 'Fijados',
       actions: [
         ...availableActions(pinnedIds, id).map((action) => ({
           key: action,
@@ -221,7 +220,6 @@ export function ComplianceRanking({
     },
   ];
   const pinGroup = (id: string): RowActionGroup => ({
-    label: 'Fijar en esta pantalla',
     actions: [
       {
         key: 'pin-top',
@@ -250,7 +248,6 @@ export function ComplianceRanking({
   const restGroups = (row: RankingRow): RowActionGroup[] => [
     ...(row.pinnable ? [pinGroup(row.id)] : []),
     {
-      label: 'Solo en esta visita',
       actions: availableActions(orderedIds, row.id)
         .filter((action) => action === 'top' || action === 'bottom')
         .map((action) => ({
