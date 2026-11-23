@@ -5,10 +5,13 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/empty-state';
+import { BlocksPanel } from '@/lib/layout-grid/blocks-panel';
 import { EditToolbar } from '@/lib/layout-grid/edit-toolbar';
 import { LayoutGrid } from '@/lib/layout-grid/layout-grid';
 import { useGridColumns } from '@/lib/layout-grid/use-grid-columns';
 import { useViewLayoutEditor } from '@/lib/layout-grid/use-view-layout-editor';
+import { describeSummaryBlock } from './block-descriptions';
 import { widgetTitle } from './summary-rows';
 import { summaryWidget } from './widgets/registry';
 import { WidgetFrame } from './widget-frame';
@@ -38,7 +41,11 @@ export function SummaryPage() {
         id="summary-title"
         title="Resumen de la empresa"
         description={`${today()} · lo pendiente ahora y cómo viene el servicio.`}
-        actions={<EditToolbar editor={editor} editable={editable} />}
+        actions={
+          <EditToolbar editor={editor} editable={editable}>
+            <BlocksPanel editor={editor} describe={describeSummaryBlock} />
+          </EditToolbar>
+        }
       />
       {editor.loadFailed && !editor.editing && (
         <Alert variant="neutral" role="status">
@@ -73,6 +80,16 @@ export function SummaryPage() {
           No pudimos guardar el diseño. Revisá la conexión e intentá de nuevo; tus cambios siguen
           acá.
         </Alert>
+      )}
+      {items?.every((item) => item.hidden) && (
+        <EmptyState
+          title="Todos los bloques están ocultos"
+          description={
+            editor.editing
+              ? 'Mostralos desde Bloques, o restablecé el diseño.'
+              : 'Tocá Editar diseño y mostralos desde Bloques.'
+          }
+        />
       )}
       {items ? (
         <LayoutGrid
