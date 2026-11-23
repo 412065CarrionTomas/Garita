@@ -36,7 +36,7 @@ async function startEditing() {
   await user.click(await screen.findByRole('button', { name: 'Editar diseño' }));
   return user;
 }
-const announcer = () => screen.getByTestId('announcer');
+const announcer = () => screen.getByRole('status', { name: 'Cambios del diseño' });
 
 it('redimensiona con el teclado, anuncia cada paso y guarda', async () => {
   const user = await startEditing();

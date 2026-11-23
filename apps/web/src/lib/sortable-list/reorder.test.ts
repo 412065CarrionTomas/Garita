@@ -2,6 +2,7 @@ import {
   applyOrder,
   availableActions,
   moveId,
+  mergeVisibleOrder,
   moveIdTo,
   partitionPinned,
   pin,
@@ -87,5 +88,23 @@ describe('applyOrder', () => {
   it('ignora ids que ya no están y sin orden respeta el de los datos', () => {
     expect(idsOf(applyOrder(rows, ['x', 'c'], getId))).toEqual(['c', 'a', 'b', 'd']);
     expect(idsOf(applyOrder(rows, [], getId))).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+describe('mergeVisibleOrder', () => {
+  it('reordena los visibles y deja a los ocultos en su lugar', () => {
+    // b y d no se ven: el usuario invirtió a, c y e.
+    expect(mergeVisibleOrder(['a', 'b', 'c', 'd', 'e'], ['e', 'c', 'a'])).toEqual([
+      'e',
+      'b',
+      'c',
+      'd',
+      'a',
+    ]);
+  });
+
+  it('sin cambios devuelve la misma referencia', () => {
+    const full = ['a', 'b', 'c'];
+    expect(mergeVisibleOrder(full, ['a', 'c'])).toBe(full);
   });
 });

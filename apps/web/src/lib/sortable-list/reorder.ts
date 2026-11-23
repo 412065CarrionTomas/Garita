@@ -95,3 +95,19 @@ export function applyOrder<T>(
     })
     .map(({ item }) => item);
 }
+
+/**
+ * Vuelca el orden nuevo de los elementos visibles en la lista completa, sin tocar el lugar de
+ * los que no se ven (p. ej. fijados que no están en esta página o en este período): guardar
+ * solo los visibles los borraría sin aviso. `visibleNext` debe ser una permutación de los
+ * visibles de `full`.
+ */
+export function mergeVisibleOrder(
+  full: readonly string[],
+  visibleNext: readonly string[],
+): readonly string[] {
+  const visible = new Set(visibleNext);
+  let cursor = 0;
+  const merged = full.map((id) => (visible.has(id) ? (visibleNext[cursor++] ?? id) : id));
+  return merged.every((id, index) => id === full[index]) ? full : merged;
+}

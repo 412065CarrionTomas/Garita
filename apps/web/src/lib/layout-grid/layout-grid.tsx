@@ -40,7 +40,7 @@ export function LayoutGrid({
   const { columns, editable } = useGridColumns(catalog.columns);
   const gridRef = useRef<HTMLDivElement>(null);
   const instructionsId = useId();
-  const { announce, region } = useAnnouncer();
+  const { announce, region } = useAnnouncer('Cambios del diseño');
   const editing = edit !== undefined && editable;
   const order = editing ? edit.order : undefined;
   const placed = useMemo(() => {

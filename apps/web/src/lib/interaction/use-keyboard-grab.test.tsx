@@ -70,7 +70,7 @@ it('atiende solo las flechas pedidas', async () => {
 });
 
 function Speaker({ message }: { message: string }) {
-  const { announce, region } = useAnnouncer();
+  const { announce, region } = useAnnouncer('Avisos');
   return (
     <>
       <button
@@ -89,7 +89,7 @@ function Speaker({ message }: { message: string }) {
 it('anuncia en una región en vivo y repite mensajes iguales', async () => {
   const user = userEvent.setup();
   render(<Speaker message="Movido" />);
-  const region = screen.getByTestId('announcer');
+  const region = screen.getByRole('status', { name: 'Avisos' });
   expect(region).toHaveAttribute('aria-live', 'polite');
   await user.click(screen.getByRole('button', { name: 'Anunciar' }));
   expect(await screen.findByText('Movido')).toBe(region);
