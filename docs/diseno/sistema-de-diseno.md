@@ -300,12 +300,12 @@ La torta se usa solo para partes de un todo con pocas categorías (hasta seis), 
 
 ### Bloques y modo edición
 
-Las pantallas de resumen se arman con bloques: hojas planas con título en condensada, la acción hacia la pantalla completa a la derecha y un cuerpo con desplazamiento propio que se adapta al tamaño del bloque. Los bloques viven en una grilla de 12 columnas, con filas de 48 px y 24 px de separación. La compactación vertical es obligatoria: ningún bloque queda con hueco encima.
+Las pantallas de resumen se arman con bloques: hojas planas con título en condensada, la acción hacia la pantalla completa a la derecha y un cuerpo con desplazamiento propio que se adapta al tamaño del bloque. Los bloques viven en una grilla de 12 columnas, con filas de 48 px y 24 px de separación. La compactación vertical es obligatoria: ningún bloque queda con hueco encima. En celular los bloques se apilan con su alto natural: se desplaza la página, no cada bloque.
 
 El usuario puede editar el diseño desde 1024 px de ancho con **Editar diseño**. En edición:
 
 - cada bloque lleva un marco punteado (todavía no está fijo), que se vuelve sólido mientras se mueve;
-- aparecen dos asas cuadradas de 36 px con borde de 1,5 px en tinta: mover arriba a la izquierda y cambiar el tamaño abajo a la derecha. Tomada, el asa se invierte (fondo tinta);
+- aparecen dos asas cuadradas de 36 px con borde de 1,5 px en tinta, montadas sobre el marco para no tapar el contenido: mover, centrada sobre el borde superior, y cambiar el tamaño, sobre la esquina inferior derecha. Tomada, el asa se invierte (fondo tinta);
 - el contenido del bloque queda inerte;
 - la barra de acciones reemplaza a **Editar diseño**: Bloques, Deshacer, Restablecer diseño, Cancelar y Guardar diseño (principal). Nada se guarda hasta tocar Guardar; cancelar con cambios pide confirmación.
 
