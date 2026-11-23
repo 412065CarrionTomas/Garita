@@ -1,3 +1,4 @@
+import { LEGAL_VERSION } from '@garita/shared';
 import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -103,13 +104,13 @@ describe('Flujos de gestión de personal (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/v1/invitaciones/canjear')
         .set('x-forwarded-for', '203.0.113.77')
-        .send({ token: `invalid-${suffix}-${attempt}` })
+        .send({ token: `invalid-${suffix}-${attempt}`, acceptedLegalVersion: LEGAL_VERSION })
         .expect(410);
     }
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
       .set('x-forwarded-for', '203.0.113.77')
-      .send({ token: `invalid-${suffix}-11` })
+      .send({ token: `invalid-${suffix}-11`, acceptedLegalVersion: LEGAL_VERSION })
       .expect(429);
   });
 
@@ -194,12 +195,42 @@ describe('Flujos de gestión de personal (e2e)', () => {
       .expect(200);
   });
 
+  it('auth/me pide aceptar la versión vigente hasta que el usuario la acepta', async () => {
+    const { user } = await create('legal-me', 'supervisor');
+    const auth = { Authorization: `Bearer user:${user.firebaseUid}` };
+    const me = () => request(app.getHttpServer()).get('/api/v1/auth/me').set(auth).expect(200);
+    expect((await me()).body).toMatchObject({ legalAcceptanceRequired: true });
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/terminos')
+      .set(auth)
+      .send({ version: '2000-01-01' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/terminos')
+      .set(auth)
+      .send({ version: LEGAL_VERSION })
+      .expect(200, { ok: true });
+    expect((await me()).body).toMatchObject({ legalAcceptanceRequired: false });
+  });
+
+  it('canje sin aceptar la versión vigente de los términos da 400 y no registra aceptación', async () => {
+    const { user } = await create('no-terms', 'guard');
+    const token = tokenFromMail(mailer.sendInvitation.mock.calls.length - 1);
+    for (const body of [{ token }, { token, acceptedLegalVersion: '2000-01-01' }])
+      await request(app.getHttpServer())
+        .post('/api/v1/invitaciones/canjear')
+        .send(body)
+        .expect(400);
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(stored.legalVersion).toBeNull();
+  });
+
   it('canje válido devuelve URL de contraseña y rol; expirado, usado y reemplazado dan 410', async () => {
     const { user } = await create('redeem', 'supervisor');
     const token = tokenFromMail(mailer.sendInvitation.mock.calls.length - 1);
     const valid = await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token })
+      .send({ token, acceptedLegalVersion: LEGAL_VERSION })
       .expect(201);
     expect(isRecord(valid.body) && valid.body.role).toBe('supervisor');
     expect(
@@ -207,6 +238,9 @@ describe('Flujos de gestión de personal (e2e)', () => {
         ? valid.body.passwordSetupUrl
         : '',
     ).toContain('https://reset.invalid/');
+    const accepted = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(accepted.legalVersion).toBe(LEGAL_VERSION);
+    expect(accepted.legalAcceptedAt).toBeInstanceOf(Date);
     const invitation = await prisma.invitation.findFirstOrThrow({ where: { userId: user.id } });
     await prisma.invitation.update({
       where: { id: invitation.id },
@@ -214,7 +248,7 @@ describe('Flujos de gestión de personal (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token })
+      .send({ token, acceptedLegalVersion: LEGAL_VERSION })
       .expect(410);
     const expired = await create('expired');
     const expiredToken = tokenFromMail(mailer.sendInvitation.mock.calls.length - 1);
@@ -224,7 +258,7 @@ describe('Flujos de gestión de personal (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token: expiredToken })
+      .send({ token: expiredToken, acceptedLegalVersion: LEGAL_VERSION })
       .expect(410);
     const used = await create('used');
     const usedToken = tokenFromMail(mailer.sendInvitation.mock.calls.length - 1);
@@ -234,7 +268,7 @@ describe('Flujos de gestión de personal (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token: usedToken })
+      .send({ token: usedToken, acceptedLegalVersion: LEGAL_VERSION })
       .expect(410);
     const replaced = await create('replaced');
     const replacedToken = tokenFromMail(mailer.sendInvitation.mock.calls.length - 1);
@@ -244,7 +278,7 @@ describe('Flujos de gestión de personal (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token: replacedToken })
+      .send({ token: replacedToken, acceptedLegalVersion: LEGAL_VERSION })
       .expect(410);
   });
 
@@ -259,7 +293,7 @@ describe('Flujos de gestión de personal (e2e)', () => {
     expect(mailer.sendInvitation).toHaveBeenCalledTimes(callCount + 1);
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token: oldToken })
+      .send({ token: oldToken, acceptedLegalVersion: LEGAL_VERSION })
       .expect(410);
   });
 

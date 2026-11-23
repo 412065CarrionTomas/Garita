@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
+import { LEGAL_VERSION } from '@garita/shared';
 import type { AllowedChannel, AuthMeResponse, UserRole } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from './tenant-resource.service';
@@ -50,6 +51,15 @@ export class AuthService {
       status,
       company: user.company,
       allowedChannels: allowedChannelsForRole(user.role),
+      legalAcceptanceRequired: user.legalVersion !== LEGAL_VERSION,
     };
+  }
+
+  async acceptLegal(userId: string, ip: string) {
+    await this.prisma.tenantPrisma.user.update({
+      where: { id: userId },
+      data: { legalVersion: LEGAL_VERSION, legalAcceptedAt: new Date(), legalAcceptedIp: ip },
+    });
+    return { ok: true as const };
   }
 }

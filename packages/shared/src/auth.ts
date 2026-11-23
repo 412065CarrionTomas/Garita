@@ -20,6 +20,8 @@ export const authMeResponseSchema = z.object({
     accountStatus: accountStatusSchema.optional(),
   }),
   allowedChannels: allowedChannelsSchema,
+  /** true si el usuario todavía no aceptó la versión vigente de Términos y Privacidad. */
+  legalAcceptanceRequired: z.boolean().optional(),
 });
 
 export type UserStatus = z.infer<typeof userStatusSchema>;
