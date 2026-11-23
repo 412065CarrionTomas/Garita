@@ -1,12 +1,13 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
-import { apiGet } from '@/lib/api-client';
+import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { RoundsPanel } from './rounds-panel';
 
 jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
 jest.mock('@/lib/api-client', () => ({
+  ApiError: jest.requireActual<{ ApiError: unknown }>('@/lib/api-client').ApiError,
   apiGet: jest.fn(),
   apiPost: jest.fn(() => Promise.resolve({ id: 'round-1' })),
   apiPatch: jest.fn(() => Promise.resolve({ id: 'round-1' })),
@@ -14,8 +15,8 @@ jest.mock('@/lib/api-client', () => ({
 
 const site = { id: 'site-1', status: 'active' as const };
 const points = [
-  { id: 'p1', name: 'Portón' },
-  { id: 'p2', name: 'Depósito' },
+  { id: 'p1', name: 'Portón', latitude: -31.4, longitude: -64.2 },
+  { id: 'p2', name: 'Depósito', latitude: -31.401, longitude: -64.201 },
 ];
 function setup() {
   jest
@@ -103,5 +104,110 @@ describe('RoundsPanel', () => {
       screen.getAllByText('La frecuencia debe estar entre 15 minutos y 24 horas.'),
     ).toHaveLength(2);
     expect(screen.getAllByText(/La gracia puede ser, como máximo, 5 minutos/)).toHaveLength(2);
+  });
+
+  describe('recorrido', () => {
+    async function fillRound() {
+      const view = setup();
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
+      await user.click(await screen.findByLabelText('Portón'));
+      await user.click(screen.getByLabelText('Depósito'));
+      expect(await screen.findByRole('heading', { name: 'Recorrido' })).toBeInTheDocument();
+      return { view, user };
+    }
+    const sentRoute = () => {
+      const call = jest.mocked(apiPost).mock.calls.find(([path]) => path.endsWith('/rondas'));
+      return call?.[1] as { route: unknown; allowStraight?: boolean } | undefined;
+    };
+
+    beforeEach(() => {
+      jest.mocked(apiPost).mockClear();
+      jest.mocked(apiPost).mockResolvedValue({ id: 'round-1' });
+    });
+
+    it('arma un circuito por calles y lo manda al guardar', async () => {
+      const { user } = await fillRound();
+      expect(screen.getByRole('checkbox', { name: 'Volver al inicio' })).toBeChecked();
+      expect(screen.getByRole('heading', { name: 'Tramo 2 → 1 (regreso)' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      await waitFor(() => {
+        expect(sentRoute()?.route).toEqual({
+          closed: true,
+          legs: [
+            { waypoints: [], sections: [{ mode: 'streets', via: [] }] },
+            { waypoints: [], sections: [{ mode: 'streets', via: [] }] },
+          ],
+        });
+      });
+    });
+
+    it('cambia el modo, agrega un punto de paso desde la lista y quita el regreso', async () => {
+      const { user } = await fillRound();
+      await user.click(screen.getByRole('checkbox', { name: 'Volver al inicio' }));
+      expect(screen.queryByRole('heading', { name: /regreso/ })).not.toBeInTheDocument();
+      await user.click(
+        screen.getByRole('button', { name: 'Agregar punto de paso al tramo 1 → 2' }),
+      );
+      expect(screen.getByText('Punto de paso 1')).toBeInTheDocument();
+      const second = screen.getByRole('group', { name: 'Modo del tramo 1 → 2 (parte 2)' });
+      await user.click(within(second).getByRole('button', { name: 'A mano' }));
+      expect(within(second).getByRole('button', { name: 'A mano' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      await waitFor(() => {
+        expect(sentRoute()?.route).toEqual({
+          closed: false,
+          legs: [
+            {
+              waypoints: [[expect.closeTo(-64.2005), expect.closeTo(-31.4005)]],
+              sections: [
+                { mode: 'streets', via: [] },
+                { mode: 'manual', via: [] },
+              ],
+            },
+          ],
+        });
+      });
+    });
+
+    it('si el ruteo falla avisa los tramos, conserva el trabajo y permite guardar recto', async () => {
+      const { user } = await fillRound();
+      await user.click(
+        screen.getByRole('button', { name: 'Agregar punto de paso al tramo 1 → 2' }),
+      );
+      jest.mocked(apiPost).mockRejectedValueOnce(
+        new ApiError('422', 422, {
+          message: 'No se pudo calcular',
+          failures: [{ leg: 0, section: 1, reason: 'unreachable_point' }],
+        }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      const dialog = await screen.findByRole('alertdialog', {
+        name: 'No se pudo calcular el recorrido',
+      });
+      expect(dialog).toHaveTextContent(
+        'No se encontró una calle cerca de un punto de el tramo 1 → 2',
+      );
+      await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Punto de paso 1')).toBeInTheDocument();
+      expect(screen.getByLabelText('Nombre')).toHaveValue('Perimetral');
+
+      jest.mocked(apiPost).mockRejectedValueOnce(
+        new ApiError('422', 422, {
+          message: 'No se pudo calcular',
+          failures: [{ leg: 0, section: 1, reason: 'unreachable_point' }],
+        }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      await user.click(await screen.findByRole('button', { name: 'Guardar con tramos rectos' }));
+      await waitFor(() => {
+        expect(jest.mocked(apiPost).mock.calls.at(-1)?.[1]).toMatchObject({ allowStraight: true });
+      });
+      expect(await screen.findByText('Ronda creada.')).toBeInTheDocument();
+    });
   });
 });

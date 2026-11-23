@@ -1,8 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import { defaultGraceMinutes, previewWindows, roundInputSchema } from '@garita/shared';
+import {
+  defaultGraceMinutes,
+  defaultRouteInput,
+  previewWindows,
+  roundInputSchema,
+  roundRouteSchema,
+  routeFailuresErrorSchema,
+  type RouteFailure,
+} from '@garita/shared';
 import { useState } from 'react';
 import { z } from 'zod';
-import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
 import { useAuth } from '../auth/auth-context';
 
@@ -12,8 +20,23 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RouteEditor } from './route-editor';
+import {
+  failureMessages,
+  legLabel,
+  reconcileRoute,
+  storedRouteInput,
+  type RouteDraft,
+} from './route-draft';
 
-const checkpointsSchema = z.array(z.looseObject({ id: z.string(), name: z.string() }));
+const checkpointsSchema = z.array(
+  z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    latitude: z.coerce.number().optional(),
+    longitude: z.coerce.number().optional(),
+  }),
+);
 const roundsSchema = z.array(
   z.looseObject({
     id: z.string(),
@@ -25,6 +48,7 @@ const roundsSchema = z.array(
         windowStartLocal: z.string(),
         windowEndLocal: z.string(),
         graceMinutes: z.number(),
+        route: z.unknown().optional(),
         checkpoints: z.array(
           z.looseObject({
             position: z.number(),
@@ -59,13 +83,32 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
   const [confirmId, setConfirmId] = useState<string>();
   const [message, setMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [routeDraft, setRouteDraft] = useState<RouteDraft>({
+    ids: [],
+    route: defaultRouteInput(0),
+  });
+  // El recorrido sigue a la lista de puntos: conserva los tramos que no cambiaron.
+  const route = reconcileRoute(routeDraft, selected);
+  const [routeFailures, setRouteFailures] = useState<RouteFailure[]>();
+  const editing = rounds.data?.find((round) => round.id === editingId);
+  const savedIds = editing?.currentVersion?.checkpoints.map(({ checkpoint }) => checkpoint.id);
+  const savedRoute =
+    savedIds?.join() === selected.join()
+      ? roundRouteSchema.safeParse(editing?.currentVersion?.route).data
+      : undefined;
+  const routePoints = selected.flatMap((id) => {
+    const point = points.data?.find((item) => item.id === id);
+    return point?.latitude !== undefined && point.longitude !== undefined
+      ? [{ id, name: point.name, lat: point.latitude, lng: point.longitude }]
+      : [];
+  });
   const labels = previewWindows({
     windowStartLocal: start,
     windowEndLocal: end,
     frequencyMinutes: frequency,
   });
-  const save = () => run(saveNow);
-  const saveNow = async () => {
+  const save = (allowStraight = false) => run(() => saveNow(allowStraight));
+  const saveNow = async (allowStraight: boolean) => {
     const parsed = roundInputSchema.safeParse({
       name,
       checkpointIds: selected,
@@ -73,6 +116,8 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
       windowStartLocal: start,
       windowEndLocal: end,
       graceMinutes: grace,
+      route,
+      ...(allowStraight ? { allowStraight } : {}),
     });
     if (!parsed.success) {
       const nextErrors = parsed.error.issues.reduce<Record<string, string[]>>((errors, issue) => {
@@ -85,6 +130,7 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
       return;
     }
     setFieldErrors({});
+    setRouteFailures(undefined);
     try {
       if (editingId)
         await apiPatch(`/rondas/${editingId}`, parsed.data, roundInputSchema, idSchema);
@@ -96,7 +142,17 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
       );
       setEditingId(undefined);
       await rounds.refetch();
-    } catch {
+    } catch (error) {
+      // El ruteo falló: no se guardó nada y el formulario queda como estaba para reintentar.
+      const failed =
+        error instanceof ApiError && error.status === 422
+          ? routeFailuresErrorSchema.safeParse(error.body)
+          : undefined;
+      if (failed?.success) {
+        setRouteFailures(failed.data.failures);
+        setMessage('');
+        return;
+      }
       setMessage('No se pudo guardar la ronda. Verificá los puntos y el nombre.');
     }
   };
@@ -144,11 +200,18 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
                         setStart(round.currentVersion?.windowStartLocal ?? '22:00');
                         setEnd(round.currentVersion?.windowEndLocal ?? '06:00');
                         setGrace(round.currentVersion?.graceMinutes ?? 15);
-                        setSelected(
+                        const ids =
                           round.currentVersion?.checkpoints.map(
                             ({ checkpoint }) => checkpoint.id,
-                          ) ?? [],
-                        );
+                          ) ?? [];
+                        setSelected(ids);
+                        setRouteDraft({
+                          ids,
+                          route:
+                            storedRouteInput(round.currentVersion?.route) ??
+                            defaultRouteInput(ids.length),
+                        });
+                        setRouteFailures(undefined);
                       }}
                     >
                       Editar
@@ -422,6 +485,28 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
                   );
                 })}
               </ol>
+              {selected.length >= 2 &&
+                (routePoints.length === selected.length ? (
+                  <RouteEditor
+                    siteId={site.id}
+                    points={routePoints}
+                    route={route}
+                    savedRoute={savedRoute}
+                    onChange={(next) => {
+                      setRouteDraft({ ids: selected, route: next });
+                    }}
+                    onClosedChange={(closed) => {
+                      setRouteDraft({
+                        ids: selected,
+                        route: reconcileRoute(routeDraft, selected, closed),
+                      });
+                    }}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Algunos puntos no tienen ubicación: el recorrido se armará por calles.
+                  </p>
+                ))}
               <div>
                 <h5 className="mb-2 font-medium">Vista previa de ventanas</h5>
                 <ol
@@ -433,7 +518,8 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
                   ))}
                 </ol>
               </div>
-              {(Object.keys(fieldErrors).length > 1 || Boolean(fieldErrors.form ?? message)) && (
+              {(Object.keys(fieldErrors).length > 1 ||
+                Boolean(fieldErrors.form ?? fieldErrors.route ?? message)) && (
                 <Alert variant="destructive" role="alert" aria-label="Errores del formulario">
                   {message && <p>{message}</p>}
                   {Object.keys(fieldErrors).length > 1 &&
@@ -443,6 +529,59 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
                   {fieldErrors.form?.map((error) => (
                     <p key={error}>{error}</p>
                   ))}
+                  {Object.keys(fieldErrors).length === 1 &&
+                    fieldErrors.route?.map((error) => <p key={error}>{error}</p>)}
+                </Alert>
+              )}
+              {routeFailures && (
+                <Alert
+                  role="alertdialog"
+                  aria-label="No se pudo calcular el recorrido"
+                  className="space-y-3"
+                >
+                  <p className="font-medium">
+                    Hubo un fallo al calcular el recorrido por calles. No se guardó nada.
+                  </p>
+                  {failureMessages(routeFailures, route.legs.length, route.closed).map((text) => (
+                    <p key={text}>{text}</p>
+                  ))}
+                  <p>
+                    Tramos sin calcular:{' '}
+                    {[...new Set(routeFailures.map((failure) => failure.leg))]
+                      .map((leg) => legLabel(leg, route.legs.length, route.closed))
+                      .join(', ')}
+                    .
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        void save();
+                      }}
+                    >
+                      Reintentar
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        void save(true);
+                      }}
+                    >
+                      Guardar con tramos rectos
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setRouteFailures(undefined);
+                      }}
+                    >
+                      Cerrar
+                    </Button>
+                  </div>
                 </Alert>
               )}
               <Button type="submit" disabled={busy}>
