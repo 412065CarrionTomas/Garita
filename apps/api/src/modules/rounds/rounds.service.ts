@@ -8,16 +8,21 @@ import {
 import { Prisma } from '../../generated/prisma/client';
 import {
   defaultRouteInput,
+  distanceMeters,
   previewWindows,
+  ROUTE_LIMITS,
   validateRouteInput,
   type LngLat,
   type RoundRoute,
   type RouteInput,
+  type RoutePreviewInput,
+  type RoutePreviewResponse,
 } from '@garita/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { RouteBuilder } from '../routing/route-builder';
+import { RoutePreviewRateLimit } from '../routing/route-preview-rate-limit';
 
 interface RoundInput {
   name: string;
@@ -36,6 +41,7 @@ export class RoundsService {
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
     private readonly routes: RouteBuilder,
+    private readonly previewLimit: RoutePreviewRateLimit,
   ) {}
 
   async list(siteId: string) {
@@ -169,6 +175,27 @@ export class RoundsService {
   }
 
   /** Checks the points and returns their location in the round's order. */
+  /** Un tramo del editor con su geometría calculada. No guarda nada. */
+  async previewRoute(
+    input: RoutePreviewInput,
+    user: AuthenticatedUser,
+  ): Promise<RoutePreviewResponse> {
+    await this.previewLimit.check(user.userId);
+    await this.resources.findOwnedOrThrow('Site', input.siteId);
+    const site = await this.siteRouting(input.siteId);
+    const coordinates = [
+      input.from,
+      input.to,
+      ...input.waypoints,
+      ...input.sections.flatMap((section) => section.via),
+    ];
+    // Sin este control, la vista previa serviría para rutear cualquier lugar con nuestra clave.
+    if (coordinates.some((c) => distanceMeters(c, site.location) > ROUTE_LIMITS.maxMetersFromSite))
+      throw new BadRequestException('El recorrido no puede alejarse más de 25 km del predio.');
+    const leg = await this.routes.buildLeg(input.from, input.to, input, site.profile);
+    return { sections: leg.sections };
+  }
+
   private async assertCheckpoints(siteId: string, ids: string[]): Promise<LngLat[]> {
     const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
       where: { id: { in: ids }, siteId, status: 'active' },
@@ -186,21 +213,24 @@ export class RoundsService {
     return points;
   }
 
-  private async buildRoute(siteId: string, input: RoundInput, points: LngLat[]) {
+  private async siteRouting(siteId: string) {
     const site = await this.prisma.tenantPrisma.site.findFirstOrThrow({
       where: { id: siteId },
       select: { latitude: true, longitude: true, maxSpeedProfile: true },
     });
+    const location: LngLat = [Number(site.longitude), Number(site.latitude)];
+    return { location, profile: site.maxSpeedProfile };
+  }
+
+  private async buildRoute(siteId: string, input: RoundInput, points: LngLat[]) {
+    const site = await this.siteRouting(siteId);
     const route = input.route ?? defaultRouteInput(points.length);
-    const issues = validateRouteInput(route, points, [
-      Number(site.longitude),
-      Number(site.latitude),
-    ]);
+    const issues = validateRouteInput(route, points, site.location);
     if (issues.length > 0)
       throw new BadRequestException(
         issues.map((issue) => ({ ...issue, path: ['route', ...issue.path] })),
       );
-    return this.routes.build(route, points, site.maxSpeedProfile);
+    return this.routes.build(route, points, site.profile);
   }
 
   private handleUnique(error: unknown): never {

@@ -3,13 +3,14 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { roundRouteSchema, type LngLat } from '@garita/shared';
+import { roundRouteSchema, routePreviewResponseSchema, type LngLat } from '@garita/shared';
 import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { NullRouting, ROUTING_PORT } from '../src/modules/routing/routing.port';
+import { ROUTE_PREVIEW_PER_MINUTE } from '../src/modules/routing/route-preview-rate-limit';
 
 describe('Recorrido ideal de la ronda por HTTP', () => {
   let app: INestApplication<App>;
@@ -162,5 +163,50 @@ describe('Recorrido ideal de la ronda por HTTP', () => {
         route: { closed: false, legs: [leg(), leg()] },
       })
       .expect(400);
+  });
+
+  describe('vista previa de un tramo', () => {
+    const path = '/api/v1/rondas/ruteo-previsualizar';
+    const body = () => {
+      const [from, to] = points;
+      return { siteId, from, to, waypoints: [], sections: [{ mode: 'streets', via: [] }] };
+    };
+
+    it('devuelve las secciones con geometría sin guardar nada', async () => {
+      const response = await request(app.getHttpServer())
+        .post(path)
+        .set(as('seed-norte-admin'))
+        .send(body())
+        .expect(200);
+      const { sections } = routePreviewResponseSchema.parse(response.body);
+      expect(sections).toEqual([
+        { mode: 'streets', via: [], geometry: [points[0], points[1]], fallback: true },
+      ]);
+    });
+
+    it('no la permite al vigilador ni para un predio de otra empresa', async () => {
+      const http = request(app.getHttpServer());
+      await http.post(path).set(as('seed-norte-guard')).send(body()).expect(403);
+      await http.post(path).set(as('seed-sur-admin')).send(body()).expect(404);
+      await http
+        .post(path)
+        .set(as('seed-norte-admin'))
+        .send({ ...body(), to: [0, 0] })
+        .expect(400);
+    });
+
+    it('limita los pedidos por usuario y minuto', async () => {
+      const statuses: number[] = [];
+      // Dos ventanas de un minuto suman como mucho el doble: uno más siempre supera el límite.
+      for (let i = 0; i <= ROUTE_PREVIEW_PER_MINUTE * 2; i++) {
+        const response = await request(app.getHttpServer())
+          .post(path)
+          .set(as('seed-norte-supervisor'))
+          .send(body());
+        statuses.push(response.status);
+        if (response.status === 429) break;
+      }
+      expect(statuses.at(-1)).toBe(429);
+    });
   });
 });

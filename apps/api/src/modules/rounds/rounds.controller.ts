@@ -10,7 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { previewRoundSchema, roundInputSchema } from '@garita/shared';
+import { previewRoundSchema, roundInputSchema, routePreviewInputSchema } from '@garita/shared';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { RoundsService } from './rounds.service';
@@ -71,5 +71,18 @@ export class RoundsController {
     const parsed = previewRoundSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
     return this.rounds.preview(parsed.data);
+  }
+  @Post('rondas/ruteo-previsualizar')
+  @HttpCode(HttpStatus.OK)
+  @Roles('admin', 'supervisor')
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400 })
+  @ApiResponse({ status: 403 })
+  @ApiResponse({ status: 404 })
+  @ApiResponse({ status: 429 })
+  previewRoute(@Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
+    const parsed = routePreviewInputSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+    return this.rounds.previewRoute(parsed.data, user);
   }
 }
