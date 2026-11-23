@@ -14,9 +14,11 @@ import {
 } from '@/features/panico/bloqueado/notification';
 import { PanicOverlay } from '@/features/panico/panic-overlay';
 import { GUARD_BAR_HEIGHT, GuardBar } from '@/features/navegacion/guard-bar';
+import { ACCEPT_LEGAL_PATH, useLegalGate } from '@/features/legal/legal-screens';
 export default function GuardLayout() {
   const screenOptions = useStackOptions();
   const { user, loading } = useAuth();
+  const legal = useLegalGate(user);
   const pathname = usePathname();
   const [permissionState, setPermissionState] = useState<FieldPermissionState | null>(null);
   const [savedShiftId, setSavedShiftId] = useState<string | null>(null);
@@ -88,6 +90,8 @@ export default function GuardLayout() {
   if (loading) return null;
   if (!user) return <Redirect href="/(auth)/login" />;
   if (user.role !== 'guard') return <Redirect href="/(configuration)" />;
+  if (legal === 'checking') return null;
+  if (legal === 'require') return <Redirect href={ACCEPT_LEGAL_PATH} />;
   if (permissionState === null) return null;
   if (permissionState !== 'ok') return <Redirect href="/permisos" />;
   const isAllowedSubroute =

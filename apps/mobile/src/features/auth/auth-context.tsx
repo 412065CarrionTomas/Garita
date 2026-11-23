@@ -179,13 +179,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       legalAcceptanceRequestSchema.parse({ version: LEGAL_VERSION }),
     );
     const uid = auth.currentUser?.uid;
-    setUser((current) => {
-      if (!current) return current;
-      const accepted = { ...current, legalAcceptanceRequired: false };
-      if (uid) void AsyncStorage.setItem(profileKey(uid), JSON.stringify(accepted));
-      return accepted;
-    });
-  }, []);
+    if (!user) return;
+    const accepted = { ...user, legalAcceptanceRequired: false };
+    if (uid)
+      await AsyncStorage.setItem(profileKey(uid), JSON.stringify(accepted)).catch(() => undefined);
+    setUser(accepted);
+  }, [user]);
   const value = useMemo(
     () => ({ user, loading, error, login, logout, recover, acceptLegal }),
     [user, loading, error, login, logout, recover, acceptLegal],

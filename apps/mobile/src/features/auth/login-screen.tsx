@@ -5,7 +5,7 @@ import { StyleSheet } from 'react-native';
 import { space } from '@garita/tokens';
 import { Banner, Button, Input, Loading, Screen, Text } from '@/ui';
 import { AuthFlowError, useAuth } from './auth-context';
-import { homePath, LegalLinks } from '../legal/legal-screens';
+import { LegalLinks, roleHome } from '../legal/legal-screens';
 
 const schema = z.object({
   email: z.email('Ingresá un correo válido'),
@@ -27,7 +27,7 @@ export function LoginScreen() {
     );
   }
   if (user) {
-    router.replace(homePath(user));
+    router.replace(roleHome(user));
     return null;
   }
   async function submit() {
@@ -40,7 +40,7 @@ export function LoginScreen() {
     setBusy(true);
     try {
       const profile = await login(result.data.email, result.data.password);
-      router.replace(homePath(profile));
+      router.replace(roleHome(profile));
     } catch (reason) {
       setMessage(reason instanceof AuthFlowError ? reason.message : 'No pudimos iniciar sesión');
     } finally {
