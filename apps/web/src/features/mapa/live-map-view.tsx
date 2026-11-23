@@ -52,7 +52,7 @@ const SITE_TONE = {
   off: 'border-dashed border-muted-foreground text-muted-foreground',
 };
 
-/** Predio: contorno punteado (sólido si está seleccionado) y sello rectangular "hechos/total" con tallo. */
+/** Predio: sello rectangular "hechos/total" con tallo. */
 function SiteMarker({
   site,
   selected,
@@ -75,18 +75,6 @@ function SiteMarker({
       onMouseEnter={() => onHover?.(site.id)}
       onMouseLeave={() => onHover?.(null)}
     >
-      <button
-        type="button"
-        tabIndex={-1}
-        aria-hidden="true"
-        onClick={() => onSelect?.(site.id)}
-        className={cn(
-          'absolute top-0 left-0 size-16 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-sm bg-foreground/5',
-          SITE_TONE[site.state],
-          selected ? 'border-solid bg-foreground/10' : 'border-dashed',
-          strong ? 'border-[3px]' : 'border-[1.5px]',
-        )}
-      />
       <button
         type="button"
         aria-label={`${site.name}: ${site.description}`}
@@ -139,7 +127,6 @@ function PointMarker({
             : 'size-3',
           point.status === 'missed' ? 'border-danger bg-card' : 'border-foreground',
           point.status === 'done' ? 'bg-foreground' : 'bg-card',
-          selected && 'border-[3.5px]',
         )}
       >
         {point.status === 'missed' && (
@@ -151,7 +138,13 @@ function PointMarker({
       {labelled && (
         <span
           aria-hidden="true"
-          className="font-cond absolute top-full -mt-1 rounded-xs bg-card/85 px-1 text-xs font-semibold text-foreground"
+          className={cn(
+            'font-cond absolute top-full -mt-1 rounded-xs bg-card/85 px-1 text-xs',
+            // Selección igual que en el camino: número en azul con barra corta debajo.
+            selected
+              ? 'border-b-[2.5px] border-info font-bold text-info'
+              : 'font-semibold text-foreground',
+          )}
         >
           {index + 1}
         </span>
