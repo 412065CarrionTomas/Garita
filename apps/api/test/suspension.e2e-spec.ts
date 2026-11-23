@@ -11,6 +11,7 @@ import {
   SUSPENSION_MESSAGES,
   accountSuspendedResponseSchema,
   authMeResponseSchema,
+  LEGAL_VERSION,
   guardSelectionRequiredSchema,
 } from '@garita/shared';
 import { z } from 'zod';
@@ -781,6 +782,17 @@ describe('HU-43 HTTP: permissions, started shifts and full-cycle recovery', () =
       accountStatus: 'suspended',
     });
     expect(JSON.stringify(me.body)).not.toMatch(/grace_expired|graceChargeId|45000/);
+  });
+
+  it('acepta los términos vigentes con la cuenta suspendida', async () => {
+    await suspend();
+    await http('POST', '/api/v1/auth/terminos')
+      .set(auth('supervisor'))
+      .send({ version: LEGAL_VERSION })
+      .expect(200, { ok: true });
+    const stored = await db.user.findUniqueOrThrow({ where: { id: supervisorId } });
+    expect(stored.legalVersion).toBe(LEGAL_VERSION);
+    expect(stored.legalAcceptedAt).toBeInstanceOf(Date);
   });
 
   it('requires guard selection when regularizing with a smaller plan', async () => {

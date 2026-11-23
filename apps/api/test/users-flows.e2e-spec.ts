@@ -205,12 +205,17 @@ describe('Flujos de gestión de personal (e2e)', () => {
       .set(auth)
       .send({ version: '2000-01-01' })
       .expect(400);
+    (app.getHttpAdapter().getInstance() as unknown as Express).set('trust proxy', true);
     await request(app.getHttpServer())
       .post('/api/v1/auth/terminos')
       .set(auth)
+      .set('x-forwarded-for', '203.0.113.21')
       .send({ version: LEGAL_VERSION })
       .expect(200, { ok: true });
     expect((await me()).body).toMatchObject({ legalAcceptanceRequired: false });
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(stored).toMatchObject({ legalVersion: LEGAL_VERSION, legalAcceptedIp: '203.0.113.21' });
+    expect(stored.legalAcceptedAt).toBeInstanceOf(Date);
   });
 
   it('canje sin aceptar la versión vigente de los términos da 400 y no registra aceptación', async () => {
@@ -228,8 +233,10 @@ describe('Flujos de gestión de personal (e2e)', () => {
   it('canje válido devuelve URL de contraseña y rol; expirado, usado y reemplazado dan 410', async () => {
     const { user } = await create('redeem', 'supervisor');
     const token = tokenFromMail(mailer.sendInvitation.mock.calls.length - 1);
+    (app.getHttpAdapter().getInstance() as unknown as Express).set('trust proxy', true);
     const valid = await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
+      .set('x-forwarded-for', '203.0.113.20')
       .send({ token, acceptedLegalVersion: LEGAL_VERSION })
       .expect(201);
     expect(isRecord(valid.body) && valid.body.role).toBe('supervisor');
@@ -241,6 +248,7 @@ describe('Flujos de gestión de personal (e2e)', () => {
     const accepted = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     expect(accepted.legalVersion).toBe(LEGAL_VERSION);
     expect(accepted.legalAcceptedAt).toBeInstanceOf(Date);
+    expect(accepted.legalAcceptedIp).toBe('203.0.113.20');
     const invitation = await prisma.invitation.findFirstOrThrow({ where: { userId: user.id } });
     await prisma.invitation.update({
       where: { id: invitation.id },

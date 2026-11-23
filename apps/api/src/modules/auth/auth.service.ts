@@ -51,6 +51,8 @@ export class AuthService {
       status,
       company: user.company,
       allowedChannels: allowedChannelsForRole(user.role),
+      // Decisión: la API informa, no bloquea. Exigirlo en el guard cortaría la sincronización tardía
+      // y la atención de pánico de quienes todavía no aceptaron; los clientes aplican la compuerta.
       legalAcceptanceRequired: user.legalVersion !== LEGAL_VERSION,
     };
   }
