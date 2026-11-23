@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { legCount, routeInputSchema } from './route';
 import { validateWindowConfig } from './windows';
 
 export const roundInputSchema = z
@@ -9,10 +10,19 @@ export const roundInputSchema = z
     windowStartLocal: z.string(),
     windowEndLocal: z.string(),
     graceMinutes: z.number().int(),
+    /** Opcional: sin recorrido, la API arma uno por calles con regreso al inicio. */
+    route: routeInputSchema.optional(),
   })
   .superRefine((value, context) => {
     for (const { field, message } of validateWindowConfig(value))
       context.addIssue({ code: 'custom', message, path: [field] });
+    const legs = legCount(value.checkpointIds.length, value.route?.closed ?? true);
+    if (value.route && value.route.legs.length !== legs)
+      context.addIssue({
+        code: 'custom',
+        message: `El recorrido debe tener ${String(legs)} tramos para estos puntos.`,
+        path: ['route', 'legs'],
+      });
     if (new Set(value.checkpointIds).size !== value.checkpointIds.length)
       context.addIssue({
         code: 'custom',

@@ -1,0 +1,169 @@
+import { z } from 'zod';
+import { haversineMeters } from '../marcas/haversine';
+
+/**
+ * Recorrido ideal de una ronda: la ruta que el vigilador DEBERÍA seguir, en el orden que armó
+ * el supervisor (nunca se reordena). Un tramo va de un punto de control al siguiente; los puntos
+ * de paso (no se escanean) lo dividen en secciones, cada una por calles o trazada a mano.
+ * Coordenadas en orden GeoJSON: [longitud, latitud].
+ */
+
+export const ROUTE_LIMITS = {
+  /** Puntos de paso por tramo. */
+  waypointsPerLeg: 10,
+  /** Quiebres de una sección a mano o puntos intermedios de una por calles. */
+  viaPerSection: 50,
+  /** Coordenadas de la línea calculada de una sección. */
+  geometryPerSection: 5000,
+  /** Distancia máxima de cualquier coordenada al predio. */
+  maxMetersFromSite: 25_000,
+  /** A partir de esta distancia un punto de control se considera movido desde que se trazó. */
+  staleMeters: 5,
+} as const;
+
+export type LngLat = [number, number];
+
+const lngLatSchema = z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]);
+
+export const routeModes = ['streets', 'manual'] as const;
+export type RouteMode = (typeof routeModes)[number];
+
+/** Lo que manda el navegador: modos, puntos de paso y quiebres. La línea la calcula la API. */
+const sectionInputSchema = z.object({
+  mode: z.enum(routeModes),
+  via: z.array(lngLatSchema).max(ROUTE_LIMITS.viaPerSection),
+});
+
+const legInputSchema = z
+  .object({
+    waypoints: z.array(lngLatSchema).max(ROUTE_LIMITS.waypointsPerLeg),
+    sections: z.array(sectionInputSchema).min(1),
+  })
+  .refine((leg) => leg.sections.length === leg.waypoints.length + 1, {
+    message: 'Cada punto de paso divide el tramo: debe haber una sección más que puntos de paso.',
+    path: ['sections'],
+  });
+
+export const routeInputSchema = z.object({
+  closed: z.boolean(),
+  legs: z.array(legInputSchema),
+});
+export type RouteInput = z.infer<typeof routeInputSchema>;
+export type RouteLegInput = RouteInput['legs'][number];
+export type RouteSectionInput = RouteLegInput['sections'][number];
+
+/** Lo que se guarda en la versión de la ronda y recibe el mapa. */
+const sectionSchema = sectionInputSchema.extend({
+  geometry: z.array(lngLatSchema).min(2).max(ROUTE_LIMITS.geometryPerSection),
+  /** Por calles pero sin ruta calculada (proveedor caído o sin clave): se dibuja recta. */
+  fallback: z.boolean(),
+});
+
+export const roundRouteSchema = z.object({
+  v: z.literal(1),
+  closed: z.boolean(),
+  legs: z.array(
+    z.object({
+      /** Ubicación de los puntos de control al trazar: si cambian, el tramo quedó desactualizado. */
+      from: lngLatSchema,
+      to: lngLatSchema,
+      waypoints: z.array(lngLatSchema).max(ROUTE_LIMITS.waypointsPerLeg),
+      sections: z.array(sectionSchema).min(1),
+    }),
+  ),
+});
+export type RoundRoute = z.infer<typeof roundRouteSchema>;
+export type RouteLeg = RoundRoute['legs'][number];
+export type RouteSection = RouteLeg['sections'][number];
+
+/** Cantidad de tramos: uno entre cada par de puntos, más el regreso al inicio si es circuito. */
+export function legCount(points: number, closed: boolean): number {
+  if (points < 2) return 0;
+  return closed ? points : points - 1;
+}
+
+/** Pares consecutivos: [a, b, c] → [[a, b], [b, c]]. */
+function pairwise<T>(items: T[]): [T, T][] {
+  const pairs: [T, T][] = [];
+  let previous: T | undefined;
+  for (const item of items) {
+    if (previous !== undefined) pairs.push([previous, item]);
+    previous = item;
+  }
+  return pairs;
+}
+
+/** Pares [desde, hasta] de cada tramo, en el orden de la ronda. */
+export function legEndpoints(points: LngLat[], closed: boolean): [LngLat, LngLat][] {
+  const [first] = points;
+  if (!first || points.length < 2) return [];
+  return pairwise(closed ? [...points, first] : points);
+}
+
+/** Recorrido por defecto: cada tramo entero por calles, sin puntos de paso. */
+export function defaultRouteInput(points: number, closed = true): RouteInput {
+  return {
+    closed,
+    legs: Array.from({ length: legCount(points, closed) }, () => ({
+      waypoints: [],
+      sections: [{ mode: 'streets' as const, via: [] }],
+    })),
+  };
+}
+
+/** Inicio y fin de cada sección: los puntos de paso cortan el tramo. */
+export function sectionEndpoints(
+  from: LngLat,
+  to: LngLat,
+  waypoints: LngLat[],
+): [LngLat, LngLat][] {
+  return pairwise([from, ...waypoints, to]);
+}
+
+/** Línea de una sección a mano (o recta de reemplazo): inicio, quiebres y fin. */
+export function polyline(start: LngLat, via: LngLat[], end: LngLat): LngLat[] {
+  return [start, ...via, end];
+}
+
+export function distanceMeters(a: LngLat, b: LngLat): number {
+  return haversineMeters(a[1], a[0], b[1], b[0]);
+}
+
+/** Problemas de forma que el esquema solo no puede ver (dependen de los puntos y del predio). */
+export function validateRouteInput(
+  route: RouteInput,
+  points: LngLat[],
+  site: LngLat,
+): { path: (string | number)[]; message: string }[] {
+  const issues: { path: (string | number)[]; message: string }[] = [];
+  const expected = legCount(points.length, route.closed);
+  if (route.legs.length !== expected)
+    issues.push({
+      path: ['legs'],
+      message: `El recorrido debe tener ${String(expected)} tramos para estos puntos.`,
+    });
+  route.legs.forEach((leg, l) => {
+    const coordinates = [...leg.waypoints, ...leg.sections.flatMap((section) => section.via)];
+    if (coordinates.some((c) => distanceMeters(c, site) > ROUTE_LIMITS.maxMetersFromSite))
+      issues.push({
+        path: ['legs', l],
+        message: 'El recorrido no puede alejarse más de 25 km del predio.',
+      });
+  });
+  return issues;
+}
+
+/** Índices de los tramos cuyos puntos de control se movieron desde que se trazó el recorrido. */
+export function staleLegs(route: RoundRoute, points: LngLat[]): number[] {
+  const pairs = legEndpoints(points, route.closed);
+  if (pairs.length !== route.legs.length) return route.legs.map((_, i) => i);
+  return route.legs.flatMap((leg, i) => {
+    const pair = pairs[i];
+    if (!pair) return [i];
+    const [from, to] = pair;
+    const moved =
+      distanceMeters(leg.from, from) > ROUTE_LIMITS.staleMeters ||
+      distanceMeters(leg.to, to) > ROUTE_LIMITS.staleMeters;
+    return moved ? [i] : [];
+  });
+}
