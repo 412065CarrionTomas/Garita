@@ -65,7 +65,15 @@ describe('contenido', () => {
       expect(entry.audiences.every((audience) => audiences.has(audience))).toBe(true);
       expect(entry.answer.length).toBeGreaterThan(0);
       expect([entry.question, ...entry.answer].join(' ')).not.toMatch(/HU-\d|\.tsx?\b|\/api\//);
+      // Un `**` sin cerrar dejaría en negrita el resto del párrafo.
+      for (const paragraph of entry.answer)
+        expect((paragraph.match(/\*\*/g)?.length ?? 0) % 2).toBe(0);
     }
+  });
+
+  it('lo público no repite roles: se muestra igual con o sin sesión', () => {
+    for (const entry of faqEntries.filter((item) => item.audiences.includes('public')))
+      expect(entry.audiences).toEqual(['public']);
   });
 
   it.each(['public', ...USER_ROLES] as const)('tiene preguntas para %s', (audience) => {

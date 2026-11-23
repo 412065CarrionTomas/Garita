@@ -36,7 +36,7 @@ export const faqEntries: readonly FaqEntry[] = [
       'Cada rol accede a la plataforma que le corresponde. Quien tiene rol **Vigilador** usa únicamente la app móvil para cubrir sus turnos, y quien tiene rol **Cliente** usa únicamente el panel web para consultar sus reportes.',
       'Quienes tienen rol **Administrador** o **Supervisor** trabajan desde el panel web y también pueden ingresar a la app móvil para usar el **Modo de configuración** y asociar etiquetas NFC en los predios.',
     ],
-    audiences: ['public', 'admin', 'supervisor', 'client', 'guard'],
+    audiences: ['public'],
   },
   {
     id: 'activate-account-from-invitation',
@@ -88,7 +88,7 @@ export const faqEntries: readonly FaqEntry[] = [
       'Podés leer los **Términos y Condiciones** y la **Política de Privacidad** desde los enlaces al pie de **Iniciar sesión**, tanto en el panel web como en la app móvil (en la app se pueden consultar incluso sin conexión).',
       `Cuando cambia la versión vigente, Garita pide aceptarla al ingresar con **Aceptar y continuar** en la web o **Leí y acepto** en la app, sin bloquear alertas de pánico ni un turno ya en curso. Para consultas escribí a ${LEGAL_OWNER.email}.`,
     ],
-    audiences: ['public', 'admin', 'supervisor', 'client', 'guard'],
+    audiences: ['public'],
   },
   {
     id: 'trial-and-subscription',
@@ -265,7 +265,7 @@ export const faqEntries: readonly FaqEntry[] = [
     question: '¿Puedo instalar el panel y activar notificaciones en mi dispositivo?',
     answer: [
       'Sí. Podés instalar Garita desde la opción de instalación de un navegador compatible y abrirla desde su ícono. En iPhone o iPad, usá **Compartir** y **Agregar a pantalla de inicio**; para activar notificaciones necesitás iOS 16.4 o posterior y abrir el panel instalado.',
-      'En el menú de tu cuenta, elegí **Activar notificaciones** y aceptá el permiso. Repetí la activación en cada dispositivo. Si rechazaste el permiso, habilitalo en la configuración del navegador o del sistema y volvé a intentarlo.',
+      'Tocá la campana **Activar notificaciones** de la barra superior (en pantallas chicas está en el menú lateral) y aceptá el permiso. Repetí la activación en cada dispositivo. Si rechazaste el permiso, habilitalo en la configuración del navegador o del sistema y volvé a intentarlo.',
     ],
     audiences: ['admin', 'supervisor'],
   },
