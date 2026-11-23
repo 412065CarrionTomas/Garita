@@ -2,10 +2,12 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   complianceOwner,
   computeCompliance,
+  computeSiteDayGrid,
   localReportDay,
   type ComplianceWindow,
   type ReportDetailQuery,
   type ReportQuery,
+  type SiteDayGridQuery,
 } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportScopeService, type ReportScope } from './incident-reports-scope.service';
@@ -133,6 +135,16 @@ export class ReportsService {
         },
       };
     });
+  }
+
+  /** Casilleros: el cumplimiento de cada predio visible, día por día, en el período pedido. */
+  siteDayGrid(input: SiteDayGridQuery, user: AuthenticatedUser) {
+    return this.scopes.measured('site_day_grid', input, user, async (scope) => ({
+      desde: scope.desde,
+      hasta: scope.hasta,
+      timezone: scope.timezone,
+      ...computeSiteDayGrid(await this.windows(scope), scope.timezone, scope),
+    }));
   }
 
   detail(input: ReportDetailQuery, user: AuthenticatedUser) {
