@@ -17,7 +17,7 @@ import { COMPLIANCE_THRESHOLD } from './charts/compliance-tone';
 type Totals = ComplianceReport['totals'];
 
 /** Barra de cumplimiento: tinta; bajo el umbral, rayada en rojo (la forma avisa además del color). */
-function ComplianceBar({ value }: { value: number }) {
+export function ComplianceBar({ value }: { value: number }) {
   const low = value < COMPLIANCE_THRESHOLD;
   return (
     <span
