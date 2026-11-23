@@ -51,13 +51,13 @@ it('redimensiona con el teclado, anuncia cada paso y guarda', async () => {
   await user.keyboard('{ArrowRight}');
   await waitFor(() => {
     expect(announcer()).toHaveTextContent(
-      'Cumplimiento: columna 1, fila 6, 9 de ancho y 8 de alto.',
+      'Cumplimiento: columna 1, fila 7, 9 de ancho y 8 de alto.',
     );
   });
   await user.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}{Enter}');
   await waitFor(() => {
     expect(announcer()).toHaveTextContent(
-      'Cumplimiento quedó en columna 1, fila 6, 12 de ancho y 8 de alto.',
+      'Cumplimiento quedó en columna 1, fila 7, 12 de ancho y 8 de alto.',
     );
   });
   // El foco sigue en el asa: el DOM no se reordena mientras se edita.

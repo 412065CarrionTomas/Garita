@@ -81,11 +81,11 @@ it('un gesto que termina donde empezó no deja rastro', () => {
 
 it('restablecer vuelve al diseño por defecto y también se deshace', () => {
   const moved = run(editing(), { type: 'resize', id: 'compliance', size: { w: 12, h: 8 } });
-  expect(pos(moved, 'compliance')).toEqual([0, 5, 12, 8]);
+  expect(pos(moved, 'compliance')).toEqual([0, 6, 12, 8]);
   const reset = run(moved, { type: 'reset' });
   expect(draftOf(reset)).toBe(adminSummaryCatalog.defaultLayout.items);
   expect(run(reset, { type: 'reset' })).toBe(reset);
-  expect(pos(run(reset, { type: 'undo' }), 'compliance')).toEqual([0, 5, 12, 8]);
+  expect(pos(run(reset, { type: 'undo' }), 'compliance')).toEqual([0, 6, 12, 8]);
 });
 
 it('limita el historial', () => {

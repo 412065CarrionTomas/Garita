@@ -42,6 +42,7 @@ export function LayoutGrid({
   const instructionsId = useId();
   const { announce, region } = useAnnouncer('Cambios del diseño');
   const editing = edit !== undefined && editable;
+  const stacked = columns === 1;
   const order = editing ? edit.order : undefined;
   const placed = useMemo(() => {
     const visible = scaleLayout(items, catalog.columns, columns).filter((item) => !item.hidden);
@@ -65,7 +66,13 @@ export function LayoutGrid({
         ref={gridRef}
         aria-label={ariaLabel}
         data-editing={editing || undefined}
-        className={cn('grid auto-rows-[--spacing(12)] gap-6', className)}
+        // En una sola columna (celular) cada bloque toma su alto natural y se desplaza la página,
+        // no cada bloque: cajas con desplazamiento propio apiladas se manejan mal con el dedo.
+        className={cn(
+          'grid gap-6',
+          stacked ? 'auto-rows-auto' : 'auto-rows-[--spacing(12)]',
+          className,
+        )}
         style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
       >
         {placed.map((item) => (
@@ -75,7 +82,7 @@ export function LayoutGrid({
             className="min-h-0 min-w-0"
             style={{
               gridColumn: `${item.x + 1} / span ${item.w}`,
-              gridRow: `${item.y + 1} / span ${item.h}`,
+              gridRow: stacked ? undefined : `${item.y + 1} / span ${item.h}`,
             }}
           >
             {editing ? (

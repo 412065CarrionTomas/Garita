@@ -95,9 +95,9 @@ it('arrastrar el asa cambia el tamaño y solo se guarda al tocar Guardar', async
   });
   const body = sentLayout();
   expect(body.baseUpdatedAt).toBeNull();
-  expect(item(body, 'compliance')).toMatchObject({ x: 0, y: 5, w: 12, h: 8 });
+  expect(item(body, 'compliance')).toMatchObject({ x: 0, y: 6, w: 12, h: 8 });
   // Turnos de hoy no entra al lado: baja, sin superponerse.
-  expect(item(body, 'shiftsToday')?.y).toBeGreaterThanOrEqual(13);
+  expect(item(body, 'shiftsToday')?.y).toBeGreaterThanOrEqual(14);
   expect(await screen.findByRole('button', { name: 'Editar diseño' })).toBeVisible();
 });
 

@@ -166,7 +166,8 @@ export function EditableItem({
         aria-pressed={keyMove.grabbed}
         className={cn(
           handleClass,
-          'top-2 left-2 cursor-grab touch-none',
+          // Sobre el borde superior, centrada: no tapa el título ni el contenido del bloque.
+          'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none',
           (pointerMove.dragging || keyMove.grabbed) &&
             'cursor-grabbing bg-foreground text-background hover:bg-foreground',
         )}
@@ -183,7 +184,8 @@ export function EditableItem({
         aria-pressed={keyResize.grabbed}
         className={cn(
           handleClass,
-          'right-2 bottom-2 cursor-nwse-resize touch-none',
+          // Montada sobre la esquina inferior derecha, mitad afuera, en la separación entre bloques.
+          'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize touch-none',
           (pointerResize.dragging || keyResize.grabbed) &&
             'bg-foreground text-background hover:bg-foreground',
         )}

@@ -22,7 +22,7 @@ export const adminSummaryCatalog = defineViewCatalog({
   widgets: {
     attention: {
       title: 'Atención ahora',
-      size: { min: { w: 3, h: 3 }, max: { w: 12, h: 12 }, default: { w: 12, h: 5 } },
+      size: { min: { w: 3, h: 3 }, max: { w: 12, h: 12 }, default: { w: 12, h: 6 } },
       presentations: ['table', 'column'],
       settings: none,
     },
@@ -65,12 +65,12 @@ export const adminSummaryCatalog = defineViewCatalog({
   },
   defaultLayout: [
     { id: 'attention', x: 0, y: 0 },
-    { id: 'compliance', x: 0, y: 5 },
-    { id: 'shiftsToday', x: 8, y: 5 },
-    { id: 'incidents', x: 8, y: 10 },
-    { id: 'sites', x: 0, y: 13 },
-    { id: 'guards', x: 0, y: 20 },
-    { id: 'account', x: 0, y: 26 },
+    { id: 'compliance', x: 0, y: 6 },
+    { id: 'shiftsToday', x: 8, y: 6 },
+    { id: 'incidents', x: 8, y: 11 },
+    { id: 'sites', x: 0, y: 14 },
+    { id: 'guards', x: 0, y: 21 },
+    { id: 'account', x: 0, y: 27 },
   ],
 });
 

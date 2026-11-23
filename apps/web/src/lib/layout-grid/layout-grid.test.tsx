@@ -36,7 +36,7 @@ it('ubica cada bloque visible en la grilla, en orden de lectura', () => {
   expect(screen.queryByText('account')).toBeNull();
   const compliance = cells[1];
   expect(compliance?.style.gridColumn).toBe('1 / span 8');
-  expect(compliance?.style.gridRow).toBe('6 / span 8');
+  expect(compliance?.style.gridRow).toBe('7 / span 8');
 });
 
 it('en celular apila los bloques en una sola columna', () => {
@@ -47,6 +47,8 @@ it('en celular apila los bloques en una sola columna', () => {
   });
   const cells = renderGrid();
   expect(cells.every((cell) => cell.style.gridColumn === '1 / span 1')).toBe(true);
+  // Alto natural: sin fila fija, para que se desplace la página y no cada bloque.
+  expect(cells.every((cell) => cell.style.gridRow === '')).toBe(true);
   expect(cells.map((cell) => cell.dataset.layoutItem)).toEqual([
     'attention',
     'compliance',
