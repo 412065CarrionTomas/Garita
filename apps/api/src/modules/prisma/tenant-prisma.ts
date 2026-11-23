@@ -35,6 +35,8 @@ export const COMPANY_ID_MODELS = [
   'Notice',
   'NoticeView',
   'NotificationPreference',
+  'UserViewPreference',
+  'UserFavorite',
   'NotificationDevice',
   'Subscription',
   'SubscriptionCharge',

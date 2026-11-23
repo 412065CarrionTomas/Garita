@@ -122,6 +122,8 @@ model Company {
   incidentClassifications IncidentClassification[]
   roundReviewDecisions RoundReviewDecision[]
   notificationPreferences NotificationPreference[]
+  viewPreferences UserViewPreference[]
+  favorites UserFavorite[]
   noticeViews NoticeView[]
   notices Notice[]
   subscriptions Subscription[]
@@ -170,6 +172,8 @@ model User {
   notificationDevices NotificationDevice[]
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
   notificationPreferences NotificationPreference[]
+  viewPreferences UserViewPreference[]
+  favorites UserFavorite[]
   noticeViews NoticeView[]
   cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
   planChangePayments PlanChangePayment[]
@@ -1128,6 +1132,43 @@ model NotificationPreference {
 
   @@unique([userId, kind])
   @@index([companyId, kind, push])
+}
+
+// --- Vistas personalizables: diseño de bloques y favoritos por usuario y pantalla ---
+
+/// Layout of a customizable screen (viewKey from @garita/shared VIEW_KEYS), validated with Zod on write and reconciled on read.
+model UserViewPreference {
+  id        String   @id @default(cuid())
+  companyId String
+  userId    String
+  viewKey   String
+  /// Catalog version the layout was saved with.
+  version   Int
+  layout    Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, viewKey])
+  @@index([companyId])
+}
+
+/// Entities pinned to the top of a screen's lists, in the user's order. entityId points to Site, User (guard) or Client by entityType; visibility is checked on write and read.
+model UserFavorite {
+  id         String   @id @default(cuid())
+  companyId  String
+  userId     String
+  viewKey    String
+  entityType String
+  entityId   String
+  position   Int
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, viewKey, entityType, entityId])
+  @@index([userId, viewKey, entityType, position])
+  @@index([companyId])
 }
 
 // --- Suscripciones con Mercado Pago (HU-29) ---
