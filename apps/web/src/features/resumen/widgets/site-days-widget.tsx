@@ -69,59 +69,62 @@ export function SiteDaysWidget({ item }: WidgetProps) {
         <WidgetEmpty>Sin predios con rondas en el período.</WidgetEmpty>
       ) : (
         <div className="space-y-3 p-5">
-          <table className="w-full min-w-max border-separate border-spacing-1 text-sm">
-            <caption className="sr-only">
-              Estado de cada predio por día. Cada casillero indica si todas las rondas se hicieron a
-              tiempo, con demora o con fallas.
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col" className="t-label pr-3 text-left text-muted-foreground">
-                  Predio
-                </th>
-                {columns.map((day) => (
-                  <th
-                    key={day}
-                    scope="col"
-                    className="t-label px-0 text-center font-normal text-muted-foreground"
-                  >
-                    <span aria-hidden="true">{dayNumber(day)}</span>
-                    <span className="sr-only">{dayLabel(day)}</span>
+          {/* Solo la tabla se desplaza de costado en celular; tabIndex para llegar con teclado. */}
+          <div tabIndex={0} role="region" aria-label="Casilleros" className="overflow-x-auto">
+            <table className="w-full min-w-max border-separate border-spacing-1 text-sm">
+              <caption className="sr-only">
+                Estado de cada predio por día. Cada casillero indica si todas las rondas se hicieron
+                a tiempo, con demora o con fallas.
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col" className="t-label pr-3 text-left text-muted-foreground">
+                    Predio
                   </th>
-                ))}
-                <th scope="col">
-                  <span className="sr-only">Resumen</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sites.map((site) => {
-                const failedDays = site.cells.filter((cell) => cell.status === 'failed').length;
-                return (
-                  <tr key={site.id}>
-                    <th scope="row" className="max-w-48 truncate pr-3 text-left font-semibold">
-                      {site.name}
+                  {columns.map((day) => (
+                    <th
+                      key={day}
+                      scope="col"
+                      className="t-label px-0 text-center font-normal text-muted-foreground"
+                    >
+                      <span aria-hidden="true">{dayNumber(day)}</span>
+                      <span className="sr-only">{dayLabel(day)}</span>
                     </th>
-                    {site.cells.map((cell) => (
-                      <td key={cell.day} title={cellText(cell)} className="p-0">
-                        <Box status={cell.status} />
-                        <span className="sr-only">{cellText(cell)}</span>
+                  ))}
+                  <th scope="col">
+                    <span className="sr-only">Resumen</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sites.map((site) => {
+                  const failedDays = site.cells.filter((cell) => cell.status === 'failed').length;
+                  return (
+                    <tr key={site.id}>
+                      <th scope="row" className="max-w-48 truncate pr-3 text-left font-semibold">
+                        {site.name}
+                      </th>
+                      {site.cells.map((cell) => (
+                        <td key={cell.day} title={cellText(cell)} className="p-0">
+                          <Box status={cell.status} />
+                          <span className="sr-only">{cellText(cell)}</span>
+                        </td>
+                      ))}
+                      <td className="pl-2 whitespace-nowrap">
+                        {failedDays > 0 ? (
+                          <Stamp variant="fail">
+                            {failedDays} {failedDays === 1 ? 'día' : 'días'} con fallas
+                          </Stamp>
+                        ) : (
+                          <Stamp check>En orden</Stamp>
+                        )}
                       </td>
-                    ))}
-                    <td className="pl-2 whitespace-nowrap">
-                      {failedDays > 0 ? (
-                        <Stamp variant="fail">
-                          {failedDays} {failedDays === 1 ? 'día' : 'días'} con fallas
-                        </Stamp>
-                      ) : (
-                        <Stamp check>En orden</Stamp>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           <ul aria-label="Referencias" className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
             {(['ok', 'late', 'failed', 'pending', 'none'] as const).map((status) => (
               <li key={status} className="flex items-center gap-2">
