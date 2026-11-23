@@ -4,19 +4,18 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import {
   defaultRouteInput,
-  distanceMeters,
   previewWindows,
-  ROUTE_LIMITS,
   validateRouteInput,
   type LngLat,
   type RoundRoute,
   type RouteInput,
-  type RoutePreviewInput,
-  type RoutePreviewResponse,
+  type RoundRoutePreviewInput,
+  type RoundRoutePreviewResponse,
 } from '@garita/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,6 +30,7 @@ interface RoundInput {
   windowEndLocal: string;
   graceMinutes: number;
   route?: RouteInput;
+  allowStraight?: boolean;
 }
 
 @Injectable()
@@ -172,24 +172,14 @@ export class RoundsService {
     return { windows: previewWindows(input) };
   }
 
-  /** Checks the points and returns their location in the round's order. */
-  /** Un tramo del editor con su geometría calculada. No guarda nada. */
-  async previewRoute(input: RoutePreviewInput): Promise<RoutePreviewResponse> {
+  /** "Calcular recorrido": la ronda completa con sus fallas, sin guardar nada. */
+  async previewRoute(input: RoundRoutePreviewInput): Promise<RoundRoutePreviewResponse> {
     await this.resources.findOwnedOrThrow('Site', input.siteId);
-    const site = await this.siteRouting(input.siteId);
-    const coordinates = [
-      input.from,
-      input.to,
-      ...input.waypoints,
-      ...input.sections.flatMap((section) => section.via),
-    ];
-    // Sin este control, la vista previa serviría para rutear cualquier lugar con nuestra clave.
-    if (coordinates.some((c) => distanceMeters(c, site.location) > ROUTE_LIMITS.maxMetersFromSite))
-      throw new BadRequestException('El recorrido no puede alejarse más de 25 km del predio.');
-    const leg = await this.routes.buildLeg(input.from, input.to, input, site.profile);
-    return { sections: leg.sections };
+    const points = await this.assertCheckpoints(input.siteId, input.checkpointIds);
+    return this.computeRoute(input.siteId, input.route, points);
   }
 
+  /** Checks the points and returns their location in the round's order. */
   private async assertCheckpoints(siteId: string, ids: string[]): Promise<LngLat[]> {
     const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
       where: { id: { in: ids }, siteId, status: 'active' },
@@ -216,15 +206,33 @@ export class RoundsService {
     return { location, profile: site.maxSpeedProfile };
   }
 
+  /**
+   * Recorrido a guardar. Si el supervisor lo armó y alguna sección no se pudo calcular, no se
+   * guarda nada hasta que acepte dejarlas rectas (allowStraight). Sin recorrido (panel anterior
+   * o backfill) no hay a quién preguntarle: se guarda recto.
+   */
   private async buildRoute(siteId: string, input: RoundInput, points: LngLat[]) {
+    const { route, failures } = await this.computeRoute(
+      siteId,
+      input.route ?? defaultRouteInput(points.length),
+      points,
+    );
+    if (input.route && failures.length > 0 && !input.allowStraight)
+      throw new UnprocessableEntityException({
+        message: 'No se pudo calcular el recorrido por calles en algunos tramos.',
+        failures,
+      });
+    return route;
+  }
+
+  private async computeRoute(siteId: string, input: RouteInput, points: LngLat[]) {
     const site = await this.siteRouting(siteId);
-    const route = input.route ?? defaultRouteInput(points.length);
-    const issues = validateRouteInput(route, points, site.location);
+    const issues = validateRouteInput(input, points, site.location);
     if (issues.length > 0)
       throw new BadRequestException(
         issues.map((issue) => ({ ...issue, path: ['route', ...issue.path] })),
       );
-    return this.routes.build(route, points, site.profile);
+    return this.routes.build(input, points, site.profile);
   }
 
   private handleUnique(error: unknown): never {

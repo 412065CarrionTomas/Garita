@@ -15,14 +15,14 @@ function builder(route: RoutingPort['route']) {
 
 /** Puerto falso que "rutea" agregando el primer punto al final, para distinguirlo de la recta. */
 const echo: RoutingPort['route'] = (_profile, sections) =>
-  Promise.resolve(sections.map((section) => [...section, section[0] ?? a]));
+  Promise.resolve(sections.map((section) => ({ line: [...section, section[0] ?? a] })));
 const failing: RoutingPort['route'] = (_profile, sections) =>
-  Promise.resolve(sections.map(() => null));
+  Promise.resolve(sections.map(() => ({ failure: 'unavailable' as const })));
 
 describe('RouteBuilder', () => {
   it('pide por calles las secciones de calle y traza a mano las otras', async () => {
     const { port, routes } = builder(echo);
-    const route = await routes.build(
+    const { route, failures } = await routes.build(
       {
         closed: false,
         legs: [
@@ -46,11 +46,12 @@ describe('RouteBuilder', () => {
       { mode: 'manual', via: [bend], geometry: [gate, bend, b], fallback: false },
     ]);
     expect(roundRouteSchema.safeParse(route).success).toBe(true);
+    expect(failures).toEqual([]);
   });
 
   it('deja recta y con fallback la sección por calles si el ruteo falla', async () => {
     const { routes } = builder(failing);
-    const route = await routes.build(
+    const { route, failures } = await routes.build(
       { closed: false, legs: [{ waypoints: [], sections: [{ mode: 'streets', via: [gate] }] }] },
       [a, b],
       'walking',
@@ -61,12 +62,41 @@ describe('RouteBuilder', () => {
       geometry: [a, gate, b],
       fallback: true,
     });
+    expect(failures).toEqual([{ leg: 0, section: 0, reason: 'unavailable' }]);
+  });
+
+  it('informa tramo y sección de cada falla, sin contar las secciones a mano', async () => {
+    const { routes } = builder((_profile, sections) =>
+      Promise.resolve(
+        sections.map((_, i) =>
+          i === 1 ? { failure: 'unreachable_point' as const } : { line: [a, b] },
+        ),
+      ),
+    );
+    const leg = { waypoints: [], sections: [{ mode: 'streets' as const, via: [] }] };
+    const mixed = {
+      waypoints: [gate],
+      sections: [
+        { mode: 'manual' as const, via: [] },
+        { mode: 'streets' as const, via: [] },
+      ],
+    };
+    const { failures } = await routes.build(
+      { closed: false, legs: [leg, mixed] },
+      [a, b, c],
+      'walking',
+    );
+    expect(failures).toEqual([{ leg: 1, section: 1, reason: 'unreachable_point' }]);
   });
 
   it('manda todas las secciones de la ronda en una sola llamada, con el regreso al inicio', async () => {
     const { port, routes } = builder(failing);
     const leg = { waypoints: [], sections: [{ mode: 'streets' as const, via: [] }] };
-    const route = await routes.build({ closed: true, legs: [leg, leg, leg] }, [a, b, c], 'bicycle');
+    const { route } = await routes.build(
+      { closed: true, legs: [leg, leg, leg] },
+      [a, b, c],
+      'bicycle',
+    );
     expect(route.closed).toBe(true);
     expect(port.route).toHaveBeenCalledTimes(1);
     expect(port.route).toHaveBeenCalledWith('bicycle', [

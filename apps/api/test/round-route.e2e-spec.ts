@@ -3,7 +3,12 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { roundRouteSchema, routePreviewResponseSchema, type LngLat } from '@garita/shared';
+import {
+  roundRoutePreviewResponseSchema,
+  roundRouteSchema,
+  routeFailuresErrorSchema,
+  type LngLat,
+} from '@garita/shared';
 import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
@@ -76,31 +81,43 @@ describe('Recorrido ideal de la ronda por HTTP', () => {
     await app.close();
   });
 
-  it('calcula y guarda el recorrido; sin clave de ruteo los tramos quedan rectos', async () => {
+  it('no guarda un recorrido con secciones sin calcular hasta que se aceptan rectas', async () => {
     const [first, second] = points;
     if (!first || !second) throw new Error('Faltan puntos');
     const gate: LngLat = [(first[0] + second[0]) / 2, (first[1] + second[1]) / 2];
-    const ids = checkpointIds.slice(0, 2);
-    const created = await request(app.getHttpServer())
+    const payload = {
+      ...base,
+      name: `${prefix} mixta`,
+      checkpointIds: checkpointIds.slice(0, 2),
+      route: {
+        closed: false,
+        legs: [
+          {
+            waypoints: [gate],
+            sections: [
+              { mode: 'streets', via: [] },
+              { mode: 'manual', via: [] },
+            ],
+          },
+        ],
+      },
+    };
+    const http = request(app.getHttpServer());
+    const rejected = await http
       .post(`/api/v1/predios/${siteId}/rondas`)
       .set(as('seed-norte-admin'))
-      .send({
-        ...base,
-        name: `${prefix} mixta`,
-        checkpointIds: ids,
-        route: {
-          closed: false,
-          legs: [
-            {
-              waypoints: [gate],
-              sections: [
-                { mode: 'streets', via: [] },
-                { mode: 'manual', via: [] },
-              ],
-            },
-          ],
-        },
-      })
+      .send(payload)
+      .expect(422);
+    expect(routeFailuresErrorSchema.parse(rejected.body).failures).toEqual([
+      { leg: 0, section: 0, reason: 'not_configured' },
+    ]);
+    const db = app.get(PrismaService).systemPrisma;
+    expect(await db.round.count({ where: { name: payload.name } })).toBe(0);
+
+    const created = await http
+      .post(`/api/v1/predios/${siteId}/rondas`)
+      .set(as('seed-norte-admin'))
+      .send({ ...payload, allowStraight: true })
       .expect(201);
     const version = await app.get(PrismaService).systemPrisma.roundVersion.findFirstOrThrow({
       where: { roundId: (created.body as { id: string }).id },
@@ -164,22 +181,29 @@ describe('Recorrido ideal de la ronda por HTTP', () => {
       .expect(400);
   });
 
-  describe('vista previa de un tramo', () => {
+  describe('calcular el recorrido', () => {
     const path = '/api/v1/rondas/ruteo-previsualizar';
-    const body = () => {
-      const [from, to] = points;
-      return { siteId, from, to, waypoints: [], sections: [{ mode: 'streets', via: [] }] };
-    };
+    const leg = (via: LngLat[] = []) => ({ waypoints: [], sections: [{ mode: 'streets', via }] });
+    const body = (via: LngLat[] = []) => ({
+      siteId,
+      checkpointIds: checkpointIds.slice(0, 2),
+      route: { closed: true, legs: [leg(via), leg()] },
+    });
 
-    it('devuelve las secciones con geometría sin guardar nada', async () => {
+    it('devuelve el recorrido y sus fallas sin guardar nada', async () => {
       const response = await request(app.getHttpServer())
         .post(path)
         .set(as('seed-norte-admin'))
         .send(body())
         .expect(200);
-      const { sections } = routePreviewResponseSchema.parse(response.body);
-      expect(sections).toEqual([
-        { mode: 'streets', via: [], geometry: [points[0], points[1]], fallback: true },
+      const { route, failures } = roundRoutePreviewResponseSchema.parse(response.body);
+      expect(route.legs.map((l) => l.sections[0]?.geometry)).toEqual([
+        [points[0], points[1]],
+        [points[1], points[0]],
+      ]);
+      expect(failures).toEqual([
+        { leg: 0, section: 0, reason: 'not_configured' },
+        { leg: 1, section: 0, reason: 'not_configured' },
       ]);
     });
 
@@ -190,7 +214,7 @@ describe('Recorrido ideal de la ronda por HTTP', () => {
       await http
         .post(path)
         .set(as('seed-norte-admin'))
-        .send({ ...body(), to: [0, 0] })
+        .send(body([[0, 0]]))
         .expect(400);
     });
   });

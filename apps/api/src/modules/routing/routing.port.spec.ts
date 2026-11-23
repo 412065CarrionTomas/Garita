@@ -54,7 +54,7 @@ describe('OpenRouteServiceRouting', () => {
   it('pide la ruta con el perfil del predio y guarda la línea en caché', async () => {
     const { cache, fetchMock, routing } = setup();
     fetchMock.mockReturnValue(feature([a, mid1, b], [0, 2]));
-    await expect(routing.route('walking', [[a, b]])).resolves.toEqual([[a, mid1, b]]);
+    await expect(routing.route('walking', [[a, b]])).resolves.toEqual([{ line: [a, mid1, b] }]);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://ors.test/v2/directions/foot-walking/geojson');
     expect(init.headers).toMatchObject({ Authorization: 'clave' });
@@ -70,9 +70,9 @@ describe('OpenRouteServiceRouting', () => {
       [c, a],
     ];
     await expect(routing.route('vehicle', sections)).resolves.toEqual([
-      [a, mid1, b],
-      [b, mid2, c],
-      [c, a],
+      { line: [a, mid1, b] },
+      { line: [b, mid2, c] },
+      { line: [c, a] },
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sentCoordinates(fetchMock)).toEqual([a, b, c, a]);
@@ -91,16 +91,12 @@ describe('OpenRouteServiceRouting', () => {
       [b, c],
       [c, a],
     ]);
-    expect(lines).toEqual([
-      [a, mid1, b],
-      [b, mid2, c],
-      [c, a],
-    ]);
+    expect(lines).toEqual([{ line: [a, mid1, b] }, { line: [b, mid2, c] }, { line: [c, a] }]);
     // La sección del medio salió de caché: las otras dos ya no se tocan y van por separado.
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('deja todo el grupo en null si los way_points no coinciden con lo enviado', async () => {
+  it('deja todo el grupo sin calcular si los way_points no coinciden con lo enviado', async () => {
     const { cache, fetchMock, routing } = setup();
     fetchMock.mockReturnValue(feature([a, b, c], [0, 2]));
     await expect(
@@ -108,30 +104,75 @@ describe('OpenRouteServiceRouting', () => {
         [a, b],
         [b, c],
       ]),
-    ).resolves.toEqual([null, null]);
+    ).resolves.toEqual([{ failure: 'unavailable' }, { failure: 'unavailable' }]);
     expect(cache.set).not.toHaveBeenCalled();
   });
 
-  it('devuelve null ante una respuesta mal formada', async () => {
+  it('informa servicio no disponible ante una respuesta mal formada', async () => {
     const { cache, fetchMock, routing } = setup();
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ features: [{ geometry: { type: 'Point' } }] })),
     );
-    await expect(routing.route('bicycle', [[a, b]])).resolves.toEqual([null]);
+    await expect(routing.route('bicycle', [[a, b]])).resolves.toEqual([{ failure: 'unavailable' }]);
     expect(cache.set).not.toHaveBeenCalled();
   });
 
-  it('devuelve null ante un error HTTP', async () => {
+  it('informa el límite de pedidos ante 429 o 403', async () => {
     const { fetchMock, routing } = setup();
-    fetchMock.mockResolvedValue(new Response('{}', { status: 429 }));
-    await expect(routing.route('walking', [[a, b]])).resolves.toEqual([null]);
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 429 }));
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 403 }));
+    for (let i = 0; i < 2; i++)
+      await expect(routing.route('walking', [[a, b]])).resolves.toEqual([
+        { failure: 'rate_limited' },
+      ]);
   });
 
-  it('no pide una sección que sola supera el tope de puntos', async () => {
+  it('marca la sección del punto que no está cerca de una calle y saltea las demás', async () => {
+    const { cache, fetchMock, routing } = setup();
+    const message =
+      'Could not find routable point within a radius of 350.0 meters of specified coordinate 2: -58.375 -34.605.';
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 2010, message } }), { status: 404 }),
+    );
+    // Pedido: [a, b, mid1, c, a] → la coordenada 2 (mid1) es un quiebre de la sección 1.
+    await expect(
+      routing.route('walking', [
+        [a, b],
+        [b, mid1, c],
+        [c, a],
+      ]),
+    ).resolves.toEqual([
+      { failure: 'skipped' },
+      { failure: 'unreachable_point' },
+      { failure: 'skipped' },
+    ]);
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
+  it('marca la sección sin camino entre sus puntos', async () => {
     const { fetchMock, routing } = setup();
-    const huge = Array.from({ length: ORS_MAX_COORDINATES + 1 }, (_, i): LngLat => [i / 1000, 0]);
-    await expect(routing.route('walking', [huge])).resolves.toEqual([null]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    const message =
+      'Route could not be found - Unable to find a route between points 0 (…) and 1 (…).';
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 2009, message } }), { status: 404 }),
+    );
+    await expect(
+      routing.route('walking', [
+        [a, b],
+        [b, c],
+      ]),
+    ).resolves.toEqual([{ failure: 'no_route' }, { failure: 'skipped' }]);
+  });
+
+  it('sin saber el punto, marca todo el pedido con el motivo', async () => {
+    const { fetchMock, routing } = setup();
+    fetchMock.mockResolvedValue(new Response('no es json', { status: 500 }));
+    await expect(
+      routing.route('walking', [
+        [a, b],
+        [b, c],
+      ]),
+    ).resolves.toEqual([{ failure: 'unavailable' }, { failure: 'unavailable' }]);
   });
 
   it('corta el pedido a los 5 segundos y devuelve null', async () => {
@@ -147,7 +188,7 @@ describe('OpenRouteServiceRouting', () => {
     );
     const result = routing.route('walking', [[a, b]]);
     await jest.advanceTimersByTimeAsync(ORS_TIMEOUT_MS);
-    await expect(result).resolves.toEqual([null]);
+    await expect(result).resolves.toEqual([{ failure: 'unavailable' }]);
   });
 });
 
@@ -179,8 +220,10 @@ describe('chainSections', () => {
 });
 
 describe('NullRouting', () => {
-  it('nunca calcula: todo queda recto', async () => {
-    await expect(new NullRouting().route('walking', [[a, b]])).resolves.toEqual([null]);
+  it('nunca calcula: informa que falta la clave', async () => {
+    await expect(new NullRouting().route('walking', [[a, b]])).resolves.toEqual([
+      { failure: 'not_configured' },
+    ]);
   });
 });
 

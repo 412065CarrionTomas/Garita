@@ -10,7 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { previewRoundSchema, roundInputSchema, routePreviewInputSchema } from '@garita/shared';
+import { previewRoundSchema, roundInputSchema, roundRoutePreviewInputSchema } from '@garita/shared';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { RoundsService } from './rounds.service';
@@ -35,6 +35,7 @@ export class RoundsController {
   @ApiResponse({ status: 403 })
   @ApiResponse({ status: 404 })
   @ApiResponse({ status: 409 })
+  @ApiResponse({ status: 422, description: 'Secciones sin calcular; reenviar con allowStraight' })
   create(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = roundInputSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
@@ -47,6 +48,7 @@ export class RoundsController {
   @ApiResponse({ status: 403 })
   @ApiResponse({ status: 404 })
   @ApiResponse({ status: 409 })
+  @ApiResponse({ status: 422, description: 'Secciones sin calcular; reenviar con allowStraight' })
   update(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = roundInputSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
@@ -80,7 +82,7 @@ export class RoundsController {
   @ApiResponse({ status: 403 })
   @ApiResponse({ status: 404 })
   previewRoute(@Body() body: unknown) {
-    const parsed = routePreviewInputSchema.safeParse(body);
+    const parsed = roundRoutePreviewInputSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
     return this.rounds.previewRoute(parsed.data);
   }
