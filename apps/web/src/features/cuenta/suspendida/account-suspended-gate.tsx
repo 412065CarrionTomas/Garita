@@ -36,7 +36,13 @@ export function AccountSuspendedGate({
       window.removeEventListener('garita:account-suspended', reject);
     };
   }, [pathname, key]);
-  if (!suspended || (role === 'admin' && pathname === '/suscripcion') || (live && denied !== key))
+  // La ayuda es estática: sigue disponible con la cuenta suspendida.
+  if (
+    !suspended ||
+    pathname === '/ayuda' ||
+    (role === 'admin' && pathname === '/suscripcion') ||
+    (live && denied !== key)
+  )
     return children;
   return (
     <div className="space-y-4">

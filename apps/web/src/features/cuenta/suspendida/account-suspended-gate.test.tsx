@@ -36,6 +36,17 @@ describe('HU-43 suspended gate', () => {
     );
     expect(screen.getByText('Pago')).toBeInTheDocument();
   });
+  it.each(['admin', 'supervisor', 'client'] as const)('keeps the FAQ readable for %s', (role) => {
+    window.history.replaceState({}, '', '/ayuda');
+    render(
+      <MemoryRouter initialEntries={['/ayuda']}>
+        <AccountSuspendedGate suspended role={role}>
+          <p>Preguntas</p>
+        </AccountSuspendedGate>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('Preguntas')).toBeInTheDocument();
+  });
   it('keeps live supervision usable and restores blocked content on reactivation', () => {
     window.history.replaceState({}, '', '/personal');
     const view = render(

@@ -45,6 +45,7 @@ import { IncidentReportsPage } from '../reportes/incidentes/incident-reports-pag
 import { SubscriptionPage } from '../suscripcion/subscription-page';
 import { PrivacyPage, TermsPage } from '../legal/legal-pages';
 import { LegalAcceptanceGate } from '../legal/legal-acceptance-gate';
+import { FaqPage, PublicFaqPage } from '../ayuda/faq-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -157,6 +158,7 @@ export function RoleLayout() {
       accountLinks={[
         ...(staff ? [{ path: '/avisos/preferencias', title: 'Preferencias de notificación' }] : []),
         ...(user.role === 'admin' ? [{ path: '/suscripcion', title: 'Suscripción y cobros' }] : []),
+        { path: '/ayuda', title: 'Preguntas frecuentes' },
       ]}
       alert={staff ? { path: '/alertas-panico', title: 'Pánico', count: panicCount } : undefined}
       notice={staff && !realtime.connected ? 'Reconectando…' : undefined}
@@ -211,6 +213,21 @@ export function AppRoutes() {
       <Route path="/activar" element={<ActivationPage />} />
       <Route path="/terminos" element={<TermsPage />} />
       <Route path="/privacidad" element={<PrivacyPage />} />
+      {/* Sin sesión, la ayuda general; con sesión, dentro del panel y con las preguntas del rol. */}
+      <Route
+        path="/ayuda"
+        element={
+          user ? (
+            <Protected roles={['admin', 'supervisor', 'client']}>
+              <RoleLayout />
+            </Protected>
+          ) : (
+            <PublicFaqPage />
+          )
+        }
+      >
+        <Route index element={<FaqPage />} />
+      </Route>
       <Route
         path="/"
         element={<Navigate to={user ? homePathForRole(user.role) : '/ingresar'} replace />}
