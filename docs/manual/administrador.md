@@ -19,6 +19,9 @@ Desde una pantalla de 1024 px de ancho o más, tocá **Editar diseño**:
 - En **Bloques** podés ocultar o mostrar cada bloque y elegir cómo se ve (por ejemplo,
   Atención ahora como tabla o como columna compacta, o los incidentes en barras, torta o
   tabla) y su período.
+- También en **Bloques** está **Casilleros por predio**, oculto al principio: un casillero
+  por predio y por día que muestra de un vistazo dónde y cuándo hubo rondas con demora o no
+  realizadas. Elegí ver 7, 14 o 30 días.
 - **Deshacer** (o Ctrl+Z) vuelve un paso atrás y **Restablecer diseño** vuelve al diseño
   original.
 

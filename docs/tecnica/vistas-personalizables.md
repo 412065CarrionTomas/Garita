@@ -45,6 +45,7 @@ Cuando cambia un catálogo (bloques, tamaños o ajustes), se incrementa su `vers
 | `DELETE` | `/mis-preferencias/vistas/:vista` | Vuelve al diseño por defecto (204).                                                                                                                        |
 | `GET`    | `/mis-favoritos/:vista/:tipo`     | Ids fijados en orden; omite los desactivados o que el usuario ya no puede ver.                                                                             |
 | `PUT`    | `/mis-favoritos/:vista/:tipo`     | Reemplaza la lista completa. 400 si algún id no existe o no es visible para el usuario.                                                                    |
+| `GET`    | `/reportes/rondas/casilleros`     | Cumplimiento de cada predio día por día para el bloque Casilleros. Período local `[desde, hasta)` de hasta 31 días (400 si es más largo).                  |
 
 - Una pantalla desconocida da 404 y un rol que no está en `catalog.roles` da 403.
 - La visibilidad de favoritos pasa por `FAVORITE_VISIBILITY_PORT` (adaptador Prisma con el cliente por empresa, que ya limita al supervisor a sus predios): el módulo no lee las tablas de otros dominios.
@@ -84,9 +85,15 @@ Actualización optimista: la lista cambia enseguida y, si la API falla, vuelve a
 
 La API no necesita cambios: valida contra el catálogo de la pantalla nueva.
 
+## Bloque Casilleros por predio
+
+De la propuesta B. Está en el catálogo pero **oculto** en el diseño por defecto: cada usuario lo muestra desde **Bloques** y elige 7, 14 o 30 días.
+
+- `computeSiteDayGrid` (`packages/shared/src/reports/compliance.ts`) arma un casillero por predio y día, y `siteDayStatus` le da un estado: `failed` (alguna no realizada o incompleta), `late`, `ok`, `pending` (sin sincronizar o en revisión) o `none` (sin rondas). La API (`reports.service.ts`) y los tests usan la misma función.
+- La web (`widgets/site-days-widget.tsx`) lo dibuja como una tabla real con predios en filas y días en columnas. Cada estado se distingue por forma y color, lleva su texto para el lector de pantalla y aparece en las referencias. En celular solo la tabla se desplaza de costado: es una región que se alcanza con el teclado.
+
 ## Pendientes y límites conocidos
 
 - **Cambios sin guardar:** `useLeaveGuard` (`apps/web/src/lib/use-leave-guard.tsx`) pide confirmación al cerrar o recargar la pestaña y al tocar un enlace interno, frenando el clic antes de que el router navegue. El botón Atrás del navegador no se intercepta: con `BrowserRouter` no hay forma confiable (`useBlocker` requiere un router de datos). Si se migra a `createBrowserRouter`, sumar `useBlocker` en ese hook.
 - **Zona horaria de los períodos del Resumen:** la web no conoce la zona de la empresa antes de pedir un informe y usa `America/Argentina/Buenos_Aires`, igual que Cumplimiento (`features/resumen/queries.ts`). Si se agrega a `/auth/me`, usarla ahí.
 - **Favoritos de clientes:** la API y el hook los admiten, pero el informe de cumplimiento no trae datos por cliente, así que el Resumen no tiene un bloque que los liste. Los predios y los vigiladores sí se pueden fijar.
-- **Casilleros predio × día** (propuesta B): necesitan que `/reportes/rondas` devuelva el cumplimiento cruzado por predio y día.
