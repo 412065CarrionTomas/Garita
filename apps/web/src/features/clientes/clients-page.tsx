@@ -7,6 +7,7 @@ import { useAuth } from '../auth/auth-context';
 import { ClientUsersPanel } from './client-users-panel';
 import { SitesMap } from '../mapa/sites-map';
 import { errorMessage } from '@/lib/error-message';
+import { useBusy } from '@/lib/use-busy';
 import { z } from 'zod';
 import {
   Dialog,
@@ -47,6 +48,7 @@ const response = z.looseObject({ id: z.string() });
 export function ClientsPage() {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const { busy, run } = useBusy();
   const [form, setForm] = useState({ name: '', contactName: '', phone: '', email: '', taxId: '' });
   const clients = useQuery({
     queryKey: ['clientes'],
@@ -150,7 +152,7 @@ export function ClientsPage() {
                   Cancelar
                 </Button>
               </DialogClose>
-              <Button>Registrar cliente</Button>
+              <Button disabled={create.isPending}>Registrar cliente</Button>
             </div>
             {error && (
               <Alert variant="destructive" className="sm:col-span-2">
@@ -289,15 +291,17 @@ export function ClientsPage() {
                 return;
               }
               if (!editing) return;
-              void apiPatch(`/clientes/${editing.id}`, parsed.data, clientInputSchema, response)
-                .then(() => {
-                  setEditing(null);
-                  setEditError('');
-                  return queryClient.invalidateQueries({ queryKey: ['clientes'] });
-                })
-                .catch((caught: unknown) => {
-                  setEditError(errorMessage(caught, 'Ya existe un cliente con ese nombre'));
-                });
+              void run(() =>
+                apiPatch(`/clientes/${editing.id}`, parsed.data, clientInputSchema, response)
+                  .then(() => {
+                    setEditing(null);
+                    setEditError('');
+                    return queryClient.invalidateQueries({ queryKey: ['clientes'] });
+                  })
+                  .catch((caught: unknown) => {
+                    setEditError(errorMessage(caught, 'Ya existe un cliente con ese nombre'));
+                  }),
+              );
             }}
           >
             {(['name', 'contactName', 'phone', 'email', 'taxId'] as const).map((key) => (
@@ -339,7 +343,7 @@ export function ClientsPage() {
               >
                 Cancelar
               </Button>
-              <Button>Guardar cambios</Button>
+              <Button disabled={busy}>Guardar cambios</Button>
             </div>
           </form>
         </DialogContent>

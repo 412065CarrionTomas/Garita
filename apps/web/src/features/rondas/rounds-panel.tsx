@@ -3,6 +3,7 @@ import { defaultGraceMinutes, previewWindows, roundInputSchema } from '@garita/s
 import { useState } from 'react';
 import { z } from 'zod';
 import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { useBusy } from '@/lib/use-busy';
 import { useAuth } from '../auth/auth-context';
 
 import { StatusBadge } from '@/components/status-badge';
@@ -48,6 +49,7 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
     queryFn: () => apiGet(`/predios/${site.id}/puntos`, checkpointsSchema),
   });
   const [name, setName] = useState('');
+  const { busy, run } = useBusy();
   const [frequency, setFrequency] = useState(120);
   const [start, setStart] = useState('22:00');
   const [end, setEnd] = useState('06:00');
@@ -62,7 +64,8 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
     windowEndLocal: end,
     frequencyMinutes: frequency,
   });
-  const save = async () => {
+  const save = () => run(saveNow);
+  const saveNow = async () => {
     const parsed = roundInputSchema.safeParse({
       name,
       checkpointIds: selected,
@@ -442,7 +445,9 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
                   ))}
                 </Alert>
               )}
-              <Button type="submit">Guardar ronda</Button>
+              <Button type="submit" disabled={busy}>
+                Guardar ronda
+              </Button>
             </form>
           )}
         </CardContent>

@@ -12,6 +12,7 @@ import {
   usersPageSchema,
 } from '@garita/shared';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { useBusy } from '@/lib/use-busy';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { SegmentedFilter } from '@/components/segmented-filter';
@@ -92,6 +93,7 @@ export function PersonalPage() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const { busy, run } = useBusy();
   const [editing, setEditing] = useState<Person | null>(null);
   const [deactivating, setDeactivating] = useState<Person | null>(null);
   const [deriveToUserId, setDeriveToUserId] = useState('');
@@ -279,8 +281,11 @@ export function PersonalPage() {
       setFormError(failure);
     }
   };
-  const saveEdit = async (event: React.SyntheticEvent<HTMLFormElement>) => {
+  const saveEdit = (event: React.SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
+    return run(() => saveEditNow(event));
+  };
+  const saveEditNow = async (event: React.SyntheticEvent<HTMLFormElement>) => {
     if (!editing) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const parsed = updateUserRequestSchema.safeParse(values);
@@ -307,12 +312,6 @@ export function PersonalPage() {
       setFormError('No se pudo editar el registro.');
     }
   };
-  const renderErrors = () =>
-    Object.entries(errors).map(([field, message]) => (
-      <span id={`${field}-error`} className="text-sm text-danger" key={field}>
-        {message}
-      </span>
-    ));
   return (
     <section aria-labelledby="personal-title" className="min-w-0 space-y-6">
       <PageHeader
@@ -386,19 +385,21 @@ export function PersonalPage() {
               setErrors({});
               setGuardLimitTrial(null);
               setFormError('');
-              void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
-                .then(async () => {
-                  await refresh();
-                  setCreating(false);
-                })
-                .catch((error: unknown) => {
-                  if (handleGuardLimit(error)) return;
-                  setFormError(
-                    error instanceof ApiError && error.status === 409
-                      ? 'Ese correo ya está en uso'
-                      : 'No se pudo crear la invitación.',
-                  );
-                });
+              void run(() =>
+                apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
+                  .then(async () => {
+                    await refresh();
+                    setCreating(false);
+                  })
+                  .catch((error: unknown) => {
+                    if (handleGuardLimit(error)) return;
+                    setFormError(
+                      error instanceof ApiError && error.status === 409
+                        ? 'Ese correo ya está en uso'
+                        : 'No se pudo crear la invitación.',
+                    );
+                  }),
+              );
             }}
           >
             {(['firstName', 'lastName', 'email', 'phone', 'employeeNumber'] as const).map(
@@ -456,7 +457,9 @@ export function PersonalPage() {
               >
                 Cancelar
               </Button>
-              <Button type="submit">Enviar invitación</Button>
+              <Button type="submit" disabled={busy}>
+                Enviar invitación
+              </Button>
             </div>
           </form>
         </DialogContent>
@@ -747,7 +750,9 @@ export function PersonalPage() {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit">Guardar cambios</Button>
+                <Button type="submit" disabled={busy}>
+                  Guardar cambios
+                </Button>
               </div>
             </form>
           </DialogContent>
@@ -1056,7 +1061,6 @@ export function PersonalPage() {
           </DialogContent>
         )}
       </Dialog>
-      {renderErrors()}
     </section>
   );
 }

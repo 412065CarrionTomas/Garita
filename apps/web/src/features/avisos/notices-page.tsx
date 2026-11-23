@@ -46,6 +46,7 @@ export function NoticesPage() {
         <div className="space-y-2">
           <Label htmlFor="notice-kind">Tipo</Label>
           <NativeSelect
+            className="w-full"
             id="notice-kind"
             value={kind}
             onChange={(e) => {
@@ -63,6 +64,7 @@ export function NoticesPage() {
         <div className="space-y-2">
           <Label htmlFor="notice-status">Estado</Label>
           <NativeSelect
+            className="w-full"
             id="notice-status"
             value={status}
             onChange={(e) => {
@@ -77,6 +79,7 @@ export function NoticesPage() {
         <div className="space-y-2">
           <Label htmlFor="notice-site">Predio</Label>
           <NativeSelect
+            className="w-full"
             id="notice-site"
             value={siteId}
             disabled={sites.isPending || sites.isError}
