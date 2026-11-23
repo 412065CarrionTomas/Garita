@@ -184,7 +184,8 @@ describe('reconcileLayout', () => {
     });
     const result = reconcileLayout(adminSummaryCatalog, stored);
     expect(item(result, 'attention').y).toBe(0);
-    expect(item(result, 'account')).toMatchObject({ hidden: true, y: 70 });
+    const accountY = item(adminSummaryCatalog.defaultLayout, 'account').y;
+    expect(item(result, 'account')).toMatchObject({ hidden: true, y: accountY + 50 });
   });
 });
 

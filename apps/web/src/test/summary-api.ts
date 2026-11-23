@@ -26,6 +26,26 @@ compliance.daily = [
   { id: '2026-11-22', name: '2026-11-22', totals: { ...compliance.totals, percentage: 86 } },
   { id: '2026-11-23', name: '2026-11-23', totals: compliance.totals },
 ];
+compliance.byGuard = [
+  {
+    id: 'g1',
+    name: 'Marta Ríos',
+    deactivated: false,
+    totals: { ...compliance.totals, percentage: 85 },
+  },
+  {
+    id: 'g2',
+    name: 'Hugo Paz',
+    deactivated: true,
+    totals: { ...compliance.totals, percentage: 70 },
+  },
+  {
+    id: null,
+    name: 'Sin vigilador',
+    deactivated: false,
+    totals: { ...compliance.totals, percentage: 50 },
+  },
+];
 compliance.bySite = [
   { id: 'p1', name: 'Depósito Sur', totals: { ...compliance.totals, percentage: 82.4 } },
   { id: 'p2', name: 'Oficinas Centro', totals: { ...compliance.totals, percentage: 98.2 } },
@@ -44,6 +64,7 @@ export function createSummaryApi() {
     if (fail) return Promise.reject(new ApiError('falla', 500));
     if (path === '/mis-favoritos/admin-summary/site')
       return Promise.resolve({ ids: [...state.favoriteSites] });
+    if (path === '/mis-favoritos/admin-summary/guard') return Promise.resolve({ ids: [] });
     if (path.startsWith('/mis-preferencias/vistas/admin-summary'))
       return Promise.resolve({
         layout: state.savedLayout,

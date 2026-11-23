@@ -3,6 +3,10 @@ import { defineViewCatalog } from './catalog';
 
 const period = z.enum(['7d', '30d']).default('30d');
 const none = z.object({});
+const ranking = z.object({
+  sort: z.enum(['worst', 'name']).default('worst'),
+  limit: z.enum(['5', '10', 'all']).default('5'),
+});
 
 /**
  * Resumen de la empresa del administrador. El diseño por defecto es la propuesta A ("Foja de
@@ -10,7 +14,8 @@ const none = z.object({});
  */
 export const adminSummaryCatalog = defineViewCatalog({
   key: 'admin-summary',
-  version: 1,
+  // 2: se agrega el bloque de vigiladores; los diseños guardados lo reciben al reconciliarse.
+  version: 2,
   columns: 12,
   roles: ['admin'],
   favoriteTypes: ['site', 'guard', 'client'],
@@ -37,10 +42,13 @@ export const adminSummaryCatalog = defineViewCatalog({
       title: 'Predios',
       size: { min: { w: 6, h: 4 }, max: { w: 12, h: 14 }, default: { w: 8, h: 7 } },
       presentations: ['table'],
-      settings: z.object({
-        sort: z.enum(['worst', 'name']).default('worst'),
-        limit: z.enum(['5', '10', 'all']).default('5'),
-      }),
+      settings: ranking,
+    },
+    guards: {
+      title: 'Vigiladores',
+      size: { min: { w: 6, h: 4 }, max: { w: 12, h: 14 }, default: { w: 12, h: 6 } },
+      presentations: ['table'],
+      settings: ranking,
     },
     incidents: {
       title: 'Incidentes',
@@ -61,7 +69,8 @@ export const adminSummaryCatalog = defineViewCatalog({
     { id: 'shiftsToday', x: 8, y: 5 },
     { id: 'incidents', x: 8, y: 10 },
     { id: 'sites', x: 0, y: 13 },
-    { id: 'account', x: 0, y: 20 },
+    { id: 'guards', x: 0, y: 20 },
+    { id: 'account', x: 0, y: 26 },
   ],
 });
 

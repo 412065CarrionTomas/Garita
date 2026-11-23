@@ -147,3 +147,28 @@ describe('mantener apretado el ⋮', () => {
     expect(await screen.findByRole('menu')).toBeVisible();
   });
 });
+
+it('fija vigiladores activos; los desactivados y "Sin vigilador" no se pueden fijar', async () => {
+  const user = userEvent.setup();
+  renderWithQueryClient(<SummaryPage />);
+  const block = await screen.findByRole('region', { name: /Vigiladores/ });
+  await within(block).findByText('Marta Ríos');
+  await user.click(
+    within(block).getByRole('button', { name: 'Acciones de Hugo Paz (desactivado)' }),
+  );
+  expect(screen.queryByRole('menuitem', { name: 'Fijar arriba de todo' })).toBeNull();
+  await user.keyboard('{Escape}');
+  await user.click(within(block).getByRole('button', { name: 'Acciones de Sin vigilador' }));
+  expect(screen.queryByRole('menuitem', { name: 'Fijar arriba de todo' })).toBeNull();
+  await user.keyboard('{Escape}');
+  await user.click(within(block).getByRole('button', { name: 'Acciones de Marta Ríos' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Fijar arriba de todo' }));
+  await waitFor(() => {
+    expect(apiPut).toHaveBeenCalledWith(
+      '/mis-favoritos/admin-summary/guard',
+      { ids: ['g1'] },
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});

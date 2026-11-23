@@ -50,6 +50,28 @@ const SUMMARY_BLOCKS = {
       },
     ],
   },
+  guards: {
+    presentations: ['table'],
+    settings: [
+      {
+        key: 'sort',
+        label: 'Orden',
+        options: [
+          { value: 'worst', label: 'Peor primero' },
+          { value: 'name', label: 'Por nombre' },
+        ],
+      },
+      {
+        key: 'limit',
+        label: 'Cantidad',
+        options: [
+          { value: '5', label: '5' },
+          { value: '10', label: '10' },
+          { value: 'all', label: 'Todos' },
+        ],
+      },
+    ],
+  },
   incidents: {
     presentations: ['bars', 'pie', 'table'],
     settings: [{ key: 'period', label: 'Período', options: PERIOD }],

@@ -31,6 +31,7 @@ it('ubica cada bloque visible en la grilla, en orden de lectura', () => {
     'shiftsToday',
     'incidents',
     'sites',
+    'guards',
   ]);
   expect(screen.queryByText('account')).toBeNull();
   const compliance = cells[1];
@@ -52,5 +53,6 @@ it('en celular apila los bloques en una sola columna', () => {
     'shiftsToday',
     'incidents',
     'sites',
+    'guards',
   ]);
 });
