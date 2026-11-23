@@ -296,6 +296,25 @@ Control segmentado (igual que los chips) que cambia cómo se muestra el mismo da
 
 Cuando una vista es un gráfico, sigue las mismas reglas que el resto del sistema: marcas en tinta (lo normal), ámbar para demoras y rojo con trama diagonal para fallas, de modo que se distingan sin color; ejes, rejilla y marcos en filete, sin degradados, sombras ni esquinas redondeadas; barras de borde recto; cifras tabulares y etiquetas en condensada; leyenda y valores escritos directamente sobre las marcas cuando entran; el tooltip es un recuadro de hoja con borde de 1,5 px. Una serie que no es excepción no usa color.
 
+La torta se usa solo para partes de un todo con pocas categorías (hasta seis), nunca para series en el tiempo. Las porciones normales se distinguen por intensidad de tinta y las fallas llevan la trama roja; siempre va con su leyenda escrita y su tabla equivalente.
+
+### Bloques y modo edición
+
+Las pantallas de resumen se arman con bloques: hojas planas con título en condensada, la acción hacia la pantalla completa a la derecha y un cuerpo con desplazamiento propio que se adapta al tamaño del bloque. Los bloques viven en una grilla de 12 columnas, con filas de 48 px y 24 px de separación. La compactación vertical es obligatoria: ningún bloque queda con hueco encima.
+
+El usuario puede editar el diseño desde 1024 px de ancho con **Editar diseño**. En edición:
+
+- cada bloque lleva un marco punteado (todavía no está fijo), que se vuelve sólido mientras se mueve;
+- aparecen dos asas cuadradas de 36 px con borde de 1,5 px en tinta: mover arriba a la izquierda y cambiar el tamaño abajo a la derecha. Tomada, el asa se invierte (fondo tinta);
+- el contenido del bloque queda inerte;
+- la barra de acciones reemplaza a **Editar diseño**: Bloques, Deshacer, Restablecer diseño, Cancelar y Guardar diseño (principal). Nada se guarda hasta tocar Guardar; cancelar con cambios pide confirmación.
+
+El panel **Bloques** es una hoja lateral con un grupo por bloque: interruptor de visibilidad y controles segmentados de presentación y ajustes.
+
+### Menú de fila (⋮)
+
+Las filas que se pueden fijar o reordenar llevan al final un botón ⋮ de 36 px. Un toque abre sus acciones (fijar, mover, quitar), que también son la alternativa al arrastre. Mantenerlo apretado 300 ms lo convierte en asa: la fila sigue al puntero y las demás le hacen lugar. Las filas fijadas van primero, con un ícono de alfiler, un fondo de hoja teñida y un filete más grueso debajo del grupo. Cada cambio deja un aviso en línea con Deshacer.
+
 ### Campos y diálogos
 
 Campos con rótulo condensado encima, borde de 1,5 px en filete fuerte, radio de 3 px y alto de 40 px. Diálogos de 520 px con título en condensada y acciones a la derecha. Las opciones excluyentes (por ejemplo, "Interno" o "Visible al cliente") son bloques seleccionables con recuadro interior de 2 px.
@@ -320,6 +339,7 @@ Principios: movimiento funcional, una vez por acción, sin rebote. Estados 120 m
 - **Do** usar cifras tabulares en horas y contadores, y alinear columnas con grilla.
 - **Do** usar el camino lineal y la tabla de puntos juntos para cualquier ronda larga.
 - **Do** dejar que el usuario elija entre tabla, grilla y gráficos con un selector de vista, sin duplicar datos entre vistas.
+- **Do** armar las pantallas de resumen con bloques que el usuario pueda acomodar, con un diseño por defecto que funcione sin tocar nada.
 - **Do** dejar que cada pantalla ocupe todo el ancho y que el panel izquierdo y las columnas crezcan con la ventana.
 - **Do** mantener 44 px mínimos de zona táctil en la app y 56 px en la acción principal.
 
