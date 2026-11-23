@@ -16,6 +16,12 @@ export const LEGAL_OWNER = {
   email: 'soporte.app.garita@gmail.com',
 } as const;
 
+/** `2026-11-22` → `22/11/2026`. */
+export function formatLegalDate(iso: string) {
+  const [year, month, day] = iso.split('-');
+  return `${day ?? ''}/${month ?? ''}/${year ?? ''}`;
+}
+
 export interface LegalSection {
   heading: string;
   paragraphs: readonly string[];
