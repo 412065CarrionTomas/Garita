@@ -73,7 +73,9 @@ export async function apiRequest<TSchema extends z.ZodType>(
       errorBody,
     );
   }
-  const result = schema.safeParse(await response.json());
+  // 204 No Content no trae cuerpo: se valida `undefined` contra el esquema del llamador.
+  const payload: unknown = response.status === 204 ? undefined : await response.json();
+  const result = schema.safeParse(payload);
   if (!result.success) throw new ApiError('La respuesta de la API no tiene el formato esperado');
   return result.data;
 }
