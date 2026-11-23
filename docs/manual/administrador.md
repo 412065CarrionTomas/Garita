@@ -13,7 +13,9 @@ los incidentes y el estado de tu cuenta.
 Desde una pantalla de 1024 px de ancho o más, tocá **Editar diseño**:
 
 - Arrastrá el asa del borde de arriba de un bloque para moverlo, y la de la esquina de abajo
-  a la derecha para cambiar su tamaño. Los demás bloques se acomodan solos.
+  a la derecha para cambiar su tamaño. El bloque queda donde lo soltás, aunque deje un espacio
+  libre; los que tapa bajan lo justo. Cada bloque se puede achicar hasta lo mínimo para que se
+  entienda; el texto que no entra se corta con "…".
 - Con el teclado: llegá al asa con Tab, tomala con Enter, usá las flechas y soltala con
   Enter. Escape cancela el movimiento.
 - En **Bloques** podés ocultar o mostrar cada bloque y elegir cómo se ve (por ejemplo,
