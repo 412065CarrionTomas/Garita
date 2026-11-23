@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import {
   adminSummaryCatalog,
+  compactInOrder,
   compactVertical,
+  readingOrder,
   defineViewCatalog,
   favoritesInputSchema,
   findOverlap,
@@ -40,6 +42,17 @@ describe('geometría de la grilla', () => {
       box('c', 8, 5, 4, 1),
     ]);
     expect(result.map((item) => item.y)).toEqual([0, 3, 0]);
+  });
+
+  it('ubica primero a los de mayor prioridad aunque estén más abajo', () => {
+    const items = [box('a', 0, 0, 4, 2), box('b', 0, 2, 4, 2)];
+    expect(readingOrder(items)).toEqual([0, 1]);
+    const result = compactInOrder(items, [1, 0]);
+    expect(result.map((item) => [item.id, item.y])).toEqual([
+      ['a', 2],
+      ['b', 0],
+    ]);
+    expect(compactInOrder(items, [0])).toEqual(items);
   });
 
   it('no modifica los objetos recibidos', () => {
