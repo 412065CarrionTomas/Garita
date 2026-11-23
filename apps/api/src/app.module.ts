@@ -1,5 +1,7 @@
 import { CoverageNoticesModule } from './modules/coverage-notices/coverage-notices.module';
 import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
+import { ViewPreferencesModule } from './modules/view-preferences/view-preferences.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -71,6 +73,8 @@ import { ShiftSchedulesModule } from './modules/shift-schedules/shift-schedules.
     ReportExportsModule,
     CoverageNoticesModule,
     NotificationPreferencesModule,
+    ViewPreferencesModule,
+    FavoritesModule,
     SubscriptionsModule,
     SmsModule,
     ShiftSchedulesModule,
