@@ -34,15 +34,20 @@ const sectionInputSchema = z.object({
   via: z.array(lngLatSchema).max(ROUTE_LIMITS.viaPerSection),
 });
 
+const legShape = {
+  waypoints: z.array(lngLatSchema).max(ROUTE_LIMITS.waypointsPerLeg),
+  sections: z.array(sectionInputSchema).min(1),
+};
+const sectionsMatchWaypoints = (leg: { waypoints: unknown[]; sections: unknown[] }) =>
+  leg.sections.length === leg.waypoints.length + 1;
+const sectionsMatchWaypointsIssue = {
+  message: 'Cada punto de paso divide el tramo: debe haber una sección más que puntos de paso.',
+  path: ['sections'],
+};
+
 const legInputSchema = z
-  .object({
-    waypoints: z.array(lngLatSchema).max(ROUTE_LIMITS.waypointsPerLeg),
-    sections: z.array(sectionInputSchema).min(1),
-  })
-  .refine((leg) => leg.sections.length === leg.waypoints.length + 1, {
-    message: 'Cada punto de paso divide el tramo: debe haber una sección más que puntos de paso.',
-    path: ['sections'],
-  });
+  .object(legShape)
+  .refine(sectionsMatchWaypoints, sectionsMatchWaypointsIssue);
 
 export const routeInputSchema = z.object({
   closed: z.boolean(),
@@ -73,6 +78,15 @@ export const roundRouteSchema = z.object({
   ),
 });
 export type RoundRoute = z.infer<typeof roundRouteSchema>;
+
+/** Vista previa de un solo tramo en el editor: la API devuelve sus secciones con geometría. */
+export const routePreviewInputSchema = z
+  .object({ siteId: z.string().min(1), from: lngLatSchema, to: lngLatSchema, ...legShape })
+  .refine(sectionsMatchWaypoints, sectionsMatchWaypointsIssue);
+export type RoutePreviewInput = z.infer<typeof routePreviewInputSchema>;
+
+export const routePreviewResponseSchema = z.object({ sections: z.array(sectionSchema).min(1) });
+export type RoutePreviewResponse = z.infer<typeof routePreviewResponseSchema>;
 export type RouteLeg = RoundRoute['legs'][number];
 export type RouteSection = RouteLeg['sections'][number];
 
