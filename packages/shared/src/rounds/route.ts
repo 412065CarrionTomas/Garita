@@ -22,6 +22,8 @@ export const ROUTE_LIMITS = {
   maxMetersFromSite: 25_000,
   /** A partir de esta distancia un punto de control se considera movido desde que se trazó. */
   staleMeters: 5,
+  /** Puntos por pedido que acepta el plan hospedado de openrouteservice. */
+  requestCoordinates: 50,
 } as const;
 
 export type LngLat = [number, number];
@@ -204,6 +206,43 @@ export function validateRouteInput(
       });
   });
   return issues;
+}
+
+const samePoint = (a: LngLat | undefined, b: LngLat | undefined) =>
+  !!a && !!b && a[0] === b[0] && a[1] === b[1];
+
+/** Puntos que ocupa un grupo de secciones encadenadas: cada una comparte su inicio con el fin anterior. */
+const chainLength = (sections: LngLat[][]) =>
+  sections.reduce((total, section, i) => total + section.length - (i === 0 ? 0 : 1), 0);
+
+/**
+ * Agrupa en cadenas las secciones sin caché que siguen una a la otra (el fin de una es el inicio
+ * de la siguiente), hasta el tope de puntos por pedido: un pedido al servicio de rutas por cadena.
+ * La API lo usa para pedir y el panel para estimar cuántos pedidos costará calcular.
+ */
+export function chainSections(sections: LngLat[][], resolved: boolean[]): number[][] {
+  const chains: number[][] = [];
+  let current: number[] = [];
+  sections.forEach((section, i) => {
+    if (resolved[i]) {
+      if (current.length) chains.push(current);
+      current = [];
+      return;
+    }
+    const previous = current.at(-1);
+    const fits =
+      previous !== undefined &&
+      samePoint(sections[previous]?.at(-1), section[0]) &&
+      chainLength([...current.map((j) => sections[j] ?? []), section]) <=
+        ROUTE_LIMITS.requestCoordinates;
+    if (!fits && current.length) {
+      chains.push(current);
+      current = [];
+    }
+    current.push(i);
+  });
+  if (current.length) chains.push(current);
+  return chains;
 }
 
 /** Índices de los tramos cuyos puntos de control se movieron desde que se trazó el recorrido. */
