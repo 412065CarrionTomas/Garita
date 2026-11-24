@@ -139,4 +139,15 @@ describe('vista previa de la ronda', () => {
         .success,
     ).toBe(true);
   });
+
+  it('rechaza puntos repetidos y más puntos que el tope', () => {
+    const parse = (checkpointIds: string[]) =>
+      roundRoutePreviewInputSchema.safeParse({
+        siteId: 'p',
+        checkpointIds,
+        route: defaultRouteInput(checkpointIds.length),
+      }).success;
+    expect(parse(['a', 'b', 'a'])).toBe(false);
+    expect(parse(Array.from({ length: 501 }, (_, i) => `p${String(i)}`))).toBe(false);
+  });
 });

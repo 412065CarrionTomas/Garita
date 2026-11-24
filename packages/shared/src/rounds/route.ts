@@ -24,6 +24,8 @@ export const ROUTE_LIMITS = {
   staleMeters: 5,
   /** Puntos por pedido que acepta el plan hospedado de openrouteservice. */
   requestCoordinates: 50,
+  /** Puntos de control de una ronda (y tramos): el máximo de puntos de un predio. */
+  pointsPerRoute: 500,
 } as const;
 
 export type LngLat = [number, number];
@@ -56,7 +58,7 @@ const legInputSchema = z
 
 export const routeInputSchema = z.object({
   closed: z.boolean(),
-  legs: z.array(legInputSchema),
+  legs: z.array(legInputSchema).max(ROUTE_LIMITS.pointsPerRoute),
 });
 export type RouteInput = z.infer<typeof routeInputSchema>;
 export type RouteLegInput = RouteInput['legs'][number];
@@ -118,7 +120,12 @@ export const routeFailuresErrorSchema = z.object({
 /** Botón "Calcular recorrido": toda la ronda en el menor número de pedidos. No guarda nada. */
 export const roundRoutePreviewInputSchema = z.object({
   siteId: z.string().min(1),
-  checkpointIds: z.array(z.string().min(1)).min(2),
+  // Sin repetidos ni sin tope: cada punto de más puede costar pedidos al servicio de rutas.
+  checkpointIds: z
+    .array(z.string().min(1))
+    .min(2)
+    .max(ROUTE_LIMITS.pointsPerRoute)
+    .refine((ids) => new Set(ids).size === ids.length, 'No se pueden repetir puntos.'),
   route: routeInputSchema,
 });
 export type RoundRoutePreviewInput = z.infer<typeof roundRoutePreviewInputSchema>;
