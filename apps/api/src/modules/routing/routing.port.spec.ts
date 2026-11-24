@@ -1,7 +1,6 @@
-import type { LngLat } from '@garita/shared';
+import { chainSections, type LngLat } from '@garita/shared';
 import { routeCacheKey } from './route-cache';
 import {
-  chainSections,
   NullRouting,
   OpenRouteServiceRouting,
   ORS_MAX_COORDINATES,

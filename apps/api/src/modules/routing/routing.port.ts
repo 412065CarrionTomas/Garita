@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import {
+  chainSections,
   ROUTE_LIMITS,
   type LngLat,
   type RouteFailureReason,
@@ -36,7 +37,7 @@ const ORS_PROFILES: Record<SpeedProfile, string> = {
 
 export const ORS_TIMEOUT_MS = 5000;
 /** Puntos por pedido que acepta el plan hospedado de openrouteservice. */
-export const ORS_MAX_COORDINATES = 50;
+export const ORS_MAX_COORDINATES = ROUTE_LIMITS.requestCoordinates;
 
 const orsResponseSchema = z.object({
   features: z
@@ -69,41 +70,6 @@ const ORS_POINT_ERRORS: Record<number, { reason: RouteFailureReason; pattern: Re
 
 type RequestResult =
   { line: LngLat[]; wayPoints: number[] } | { failure: RouteFailureReason; coordinate?: number };
-
-const samePoint = (a: LngLat | undefined, b: LngLat | undefined) =>
-  !!a && !!b && a[0] === b[0] && a[1] === b[1];
-
-/** Puntos que ocupa un grupo de secciones encadenadas: cada una comparte su inicio con el fin anterior. */
-const chainLength = (sections: LngLat[][]) =>
-  sections.reduce((total, section, i) => total + section.length - (i === 0 ? 0 : 1), 0);
-
-/**
- * Agrupa en cadenas las secciones sin caché que siguen una a la otra (el fin de una es el inicio
- * de la siguiente), hasta el tope de puntos por pedido. Devuelve índices de sección.
- */
-export function chainSections(sections: LngLat[][], resolved: boolean[]): number[][] {
-  const chains: number[][] = [];
-  let current: number[] = [];
-  sections.forEach((section, i) => {
-    if (resolved[i]) {
-      if (current.length) chains.push(current);
-      current = [];
-      return;
-    }
-    const previous = current.at(-1);
-    const fits =
-      previous !== undefined &&
-      samePoint(sections[previous]?.at(-1), section[0]) &&
-      chainLength([...current.map((j) => sections[j] ?? []), section]) <= ORS_MAX_COORDINATES;
-    if (!fits && current.length) {
-      chains.push(current);
-      current = [];
-    }
-    current.push(i);
-  });
-  if (current.length) chains.push(current);
-  return chains;
-}
 
 /** openrouteservice: POST /v2/directions/{perfil}/geojson. Límite: 2000 pedidos/día, 40/minuto. */
 export class OpenRouteServiceRouting implements RoutingPort {
