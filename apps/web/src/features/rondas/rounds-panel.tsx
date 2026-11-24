@@ -109,9 +109,9 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
   });
   const previewRoute =
     storedRouteInput(preview?.currentVersion?.route) ?? defaultRouteInput(previewIds.length);
+  const previewStored = storedRoute(preview?.currentVersion?.route);
   const previewDisplay =
-    storedRoute(preview?.currentVersion?.route) ??
-    resolveRoute(previewRoute, previewCoords, new Map()).display;
+    previewStored ?? resolveRoute(previewRoute, previewCoords, new Map()).display;
 
   return (
     <section
@@ -294,14 +294,16 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
         style={{ height: fillHeight }}
         className="overflow-hidden rounded-md border border-border xl:sticky xl:top-4"
       >
-        {located.length > 0 && previewCoords.length === previewIds.length && (
-          <RouteEditor
-            points={located}
-            selected={previewIds}
-            route={previewRoute}
-            display={previewDisplay}
-          />
-        )}
+        {/* Con el recorrido guardado se dibuja aunque falte algún punto (dado de baja después). */}
+        {located.length > 0 &&
+          (previewStored !== null || previewCoords.length === previewIds.length) && (
+            <RouteEditor
+              points={located}
+              selected={previewIds}
+              route={previewRoute}
+              display={previewDisplay}
+            />
+          )}
       </div>
     </section>
   );

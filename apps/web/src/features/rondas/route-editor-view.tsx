@@ -1,12 +1,13 @@
 import type { LngLat, RoundRoute, RouteInput } from '@garita/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import type { MapLayerMouseEvent } from 'maplibre-gl';
 import { Layer, Marker, useMap } from 'react-map-gl/maplibre';
 import { cn } from '@/lib/utils';
 import { BaseMap } from '../mapa/base-map';
 import { RouteLayers } from '../mapa/live-map-view';
 import { DEFAULT_CENTER, useDark } from '../mapa/map-style';
 import { GuideMark, ModeChangeMark } from '../mapa/route-legend';
-import { partKey, routeEdits } from './route-draft';
+import { canJoinAt, partKey, routeEdits } from './route-draft';
 
 export interface RouteEditorPoint {
   id: string;
@@ -77,9 +78,48 @@ function FitPoints({ points, line }: { points: RouteEditorPoint[]; line: LngLat[
 function FollowFocus({ point }: { point?: RouteEditorPoint }) {
   const { current: map } = useMap();
   useEffect(() => {
-    if (map && point) map.easeTo({ center: [point.lng, point.lat], duration: 300 });
+    if (!map || !point) return;
+    // Con movimiento reducido, el mapa salta sin animar (sistema de diseño).
+    const reduce =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    map.easeTo({ center: [point.lng, point.lat], duration: reduce ? 0 : 300 });
   }, [map, point]);
   return null;
+}
+
+/**
+ * Punto fantasma sobre la línea de la parte elegida. Tiene su propio estado y escucha al mapa
+ * directamente: seguir al mouse no vuelve a dibujar todos los marcadores.
+ */
+function GhostGuide({ l, s }: { l: number; s: number }) {
+  const { current: map } = useMap();
+  const [at, setAt] = useState<LngLat | null>(null);
+  useEffect(() => {
+    const instance = map?.getMap();
+    if (!instance) return;
+    const move = (event: MapLayerMouseEvent) => {
+      const props = event.features?.[0]?.properties;
+      setAt(props?.leg === l && props.section === s ? [event.lngLat.lng, event.lngLat.lat] : null);
+    };
+    const leave = () => {
+      setAt(null);
+    };
+    instance.on('mousemove', HIT, move);
+    instance.on('mouseleave', HIT, leave);
+    return () => {
+      instance.off('mousemove', HIT, move);
+      instance.off('mouseleave', HIT, leave);
+    };
+  }, [map, l, s]);
+  if (!at) return null;
+  return (
+    <Marker latitude={at[1]} longitude={at[0]} anchor="center" style={{ zIndex: 1 }}>
+      <span aria-hidden="true" className="pointer-events-none block opacity-70">
+        <GuideMark />
+      </span>
+    </Marker>
+  );
 }
 
 /**
@@ -102,7 +142,6 @@ export function RouteEditorView({
 }: RouteEditorProps) {
   const dark = useDark();
   const [overLine, setOverLine] = useState(false);
-  const [ghost, setGhost] = useState<LngLat | null>(null);
   const ink = useMemo(
     () => getComputedStyle(document.documentElement).getPropertyValue('--foreground').trim(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,6 +160,10 @@ export function RouteEditorView({
   );
   const routes = useMemo(() => [{ checkpointIds: selected, route: display }], [selected, display]);
   const editable = Boolean(onRouteChange);
+  // En la vista previa (sin handlers) nada responde al mouse.
+  const interactive = editable || Boolean(onSelect);
+  // Con «Sumar puntos de control» las líneas no se tocan: solo cuentan los puntos.
+  const linesActive = interactive && tool === 'select';
   const part =
     selection?.kind === 'part' || selection?.kind === 'via'
       ? { l: selection.l, s: selection.s }
@@ -138,25 +181,20 @@ export function RouteEditorView({
     <BaseMap
       initialViewState={{ ...DEFAULT_CENTER, zoom: 15 }}
       cooperativeGestures={false}
-      interactiveLayerIds={[HIT]}
-      cursor={tool === 'chain' ? 'crosshair' : ghost ? 'copy' : overLine ? 'pointer' : undefined}
+      interactiveLayerIds={linesActive ? [HIT] : []}
+      cursor={tool === 'chain' ? 'crosshair' : linesActive && overLine ? 'pointer' : undefined}
       onMouseEnter={() => {
         setOverLine(true);
       }}
       onMouseLeave={() => {
         setOverLine(false);
-        setGhost(null);
-      }}
-      onMouseMove={(event) => {
-        const over = lineAt(event.features?.[0]?.properties);
-        const onPart = editable && part && over?.l === part.l && over.s === part.s;
-        setGhost(onPart ? [event.lngLat.lng, event.lngLat.lat] : null);
       }}
       onClick={(event) => {
+        if (!linesActive) return;
         const at: LngLat = [event.lngLat.lng, event.lngLat.lat];
         const over = lineAt(event.features?.[0]?.properties);
         if (!over) {
-          if (tool === 'select') onSelect?.(null);
+          onSelect?.(null);
           return;
         }
         if (editable && part?.l === over.l && part.s === over.s) onAddVia?.(over.l, over.s, at);
@@ -188,15 +226,11 @@ export function RouteEditorView({
         source="route"
         paint={{ 'line-color': ink, 'line-opacity': 0, 'line-width': 22 }}
       />
-      {ghost && (
-        <Marker latitude={ghost[1]} longitude={ghost[0]} anchor="center" style={{ zIndex: 1 }}>
-          <span aria-hidden="true" className="pointer-events-none block opacity-70">
-            <GuideMark />
-          </span>
-        </Marker>
+      {editable && linesActive && part && (
+        <GhostGuide key={partKey(part.l, part.s)} l={part.l} s={part.s} />
       )}
       {route.legs.map((leg, l) => (
-        <span key={`leg-${String(l)}`}>
+        <Fragment key={`leg-${String(l)}`}>
           {leg.waypoints.map(([lng, lat], k) => {
             const chosen = selection?.kind === 'waypoint' && selection.l === l && selection.k === k;
             return (
@@ -219,10 +253,16 @@ export function RouteEditorView({
               >
                 <span
                   aria-hidden="true"
-                  title="Cambio de modo: arrastralo para moverlo; clic derecho lo elimina"
+                  title={
+                    editable
+                      ? 'Cambio de modo: arrastralo para moverlo; clic derecho lo elimina'
+                      : 'Cambio de modo'
+                  }
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    if (editable) onRouteChange?.(routeEdits.removeWaypoint(route, l, k));
+                    // Si las dos partes juntas pasan el tope de puntos de guía, no se elimina.
+                    if (editable && canJoinAt(route, l, k, false))
+                      onRouteChange?.(routeEdits.removeWaypoint(route, l, k));
                   }}
                   className={cn(
                     'block p-1',
@@ -265,7 +305,11 @@ export function RouteEditorView({
                 >
                   <span
                     aria-hidden="true"
-                    title="Punto de guía: arrastralo para moverlo; clic derecho lo elimina"
+                    title={
+                      editable
+                        ? 'Punto de guía: arrastralo para moverlo; clic derecho lo elimina'
+                        : 'Punto de guía'
+                    }
                     onContextMenu={(event) => {
                       event.preventDefault();
                       if (editable) onRouteChange?.(routeEdits.removeVia(route, l, s, i));
@@ -288,7 +332,7 @@ export function RouteEditorView({
               );
             }),
           )}
-        </span>
+        </Fragment>
       ))}
       {points.map((point) => {
         const order = selected.indexOf(point.id);
@@ -310,7 +354,8 @@ export function RouteEditorView({
               aria-hidden="true"
               title={order >= 0 ? `${String(order + 1)}. ${point.name}` : point.name}
               className={cn(
-                'font-cond grid cursor-pointer place-items-center border-2 font-semibold tabular-nums',
+                'font-cond grid place-items-center border-2 font-semibold tabular-nums',
+                onPointClick && 'cursor-pointer',
                 order >= 0
                   ? 'size-7 border-foreground bg-card text-sm text-foreground'
                   : 'size-3.5 border-muted-foreground bg-card',

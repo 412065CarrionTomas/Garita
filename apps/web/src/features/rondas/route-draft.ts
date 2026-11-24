@@ -75,7 +75,8 @@ export function normalizeRoute(route: RoundRoute): RoundRoute {
         const next = rest[k];
         const last = sections.at(-1);
         if (!next || !last) return;
-        if (next.mode !== last.mode) {
+        // Distinto modo, o juntas pasarían el tope de puntos de guía: el corte se queda.
+        if (next.mode !== last.mode || !viaFit(last, next, true)) {
           waypoints.push(waypoint);
           sections.push(next);
           return;
@@ -124,6 +125,39 @@ function updateVia(route: RouteInput, l: number, s: number, change: (via: LngLat
   }));
 }
 
+/** Si dos partes unidas entran en el tope de puntos de guía (con el punto que las corta o sin él). */
+function viaFit(before: { via: LngLat[] }, after: { via: LngLat[] }, keepPoint: boolean) {
+  return before.via.length + after.via.length + (keepPoint ? 1 : 0) <= ROUTE_LIMITS.viaPerSection;
+}
+
+/** Si quitar el cambio de modo `k` (conservando su punto o no) deja una parte dentro del tope. */
+export function canJoinAt(route: RouteInput, l: number, k: number, keepPoint: boolean): boolean {
+  const leg = route.legs[l];
+  const before = leg?.sections[k];
+  const after = leg?.sections[k + 1];
+  return Boolean(before && after && viaFit(before, after, keepPoint));
+}
+
+/** Un cambio de modo con el mismo modo a los dos lados sobra: pasa a punto de guía si entra. */
+function joinSameMode(leg: RouteLegInput): RouteLegInput {
+  const [first, ...rest] = leg.sections;
+  if (!first) return leg;
+  const waypoints: LngLat[] = [];
+  const sections = [first];
+  leg.waypoints.forEach((waypoint, k) => {
+    const next = rest[k];
+    const last = sections.at(-1);
+    if (!next || !last) return;
+    if (next.mode !== last.mode || !viaFit(last, next, true)) {
+      waypoints.push(waypoint);
+      sections.push(next);
+      return;
+    }
+    sections[sections.length - 1] = { mode: last.mode, via: [...last.via, waypoint, ...next.via] };
+  });
+  return { waypoints, sections };
+}
+
 const replaceAt = <T>(items: T[], index: number, value: T) =>
   items.map((item, i) => (i === index ? value : item));
 
@@ -134,11 +168,14 @@ export const otherMode = (mode: RouteMode): RouteMode =>
   mode === 'streets' ? 'manual' : 'streets';
 
 export const routeEdits = {
+  /** Cambia el modo de la parte; si queda igual a una vecina, se une con ella. */
   setMode: (route: RouteInput, l: number, s: number, mode: RouteMode) =>
-    updateLeg(route, l, (leg) => ({
-      ...leg,
-      sections: leg.sections.map((section, i) => (i === s ? { ...section, mode } : section)),
-    })),
+    updateLeg(route, l, (leg) =>
+      joinSameMode({
+        ...leg,
+        sections: leg.sections.map((section, i) => (i === s ? { ...section, mode } : section)),
+      }),
+    ),
   /** Punto de guía en la posición `index` de la parte. */
   insertVia: (route: RouteInput, l: number, s: number, index: number, at: LngLat) =>
     updateVia(route, l, s, (via) => [...via.slice(0, index), at, ...via.slice(index)]),
@@ -171,7 +208,7 @@ export const routeEdits = {
       const before = leg.sections[k];
       const after = leg.sections[k + 1];
       const at = leg.waypoints[k];
-      if (!before || !after || !at) return leg;
+      if (!before || !after || !at || !viaFit(before, after, true)) return leg;
       return {
         waypoints: leg.waypoints.filter((_, i) => i !== k),
         sections: [
@@ -186,7 +223,7 @@ export const routeEdits = {
     updateLeg(route, l, (leg) => {
       const before = leg.sections[k];
       const after = leg.sections[k + 1];
-      if (!before || !after) return leg;
+      if (!before || !after || !viaFit(before, after, false)) return leg;
       return {
         waypoints: leg.waypoints.filter((_, i) => i !== k),
         sections: [
@@ -436,7 +473,10 @@ export function resolveRoute(
  */
 export function requestEstimate(parts: PartInfo[]): { pending: number; requests: number } {
   const streets = parts.filter((part) => part.mode === 'streets');
-  const pending = streets.filter((part) => part.state === 'pending').length;
+  // Las guardadas rectas también se pueden volver a pedir (por ejemplo, si el servicio volvió).
+  const pending = streets.filter(
+    (part) => part.state === 'pending' || part.state === 'straight',
+  ).length;
   if (pending === 0) return { pending, requests: 0 };
   const chains = chainSections(
     streets.map((part) => part.control),
@@ -457,20 +497,21 @@ export function partLabel(route: RouteInput, l: number, s: number): string {
   return (route.legs[l]?.sections.length ?? 1) > 1 ? `${leg}, parte ${String(s + 1)}` : leg;
 }
 
-/** Metros de cada tramo según la línea dibujada (calculada o recta). */
-export function legMeters(route: RoundRoute): number[] {
+/** Metros de cada parte según la línea dibujada, [tramo][parte]. */
+export function sectionMeters(route: RoundRoute): number[][] {
   return route.legs.map((leg) =>
-    leg.sections.reduce(
-      (total, { geometry }) =>
-        total +
-        geometry.reduce(
-          (sum, point, i) =>
-            i === 0 ? sum : sum + distanceMeters(geometry[i - 1] ?? point, point),
-          0,
-        ),
-      0,
+    leg.sections.map(({ geometry }) =>
+      geometry.reduce(
+        (sum, point, i) => (i === 0 ? sum : sum + distanceMeters(geometry[i - 1] ?? point, point)),
+        0,
+      ),
     ),
   );
+}
+
+/** Metros de cada tramo según la línea dibujada (calculada o recta). */
+export function legMeters(route: RoundRoute): number[] {
+  return sectionMeters(route).map((parts) => parts.reduce((total, m) => total + m, 0));
 }
 
 export const formatMeters = (meters: number) =>

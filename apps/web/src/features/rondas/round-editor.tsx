@@ -1,44 +1,36 @@
 import { useMutation } from '@tanstack/react-query';
 import {
   ROUTE_LIMITS,
-  defaultGraceMinutes,
   defaultRouteInput,
-  previewWindows,
   roundInputSchema,
   roundRoutePreviewInputSchema,
   roundRoutePreviewResponseSchema,
   routeFailuresErrorSchema,
   staleLegs,
   type LngLat,
+  type RoundRoutePreviewInput,
   type RouteFailure,
   type RouteInput,
   type RouteMode,
 } from '@garita/shared';
-import { ChevronDown, ChevronUp, CircleHelp, GripVertical, Plus, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { z } from 'zod';
 import { SegmentedFilter } from '@/components/segmented-filter';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError, apiPatch, apiPost } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
-import { cn } from '@/lib/utils';
+import { EditorHelp } from './editor-help';
 import { LegsList } from './legs-list';
+import { OrderList } from './order-list';
 import { RouteEditor, type RouteSelection, type RouteTool } from './route-editor';
 import {
+  GUIDE_STEP_METERS,
   failureMessages,
   formatMeters,
   legMeters,
-  GUIDE_STEP_METERS,
   partKey,
   pointAfterLast,
   rebaseRoute,
@@ -48,6 +40,7 @@ import {
   requestEstimate,
   resolveRoute,
   routeEdits,
+  sectionMeters,
   storedRoute,
   storedRouteInput,
   viaInsertIndex,
@@ -55,6 +48,7 @@ import {
   type SectionMemo,
 } from './route-draft';
 import { RouteInspector } from './route-inspector';
+import { SchedulePicker } from './schedule-picker';
 
 export interface EditorPoint {
   id: string;
@@ -86,100 +80,6 @@ const TABS: { value: 'order' | 'legs'; label: string }[] = [
   { value: 'legs', label: 'Tramos' },
 ];
 const idSchema = z.looseObject({ id: z.string() });
-
-/** Qué hace cada control del editor que no se explica solo con su nombre. */
-const HELP: { title: string; items: [string, string][] }[] = [
-  {
-    title: 'Horario',
-    items: [
-      ['Franja', 'Horas del día en que la ronda está vigente.'],
-      ['Frecuencia', 'Cada cuántos minutos empieza una vuelta nueva dentro de la franja.'],
-      [
-        'Ventana',
-        'Cada período de la frecuencia. En cada ventana hay que pasar por todos los puntos.',
-      ],
-      [
-        'Gracia',
-        'Minutos después del fin de una ventana en que un registro todavía cuenta para ella, marcado como tarde.',
-      ],
-    ],
-  },
-  {
-    title: 'Orden',
-    items: [
-      ['Compartido', 'El punto también forma parte de otra ronda del predio.'],
-      ['Fuera de la ronda', 'Puntos del predio que esta ronda no incluye.'],
-    ],
-  },
-  {
-    title: 'Recorrido',
-    items: [
-      ['Tramo', 'El camino de un punto de control al siguiente.'],
-      ['Parte', 'Un pedazo del tramo con un solo modo: por calles o trazo libre.'],
-      [
-        'Punto de guía',
-        'Da forma a la línea de su parte. Por calles, la ruta pasa por ahí; en trazo libre, la línea dobla ahí. No se escanea.',
-      ],
-      ['Cambio de modo', 'Punto donde termina una parte y empieza otra con el otro modo.'],
-      ['Por calles', 'La línea sigue las calles; se calcula con «Calcular por calles».'],
-      ['Trazo libre', 'Rectas entre sus puntos. No se calcula.'],
-    ],
-  },
-  {
-    title: 'Herramientas del mapa',
-    items: [
-      [
-        'Seleccionar',
-        'Tocá una línea para elegir su parte; sobre la parte elegida, un clic suma un punto de guía. Los puntos se arrastran y el clic derecho los elimina.',
-      ],
-      [
-        'Sumar puntos de control',
-        'Tocá los puntos del predio en el orden en que se recorren: se suman al final. Tocar el último lo saca.',
-      ],
-      ['Volver al inicio', 'Agrega un último tramo del último punto al primero.'],
-      [
-        'Calcular por calles',
-        'Pide al servicio de rutas solo las partes por calles sin calcular. Hasta calcularlas se ven como línea de puntos recta.',
-      ],
-    ],
-  },
-];
-
-function EditorHelp() {
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="self-center text-muted-foreground"
-          aria-label="Ayuda del editor de rondas"
-          title="Ayuda"
-        >
-          <CircleHelp aria-hidden="true" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto">
-        <DialogTitle className="text-lg font-semibold">Cómo se arma una ronda</DialogTitle>
-        <DialogDescription className="sr-only">Qué hace cada control del editor.</DialogDescription>
-        {HELP.map((group) => (
-          <section key={group.title} className="mt-4">
-            <h4 className="t-label">{group.title}</h4>
-            <dl className="mt-1 grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[11rem_1fr]">
-              {group.items.map(([term, text]) => (
-                <div key={term} className="contents">
-                  <dt className="font-semibold">{term}</dt>
-                  <dd className="text-muted-foreground">{text}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        ))}
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 interface Snapshot {
   selected: string[];
@@ -237,7 +137,6 @@ export function RoundEditor({
     );
   });
   const [filter, setFilter] = useState('');
-  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
@@ -265,20 +164,26 @@ export function RoundEditor({
   const { display, parts } = resolveRoute(route, coords, memo);
   const estimate = requestEstimate(parts);
   const savedRoute = initialIds.join() === selected.join() ? storedRoute(version?.route) : null;
-  const stale = new Set(savedRoute && allLocated ? staleLegs(savedRoute, coords) : []);
+  // Un tramo con un punto movido deja de avisar cuando sus partes por calles se recalcularon.
+  const stale = new Set(
+    (savedRoute && allLocated ? staleLegs(savedRoute, coords) : []).filter((l) =>
+      parts.some((p) => p.l === l && p.mode === 'streets' && p.state !== 'calculated'),
+    ),
+  );
+  const partMeters = sectionMeters(display);
   const meters = legMeters(display);
   const total = meters.reduce((sum, m) => sum + m, 0);
-  const partsOfLeg = (l: number) => parts.filter((p) => p.l === l);
 
   const calculate = useMutation({
-    mutationFn: () =>
+    mutationFn: (sent: RoundRoutePreviewInput) =>
       apiPost(
         '/rondas/ruteo-previsualizar',
-        { siteId, checkpointIds: selected, route },
+        sent,
         roundRoutePreviewInputSchema,
         roundRoutePreviewResponseSchema,
       ),
-    onSuccess: (result) => {
+    // Las fallas se leen contra el recorrido enviado: mientras tanto se pudo seguir editando.
+    onSuccess: (result, sent) => {
       setMemo((current) => rememberRoute(current, result.route, result.failures));
       const streets = result.route.legs.flatMap((leg) =>
         leg.sections.filter((section) => section.mode === 'streets'),
@@ -287,23 +192,11 @@ export function RoundEditor({
         .size;
       setSummary(
         failed
-          ? `Se calcularon ${String(streets - failed)} de ${String(streets)} partes por calles. ${String(failed)} no se pudieron calcular: ${failureMessages(result.failures, route).join(' ')}`
+          ? `Se calcularon ${String(streets - failed)} de ${String(streets)} partes por calles. ${String(failed)} no se pudieron calcular: ${failureMessages(result.failures, sent.route).join(' ')}`
           : `Se calcularon las ${String(streets)} partes por calles.`,
       );
     },
   });
-
-  const labels = previewWindows({
-    windowStartLocal: start,
-    windowEndLocal: end,
-    frequencyMinutes: frequency,
-  });
-  const scheduleError = Boolean(
-    fieldErrors.frequencyMinutes ??
-    fieldErrors.windowStartLocal ??
-    fieldErrors.windowEndLocal ??
-    fieldErrors.graceMinutes,
-  );
 
   // Lo elegido puede dejar de existir al editar o deshacer: entonces no hay nada elegido.
   const current = ((): RouteSelection | null => {
@@ -407,32 +300,45 @@ export function RoundEditor({
     const element = sectionRef.current;
     if (element && 'scrollIntoView' in element) element.scrollIntoView({ block: 'start' });
   }, []);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target?.closest('input, select, textarea, [contenteditable="true"]')) return;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-        event.preventDefault();
-        undo();
-        return;
-      }
-      if (event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.key === 'Escape') {
-        setTool('select');
-        setSelection(null);
-        return;
-      }
-      const next = SHORTCUTS[event.key.toLowerCase()];
-      if (next) setTool(next);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-    };
+  const onKey = useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('input, select, textarea, [contenteditable="true"]')) return;
+    // Con un diálogo abierto (como la ayuda), las teclas son del diálogo, no del editor.
+    if (document.querySelector('[role="dialog"], [role="alertdialog"][aria-modal="true"]')) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+      // Ctrl+Mayús+Z es rehacer: no hay rehacer, pero tampoco debe deshacer.
+      if (event.shiftKey) return;
+      event.preventDefault();
+      undo();
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === 'Escape') {
+      setTool('select');
+      setSelection(null);
+      return;
+    }
+    const next = SHORTCUTS[event.key.toLowerCase()];
+    if (next) setTool(next);
   });
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      onKey(event);
+    };
+    window.addEventListener('keydown', listener);
+    return () => {
+      window.removeEventListener('keydown', listener);
+    };
+  }, []);
 
   // Armar una ronda larga lleva tiempo: salir sin guardar pide confirmación si hubo cambios.
-  const dirty = past.length > 0 || name !== (round?.name ?? '');
+  const dirty =
+    past.length > 0 ||
+    name !== (round?.name ?? '') ||
+    frequency !== (version?.frequencyMinutes ?? 120) ||
+    start !== (version?.windowStartLocal ?? '22:00') ||
+    end !== (version?.windowEndLocal ?? '06:00') ||
+    grace !== (version?.graceMinutes ?? 15);
   const leave = () => {
     if (dirty && !window.confirm('¿Descartar los cambios de la ronda?')) return;
     onClose();
@@ -534,103 +440,16 @@ export function RoundEditor({
           />
           {fieldError('name', 'round-name-error')}
         </div>
-        <details
-          className="relative"
-          open={scheduleOpen || scheduleError}
-          onToggle={(event) => {
-            setScheduleOpen(event.currentTarget.open);
+        <SchedulePicker
+          schedule={{ frequency, start, end, grace }}
+          errors={fieldErrors}
+          onChange={(next) => {
+            setFrequency(next.frequency);
+            setStart(next.start);
+            setEnd(next.end);
+            setGrace(next.grace);
           }}
-        >
-          <summary className="flex h-10 cursor-pointer list-none items-center gap-2 rounded-md border-[1.5px] border-input px-3 hover:bg-muted [&::-webkit-details-marker]:hidden">
-            <span className="t-stamp tabular-nums">
-              {start === end ? 'Todo el día' : `${start}–${end}`} · cada {frequency} min ·{' '}
-              {labels.length} ventanas
-            </span>
-            <ChevronDown aria-hidden="true" className="size-4" />
-            <span className="sr-only">Horario de la ronda</span>
-          </summary>
-          <div className="absolute top-12 left-0 z-20 grid w-[min(36rem,90vw)] gap-3 rounded-md border-[1.5px] border-primary bg-card p-4">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="round-frequency">Frecuencia (minutos)</Label>
-                <Input
-                  id="round-frequency"
-                  aria-invalid={Boolean(fieldErrors.frequencyMinutes)}
-                  aria-describedby={
-                    fieldErrors.frequencyMinutes ? 'round-frequency-error' : undefined
-                  }
-                  type="number"
-                  min="15"
-                  max="1440"
-                  value={frequency}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    setFrequency(next);
-                    setGrace(defaultGraceMinutes(next));
-                  }}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="round-start">Inicio de franja</Label>
-                <Input
-                  id="round-start"
-                  aria-invalid={Boolean(fieldErrors.windowStartLocal)}
-                  aria-describedby={fieldErrors.windowStartLocal ? 'round-start-error' : undefined}
-                  type="time"
-                  value={start}
-                  onChange={(event) => {
-                    setStart(event.target.value);
-                  }}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="round-end">Fin de franja</Label>
-                <Input
-                  id="round-end"
-                  aria-invalid={Boolean(fieldErrors.windowEndLocal)}
-                  aria-describedby={fieldErrors.windowEndLocal ? 'round-end-error' : undefined}
-                  type="time"
-                  value={end}
-                  onChange={(event) => {
-                    setEnd(event.target.value);
-                  }}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="round-grace">Gracia (minutos)</Label>
-                <Input
-                  id="round-grace"
-                  aria-invalid={Boolean(fieldErrors.graceMinutes)}
-                  aria-describedby={
-                    fieldErrors.graceMinutes ? 'round-grace-error' : 'round-grace-help'
-                  }
-                  type="number"
-                  min="0"
-                  max="60"
-                  value={grace}
-                  onChange={(event) => {
-                    setGrace(Number(event.target.value));
-                  }}
-                />
-              </div>
-            </div>
-            <p id="round-grace-help" className="text-sm text-muted-foreground">
-              Gracia predeterminada {defaultGraceMinutes(frequency)} min, máximo{' '}
-              {Math.min(60, frequency / 2)}.{start === end && ' Todo el día (24 h).'}
-            </p>
-            {fieldError('frequencyMinutes', 'round-frequency-error')}
-            {fieldError('windowStartLocal', 'round-start-error')}
-            {fieldError('windowEndLocal', 'round-end-error')}
-            {fieldError('graceMinutes', 'round-grace-error')}
-            <ol aria-label="Vista previa de ventanas" className="flex flex-wrap gap-1.5">
-              {labels.map((label) => (
-                <li key={label} className="t-stamp bg-muted px-2 py-1 tabular-nums">
-                  {label}
-                </li>
-              ))}
-            </ol>
-          </div>
-        </details>
+        />
         <EditorHelp />
         <div className="ml-auto flex gap-2 self-center">
           <Button
@@ -785,129 +604,24 @@ export function RoundEditor({
               />
             ) : (
               <>
-                {selected.length === 0 && (
-                  <p className="p-3 text-sm text-muted-foreground">
-                    Sumá puntos desde la lista de abajo o con «Sumar puntos de control» en el mapa.
-                  </p>
-                )}
-                <ol aria-label="Orden de puntos">
-                  {selected.map((id, index) => {
-                    if (!matches(id)) return null;
-                    const leg = route.legs[index];
-                    const label = nameOf(id);
-                    const legParts = partsOfLeg(index);
-                    const isFocus = current?.kind === 'point' && current.id === id;
-                    return (
-                      <li
-                        key={id}
-                        draggable
-                        onDragStart={(event) => {
-                          event.dataTransfer.setData('text/plain', id);
-                        }}
-                        onDragOver={(event) => {
-                          event.preventDefault();
-                        }}
-                        onDrop={(event) => {
-                          moveTo(event.dataTransfer.getData('text/plain'), index);
-                        }}
-                        className={cn(
-                          'group flex min-h-11 items-center gap-1.5 border-b border-border pr-1 pl-2',
-                          isFocus && 'bg-muted',
-                        )}
-                      >
-                        <GripVertical
-                          aria-hidden="true"
-                          className="size-4 shrink-0 cursor-grab text-muted-foreground"
-                        />
-                        <span className="t-numeral w-7 shrink-0 text-right">{index + 1}</span>
-                        <button
-                          type="button"
-                          className="min-w-0 flex-1 py-1 text-left"
-                          onClick={() => {
-                            select({ kind: 'point', id });
-                          }}
-                        >
-                          <span className="block truncate font-medium">{label}</span>
-                          <span className="block text-xs text-muted-foreground tabular-nums">
-                            {leg
-                              ? `→ ${formatMeters(meters[index] ?? 0)}${leg.sections.length > 1 ? ` · ${String(leg.sections.length)} partes` : ''}`
-                              : 'Fin del recorrido'}
-                            {legParts.some((p) => p.state === 'failed') && ' · ✕ falló'}
-                            {legParts.some((p) => p.state === 'pending') && ' · sin calcular'}
-                            {stale.has(index) && ' · se movió un punto'}
-                            {sharedIds.has(id) && ' · compartido'}
-                          </span>
-                        </button>
-                        <span className="flex opacity-60 group-focus-within:opacity-100 group-hover:opacity-100">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Subir ${label}`}
-                            disabled={index === 0}
-                            onClick={() => {
-                              moveTo(id, index - 1);
-                            }}
-                          >
-                            <ChevronUp aria-hidden="true" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Bajar ${label}`}
-                            disabled={index === selected.length - 1}
-                            onClick={() => {
-                              moveTo(id, index + 1);
-                            }}
-                          >
-                            <ChevronDown aria-hidden="true" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Quitar ${label}`}
-                            onClick={() => {
-                              removePoint(id);
-                            }}
-                          >
-                            <X aria-hidden="true" />
-                          </Button>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-                {outside.length > 0 && (
-                  <>
-                    <h4 className="t-label px-3 pt-4 pb-1">Fuera de la ronda</h4>
-                    <ul aria-label="Puntos fuera de la ronda">
-                      {outside.map((point) => (
-                        <li
-                          key={point.id}
-                          className="flex min-h-10 items-center gap-2 border-b border-border pr-1 pl-3"
-                        >
-                          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                            {point.name}
-                          </span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Sumar ${point.name}`}
-                            onClick={() => {
-                              addPoint(point.id);
-                            }}
-                          >
-                            <Plus aria-hidden="true" />
-                            Sumar
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
+                <OrderList
+                  selected={selected}
+                  outside={outside}
+                  visible={matches}
+                  nameOf={nameOf}
+                  route={route}
+                  meters={meters}
+                  parts={parts}
+                  stale={stale}
+                  sharedIds={sharedIds}
+                  focusId={current?.kind === 'point' ? current.id : null}
+                  onFocus={(id) => {
+                    select({ kind: 'point', id });
+                  }}
+                  onMove={moveTo}
+                  onRemove={removePoint}
+                  onAdd={addPoint}
+                />
               </>
             )}
           </div>
@@ -960,7 +674,7 @@ export function RoundEditor({
               disabled={calculate.isPending || estimate.pending === 0}
               onClick={() => {
                 setSummary('');
-                calculate.mutate();
+                calculate.mutate({ siteId, checkpointIds: selected, route });
               }}
             >
               {calculate.isPending ? 'Calculando…' : 'Calcular por calles'}
@@ -1002,12 +716,18 @@ export function RoundEditor({
               route={route}
               parts={parts}
               selection={current}
-              meters={meters}
+              meters={partMeters}
               stale={stale}
               pointName={nameOf}
               pointOrder={(id) => selected.indexOf(id)}
               onSetMode={(l, s, mode: RouteMode) => {
-                editRoute(routeEdits.setMode(route, l, s, mode));
+                const next = routeEdits.setMode(route, l, s, mode);
+                editRoute(next);
+                // Si se unió con la parte anterior (mismo modo), la parte elegida es esa.
+                const joined =
+                  (next.legs[l]?.sections.length ?? 0) < (route.legs[l]?.sections.length ?? 0);
+                const joinedBack = joined && route.legs[l]?.sections[s - 1]?.mode === mode;
+                select({ kind: 'part', l, s: joinedBack ? s - 1 : s });
               }}
               onSplit={split}
               onMerge={merge}

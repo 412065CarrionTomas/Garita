@@ -7,6 +7,7 @@ import { MODE_LABEL } from '../mapa/route-features';
 import { ModeIcon } from '../mapa/route-legend';
 import {
   FAILURE_TEXT,
+  canJoinAt,
   formatMeters,
   legLabel,
   partLabel,
@@ -35,7 +36,8 @@ export interface RouteInspectorProps {
   route: RouteInput;
   parts: PartInfo[];
   selection: RouteSelection | null;
-  meters: number[];
+  /** Metros de cada parte, [tramo][parte]. */
+  meters: number[][];
   /** Tramos cuyos puntos se movieron más de 5 m desde que se guardó el recorrido. */
   stale: Set<number>;
   pointName: (id: string) => string;
@@ -126,9 +128,8 @@ export function RouteInspector(props: RouteInspectorProps) {
     const leg = route.legs[l];
     const from = leg?.sections[k]?.mode ?? 'streets';
     const to = leg?.sections[k + 1]?.mode ?? 'streets';
-    const merged =
-      (leg?.sections[k]?.via.length ?? 0) + (leg?.sections[k + 1]?.via.length ?? 0) + 1;
-    const tooMany = merged > ROUTE_LIMITS.viaPerSection;
+    const tooMany = !canJoinAt(route, l, k, true);
+    const cannotRemove = !canJoinAt(route, l, k, false);
     return (
       <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
         <span>
@@ -156,6 +157,12 @@ export function RouteInspector(props: RouteInspectorProps) {
           type="button"
           variant="destructive"
           size="sm"
+          disabled={cannotRemove}
+          title={
+            cannotRemove
+              ? `Las dos partes juntas pasarían los ${String(ROUTE_LIMITS.viaPerSection)} puntos de guía.`
+              : undefined
+          }
           onClick={() => {
             props.onRemoveWaypoint(l, k);
           }}
@@ -217,7 +224,9 @@ export function RouteInspector(props: RouteInspectorProps) {
     <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
       <span>
         <span className="block font-medium">
-          {label} · {formatMeters(props.meters[l] ?? 0)}
+          {label} · {formatMeters(props.meters[l]?.[s] ?? 0)}
+          {leg.sections.length > 1 &&
+            ` de ${formatMeters(props.meters[l]?.reduce((total, m) => total + m, 0) ?? 0)} del tramo`}
         </span>
         <span
           className={cn(

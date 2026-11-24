@@ -138,6 +138,32 @@ describe('RoundsPanel', () => {
     expect(screen.getAllByText(/La gracia puede ser, como máximo, 5 minutos/)).toHaveLength(2);
   });
 
+  it('pide confirmar al salir si solo cambió el horario', async () => {
+    await openNew();
+    const user = userEvent.setup();
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.change(screen.getByLabelText('Gracia (minutos)'), { target: { value: '10' } });
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(confirm).toHaveBeenCalledWith('¿Descartar los cambios de la ronda?');
+    expect(screen.getByLabelText('Nombre')).toBeInTheDocument();
+  });
+
+  it('Ctrl+Mayús+Z no deshace y las teclas no tocan el editor con la ayuda abierta', async () => {
+    await openNew();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Sumar Portón' }));
+    await user.keyboard('{Control>}{Shift>}z{/Shift}{/Control}');
+    expect(screen.getByRole('list', { name: 'Orden de puntos' }).children).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Ayuda del editor de rondas' }));
+    await user.keyboard('e');
+    await user.keyboard('{Escape}');
+    const tools = screen.getByRole('group', { name: 'Herramienta del mapa' });
+    expect(within(tools).getByRole('button', { name: 'Seleccionar' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
   describe('recorrido', () => {
     async function fillRound() {
       const view = await openNew();

@@ -7,6 +7,7 @@ import {
 } from '@garita/shared';
 import {
   GUIDE_STEP_METERS,
+  canJoinAt,
   failureMessages,
   formatMeters,
   legMeters,
@@ -114,6 +115,27 @@ describe('routeEdits', () => {
     expect(pointAfterLast([A, near], GUIDE_STEP_METERS)).toEqual([0.00005, 0]);
   });
 
+  it('no une dos partes si juntas pasan el tope de puntos de guía', () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i): LngLat => [i / 1e4, 0.001]);
+    const full = oneLeg({
+      waypoints: [p2],
+      sections: [
+        { mode: 'streets', via: many(30) },
+        { mode: 'manual', via: many(18) },
+      ],
+    });
+    // 30 + 18 = 48 entra sin el punto; con el punto como guía serían 49.
+    expect(canJoinAt(full, 0, 0, false)).toBe(true);
+    expect(canJoinAt(full, 0, 0, true)).toBe(false);
+    expect(routeEdits.mergeAtWaypoint(full, 0, 0)).toEqual(full);
+    expect(routeEdits.removeWaypoint(full, 0, 0).legs[0]?.sections).toHaveLength(1);
+  });
+
+  it('al igualar el modo con la parte vecina, las dos se unen', () => {
+    const split = routeEdits.splitAtVia(guided, 0, 0, 1);
+    expect(routeEdits.setMode(split, 0, 1, 'streets')).toEqual(guided);
+  });
+
   it('inserta el punto de guía según dónde se tocó a lo largo de la línea', () => {
     const line = [A, p1, p2, p3, B];
     expect(viaInsertIndex([p1, p2, p3], line, [0.0065, 0.0011])).toBe(2);
@@ -219,6 +241,11 @@ describe('estado de cada parte', () => {
       })),
     });
     expect(states(mixed, straight)).toEqual(['straight', 'manual']);
+    // Se puede volver a pedir: cuenta para «Calcular por calles».
+    expect(requestEstimate(resolveRoute(mixed, [A, B], straight).parts)).toEqual({
+      pending: 1,
+      requests: 1,
+    });
   });
 
   it('estima un pedido por cada corrida de partes por calles seguidas sin calcular', () => {
