@@ -82,7 +82,7 @@ describe('SitesPage', () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
     expect(screen.queryByRole('button', { name: 'Guardar predio' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+    await user.click(await screen.findByRole('button', { name: 'Nuevo predio' }));
     const dialog = screen.getByRole('dialog', { name: 'Alta de predio' });
     expect(within(dialog).getByLabelText('Cliente')).toBeRequired();
     expect(within(dialog).getByLabelText('Nombre')).toBeRequired();
@@ -100,24 +100,36 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('supervisor'));
     renderWithQueryClient(<SitesPage />);
     expect(await screen.findByRole('heading', { name: 'Sede' })).toBeInTheDocument();
-    expect(screen.getByText('Supervisión')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Guardar predio' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Supervisores de Sede')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Nuevo predio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editar predio' })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Configuración' }));
+    expect(screen.queryByRole('group', { name: 'Supervisores asignados' })).not.toBeInTheDocument();
   });
 
-  it('permite seleccionar y asignar supervisores con el selector múltiple', async () => {
+  it('pliega la lista al elegir un predio y la vuelve a mostrar con la flecha', async () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
-    const select = await screen.findByRole('listbox', { name: 'Supervisores de Sede' });
-    await waitFor(() => {
-      expect(select).not.toBeDisabled();
-    });
-    await user.selectOptions(select, 'supervisor-1');
+    await user.click(await screen.findByRole('button', { name: /^Sede/ }));
+    expect(screen.queryByRole('navigation', { name: 'Lista de predios' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Nuevo predio' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Mostrar lista de predios' }));
+    expect(screen.getByRole('navigation', { name: 'Lista de predios' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo predio' })).toBeInTheDocument();
+  });
+
+  it('asigna y quita supervisores desde la pestaña Configuración', async () => {
+    jest.mocked(useAuth).mockReturnValue(profile('admin'));
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
+    const ana = await screen.findByRole('checkbox', { name: 'Ana Gómez' });
+    expect(ana).toBeChecked();
+    await user.click(ana);
     await waitFor(() => {
       expect(apiPut).toHaveBeenCalledWith(
         '/predios/site-1/supervisores',
-        { supervisorIds: ['supervisor-1'] },
+        { supervisorIds: [] },
         expect.anything(),
         expect.anything(),
       );
@@ -196,6 +208,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
 
     expect(await screen.findByText('Velocidad máxima de recorrido')).toBeInTheDocument();
     const select = screen.getByRole('combobox', {
@@ -244,6 +257,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(supervisorProfile);
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
 
     const select = await screen.findByRole('combobox', {
       name: 'Velocidad máxima de recorrido para Sede',
@@ -291,7 +305,7 @@ it('no guarda en cero y limpia el formulario despues del alta', async () => {
   jest.mocked(apiPost).mockClear();
   const user = userEvent.setup();
   renderWithQueryClient(<SitesPage />);
-  await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+  await user.click(await screen.findByRole('button', { name: 'Nuevo predio' }));
   const dialog = screen.getByRole('dialog', { name: 'Alta de predio' });
   await user.selectOptions(await within(dialog).findByLabelText('Cliente'), 'client-1');
   await user.type(within(dialog).getByLabelText('Nombre'), 'Nuevo');
