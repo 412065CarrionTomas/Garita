@@ -60,10 +60,11 @@ describe('CheckpointsPanel', () => {
         </div>,
       );
       expect(screen.queryByLabelText('Nombre del punto')).not.toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+      await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
       expect(screen.getByLabelText('Nombre del punto')).toBeInTheDocument();
+      // El panel va sobre la hoja de la pestaña: sin fondo propio, con el texto del token.
       expect(container.querySelector('[data-slot=card]')).toHaveClass(
-        'bg-card',
+        'bg-transparent',
         'text-card-foreground',
       );
       expect(container.innerHTML).not.toMatch(
@@ -76,7 +77,7 @@ describe('CheckpointsPanel', () => {
     setRole('admin');
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+    await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
     await user.type(await screen.findByLabelText('Nombre del punto'), 'Portón');
     fireEvent.change(screen.getByLabelText('Radio de tolerancia (m)'), { target: { value: '5' } });
     const form = screen.getByRole('button', { name: 'Crear punto' }).closest('form');
@@ -94,7 +95,7 @@ describe('CheckpointsPanel', () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+    await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
     await user.type(await screen.findByLabelText('Nombre del punto'), 'Torre');
     fireEvent.change(await screen.findByLabelText('Latitud'), { target: { value: '-34' } });
     fireEvent.change(screen.getByLabelText('Longitud'), { target: { value: '-58' } });
@@ -132,7 +133,8 @@ describe('CheckpointsPanel', () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
+    await user.click(await screen.findByRole('button', { name: 'Más acciones de Portón' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Dar de baja' }));
     await user.click(screen.getByRole('button', { name: 'Confirmar baja' }));
     expect(
       await screen.findByText('No se puede dar de baja: está incluida en Perimetral.'),
@@ -159,7 +161,8 @@ describe('CheckpointsPanel', () => {
     window.confirm = confirmSpy;
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(await screen.findByRole('button', { name: 'Regenerar QR' }));
+    await user.click(await screen.findByRole('button', { name: 'Más acciones de Portón' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Regenerar QR' }));
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('dejará de ser válido'));
     expect(apiPost).not.toHaveBeenCalled();
   });
@@ -175,7 +178,7 @@ describe('CheckpointsPanel', () => {
   });
 });
 
-it('no ofrece imprimir una lista vacia y limpia el alta al guardar', async () => {
+it('no ofrece imprimir una lista vacia y cierra el alta al guardar', async () => {
   setRole('admin');
   jest.mocked(apiGet).mockResolvedValue([] as never);
   const user = userEvent.setup();
@@ -186,14 +189,16 @@ it('no ofrece imprimir una lista vacia y limpia el alta al guardar', async () =>
   expect(
     screen.queryByRole('button', { name: 'Descargar stickers de todos' }),
   ).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+  await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
   await user.type(await screen.findByLabelText('Nombre del punto'), 'Nuevo punto');
   await user.click(screen.getByRole('button', { name: 'Crear punto' }));
   await screen.findByText('Punto guardado.');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
   expect(screen.getByLabelText('Nombre del punto')).toHaveValue('');
   expect(screen.getByLabelText('Radio de tolerancia (m)')).toHaveValue(30);
 });
-it('cancelar edicion limpia todos los campos y regenerar QR refresca puntos', async () => {
+it('cancelar la edición cierra el modal y deja el alta vacía y regenerar QR refresca puntos', async () => {
   setRole('admin');
   jest.mocked(apiGet).mockResolvedValue([
     {
@@ -211,14 +216,21 @@ it('cancelar edicion limpia todos los campos y regenerar QR refresca puntos', as
   ] as never);
   const user = userEvent.setup();
   renderWithQueryClient(<CheckpointsPanel site={site} />);
-  await user.click(await screen.findByRole('button', { name: 'Editar' }));
-  await user.click(screen.getByRole('button', { name: 'Cancelar edición' }));
+  await user.click(await screen.findByRole('button', { name: 'Más acciones de Porton' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+  expect(screen.getByRole('dialog', { name: 'Editar punto' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+  expect(screen.getByRole('dialog', { name: 'Nuevo punto' })).toBeInTheDocument();
   expect(screen.getByLabelText('Nombre del punto')).toHaveValue('');
   expect(screen.getByLabelText('Radio de tolerancia (m)')).toHaveValue(30);
-  expect(screen.getByLabelText('Ubicación del sticker (opcional)')).toHaveValue('');
+  expect(screen.getByLabelText('Descripción de ubicación del sticker (opcional)')).toHaveValue('');
   expect(screen.getByLabelText('Punto interior')).not.toBeChecked();
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   const reads = jest.mocked(apiGet).mock.calls.length;
-  await user.click(screen.getByRole('button', { name: 'Regenerar QR' }));
+  await user.click(screen.getByRole('button', { name: 'Más acciones de Porton' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Regenerar QR' }));
   await screen.findByText('QR regenerado. Imprimí un sticker nuevo.');
   expect(jest.mocked(apiGet).mock.calls.length).toBeGreaterThan(reads);
 });

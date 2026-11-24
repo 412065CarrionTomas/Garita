@@ -1,17 +1,40 @@
 import { useQuery } from '@tanstack/react-query';
 import { checkpointInputSchema, checkpointsResponseSchema } from '@garita/shared';
 import { useState, type SyntheticEvent } from 'react';
+import { useFillHeight } from '@/lib/use-fill-height';
 import { z } from 'zod';
 import { apiDownload, apiGet, apiPatch, apiPost, ApiError } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
 import { useAuth } from '../auth/auth-context';
+import { AddressSearch } from '../mapa/address-search';
 import { SiteLocation } from '../mapa/site-location';
 import { SitesMap } from '../mapa/sites-map';
 
-import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Download, EllipsisVertical, Plus } from 'lucide-react';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -77,6 +100,8 @@ export function CheckpointsPanel({ site }: SiteProps) {
     isIndoor: false,
   };
   const [form, setForm] = useState(emptyForm);
+  // Mapa y tabla llenan lo que queda de la ventana: la página no baja, se desplaza la tabla.
+  const [measureFill, fillHeight] = useFillHeight<HTMLDivElement>();
   const [formOpen, setFormOpen] = useState(false);
   const { busy, run } = useBusy();
   const [editingId, setEditingId] = useState<string>();
@@ -108,6 +133,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
       setConfirmFar(false);
       setEditingId(undefined);
       setForm(emptyForm);
+      setFormOpen(false);
       setMessage('Punto guardado.');
       await points.refetch();
     } catch (error) {
@@ -145,6 +171,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
     stickerLocation: string | null;
     isIndoor: boolean;
   }) => {
+    setMessage('');
     setFormOpen(true);
     setEditingId(point.id);
     setForm({
@@ -165,307 +192,370 @@ export function CheckpointsPanel({ site }: SiteProps) {
   };
 
   return (
-    <section aria-labelledby={`points-${site.id}`} className="mt-4">
-      <Card className="border-0 py-0">
-        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-          <h3
-            id={`points-${site.id}`}
-            className="font-cond text-xl font-semibold uppercase tracking-wider"
+    <section aria-labelledby={`points-${site.id}`}>
+      <Card className="border-0 bg-transparent py-0">
+        {/* La pestaña ya dice "Puntos de control": el título queda para lectores de pantalla. */}
+        <h3 id={`points-${site.id}`} className="sr-only">
+          Puntos de control
+        </h3>
+        <CardContent className="space-y-4 px-0">
+          <Dialog
+            open={admin && site.status === 'active' && formOpen}
+            onOpenChange={(open) => {
+              setFormOpen(open);
+              if (open) return;
+              setEditingId(undefined);
+              setForm(emptyForm);
+              setConfirmFar(false);
+            }}
           >
-            Puntos de control
-          </h3>
-          {admin && site.status === 'active' && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setFormOpen(!formOpen);
-              }}
-              aria-expanded={formOpen}
-              aria-controls={`point-form-${site.id}`}
-            >
-              Agregar punto
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {admin && site.status === 'active' && formOpen && (
-            <form
-              id={`point-form-${site.id}`}
-              className="grid gap-4"
-              onSubmit={(event) => void save(event)}
-            >
-              <Label className="grid min-w-0 gap-2">
-                Nombre del punto
-                <Input
-                  required
-                  maxLength={200}
-                  value={form.name}
-                  onChange={(event) => {
-                    setForm({ ...form, name: event.target.value });
-                  }}
-                  className="w-full"
-                />
-              </Label>
-              <SiteLocation
-                latitude={form.latitude}
-                longitude={form.longitude}
-                onChange={(latitude, longitude) => {
-                  setForm({ ...form, latitude, longitude });
-                }}
-              />
-              <Label className="grid min-w-0 gap-2">
-                Radio de tolerancia (m)
-                <Input
-                  aria-label="Radio de tolerancia (m)"
-                  type="number"
-                  min={10}
-                  max={200}
-                  step={1}
-                  required
-                  value={form.toleranceRadiusMeters}
-                  onChange={(event) => {
-                    setForm({ ...form, toleranceRadiusMeters: Number(event.target.value) });
-                  }}
-                  className="w-full"
-                />
-              </Label>
-              <Label className="grid min-w-0 gap-2">
-                Ubicación del sticker (opcional)
-                <Textarea
-                  value={form.stickerLocation}
-                  onChange={(event) => {
-                    setForm({ ...form, stickerLocation: event.target.value });
-                  }}
-                  className="w-full"
-                />
-              </Label>
-              <Label className="flex gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.isIndoor}
-                  onChange={(event) => {
-                    setForm({ ...form, isIndoor: event.target.checked });
-                  }}
-                />
-                Punto interior
-              </Label>
-              <div className="flex gap-3">
-                <Button type="submit" disabled={busy}>
-                  {editingId ? 'Guardar cambios' : 'Crear punto'}
-                </Button>
-                {editingId && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setEditingId(undefined);
-                      setForm(emptyForm);
-                      setConfirmFar(false);
+            {/* Grande para ubicar el punto con precisión entre los que ya existen. */}
+            <DialogContent className="w-[calc(100%-2rem)] max-w-none">
+              <DialogTitle className="text-lg font-semibold">
+                {editingId ? 'Editar punto' : 'Nuevo punto'}
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                Completá los datos y ubicá el punto en el mapa.
+              </DialogDescription>
+              <form
+                id={`point-form-${site.id}`}
+                className="mt-4 grid items-start gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]"
+                onSubmit={(event) => void save(event)}
+              >
+                {/* Mide lo mismo que el mapa: la lista de puntos usa solo lo que sobra y se desplaza. */}
+                <div className="flex min-w-0 flex-col gap-4 lg:h-[calc(90vh-8rem)] lg:min-h-80">
+                  <Label className="grid min-w-0 gap-2">
+                    Nombre del punto
+                    <Input
+                      required
+                      maxLength={200}
+                      value={form.name}
+                      onChange={(event) => {
+                        setForm({ ...form, name: event.target.value });
+                      }}
+                      className="w-full"
+                    />
+                  </Label>
+                  <AddressSearch
+                    onSelect={(latitude, longitude) => {
+                      setForm({ ...form, latitude, longitude });
                     }}
-                  >
-                    Cancelar edición
-                  </Button>
-                )}
-              </div>
-            </form>
-          )}
-          {admin && !!points.data?.length && (
-            <Button variant="outline" onClick={() => void download()}>
-              Descargar stickers de todos
-            </Button>
-          )}
-          {message && <p role="status">{message}</p>}
+                  />
+                  <Label className="grid min-w-0 gap-2">
+                    Radio de tolerancia (m)
+                    <Input
+                      aria-label="Radio de tolerancia (m)"
+                      type="number"
+                      min={10}
+                      max={200}
+                      step={1}
+                      required
+                      value={form.toleranceRadiusMeters}
+                      onChange={(event) => {
+                        setForm({ ...form, toleranceRadiusMeters: Number(event.target.value) });
+                      }}
+                      className="w-full"
+                    />
+                  </Label>
+                  <Label className="grid min-w-0 gap-2">
+                    Descripción de ubicación del sticker (opcional)
+                    <Textarea
+                      value={form.stickerLocation}
+                      onChange={(event) => {
+                        setForm({ ...form, stickerLocation: event.target.value });
+                      }}
+                      className="w-full"
+                    />
+                  </Label>
+                  <Label className="flex gap-2">
+                    <input
+                      type="checkbox"
+                      checked={form.isIndoor}
+                      onChange={(event) => {
+                        setForm({ ...form, isIndoor: event.target.checked });
+                      }}
+                    />
+                    Punto interior
+                  </Label>
+                  <div className="flex gap-3">
+                    <Button type="submit" disabled={busy}>
+                      {editingId ? 'Guardar cambios' : 'Crear punto'}
+                    </Button>
+                    <DialogClose asChild>
+                      <Button type="button" variant="ghost">
+                        Cancelar
+                      </Button>
+                    </DialogClose>
+                  </div>
+                  {confirmFar && (
+                    <Alert
+                      role="alertdialog"
+                      aria-modal="true"
+                      aria-labelledby={`far-${site.id}`}
+                      className="space-y-3 border-warning bg-warning-soft text-warning"
+                    >
+                      <h4 id={`far-${site.id}`} className="font-semibold">
+                        El punto está a más de 1 km del predio
+                      </h4>
+                      <p>Confirmá que la ubicación sea correcta para guardar el punto.</p>
+                      <Button variant="outline" onClick={() => void save(undefined, true)}>
+                        Confirmar ubicación
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="mt-3"
+                        onClick={() => {
+                          setConfirmFar(false);
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                    </Alert>
+                  )}
+                  {message && <p role="status">{message}</p>}
+                  {!!points.data?.length && (
+                    <details className="min-h-0 shrink overflow-y-auto rounded-md border border-border">
+                      <summary className="sticky top-0 cursor-pointer bg-popover px-3 py-2 text-sm font-semibold">
+                        Puntos del predio ({points.data.length})
+                      </summary>
+                      {/* El número es el mismo que se ve bajo cada punto en el mapa. */}
+                      <ol className="border-t border-border px-3 py-2 text-sm">
+                        {points.data.map((point, index) => (
+                          <li key={point.id} className="flex gap-2 py-0.5">
+                            <span className="w-6 shrink-0 text-right text-muted-foreground tabular-nums">
+                              {index + 1}
+                            </span>
+                            <span className="min-w-0 break-words">{point.name}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  )}
+                </div>
+                <SiteLocation
+                  search={false}
+                  others={(points.data ?? [])
+                    .map((point, index) => ({ ...point, label: String(index + 1) }))
+                    .filter((point) => point.id !== editingId)}
+                  mapClassName="h-[calc(90vh-8rem)] min-h-80"
+                  latitude={form.latitude}
+                  longitude={form.longitude}
+                  onChange={(latitude, longitude) => {
+                    setForm({ ...form, latitude, longitude });
+                  }}
+                />
+              </form>
+            </DialogContent>
+          </Dialog>
+          {!formOpen && message && <p role="status">{message}</p>}
           {points.isPending ? (
             <p role="status">Cargando puntos…</p>
           ) : points.isError ? (
             <Alert variant="destructive">No se pudieron cargar los puntos.</Alert>
           ) : (
-            <>
+            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
               {points.data.length > 0 && (
-                <div aria-label={`Mapa de puntos de ${site.name}`}>
-                  <SitesMap sites={[site, ...points.data]} />
+                <div
+                  aria-label={`Mapa de puntos de ${site.name}`}
+                  className="xl:sticky xl:top-4 xl:order-last"
+                >
+                  <SitesMap
+                    sites={[
+                      site,
+                      ...points.data.map((point, index) => ({
+                        ...point,
+                        label: String(index + 1),
+                      })),
+                    ]}
+                    height={fillHeight}
+                  />
                 </div>
               )}
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead scope="col" className="t-label w-12">
-                      N°
-                    </TableHead>
-                    <TableHead scope="col" className="t-label">
-                      Punto
-                    </TableHead>
-                    <TableHead scope="col" className="t-label">
-                      Estado
-                    </TableHead>
-                    <TableHead scope="col" className="t-label">
-                      Ubicación
-                    </TableHead>
-                    {admin && (
-                      <TableHead scope="col" className="t-label">
-                        Acciones
+              {/* En pantallas anchas la tabla se desplaza sola y ocupa el mismo alto que el mapa. */}
+              <div ref={measureFill} style={{ maxHeight: fillHeight }} className="overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-muted">
+                    <TableRow>
+                      <TableHead scope="col" className="t-label w-12">
+                        N°
                       </TableHead>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {points.data.map((point, index) => (
-                    <TableRow key={point.id}>
-                      <TableCell className="t-numeral text-muted-foreground">{index + 1}</TableCell>
-                      <TableCell className="font-semibold">
-                        {point.name}
-                        {point.isIndoor ? ' · Interior' : ''}
-                        {point.stickerLocation && (
-                          <p className="text-sm font-normal text-muted-foreground">
-                            {point.stickerLocation}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {/* TODO(foja): la maqueta muestra Instalada / Falta imprimir; la API aún no expone si el QR se imprimió. */}
-                        <StatusBadge tone={point.status === 'active' ? 'success' : 'neutral'}>
-                          {point.status === 'active' ? 'Activo' : 'Inactivo'}
-                        </StatusBadge>
-                      </TableCell>
-                      <TableCell className="text-sm tabular-nums">
-                        Radio: {point.toleranceRadiusMeters} m · {point.latitude}, {point.longitude}
-                      </TableCell>
+                      <TableHead scope="col" className="t-label">
+                        {/* Las acciones de la lista van junto al título y no agrandan la fila. */}
+                        <span className="flex items-center gap-1.5">
+                          Punto
+                          {admin && site.status === 'active' && (
+                            <Button
+                              variant="outline"
+                              size="icon-xs"
+                              className="size-6"
+                              aria-label="Agregar punto"
+                              title="Agregar punto"
+                              aria-expanded={formOpen}
+                              aria-controls={`point-form-${site.id}`}
+                              onClick={() => {
+                                setMessage('');
+                                setFormOpen(true);
+                              }}
+                            >
+                              <Plus aria-hidden="true" />
+                            </Button>
+                          )}
+                          {admin && points.data.length > 0 && (
+                            <Button
+                              variant="outline"
+                              size="icon-xs"
+                              className="size-6"
+                              aria-label="Descargar stickers de todos"
+                              title="Descargar stickers de todos"
+                              onClick={() => void download()}
+                            >
+                              <Download aria-hidden="true" />
+                            </Button>
+                          )}
+                        </span>
+                      </TableHead>
+                      <TableHead scope="col" className="t-label">
+                        Radio
+                      </TableHead>
                       {admin && (
-                        <TableCell>
-                          <div className="flex flex-wrap gap-3">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                edit(point);
-                              }}
-                            >
-                              Editar
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
-                                  )
-                                )
-                                  void apiPost(
-                                    `/puntos/${point.id}/regenerar-qr`,
-                                    {},
-                                    emptyInput,
-                                    z.looseObject({
-                                      checkpoint: idResponse,
-                                      qrPayload: z.string(),
-                                    }),
-                                  )
-                                    .then(async () => {
-                                      await points.refetch();
-                                      setMessage('QR regenerado. Imprimí un sticker nuevo.');
-                                    })
-                                    .catch(() => {
-                                      setMessage('No se pudo regenerar el QR. Intentá de nuevo.');
-                                    });
-                              }}
-                            >
-                              Regenerar QR
-                            </Button>
-                            <Button
-                              variant="ghostDestructive"
-                              size="sm"
-                              onClick={() => {
-                                setPendingAction(() => async () => {
-                                  try {
-                                    await apiPost(
-                                      `/puntos/${point.id}/baja`,
-                                      {},
-                                      emptyInput,
-                                      idResponse,
-                                    );
-                                  } catch (error) {
-                                    if (error instanceof ApiError && error.status === 409) {
-                                      const names = roundNames(error);
-                                      setMessage(
-                                        names.length
-                                          ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
-                                          : 'No se puede dar de baja: está incluida en rondas activas.',
-                                      );
-                                      return;
-                                    }
-                                    setMessage(
-                                      'No se pudo dar de baja el punto. Intentá de nuevo.',
-                                    );
-                                  }
-                                });
-                              }}
-                            >
-                              Dar de baja
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => void download(point.id)}
-                            >
-                              Descargar sticker
-                            </Button>
-                          </div>
-                        </TableCell>
+                        <TableHead scope="col" className="t-label w-px">
+                          <span className="sr-only">Acciones</span>
+                        </TableHead>
                       )}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </>
+                  </TableHeader>
+                  <TableBody>
+                    {points.data.map((point, index) => (
+                      <TableRow key={point.id}>
+                        <TableCell className="t-numeral text-muted-foreground">
+                          {index + 1}
+                        </TableCell>
+                        <TableCell className="font-semibold">
+                          {point.name}
+                          {point.isIndoor ? ' · Interior' : ''}
+                        </TableCell>
+                        <TableCell className="text-sm tabular-nums">
+                          {point.toleranceRadiusMeters} m
+                          <span className="block text-xs text-muted-foreground">
+                            {point.latitude}, {point.longitude}
+                          </span>
+                        </TableCell>
+                        {admin && (
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={`Más acciones de ${point.name}`}
+                                  >
+                                    <EllipsisVertical aria-hidden="true" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onSelect={() => {
+                                      edit(point);
+                                    }}
+                                  >
+                                    Editar
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onSelect={() => {
+                                      if (
+                                        window.confirm(
+                                          'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
+                                        )
+                                      )
+                                        void apiPost(
+                                          `/puntos/${point.id}/regenerar-qr`,
+                                          {},
+                                          emptyInput,
+                                          z.looseObject({
+                                            checkpoint: idResponse,
+                                            qrPayload: z.string(),
+                                          }),
+                                        )
+                                          .then(async () => {
+                                            await points.refetch();
+                                            setMessage('QR regenerado. Imprimí un sticker nuevo.');
+                                          })
+                                          .catch(() => {
+                                            setMessage(
+                                              'No se pudo regenerar el QR. Intentá de nuevo.',
+                                            );
+                                          });
+                                    }}
+                                  >
+                                    Regenerar QR
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => void download(point.id)}>
+                                    Descargar sticker
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    variant="destructive"
+                                    onSelect={() => {
+                                      setPendingAction(() => async () => {
+                                        try {
+                                          await apiPost(
+                                            `/puntos/${point.id}/baja`,
+                                            {},
+                                            emptyInput,
+                                            idResponse,
+                                          );
+                                        } catch (error) {
+                                          if (error instanceof ApiError && error.status === 409) {
+                                            const names = roundNames(error);
+                                            setMessage(
+                                              names.length
+                                                ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
+                                                : 'No se puede dar de baja: está incluida en rondas activas.',
+                                            );
+                                            return;
+                                          }
+                                          setMessage(
+                                            'No se pudo dar de baja el punto. Intentá de nuevo.',
+                                          );
+                                        }
+                                      });
+                                    }}
+                                  >
+                                    Dar de baja
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
           )}
-          {confirmFar && (
-            <Alert
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby={`far-${site.id}`}
-              className="space-y-3 border-warning bg-warning-soft text-warning"
-            >
-              <h4 id={`far-${site.id}`} className="font-semibold">
-                El punto está a más de 1 km del predio
-              </h4>
-              <p>Confirmá que la ubicación sea correcta para guardar el punto.</p>
-              <Button variant="outline" onClick={() => void save(undefined, true)}>
-                Confirmar ubicación
-              </Button>
-              <Button
-                variant="outline"
-                className="mt-3"
-                onClick={() => {
-                  setConfirmFar(false);
-                }}
-              >
-                Cancelar
-              </Button>
-            </Alert>
-          )}
-          {pendingAction && (
-            <Alert
-              role="alertdialog"
-              aria-modal="true"
-              aria-label="Confirmar baja"
-              className="space-y-3 border-warning bg-warning-soft text-warning"
-            >
-              <p>¿Dar de baja este punto de control?</p>
-              <Button onClick={() => void confirm()} variant="destructive">
-                Confirmar baja
-              </Button>
-              <Button
-                variant="outline"
-                className="mt-3"
-                onClick={() => {
-                  setPendingAction(undefined);
-                }}
-              >
-                Cancelar
-              </Button>
-            </Alert>
-          )}
+          {/* Diálogo y no un aviso al pie: debajo de la tabla quedaba fuera de la pantalla. */}
+          <AlertDialog
+            open={!!pendingAction}
+            onOpenChange={(open) => {
+              if (!open) setPendingAction(undefined);
+            }}
+          >
+            <AlertDialogContent className="space-y-4">
+              <AlertDialogTitle className="text-lg font-semibold">Confirmar baja</AlertDialogTitle>
+              <AlertDialogDescription>¿Dar de baja este punto de control?</AlertDialogDescription>
+              <div className="flex flex-wrap justify-end gap-2">
+                <AlertDialogCancel asChild>
+                  <Button variant="outline">Cancelar</Button>
+                </AlertDialogCancel>
+                <Button onClick={() => void confirm()} variant="destructive">
+                  Confirmar baja
+                </Button>
+              </div>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardContent>
       </Card>
     </section>
