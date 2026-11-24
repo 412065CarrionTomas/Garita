@@ -21,6 +21,8 @@ export function useFillHeight<T extends HTMLElement>(gap = 8, min = 320) {
     // Lo de arriba puede crecer o achicarse (pestañas, avisos): se vuelve a medir con la página.
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
     observer?.observe(document.body);
+    // Al mostrarse su pestaña el elemento pasa de 0 a su tamaño, aunque la página no cambie.
+    observer?.observe(element);
     return () => {
       window.removeEventListener('resize', update);
       observer?.disconnect();
