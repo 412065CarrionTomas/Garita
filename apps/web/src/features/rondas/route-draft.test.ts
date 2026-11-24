@@ -2,9 +2,12 @@ import { defaultRouteInput, type LngLat, type RouteInput } from '@garita/shared'
 import {
   failedLegs,
   failureMessages,
+  formatMeters,
+  legMeters,
   legLabel,
   reconcileRoute,
   routeEdits,
+  sectionOptions,
   sectionMidpoint,
   storedRouteInput,
 } from './route-draft';
@@ -127,5 +130,59 @@ describe('mensajes de falla', () => {
     ]);
     expect([...failedLegs(failures)].sort()).toEqual([0, 1, 2]);
     expect(legLabel(2, 3, true)).toBe('3 → 1 (regreso)');
+  });
+});
+
+describe('edición desde el mapa', () => {
+  const route: RouteInput = {
+    closed: false,
+    legs: [
+      {
+        waypoints: [gate],
+        sections: [
+          { mode: 'streets', via: [] },
+          { mode: 'manual', via: [bend] },
+        ],
+      },
+    ],
+  };
+
+  it('inserta el punto de paso en la sección tocada y la parte con su mismo modo', () => {
+    const at: LngLat = [-64.17, -31.42];
+    const next = routeEdits.insertWaypoint(route, 0, 1, at);
+    expect(next.legs[0]?.waypoints).toEqual([gate, at]);
+    expect(next.legs[0]?.sections).toEqual([
+      { mode: 'streets', via: [] },
+      { mode: 'manual', via: [bend] },
+      { mode: 'manual', via: [] },
+    ]);
+    // Al principio de la sección 0 queda antes del punto de paso existente.
+    expect(routeEdits.insertWaypoint(route, 0, 0, at).legs[0]?.waypoints).toEqual([at, gate]);
+  });
+
+  it('borra un quiebre puntual y lista las secciones con su nombre', () => {
+    expect(routeEdits.removeVia(route, 0, 1, 0).legs[0]?.sections[1]?.via).toEqual([]);
+    expect(sectionOptions(route).map((option) => option.label)).toEqual([
+      'Tramo 1 → 2 (parte 1)',
+      'Tramo 1 → 2 (parte 2)',
+    ]);
+  });
+
+  it('mide cada tramo sobre la línea y formatea en m o km', () => {
+    const meters = legMeters({
+      v: 1,
+      closed: false,
+      legs: [
+        {
+          from: gate,
+          to: bend,
+          waypoints: [],
+          sections: [{ mode: 'manual', via: [], geometry: [gate, bend], fallback: false }],
+        },
+      ],
+    });
+    expect(meters[0]).toBeGreaterThan(1000);
+    expect(formatMeters(1440)).toBe('1,4 km');
+    expect(formatMeters(87.4)).toBe('87 m');
   });
 });

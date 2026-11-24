@@ -1,10 +1,12 @@
 import {
   defaultRouteInput,
+  distanceMeters,
   legCount,
   polyline,
   roundRouteSchema,
   sectionEndpoints,
   type LngLat,
+  type RoundRoute,
   type RouteFailure,
   type RouteInput,
   type RouteLegInput,
@@ -109,6 +111,26 @@ export const routeEdits = {
     updateVia(route, l, s, (via) => [...via, at]),
   moveVia: (route: RouteInput, l: number, s: number, i: number, at: LngLat) =>
     updateVia(route, l, s, (via) => replaceAt(via, i, at)),
+  /**
+   * Punto de paso marcado sobre la línea de la sección `s`: la sección se parte en dos con su
+   * mismo modo. Sus quiebres quedan en la primera mitad.
+   */
+  insertWaypoint: (route: RouteInput, l: number, s: number, at: LngLat) =>
+    updateLeg(route, l, (leg) => {
+      const section = leg.sections[s];
+      if (!section) return leg;
+      return {
+        waypoints: [...leg.waypoints.slice(0, s), at, ...leg.waypoints.slice(s)],
+        sections: [
+          ...leg.sections.slice(0, s),
+          section,
+          { mode: section.mode, via: [] },
+          ...leg.sections.slice(s + 1),
+        ],
+      };
+    }),
+  removeVia: (route: RouteInput, l: number, s: number, i: number) =>
+    updateVia(route, l, s, (via) => via.filter((_, k) => k !== i)),
   undoVia: (route: RouteInput, l: number, s: number) =>
     updateVia(route, l, s, (via) => via.slice(0, -1)),
   clearVia: (route: RouteInput, l: number, s: number) => updateVia(route, l, s, () => []),
@@ -142,6 +164,69 @@ export function legLabel(l: number, total: number, closed: boolean): string {
   const back = closed && l === total - 1;
   return `${String(l + 1)} → ${String(back ? 1 : l + 2)}${back ? ' (regreso)' : ''}`;
 }
+
+/** Lo que se dibuja sin calcular: rectas, y las secciones por calles marcadas como pendientes. */
+export function draftGeometry(route: RouteInput, coords: LngLat[]): RoundRoute {
+  const first = coords[0];
+  const ring = route.closed && first ? [...coords, first] : coords;
+  return {
+    v: 1,
+    closed: route.closed,
+    legs: route.legs.flatMap((leg, l) => {
+      const from = ring[l];
+      const to = ring[l + 1];
+      if (!from || !to) return [];
+      const ends = sectionEndpoints(from, to, leg.waypoints);
+      return [
+        {
+          from,
+          to,
+          waypoints: leg.waypoints,
+          sections: leg.sections.map((section, s) => {
+            const [start, end] = ends[s] ?? [from, to];
+            return {
+              ...section,
+              geometry: polyline(start, section.via, end),
+              fallback: section.mode === 'streets',
+            };
+          }),
+        },
+      ];
+    }),
+  };
+}
+
+/** Cada sección del recorrido, para elegirla sin el mapa: "Tramo 1 → 2 (parte 2)". */
+export function sectionOptions(route: RouteInput): { l: number; s: number; label: string }[] {
+  return route.legs.flatMap((leg, l) =>
+    leg.sections.map((_, s) => ({
+      l,
+      s,
+      label: `Tramo ${legLabel(l, route.legs.length, route.closed)}${leg.sections.length > 1 ? ` (parte ${String(s + 1)})` : ''}`,
+    })),
+  );
+}
+
+/** Metros de cada tramo según la línea dibujada (calculada o borrador). */
+export function legMeters(route: RoundRoute): number[] {
+  return route.legs.map((leg) =>
+    leg.sections.reduce(
+      (total, { geometry }) =>
+        total +
+        geometry.reduce(
+          (sum, point, i) =>
+            i === 0 ? sum : sum + distanceMeters(geometry[i - 1] ?? point, point),
+          0,
+        ),
+      0,
+    ),
+  );
+}
+
+export const formatMeters = (meters: number) =>
+  meters < 1000
+    ? `${String(Math.round(meters))} m`
+    : `${(meters / 1000).toFixed(1).replace('.', ',')} km`;
 
 /** Un mensaje por falla de un tramo, y uno solo por cada falla general del servicio. */
 export function failureMessages(failures: RouteFailure[], legs: number, closed: boolean): string[] {

@@ -29,28 +29,60 @@ function setup() {
     );
   return renderWithQueryClient(<RoundsPanel site={site} />);
 }
+/** Abre el editor de una ronda nueva. */
+async function openNew() {
+  const view = setup();
+  await userEvent.setup().click(await screen.findByRole('button', { name: 'Nueva ronda' }));
+  await screen.findByLabelText('Nombre');
+  return view;
+}
 
 describe('RoundsPanel', () => {
-  it.each(['light', 'dark'])('conserva el formulario y los tokens en tema %s', async (theme) => {
+  it.each(['light', 'dark'])('conserva el editor y los tokens en tema %s', async (theme) => {
     setup().unmount();
     const { container } = renderWithQueryClient(
       <div className={theme}>
         <RoundsPanel site={site} />
       </div>,
     );
-    expect(await screen.findByRole('heading', { name: 'Rondas', level: 3 })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Puntos en orden de recorrido' })).toBeInTheDocument();
-    expect(container.querySelector('[data-slot=card]')).toHaveClass(
-      'bg-card',
-      'text-card-foreground',
-    );
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Nueva ronda' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Nueva ronda', level: 3 }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Puntos fuera de la ronda' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Herramienta del mapa' })).toBeInTheDocument();
+    expect(container.querySelector('section')).toHaveClass('bg-card');
     expect(container.innerHTML).not.toMatch(
       /(?:bg|text|border)-(?:white|black|red|amber|gray|slate|zinc|blue|green)(?:-|\b)|#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i,
     );
   });
 
+  it('vuelve a la lista sin guardar y deshace el último cambio de puntos', async () => {
+    await openNew();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Sumar Portón' }));
+    await user.click(screen.getByRole('button', { name: 'Sumar Depósito' }));
+    expect(screen.getByRole('list', { name: 'Orden de puntos' }).children).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Deshacer' }));
+    expect(screen.getByRole('list', { name: 'Orden de puntos' }).children).toHaveLength(1);
+    // Con cambios, salir pide confirmación: si se rechaza, el editor sigue abierto.
+    window.confirm = jest.fn(() => false);
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(window.confirm).toHaveBeenCalledWith('¿Descartar los cambios de la ronda?');
+    expect(screen.getByLabelText('Nombre')).toBeInTheDocument();
+    window.confirm = jest.fn(() => true);
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(await screen.findByRole('button', { name: 'Nueva ronda' })).toBeInTheDocument();
+    expect(apiPost).not.toHaveBeenCalledWith(
+      expect.stringContaining('/rondas'),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('muestra las ventanas nocturnas y recorta la última', async () => {
-    setup();
+    await openNew();
     expect(await screen.findByText('22:00–00:00')).toBeInTheDocument();
     expect(screen.getByText('00:00–02:00')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Inicio de franja'), { target: { value: '20:00' } });
@@ -58,18 +90,18 @@ describe('RoundsPanel', () => {
     expect(screen.getByText('00:00–01:00')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Inicio de franja'), { target: { value: '06:00' } });
     fireEvent.change(screen.getByLabelText('Fin de franja'), { target: { value: '06:00' } });
-    expect(screen.getByText('Todo el día (24 h)')).toBeInTheDocument();
+    expect(screen.getByText(/Todo el día \(24 h\)/)).toBeInTheDocument();
     expect(
       screen.getAllByRole('list', { name: 'Vista previa de ventanas' })[0]?.querySelectorAll('li'),
     ).toHaveLength(12);
   });
 
   it('rechaza una gracia mayor que la mitad de la frecuencia y ordena con botones', async () => {
-    setup();
+    await openNew();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
-    await user.click(await screen.findByLabelText('Portón'));
-    await user.click(screen.getByLabelText('Depósito'));
+    await user.click(await screen.findByRole('button', { name: 'Sumar Portón' }));
+    await user.click(screen.getByRole('button', { name: 'Sumar Depósito' }));
     fireEvent.change(screen.getByLabelText('Frecuencia (minutos)'), { target: { value: '30' } });
     fireEvent.change(screen.getByLabelText(/Gracia/), { target: { value: '20' } });
     await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
@@ -81,10 +113,10 @@ describe('RoundsPanel', () => {
   });
 
   it('muestra los errores de frecuencia y gracia junto a sus campos', async () => {
-    setup();
+    await openNew();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
-    await user.click(await screen.findByLabelText('Portón'));
+    await user.click(await screen.findByRole('button', { name: 'Sumar Portón' }));
     fireEvent.change(screen.getByLabelText('Frecuencia (minutos)'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText(/Gracia/), { target: { value: '10' } });
     const form = screen.getByRole('button', { name: 'Guardar ronda' }).closest('form');
@@ -108,12 +140,12 @@ describe('RoundsPanel', () => {
 
   describe('recorrido', () => {
     async function fillRound() {
-      const view = setup();
+      const view = await openNew();
       const user = userEvent.setup();
       await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
-      await user.click(await screen.findByLabelText('Portón'));
-      await user.click(screen.getByLabelText('Depósito'));
-      expect(await screen.findByRole('heading', { name: 'Recorrido' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Sumar Portón' }));
+      await user.click(screen.getByRole('button', { name: 'Sumar Depósito' }));
+      expect(screen.getByRole('combobox', { name: 'Tramo elegido' })).toBeInTheDocument();
       return { view, user };
     }
     const sentRoute = () => {
@@ -129,7 +161,7 @@ describe('RoundsPanel', () => {
     it('arma un circuito por calles y lo manda al guardar', async () => {
       const { user } = await fillRound();
       expect(screen.getByRole('checkbox', { name: 'Volver al inicio' })).toBeChecked();
-      expect(screen.getByRole('heading', { name: 'Tramo 2 → 1 (regreso)' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Tramo 2 → 1 (regreso)' })).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
       await waitFor(() => {
         expect(sentRoute()?.route).toEqual({
@@ -145,7 +177,7 @@ describe('RoundsPanel', () => {
     it('cambia el modo, agrega un punto de paso desde la lista y quita el regreso', async () => {
       const { user } = await fillRound();
       await user.click(screen.getByRole('checkbox', { name: 'Volver al inicio' }));
-      expect(screen.queryByRole('heading', { name: /regreso/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /regreso/ })).not.toBeInTheDocument();
       await user.click(
         screen.getByRole('button', { name: 'Agregar punto de paso al tramo 1 → 2' }),
       );
