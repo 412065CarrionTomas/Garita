@@ -99,6 +99,13 @@ it('repite el tono y lo detiene cuando ya no hay activas', async () => {
     await waitFor(() => {
       expect(audio.resume).toHaveBeenCalled();
     });
+    // Con la alerta ya activa suena enseguida, sin esperar el próximo intervalo.
+    await waitFor(() => {
+      expect(start).toHaveBeenCalled();
+    });
+    // Habilitado el audio, los gestos siguientes ya no lo tocan.
+    fireEvent.pointerDown(document);
+    expect(audio.resume).toHaveBeenCalledTimes(1);
     const initial = start.mock.calls.length;
     act(() => {
       jest.advanceTimersByTime(8000);

@@ -5,6 +5,20 @@ import { Alert } from '@/components/ui/alert';
 import type { z } from 'zod';
 import type { panicAlertSummarySchema } from '@garita/shared';
 
+/** Un pitido de medio segundo, si el navegador ya habilitó el audio. */
+function beep(audio: AudioContext | null) {
+  if (audio?.state !== 'running') return;
+  const oscillator = audio.createOscillator();
+  const gain = audio.createGain();
+  oscillator.connect(gain);
+  gain.connect(audio.destination);
+  oscillator.frequency.value = 880;
+  gain.gain.setValueAtTime(0.12, audio.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.5);
+  oscillator.start();
+  oscillator.stop(audio.currentTime + 0.5);
+}
+
 export function PanicBanner({
   alerts,
   count,
@@ -14,45 +28,51 @@ export function PanicBanner({
 }) {
   const context = useRef<AudioContext | null>(null);
   const active = count > 0;
+  const activeRef = useRef(active);
   useEffect(() => {
+    activeRef.current = active;
     if (!active) return;
-    const tone = () => {
-      const audio = context.current;
-      if (audio?.state !== 'running') return;
-      const oscillator = audio.createOscillator();
-      const gain = audio.createGain();
-      oscillator.connect(gain);
-      gain.connect(audio.destination);
-      oscillator.frequency.value = 880;
-      gain.gain.setValueAtTime(0.12, audio.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.5);
-      oscillator.start();
-      oscillator.stop(audio.currentTime + 0.5);
-    };
-    tone();
-    const timer = window.setInterval(tone, 4000);
+    beep(context.current);
+    const timer = window.setInterval(() => {
+      beep(context.current);
+    }, 4000);
     return () => {
       window.clearInterval(timer);
     };
   }, [active]);
   // El navegador solo deja sonar después de un gesto: el primer clic o tecla en la app habilita el audio.
   useEffect(() => {
-    const unlock = () => {
+    const stop = () => {
+      document.removeEventListener('pointerdown', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+    function unlock() {
       try {
         context.current ??= new AudioContext();
-        void context.current.resume();
       } catch {
-        /* Sin audio en este navegador: queda el aviso visual. */
+        // Sin audio en este navegador: queda el aviso visual.
+        stop();
+        return;
       }
-    };
+      const audio = context.current;
+      audio
+        .resume()
+        .then(() => {
+          if (audio.state !== 'running') return;
+          // Ya habilitado: no hace falta escuchar más gestos, y si hay alerta suena ya.
+          stop();
+          if (activeRef.current) beep(audio);
+        })
+        // Algunos gestos (como Tab o Escape) no cuentan: se espera el próximo.
+        .catch(() => undefined);
+    }
     document.addEventListener('pointerdown', unlock);
     document.addEventListener('keydown', unlock);
     return () => {
-      document.removeEventListener('pointerdown', unlock);
-      document.removeEventListener('keydown', unlock);
+      stop();
       const audio = context.current;
       context.current = null;
-      void audio?.close();
+      audio?.close().catch(() => undefined);
     };
   }, []);
   const first = alerts[0];
