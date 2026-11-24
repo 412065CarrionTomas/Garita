@@ -285,3 +285,27 @@ it('renumera en el modo edición y guarda todo junto recién con Guardar', async
   );
   actions.remove();
 });
+
+it('en un predio inactivo solo deja descargar el sticker', async () => {
+  setRole('admin');
+  jest.mocked(apiGet).mockResolvedValue([
+    {
+      id: 'a',
+      siteId: site.id,
+      name: 'Alfa',
+      latitude: -34.6,
+      longitude: -58.4,
+      toleranceRadiusMeters: 30,
+      stickerLocation: null,
+      isIndoor: false,
+      qrVersion: 1,
+      status: 'active',
+    },
+  ]);
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={{ ...site, status: 'inactive' as const }} />);
+  await user.click(await screen.findByRole('button', { name: 'Más acciones de Alfa' }));
+  expect(await screen.findByRole('menuitem', { name: 'Descargar sticker' })).toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: 'Editar' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: 'Dar de baja' })).not.toBeInTheDocument();
+});

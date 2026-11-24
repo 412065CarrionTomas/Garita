@@ -4,7 +4,7 @@ import {
   checkpointInputSchema,
   checkpointsResponseSchema,
 } from '@garita/shared';
-import { useState, type SyntheticEvent } from 'react';
+import { useRef, useState, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useFillHeight } from '@/lib/use-fill-height';
 import { z } from 'zod';
@@ -110,6 +110,8 @@ function NumberField({
   onEdit: () => void;
   onDone: (value?: number) => void;
 }) {
+  // Enter o Escape desmontan el campo y disparan además onBlur: solo cuenta la primera salida.
+  const settled = useRef(false);
   if (!editing)
     return (
       <button
@@ -121,8 +123,10 @@ function NumberField({
         {value}
       </button>
     );
-  const done = (input: HTMLInputElement) => {
-    onDone(input.valueAsNumber);
+  const done = (value?: number) => {
+    if (settled.current) return;
+    settled.current = true;
+    onDone(value);
   };
   return (
     <input
@@ -134,14 +138,15 @@ function NumberField({
       aria-label={`Nuevo número de ${name}`}
       className="w-10 rounded-sm border border-ring bg-card text-center tabular-nums"
       onFocus={(event) => {
+        settled.current = false;
         event.target.select();
       }}
       onBlur={(event) => {
-        done(event.target);
+        done(event.target.valueAsNumber);
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') done(event.currentTarget);
-        if (event.key === 'Escape') onDone();
+        if (event.key === 'Enter') done(event.currentTarget.valueAsNumber);
+        if (event.key === 'Escape') done();
       }}
     />
   );
@@ -169,6 +174,8 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
   const { busy, run } = useBusy();
   const [editingId, setEditingId] = useState<string>();
   const [confirmFar, setConfirmFar] = useState(false);
+  // Guardar el orden con algún punto movido a más de 1 km pide confirmación.
+  const [farArrangement, setFarArrangement] = useState(false);
   const [pendingAction, setPendingAction] = useState<() => Promise<unknown>>();
   const [message, setMessage] = useState('');
   // Modo edición: orden y ubicación de todos los puntos, sin tocar la API hasta Guardar.
@@ -209,8 +216,7 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
     } catch (error) {
       const code = errorCode(error);
       if (code === 'CHECKPOINT_LOCATION_REQUIRES_CONFIRMATION') {
-        if (window.confirm('Algún punto quedó a más de 1 km del predio. ¿Guardar igual?'))
-          await sendArrangement(true);
+        setFarArrangement(true);
         return;
       }
       if (code === 'CHECKPOINT_LIST_OUTDATED') {
@@ -436,10 +442,15 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                         El punto está a más de 1 km del predio
                       </h4>
                       <p>Confirmá que la ubicación sea correcta para guardar el punto.</p>
-                      <Button variant="outline" onClick={() => void save(undefined, true)}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void save(undefined, true)}
+                      >
                         Confirmar ubicación
                       </Button>
                       <Button
+                        type="button"
                         variant="outline"
                         className="mt-3"
                         onClick={() => {
@@ -635,76 +646,89 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    onSelect={() => {
-                                      edit(point);
-                                    }}
-                                  >
-                                    Editar
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onSelect={() => {
-                                      if (
-                                        window.confirm(
-                                          'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
-                                        )
-                                      )
-                                        void apiPost(
-                                          `/puntos/${point.id}/regenerar-qr`,
-                                          {},
-                                          emptyInput,
-                                          z.looseObject({
-                                            checkpoint: idResponse,
-                                            qrPayload: z.string(),
-                                          }),
-                                        )
-                                          .then(async () => {
-                                            await points.refetch();
-                                            setMessage('QR regenerado. Imprimí un sticker nuevo.');
-                                          })
-                                          .catch(() => {
-                                            setMessage(
-                                              'No se pudo regenerar el QR. Intentá de nuevo.',
-                                            );
-                                          });
-                                    }}
-                                  >
-                                    Regenerar QR
-                                  </DropdownMenuItem>
+                                  {canArrange && (
+                                    <>
+                                      <DropdownMenuItem
+                                        onSelect={() => {
+                                          edit(point);
+                                        }}
+                                      >
+                                        Editar
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onSelect={() => {
+                                          if (
+                                            window.confirm(
+                                              'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
+                                            )
+                                          )
+                                            void apiPost(
+                                              `/puntos/${point.id}/regenerar-qr`,
+                                              {},
+                                              emptyInput,
+                                              z.looseObject({
+                                                checkpoint: idResponse,
+                                                qrPayload: z.string(),
+                                              }),
+                                            )
+                                              .then(async () => {
+                                                await points.refetch();
+                                                setMessage(
+                                                  'QR regenerado. Imprimí un sticker nuevo.',
+                                                );
+                                              })
+                                              .catch(() => {
+                                                setMessage(
+                                                  'No se pudo regenerar el QR. Intentá de nuevo.',
+                                                );
+                                              });
+                                        }}
+                                      >
+                                        Regenerar QR
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                   <DropdownMenuItem onSelect={() => void download(point.id)}>
                                     Descargar sticker
                                   </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    variant="destructive"
-                                    onSelect={() => {
-                                      setPendingAction(() => async () => {
-                                        try {
-                                          await apiPost(
-                                            `/puntos/${point.id}/baja`,
-                                            {},
-                                            emptyInput,
-                                            idResponse,
-                                          );
-                                        } catch (error) {
-                                          if (error instanceof ApiError && error.status === 409) {
-                                            const names = roundNames(error);
-                                            setMessage(
-                                              names.length
-                                                ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
-                                                : 'No se puede dar de baja: está incluida en rondas activas.',
-                                            );
-                                            return;
-                                          }
-                                          setMessage(
-                                            'No se pudo dar de baja el punto. Intentá de nuevo.',
-                                          );
-                                        }
-                                      });
-                                    }}
-                                  >
-                                    Dar de baja
-                                  </DropdownMenuItem>
+                                  {canArrange && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        variant="destructive"
+                                        onSelect={() => {
+                                          setPendingAction(() => async () => {
+                                            try {
+                                              await apiPost(
+                                                `/puntos/${point.id}/baja`,
+                                                {},
+                                                emptyInput,
+                                                idResponse,
+                                              );
+                                            } catch (error) {
+                                              if (
+                                                error instanceof ApiError &&
+                                                error.status === 409
+                                              ) {
+                                                const names = roundNames(error);
+                                                setMessage(
+                                                  names.length
+                                                    ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
+                                                    : 'No se puede dar de baja: está incluida en rondas activas.',
+                                                );
+                                                return;
+                                              }
+                                              setMessage(
+                                                'No se pudo dar de baja el punto. Intentá de nuevo.',
+                                              );
+                                            }
+                                          });
+                                        }}
+                                      >
+                                        Dar de baja
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </div>
@@ -717,6 +741,30 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
               </div>
             </div>
           )}
+          <AlertDialog open={farArrangement} onOpenChange={setFarArrangement}>
+            <AlertDialogContent className="space-y-4">
+              <AlertDialogTitle className="text-lg font-semibold">
+                Algún punto quedó a más de 1 km del predio
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Confirmá que las ubicaciones sean correctas para guardar los puntos.
+              </AlertDialogDescription>
+              <div className="flex flex-wrap justify-end gap-2">
+                <AlertDialogCancel asChild>
+                  <Button variant="outline">Cancelar</Button>
+                </AlertDialogCancel>
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    setFarArrangement(false);
+                    void run(() => sendArrangement(true));
+                  }}
+                >
+                  Guardar igual
+                </Button>
+              </div>
+            </AlertDialogContent>
+          </AlertDialog>
           {/* Diálogo y no un aviso al pie: debajo de la tabla quedaba fuera de la pantalla. */}
           <AlertDialog
             open={!!pendingAction}

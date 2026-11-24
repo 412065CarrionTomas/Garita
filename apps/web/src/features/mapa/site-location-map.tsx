@@ -100,7 +100,7 @@ export interface ClientSitesMapProps {
     longitude: number | string;
     /** Rótulo chico bajo el marcador (por ejemplo, el número del punto). */
     label?: ReactNode;
-    /** Se puede arrastrar; al soltarlo avisa con `onMove`. */
+    /** Se puede arrastrar; mientras se arrastra avisa con `onMove` (su rótulo lo acompaña). */
     draggable?: boolean;
   }[];
   /** Alto en px (por ejemplo, lo que queda de la ventana); sin esto, una franja fija. */
@@ -139,6 +139,9 @@ function Pin({
       clearTimeout(timer);
     };
     const down = (event: PointerEvent) => {
+      // Solo el botón principal (o el dedo): el clic derecho no entra al modo edición.
+      if (event.button !== 0) return;
+      cancel();
       startX = event.clientX;
       startY = event.clientY;
       timer = setTimeout(() => {
