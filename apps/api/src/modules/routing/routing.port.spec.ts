@@ -108,6 +108,20 @@ describe('OpenRouteServiceRouting', () => {
     ).resolves.toEqual([{ line: [a, mid1, b] }, { line: [b, c] }, { line: [b, mid2, a] }]);
   });
 
+  it.each([
+    ['al revés', [0, 3, 2]],
+    ['fuera de la línea', [0, 2, 9]],
+  ])('no guarda como recta una sección con way_points %s', async (_case, wayPoints) => {
+    const { cache, fetchMock, routing } = setup();
+    fetchMock.mockReturnValue(feature([a, mid1, b, c], wayPoints));
+    const lines = await routing.route('walking', [
+      [a, b],
+      [b, c],
+    ]);
+    expect(lines[1]).toEqual({ failure: 'unavailable' });
+    expect(cache.set).not.toHaveBeenCalledWith('walking', [b, c], expect.anything());
+  });
+
   it('deja todo el grupo sin calcular si los way_points no coinciden con lo enviado', async () => {
     const { cache, fetchMock, routing } = setup();
     fetchMock.mockReturnValue(feature([a, b, c], [0, 2]));

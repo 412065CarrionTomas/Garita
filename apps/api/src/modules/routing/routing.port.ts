@@ -90,20 +90,19 @@ export class OpenRouteServiceRouting implements RoutingPort {
       sections,
       cached.map((line) => line !== null),
     );
-    await Promise.all(
-      chains.map(async (chain) => {
-        const group = chain.map((i) => sections[i] ?? []);
-        const computed = await this.requestChain(ORS_PROFILES[profile], group);
-        await Promise.all(
-          chain.map(async (sectionIndex, k) => {
-            const result = computed[k] ?? { failure: 'unavailable' };
-            const section = sections[sectionIndex];
-            results[sectionIndex] = result;
-            if ('line' in result && section) await this.cache.set(profile, section, result.line);
-          }),
-        );
-      }),
-    );
+    // De a un pedido: en paralelo, una ronda con muchas cadenas choca con el límite por minuto.
+    for (const chain of chains) {
+      const group = chain.map((i) => sections[i] ?? []);
+      const computed = await this.requestChain(ORS_PROFILES[profile], group);
+      await Promise.all(
+        chain.map(async (sectionIndex, k) => {
+          const result = computed[k] ?? { failure: 'unavailable' };
+          const section = sections[sectionIndex];
+          results[sectionIndex] = result;
+          if ('line' in result && section) await this.cache.set(profile, section, result.line);
+        }),
+      );
+    }
     return results;
   }
 
@@ -136,10 +135,12 @@ export class OpenRouteServiceRouting implements RoutingPort {
       const start = starts[k] ?? 0;
       const from = wayPoints[start];
       const to = wayPoints[start + section.length - 1];
-      if (from === undefined || to === undefined) return { failure: 'unavailable' };
-      const slice = line.slice(from, to + 1);
+      // Índices fuera de la línea o al revés: respuesta inválida, no se guarda como recta buena.
+      if (from === undefined || to === undefined || from > to || to >= line.length)
+        return { failure: 'unavailable' };
       // Dos puntos fuera de la calle que caen en el mismo lugar de ella: el camino es la recta.
-      if (slice.length < 2) return { line: section };
+      if (from === to) return { line: section };
+      const slice = line.slice(from, to + 1);
       // shortcut: una sección de más de 5000 coordenadas queda sin calcular; si pasa, simplificarla.
       if (slice.length > ROUTE_LIMITS.geometryPerSection) return { failure: 'unavailable' };
       return { line: slice };
