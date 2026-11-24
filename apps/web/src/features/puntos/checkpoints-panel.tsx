@@ -1,10 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import { checkpointInputSchema, checkpointsResponseSchema } from '@garita/shared';
+import {
+  checkpointArrangementInputSchema,
+  checkpointInputSchema,
+  checkpointsResponseSchema,
+} from '@garita/shared';
 import { useState, type SyntheticEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useFillHeight } from '@/lib/use-fill-height';
 import { z } from 'zod';
 import { apiDownload, apiGet, apiPatch, apiPost, ApiError } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
+import { cn } from '@/lib/utils';
 import { useAuth } from '../auth/auth-context';
 import { AddressSearch } from '../mapa/address-search';
 import { SiteLocation } from '../mapa/site-location';
@@ -51,6 +57,8 @@ const idResponse = z.looseObject({ id: z.string() });
 const emptyInput = z.object({});
 
 interface SiteProps {
+  /** Lugar de la cabecera del predio donde van Cancelar y Guardar del modo edición. */
+  actions?: HTMLElement | null;
   site: {
     id: string;
     name: string;
@@ -84,7 +92,62 @@ function roundNames(error: unknown): string[] {
   return names;
 }
 
-export function CheckpointsPanel({ site }: SiteProps) {
+type Arrangement = { id: string; latitude: number; longitude: number }[];
+
+/** N° editable en el modo edición: se toca, se escribe el nuevo y Enter. */
+function NumberField({
+  name,
+  value,
+  max,
+  editing,
+  onEdit,
+  onDone,
+}: {
+  name: string;
+  value: number;
+  max: number;
+  editing: boolean;
+  onEdit: () => void;
+  onDone: (value?: number) => void;
+}) {
+  if (!editing)
+    return (
+      <button
+        type="button"
+        className="min-w-5 cursor-pointer rounded-sm underline decoration-dotted underline-offset-2 hover:bg-muted"
+        aria-label={`Cambiar el número de ${name} (ahora ${String(value)})`}
+        onClick={onEdit}
+      >
+        {value}
+      </button>
+    );
+  const done = (input: HTMLInputElement) => {
+    onDone(input.valueAsNumber);
+  };
+  return (
+    <input
+      type="number"
+      autoFocus
+      min={1}
+      max={max}
+      defaultValue={value}
+      aria-label={`Nuevo número de ${name}`}
+      className="w-10 rounded-sm border border-ring bg-card text-center tabular-nums"
+      onFocus={(event) => {
+        event.target.select();
+      }}
+      onBlur={(event) => {
+        done(event.target);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') done(event.currentTarget);
+        if (event.key === 'Escape') onDone();
+      }}
+    />
+  );
+}
+
+export function CheckpointsPanel({ site, actions }: SiteProps) {
   const { user } = useAuth();
   const admin = user?.role === 'admin';
   const points = useQuery({
@@ -108,6 +171,55 @@ export function CheckpointsPanel({ site }: SiteProps) {
   const [confirmFar, setConfirmFar] = useState(false);
   const [pendingAction, setPendingAction] = useState<() => Promise<unknown>>();
   const [message, setMessage] = useState('');
+  // Modo edición: orden y ubicación de todos los puntos, sin tocar la API hasta Guardar.
+  const [draft, setDraft] = useState<Arrangement | null>(null);
+  // Solo un campo a la vez: el N° se ve en la tabla y en el mapa.
+  const [renumbering, setRenumbering] = useState<{ id: string; inMap: boolean } | null>(null);
+  const canArrange = admin && site.status === 'active';
+
+  const startArranging = () => {
+    if (!canArrange || draft || !points.data?.length) return;
+    setMessage('');
+    setDraft(points.data.map(({ id, latitude, longitude }) => ({ id, latitude, longitude })));
+  };
+  const stopArranging = () => {
+    setDraft(null);
+    setRenumbering(null);
+  };
+  const renumber = (id: string, value?: number) => {
+    setRenumbering(null);
+    if (!draft || value === undefined || !Number.isInteger(value)) return;
+    const moved = draft.find((point) => point.id === id);
+    if (!moved) return;
+    const rest = draft.filter((point) => point.id !== id);
+    const index = Math.min(Math.max(value, 1), draft.length) - 1;
+    setDraft([...rest.slice(0, index), moved, ...rest.slice(index)]);
+  };
+  const saveArrangement = () => run(() => sendArrangement(false));
+  const sendArrangement = async (confirmFarLocation: boolean): Promise<void> => {
+    if (!draft) return;
+    try {
+      await apiPatch(
+        `/predios/${site.id}/puntos/orden`,
+        { puntos: draft, confirmFarLocation },
+        checkpointArrangementInputSchema,
+        checkpointsResponseSchema,
+      );
+      stopArranging();
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === 'CHECKPOINT_LOCATION_REQUIRES_CONFIRMATION') {
+        if (window.confirm('Algún punto quedó a más de 1 km del predio. ¿Guardar igual?'))
+          await sendArrangement(true);
+        return;
+      }
+      if (code === 'CHECKPOINT_LIST_OUTDATED') {
+        stopArranging();
+        setMessage('Los puntos del predio cambiaron mientras editabas. Volvé a intentarlo.');
+      } else setMessage('No se pudieron guardar los puntos. Intentá de nuevo.');
+    }
+    await points.refetch();
+  };
 
   const input = (confirmFarLocation = false) => ({
     ...form,
@@ -184,6 +296,31 @@ export function CheckpointsPanel({ site }: SiteProps) {
     });
   };
 
+  // En el modo edición se ve el borrador: su orden y sus ubicaciones.
+  const rows = draft
+    ? draft.flatMap((moved) => {
+        const point = points.data?.find(({ id }) => id === moved.id);
+        return point ? [{ ...point, latitude: moved.latitude, longitude: moved.longitude }] : [];
+      })
+    : (points.data ?? []);
+  const numberOf = (id: string, index: number, name: string, inMap: boolean) =>
+    draft ? (
+      <NumberField
+        name={name}
+        value={index + 1}
+        max={rows.length}
+        editing={renumbering?.id === id && renumbering.inMap === inMap}
+        onEdit={() => {
+          setRenumbering({ id, inMap });
+        }}
+        onDone={(value) => {
+          renumber(id, value);
+        }}
+      />
+    ) : (
+      index + 1
+    );
+
   const confirm = async () => {
     if (!pendingAction) return;
     await pendingAction();
@@ -193,7 +330,8 @@ export function CheckpointsPanel({ site }: SiteProps) {
 
   return (
     <section aria-labelledby={`points-${site.id}`}>
-      <Card className="border-0 bg-transparent py-0">
+      {/* Visible: el texto de ayuda del mapa asoma sobre la línea de la cabecera. */}
+      <Card className="overflow-visible border-0 bg-transparent py-0">
         {/* La pestaña ya dice "Puntos de control": el título queda para lectores de pantalla. */}
         <h3 id={`points-${site.id}`} className="sr-only">
           Puntos de control
@@ -354,23 +492,60 @@ export function CheckpointsPanel({ site }: SiteProps) {
             <Alert variant="destructive">No se pudieron cargar los puntos.</Alert>
           ) : (
             <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-              {points.data.length > 0 && (
+              {rows.length > 0 && (
                 <div
                   aria-label={`Mapa de puntos de ${site.name}`}
-                  className="xl:sticky xl:top-4 xl:order-last"
+                  className="relative xl:sticky xl:top-4 xl:order-last"
                 >
+                  {canArrange && (
+                    // Apoyado en la línea de la cabecera, justo arriba del mapa.
+                    <p className="absolute bottom-full left-0 mb-1 text-xs text-muted-foreground">
+                      {draft ? (
+                        'Arrastrá los pines o tocá un número para cambiarlo.'
+                      ) : (
+                        // También es un botón: con teclado no se puede mantener un pin.
+                        <button
+                          type="button"
+                          className="cursor-pointer hover:text-foreground"
+                          onClick={startArranging}
+                        >
+                          Mantené un pin para editar
+                        </button>
+                      )}
+                    </p>
+                  )}
                   <SitesMap
-                    sites={[
-                      site,
-                      ...points.data.map((point, index) => ({
-                        ...point,
-                        label: String(index + 1),
-                      })),
-                    ]}
+                    sites={rows.map((point, index) => ({
+                      ...point,
+                      label: numberOf(point.id, index, point.name, true),
+                      draggable: !!draft,
+                    }))}
                     height={fillHeight}
+                    onHold={canArrange ? startArranging : undefined}
+                    onMove={(id, latitude, longitude) => {
+                      setDraft(
+                        (current) =>
+                          current?.map((point) =>
+                            point.id === id ? { id, latitude, longitude } : point,
+                          ) ?? null,
+                      );
+                    }}
                   />
                 </div>
               )}
+              {draft &&
+                actions &&
+                createPortal(
+                  <>
+                    <Button variant="ghost" size="xs" disabled={busy} onClick={stopArranging}>
+                      Cancelar
+                    </Button>
+                    <Button size="xs" disabled={busy} onClick={() => void saveArrangement()}>
+                      Guardar
+                    </Button>
+                  </>,
+                  actions,
+                )}
               {/* En pantallas anchas la tabla se desplaza sola y ocupa el mismo alto que el mapa. */}
               <div ref={measureFill} style={{ maxHeight: fillHeight }} className="overflow-y-auto">
                 <Table>
@@ -383,7 +558,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
                         {/* Las acciones de la lista van junto al título y no agrandan la fila. */}
                         <span className="flex items-center gap-1.5">
                           Punto
-                          {admin && site.status === 'active' && (
+                          {admin && site.status === 'active' && !draft && (
                             <Button
                               variant="outline"
                               size="icon-xs"
@@ -400,7 +575,7 @@ export function CheckpointsPanel({ site }: SiteProps) {
                               <Plus aria-hidden="true" />
                             </Button>
                           )}
-                          {admin && points.data.length > 0 && (
+                          {admin && !draft && points.data.length > 0 && (
                             <Button
                               variant="outline"
                               size="icon-xs"
@@ -425,10 +600,10 @@ export function CheckpointsPanel({ site }: SiteProps) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {points.data.map((point, index) => (
+                    {rows.map((point, index) => (
                       <TableRow key={point.id}>
                         <TableCell className="t-numeral text-muted-foreground">
-                          {index + 1}
+                          {numberOf(point.id, index, point.name, false)}
                         </TableCell>
                         <TableCell className="font-semibold">
                           {point.name}
@@ -442,7 +617,13 @@ export function CheckpointsPanel({ site }: SiteProps) {
                         </TableCell>
                         {admin && (
                           <TableCell>
-                            <div className="flex items-center justify-end gap-1">
+                            {/* En el modo edición los demás cambios esperan: se entra por ⋮ después. */}
+                            <div
+                              className={cn(
+                                'flex items-center justify-end gap-1',
+                                draft && 'invisible',
+                              )}
+                            >
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button

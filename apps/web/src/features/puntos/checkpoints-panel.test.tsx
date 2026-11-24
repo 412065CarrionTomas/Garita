@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
-import { ApiError, apiGet, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { CheckpointsPanel } from './checkpoints-panel';
 
@@ -10,7 +10,9 @@ jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
 // Mapa caído: el formulario muestra la carga manual de coordenadas.
 jest.mock('@/features/mapa/site-location-map', () => ({
   SiteMapLocation: ({ unavailable }: { unavailable: ReactNode }) => unavailable,
-  ClientSitesMap: () => null,
+  // Muestra los N° del mapa: en el modo edición se pueden tocar igual que los de la tabla.
+  ClientSitesMap: ({ sites }: { sites: { id: string; label?: ReactNode }[] }) =>
+    sites.map((point) => <span key={point.id}>{point.label}</span>),
 }));
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn(() => Promise.resolve([])),
@@ -233,4 +235,53 @@ it('cancelar la edición cierra el modal y deja el alta vacía y regenerar QR re
   await user.click(screen.getByRole('menuitem', { name: 'Regenerar QR' }));
   await screen.findByText('QR regenerado. Imprimí un sticker nuevo.');
   expect(jest.mocked(apiGet).mock.calls.length).toBeGreaterThan(reads);
+});
+
+it('renumera en el modo edición y guarda todo junto recién con Guardar', async () => {
+  setRole('admin');
+  const point = (id: string, name: string) => ({
+    id,
+    siteId: site.id,
+    name,
+    latitude: -34.6,
+    longitude: -58.4,
+    toleranceRadiusMeters: 30,
+    stickerLocation: null,
+    isIndoor: false,
+    qrVersion: 1,
+    status: 'active',
+  });
+  jest
+    .mocked(apiGet)
+    .mockResolvedValue([point('a', 'Alfa'), point('b', 'Beta'), point('c', 'Gama')]);
+  const actions = document.createElement('div');
+  document.body.append(actions);
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={site} actions={actions} />);
+  await user.click(await screen.findByRole('button', { name: 'Mantené un pin para editar' }));
+  // El de la tabla (el otro es el del mapa): se abre un solo campo y no se cierra solo.
+  const [inTable] = screen.getAllByRole('button', { name: 'Cambiar el número de Gama (ahora 3)' });
+  if (!inTable) throw new Error('Falta el N° de Gama');
+  await user.click(inTable);
+  expect(screen.getAllByLabelText('Nuevo número de Gama')).toHaveLength(1);
+  await user.clear(screen.getByLabelText('Nuevo número de Gama'));
+  await user.type(screen.getByLabelText('Nuevo número de Gama'), '1{Enter}');
+  expect(apiPatch).not.toHaveBeenCalled();
+  expect(screen.getAllByRole('row').map((row) => row.textContent)).toEqual([
+    expect.stringContaining('Punto') as unknown,
+    expect.stringMatching(/^1Gama/) as unknown,
+    expect.stringMatching(/^2Alfa/) as unknown,
+    expect.stringMatching(/^3Beta/) as unknown,
+  ]);
+  await user.click(screen.getByRole('button', { name: 'Guardar' }));
+  expect(apiPatch).toHaveBeenCalledWith(
+    '/predios/site-1/puntos/orden',
+    {
+      puntos: ['c', 'a', 'b'].map((id) => ({ id, latitude: -34.6, longitude: -58.4 })),
+      confirmFarLocation: false,
+    },
+    expect.anything(),
+    expect.anything(),
+  );
+  actions.remove();
 });

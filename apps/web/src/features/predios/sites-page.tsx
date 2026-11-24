@@ -186,6 +186,7 @@ export function SitesPage() {
   const [selectedId, setSelectedId] = useState<string>();
   // Al elegir un predio la lista se pliega para dejarle el ancho al detalle y al mapa.
   const [listOpen, setListOpen] = useState(true);
+  const [pointActions, setPointActions] = useState<HTMLDivElement | null>(null);
   const listId = useId();
   useEffect(() => {
     if (!listOpen) return;
@@ -547,6 +548,8 @@ export function SitesPage() {
                             <TabsTrigger value="rondas">Rondas</TabsTrigger>
                             <TabsTrigger value="configuracion">Configuración</TabsTrigger>
                           </TabsList>
+                          {/* Cancelar y Guardar del modo edición de puntos. */}
+                          <div ref={setPointActions} className="contents" />
                           {user?.role === 'admin' && site.status === 'active' && (
                             <>
                               <Button
@@ -583,7 +586,7 @@ export function SitesPage() {
                       </div>
                     </header>
                     <TabsContent value="puntos">
-                      <CheckpointsPanel site={site} />
+                      <CheckpointsPanel site={site} actions={pointActions} />
                     </TabsContent>
                     {/* Montada siempre: cambiar de pestaña no descarta una ronda a medio armar. */}
                     <TabsContent

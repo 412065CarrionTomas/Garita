@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
+import type { Marker as MarkerInstance } from 'maplibre-gl';
 import { Marker as MapMarker, useMap } from 'react-map-gl/maplibre';
 import { AddressSearch } from './address-search';
 import { BaseMap } from './base-map';
@@ -98,19 +99,86 @@ export interface ClientSitesMapProps {
     latitude: number | string;
     longitude: number | string;
     /** Rótulo chico bajo el marcador (por ejemplo, el número del punto). */
-    label?: string;
+    label?: ReactNode;
+    /** Se puede arrastrar; al soltarlo avisa con `onMove`. */
+    draggable?: boolean;
   }[];
   /** Alto en px (por ejemplo, lo que queda de la ventana); sin esto, una franja fija. */
   height?: number;
+  /** Mantener apretado un marcador 300 ms. */
+  onHold?: (id: string) => void;
+  onMove?: (id: string, latitude: number, longitude: number) => void;
+}
+
+const HOLD_MS = 300;
+
+/** Pin por defecto de MapLibre; avisa si se lo mantiene apretado sin moverlo. */
+function Pin({
+  id,
+  latitude,
+  longitude,
+  draggable,
+  onHold,
+  onMove,
+}: {
+  id: string;
+  latitude: number;
+  longitude: number;
+  draggable?: boolean;
+  onHold?: (id: string) => void;
+  onMove?: (id: string, latitude: number, longitude: number) => void;
+}) {
+  const ref = useRef<MarkerInstance>(null);
+  useEffect(() => {
+    const element = ref.current?.getElement();
+    if (!element || !onHold) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let startX = 0;
+    let startY = 0;
+    const cancel = () => {
+      clearTimeout(timer);
+    };
+    const down = (event: PointerEvent) => {
+      startX = event.clientX;
+      startY = event.clientY;
+      timer = setTimeout(() => {
+        onHold(id);
+      }, HOLD_MS);
+    };
+    // Si el dedo se corre, es un arrastre del mapa y no una pulsación larga.
+    const move = (event: PointerEvent) => {
+      if (Math.hypot(event.clientX - startX, event.clientY - startY) > 6) cancel();
+    };
+    const ends = ['pointerup', 'pointerleave', 'pointercancel'] as const;
+    element.addEventListener('pointerdown', down);
+    element.addEventListener('pointermove', move);
+    for (const name of ends) element.addEventListener(name, cancel);
+    return () => {
+      cancel();
+      element.removeEventListener('pointerdown', down);
+      element.removeEventListener('pointermove', move);
+      for (const name of ends) element.removeEventListener(name, cancel);
+    };
+  }, [id, onHold]);
+  return (
+    <MapMarker
+      ref={ref}
+      latitude={latitude}
+      longitude={longitude}
+      draggable={draggable}
+      onDrag={(event) => onMove?.(id, event.lngLat.lat, event.lngLat.lng)}
+    />
+  );
 }
 
 /** Uno o varios lugares con un marcador cada uno; con varios, encuadra todos al abrir. */
-export function ClientSitesMap({ sites, height }: ClientSitesMapProps) {
+export function ClientSitesMap({ sites, height, onHold, onMove }: ClientSitesMapProps) {
   const points = sites.map((site) => ({
     id: site.id,
     lat: Number(site.latitude),
     lng: Number(site.longitude),
     label: site.label,
+    draggable: site.draggable,
   }));
   const [first] = points;
   if (!first) return <EmptyState title="Este cliente no tiene predios activos." />;
@@ -138,19 +206,27 @@ export function ClientSitesMap({ sites, height }: ClientSitesMapProps) {
         }
       >
         {points.map((point) => (
-          <MapMarker key={point.id} latitude={point.lat} longitude={point.lng} />
+          <Pin
+            key={point.id}
+            id={point.id}
+            latitude={point.lat}
+            longitude={point.lng}
+            draggable={point.draggable}
+            onHold={onHold}
+            onMove={onMove}
+          />
         ))}
         {/* El número va en un marcador aparte, colgado justo debajo de la punta del pin. */}
         {points.map(
           (point) =>
-            point.label && (
+            point.label !== undefined && (
               <MapMarker
                 key={`${point.id}-label`}
                 latitude={point.lat}
                 longitude={point.lng}
                 anchor="top"
               >
-                <span className="rounded-sm bg-card px-1 text-[10px] leading-tight font-semibold text-foreground tabular-nums">
+                <span className="block rounded-sm bg-card px-1 text-[10px] leading-tight font-semibold text-foreground tabular-nums">
                   {point.label}
                 </span>
               </MapMarker>
