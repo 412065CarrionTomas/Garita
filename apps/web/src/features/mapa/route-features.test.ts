@@ -40,12 +40,12 @@ describe('routeFeatures', () => {
     );
     expect(lines.features.map((f) => [f.properties, f.geometry.coordinates])).toEqual([
       // Tramo a → b: destino faltó, sólido. Calle hasta el portón y a mano adentro.
-      [{ kind: 'streets', solid: true }, [a, gate]],
-      [{ kind: 'manual', solid: true }, [gate, b]],
+      [{ kind: 'streets', solid: true, leg: 0, section: 0 }, [a, gate]],
+      [{ kind: 'manual', solid: true, leg: 0, section: 1 }, [gate, b]],
       // b → c: sin calcular (fallback) y destino pendiente: atenuado.
-      [{ kind: 'fallback', solid: false }, [b, c]],
+      [{ kind: 'fallback', solid: false, leg: 1, section: 0 }, [b, c]],
       // Regreso al inicio: el destino es el primer punto, ya registrado.
-      [{ kind: 'streets', solid: true }, [c, a]],
+      [{ kind: 'streets', solid: true, leg: 2, section: 0 }, [c, a]],
     ]);
     expect(waypoints).toEqual([gate]);
     expect(hasFallback).toBe(true);
@@ -57,8 +57,8 @@ describe('routeFeatures', () => {
       points,
     );
     expect(lines.features.map((f) => [f.properties, f.geometry.coordinates])).toEqual([
-      [{ kind: 'fallback', solid: true }, [a, b]],
-      [{ kind: 'fallback', solid: false }, [b, c]],
+      [{ kind: 'fallback', solid: true, leg: 0, section: 0 }, [a, b]],
+      [{ kind: 'fallback', solid: false, leg: 1, section: 0 }, [b, c]],
     ]);
     expect(hasFallback).toBe(true);
   });

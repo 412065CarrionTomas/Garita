@@ -14,6 +14,9 @@ export interface RouteLineProperties {
   kind: SectionKind;
   /** Sólido si el destino del tramo ya se registró o faltó; si no, atenuado. */
   solid: boolean;
+  /** Tramo y sección: el editor los usa para saber qué línea se tocó. */
+  leg: number;
+  section: number;
 }
 
 interface LinePoint {
@@ -54,10 +57,11 @@ export function routeFeatures(routes: LiveMapRoute[], points: LinePoint[]): Rout
       route.legs.forEach((leg, l) => {
         const solid = isSolid(destinations[l]?.status);
         waypoints.push(...leg.waypoints);
-        for (const section of leg.sections)
+        leg.sections.forEach((section, s) => {
           features.push(
-            line(section.fallback ? 'fallback' : section.mode, solid, section.geometry),
+            line(section.fallback ? 'fallback' : section.mode, solid, section.geometry, l, s),
           );
+        });
       });
       continue;
     }
@@ -69,7 +73,7 @@ export function routeFeatures(routes: LiveMapRoute[], points: LinePoint[]): Rout
       located.map((point): LngLat => [point.lng, point.lat]),
       false,
     ).forEach(([from, to], l) => {
-      features.push(line('fallback', isSolid(located[l + 1]?.status), [from, to]));
+      features.push(line('fallback', isSolid(located[l + 1]?.status), [from, to], l, 0));
     });
   }
   return {
@@ -79,10 +83,16 @@ export function routeFeatures(routes: LiveMapRoute[], points: LinePoint[]): Rout
   };
 }
 
-function line(kind: SectionKind, solid: boolean, coordinates: LngLat[]): LineFeature {
+function line(
+  kind: SectionKind,
+  solid: boolean,
+  coordinates: LngLat[],
+  leg: number,
+  section: number,
+): LineFeature {
   return {
     type: 'Feature',
-    properties: { kind, solid },
+    properties: { kind, solid, leg, section },
     geometry: { type: 'LineString', coordinates },
   };
 }
