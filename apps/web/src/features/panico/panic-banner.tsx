@@ -1,19 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router';
 import { Siren } from 'lucide-react';
 import { Alert } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
 import type { z } from 'zod';
 import type { panicAlertSummarySchema } from '@garita/shared';
-
-const soundKey = 'garita-panic-sound';
-function rememberedSound() {
-  try {
-    return localStorage.getItem(soundKey) === 'enabled';
-  } catch {
-    return false;
-  }
-}
 
 export function PanicBanner({
   alerts,
@@ -23,24 +13,12 @@ export function PanicBanner({
   count: number;
 }) {
   const context = useRef<AudioContext | null>(null);
-  const [enabled, setEnabled] = useState(rememberedSound);
-  const [blocked, setBlocked] = useState(false);
-  const [error, setError] = useState('');
   const active = count > 0;
   useEffect(() => {
-    if (!enabled || !active) return;
-    let audio: AudioContext;
-    try {
-      audio = context.current ?? new AudioContext();
-      context.current = audio;
-    } catch {
-      return;
-    }
+    if (!active) return;
     const tone = () => {
-      if (audio.state !== 'running') {
-        setBlocked(true);
-        return;
-      }
+      const audio = context.current;
+      if (audio?.state !== 'running') return;
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
       oscillator.connect(gain);
@@ -56,47 +34,30 @@ export function PanicBanner({
     return () => {
       window.clearInterval(timer);
     };
-  }, [enabled, active]);
-  useEffect(
-    () => () => {
+  }, [active]);
+  // El navegador solo deja sonar después de un gesto: el primer clic o tecla en la app habilita el audio.
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        context.current ??= new AudioContext();
+        void context.current.resume();
+      } catch {
+        /* Sin audio en este navegador: queda el aviso visual. */
+      }
+    };
+    document.addEventListener('pointerdown', unlock);
+    document.addEventListener('keydown', unlock);
+    return () => {
+      document.removeEventListener('pointerdown', unlock);
+      document.removeEventListener('keydown', unlock);
       const audio = context.current;
       context.current = null;
       void audio?.close();
-    },
-    [],
-  );
-
-  const enable = async () => {
-    try {
-      context.current ??= new AudioContext();
-      await context.current.resume();
-      if (context.current.state !== 'running') throw new Error('Audio bloqueado');
-      try {
-        localStorage.setItem(soundKey, 'enabled');
-      } catch {
-        /* The current session can still use sound. */
-      }
-      setEnabled(true);
-      setBlocked(false);
-      setError('');
-    } catch {
-      setError('No se pudo activar el sonido. Revisá los permisos del navegador.');
-    }
-  };
+    };
+  }, []);
   const first = alerts[0];
   return (
     <>
-      {(!enabled || blocked) && (
-        <Button
-          variant="outline"
-          onClick={() => {
-            void enable();
-          }}
-        >
-          Activar sonido de alertas
-        </Button>
-      )}
-      {error && <Alert variant="destructive">{error}</Alert>}
       {active && (
         <Alert role="alert" aria-live="assertive" aria-atomic="true" variant="destructive">
           <Siren aria-hidden="true" />
