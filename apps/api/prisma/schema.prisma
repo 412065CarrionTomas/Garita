@@ -292,6 +292,8 @@ model Checkpoint {
   toleranceRadiusMeters Int                      @default(30)
   stickerLocation       String?
   isIndoor              Boolean                  @default(false)
+  // N° del punto en el predio (1 = primero); orden sugerido al armar una ronda.
+  position              Int                      @default(0)
   qrVersion             Int                      @default(1)
   status                RecordStatus             @default(active)
   createdAt             DateTime                 @default(now())
