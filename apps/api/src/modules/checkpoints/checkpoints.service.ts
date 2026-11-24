@@ -138,41 +138,47 @@ export class CheckpointsService {
   /** Guarda de una vez el orden y la ubicación de todos los puntos activos del predio. */
   async arrange(siteId: string, input: CheckpointArrangementInput, user: AuthenticatedUser) {
     const site = await this.sites.assertSiteIsActive(siteId, user);
-    const current = await this.prisma.tenantPrisma.checkpoint.findMany({
-      where: { siteId, status: 'active' },
-      select: { id: true, latitude: true, longitude: true },
-    });
-    const byId = new Map(current.map((point) => [point.id, point]));
-    const ids = new Set(input.puntos.map(({ id }) => id));
-    // Otro usuario pudo sumar o dar de baja puntos mientras tanto: no se pisa a ciegas.
-    if (
-      ids.size !== input.puntos.length ||
-      ids.size !== byId.size ||
-      input.puntos.some(({ id }) => !byId.has(id))
-    )
-      throw new ConflictException({
+    const outdated = () =>
+      new ConflictException({
         code: 'CHECKPOINT_LIST_OUTDATED',
         message: 'Los puntos del predio cambiaron. Recargá la página y volvé a intentar.',
       });
-    for (const point of input.puntos) {
-      const before = byId.get(point.id);
-      if (
-        before &&
-        (before.latitude.toNumber() !== point.latitude ||
-          before.longitude.toNumber() !== point.longitude)
-      )
-        this.assertNearSite(
-          { ...point, confirmFarLocation: input.confirmFarLocation },
-          site.latitude.toNumber(),
-          site.longitude.toNumber(),
-        );
-    }
+    // Leer, validar y escribir en la misma transacción: otro usuario pudo sumar o dar de baja
+    // puntos mientras tanto y no se pisa a ciegas.
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      for (const [index, point] of input.puntos.entries())
-        await tx.checkpoint.update({
-          where: { id: point.id },
+      const current = await tx.checkpoint.findMany({
+        where: { siteId, status: 'active' },
+        select: { id: true, latitude: true, longitude: true },
+      });
+      const byId = new Map(current.map((point) => [point.id, point]));
+      const ids = new Set(input.puntos.map(({ id }) => id));
+      if (
+        ids.size !== input.puntos.length ||
+        ids.size !== byId.size ||
+        input.puntos.some(({ id }) => !byId.has(id))
+      )
+        throw outdated();
+      for (const point of input.puntos) {
+        const before = byId.get(point.id);
+        if (
+          before &&
+          (before.latitude.toNumber() !== point.latitude ||
+            before.longitude.toNumber() !== point.longitude)
+        )
+          this.assertNearSite(
+            { ...point, confirmFarLocation: input.confirmFarLocation },
+            site.latitude.toNumber(),
+            site.longitude.toNumber(),
+          );
+      }
+      for (const [index, point] of input.puntos.entries()) {
+        // Solo si sigue activo en este predio: si lo dieron de baja recién, la lista quedó vieja.
+        const { count } = await tx.checkpoint.updateMany({
+          where: { id: point.id, siteId, status: 'active' },
           data: { position: index + 1, latitude: point.latitude, longitude: point.longitude },
         });
+        if (count !== 1) throw outdated();
+      }
     });
     this.logger.log({ action: 'checkpoint.arranged', siteId, userId: user.userId });
     return this.list(siteId);

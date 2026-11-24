@@ -11,6 +11,7 @@ function setup() {
     checkpoint: {
       update: jest.fn().mockResolvedValue({ id: 'point', status: 'inactive' }),
       findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     nfcTag: { updateMany: jest.fn() },
   };
@@ -67,14 +68,24 @@ describe('arrange', () => {
   it('numera los puntos en el orden recibido', async () => {
     const { db, service } = arrangeSetup();
     await service.arrange('site', { puntos: [point('b'), point('a')] }, user);
-    expect(db.checkpoint.update).toHaveBeenNthCalledWith(1, {
-      where: { id: 'b' },
+    expect(db.checkpoint.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: 'b', siteId: 'site', status: 'active' },
       data: { position: 1, latitude: -31.35, longitude: -64.29 },
     });
-    expect(db.checkpoint.update).toHaveBeenNthCalledWith(2, {
-      where: { id: 'a' },
+    expect(db.checkpoint.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: 'a', siteId: 'site', status: 'active' },
       data: { position: 2, latitude: -31.35, longitude: -64.29 },
     });
+  });
+
+  it('rechaza si un punto se dio de baja entre la lectura y la escritura', async () => {
+    const { db, service } = arrangeSetup();
+    db.checkpoint.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.arrange('site', { puntos: [point('a'), point('b')] }, user),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it.each([[[point('a')]], [[point('a'), point('a')]], [[point('a'), point('x')]]])(
@@ -84,7 +95,7 @@ describe('arrange', () => {
       await expect(service.arrange('site', { puntos }, user)).rejects.toMatchObject({
         status: 409,
       });
-      expect(db.checkpoint.update).not.toHaveBeenCalled();
+      expect(db.checkpoint.updateMany).not.toHaveBeenCalled();
     },
   );
 
@@ -94,8 +105,8 @@ describe('arrange', () => {
     await expect(service.arrange('site', { puntos }, user)).rejects.toMatchObject({
       status: 409,
     });
-    expect(db.checkpoint.update).not.toHaveBeenCalled();
+    expect(db.checkpoint.updateMany).not.toHaveBeenCalled();
     await service.arrange('site', { puntos, confirmFarLocation: true }, user);
-    expect(db.checkpoint.update).toHaveBeenCalledTimes(2);
+    expect(db.checkpoint.updateMany).toHaveBeenCalledTimes(2);
   });
 });
