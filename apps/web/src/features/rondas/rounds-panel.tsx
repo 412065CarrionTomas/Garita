@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import { useFillHeight } from '@/lib/use-fill-height';
 import { RoundEditor } from './round-editor';
 import { RouteEditor } from './route-editor';
-import { draftGeometry, storedRouteInput } from './route-draft';
+import { resolveRoute, storedRoute, storedRouteInput } from './route-draft';
 
 const checkpointsSchema = z.array(
   z.looseObject({
@@ -110,9 +110,8 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
   const previewRoute =
     storedRouteInput(preview?.currentVersion?.route) ?? defaultRouteInput(previewIds.length);
   const previewDisplay =
-    roundRouteSchema.safeParse(preview?.currentVersion?.route).data ??
-    draftGeometry(previewRoute, previewCoords);
-  const noop = () => undefined;
+    storedRoute(preview?.currentVersion?.route) ??
+    resolveRoute(previewRoute, previewCoords, new Map()).display;
 
   return (
     <section
@@ -301,13 +300,6 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
             selected={previewIds}
             route={previewRoute}
             display={previewDisplay}
-            active={null}
-            focusId={null}
-            tool="hand"
-            onPointClick={noop}
-            onLineClick={noop}
-            onMapClick={noop}
-            onRouteChange={noop}
           />
         )}
       </div>

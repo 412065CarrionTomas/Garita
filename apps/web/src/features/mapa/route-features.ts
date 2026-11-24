@@ -1,4 +1,4 @@
-import { legEndpoints, type LngLat, type RoundRoute } from '@garita/shared';
+import { legEndpoints, type LngLat, type RoundRoute, type RouteMode } from '@garita/shared';
 import type { PointStatus } from '@/components/point-path';
 
 /** Recorrido de una ronda para el mapa: sus puntos en orden y el recorrido guardado (o null). */
@@ -7,8 +7,13 @@ export interface LiveMapRoute {
   route: RoundRoute | null;
 }
 
-/** streets = por calles; manual = a mano; fallback = recto porque no se calculó (o ronda previa). */
+/** streets = por calles; manual = trazo libre; fallback = recto porque no se calculó (o ronda previa). */
 export type SectionKind = 'streets' | 'manual' | 'fallback';
+
+export const MODE_LABEL: Record<RouteMode, string> = {
+  streets: 'Por calles',
+  manual: 'Trazo libre',
+};
 
 export interface RouteLineProperties {
   kind: SectionKind;
@@ -34,9 +39,8 @@ interface LineFeature {
 
 export interface RouteFeatures {
   lines: { type: 'FeatureCollection'; features: LineFeature[] };
-  /** Puntos de paso: no se registran, solo dan forma al camino. */
-  waypoints: LngLat[];
-  hasFallback: boolean;
+  /** Dónde la línea cambia de modo, con el modo de antes y el de después. No se registran. */
+  modeChanges: { at: LngLat; from: RouteMode; to: RouteMode }[];
 }
 
 const isSolid = (status: PointStatus | undefined) => status === 'done' || status === 'missed';
@@ -48,7 +52,7 @@ const isSolid = (status: PointStatus | undefined) => status === 'done' || status
 export function routeFeatures(routes: LiveMapRoute[], points: LinePoint[]): RouteFeatures {
   const byId = new Map(points.map((point) => [point.id, point]));
   const features: LineFeature[] = [];
-  const waypoints: LngLat[] = [];
+  const modeChanges: RouteFeatures['modeChanges'] = [];
   for (const { checkpointIds, route } of routes) {
     const ids =
       route?.closed && checkpointIds[0] ? [...checkpointIds, checkpointIds[0]] : checkpointIds;
@@ -56,7 +60,12 @@ export function routeFeatures(routes: LiveMapRoute[], points: LinePoint[]): Rout
     if (route) {
       route.legs.forEach((leg, l) => {
         const solid = isSolid(destinations[l]?.status);
-        waypoints.push(...leg.waypoints);
+        leg.waypoints.forEach((at, k) => {
+          const from = leg.sections[k]?.mode;
+          const to = leg.sections[k + 1]?.mode;
+          // Un corte con el mismo modo a los dos lados (recorridos viejos) no es un cambio de modo.
+          if (from && to && from !== to) modeChanges.push({ at, from, to });
+        });
         leg.sections.forEach((section, s) => {
           features.push(
             line(section.fallback ? 'fallback' : section.mode, solid, section.geometry, l, s),
@@ -78,8 +87,7 @@ export function routeFeatures(routes: LiveMapRoute[], points: LinePoint[]): Rout
   }
   return {
     lines: { type: 'FeatureCollection', features },
-    waypoints,
-    hasFallback: features.some((feature) => feature.properties.kind === 'fallback'),
+    modeChanges,
   };
 }
 

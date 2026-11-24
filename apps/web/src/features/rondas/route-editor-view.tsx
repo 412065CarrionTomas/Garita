@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 import { BaseMap } from '../mapa/base-map';
 import { RouteLayers } from '../mapa/live-map-view';
 import { DEFAULT_CENTER, useDark } from '../mapa/map-style';
-import { routeEdits } from './route-draft';
+import { GuideMark, ModeChangeMark } from '../mapa/route-legend';
+import { partKey, routeEdits } from './route-draft';
 
 export interface RouteEditorPoint {
   id: string;
@@ -14,13 +15,15 @@ export interface RouteEditorPoint {
   lng: number;
 }
 
-/** Mano: elegir y arrastrar. Encadenar: sumar puntos en orden. Paso y quiebre: marcar en el mapa. */
-export type RouteTool = 'hand' | 'chain' | 'waypoint' | 'bend';
+/** Seleccionar (y arrastrar) o sumar puntos de control tocándolos en orden. */
+export type RouteTool = 'select' | 'chain';
 
-export interface RouteSection {
-  l: number;
-  s: number;
-}
+/** Lo elegido: una parte de un tramo, un punto de guía, un cambio de modo o un punto de control. */
+export type RouteSelection =
+  | { kind: 'part'; l: number; s: number }
+  | { kind: 'via'; l: number; s: number; i: number }
+  | { kind: 'waypoint'; l: number; k: number }
+  | { kind: 'point'; id: string };
 
 export interface RouteEditorProps {
   /** Todos los puntos del predio con ubicación; los de la ronda llevan su número de orden. */
@@ -28,15 +31,18 @@ export interface RouteEditorProps {
   /** Puntos de la ronda en orden. */
   selected: string[];
   route: RouteInput;
-  /** Lo que se dibuja: el recorrido calculado o el borrador. */
+  /** Lo que se dibuja: lo calculado de cada parte o su recta. */
   display: RoundRoute;
-  active: RouteSection | null;
-  focusId: string | null;
-  tool: RouteTool;
-  onPointClick: (id: string) => void;
-  onLineClick: (section: RouteSection, at: LngLat) => void;
-  onMapClick: (at: LngLat) => void;
-  onRouteChange: (route: RouteInput) => void;
+  selection?: RouteSelection | null;
+  tool?: RouteTool;
+  onSelect?: (selection: RouteSelection | null) => void;
+  onPointClick?: (id: string) => void;
+  /** Clic sobre la línea de la parte elegida: sumar un punto de guía ahí. */
+  onAddVia?: (l: number, s: number, at: LngLat) => void;
+  /** Partes cuyos puntos de guía muestran su número (clave `partKey`). */
+  numbered?: ReadonlySet<string>;
+  /** Sin esto el mapa es de solo lectura. */
+  onRouteChange?: (route: RouteInput) => void;
 }
 
 const HIT = 'route-hit';
@@ -61,7 +67,7 @@ function FitPoints({ points, line }: { points: RouteEditorPoint[]; line: LngLat[
       ],
       { padding: 72, maxZoom: 18, duration: 0 },
     );
-    // Solo al cambiar qué puntos hay: reordenar o mover un paso no debe mover la cámara.
+    // Solo al cambiar qué puntos hay: reordenar o mover un punto no debe mover la cámara.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, key.split('|').sort().join('|')]);
   return null;
@@ -76,28 +82,32 @@ function FollowFocus({ point }: { point?: RouteEditorPoint }) {
   return null;
 }
 
-/** Mapa del editor del recorrido: la lista de la izquierda es la alternativa sin mouse. */
+/**
+ * Mapa del editor del recorrido, pensado para mouse: tocar una línea elige su parte; sobre la
+ * parte elegida, un clic suma un punto de guía donde está el punto fantasma; los puntos se
+ * arrastran y el clic derecho los elimina. La lista y la barra de abajo ofrecen lo mismo sin mapa.
+ */
 export function RouteEditorView({
   points,
   selected,
   route,
   display,
-  active,
-  focusId,
-  tool,
+  selection = null,
+  tool = 'select',
+  numbered,
+  onSelect,
   onPointClick,
-  onLineClick,
-  onMapClick,
+  onAddVia,
   onRouteChange,
 }: RouteEditorProps) {
   const dark = useDark();
   const [overLine, setOverLine] = useState(false);
-  // El tramo elegido va en el azul informativo para separarse de la ruta en tinta.
-  const [ink, info] = useMemo(() => {
-    const css = getComputedStyle(document.documentElement);
-    return ['--foreground', '--info'].map((token) => css.getPropertyValue(token).trim());
+  const [ghost, setGhost] = useState<LngLat | null>(null);
+  const ink = useMemo(
+    () => getComputedStyle(document.documentElement).getPropertyValue('--foreground').trim(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dark]);
+    [dark],
+  );
   const inRoute = useMemo(() => {
     const byId = new Map(points.map((p) => [p.id, p]));
     return selected.flatMap((id) => {
@@ -110,30 +120,47 @@ export function RouteEditorView({
     [inRoute],
   );
   const routes = useMemo(() => [{ checkpointIds: selected, route: display }], [selected, display]);
-  const marking = tool !== 'hand';
+  const editable = Boolean(onRouteChange);
+  const part =
+    selection?.kind === 'part' || selection?.kind === 'via'
+      ? { l: selection.l, s: selection.s }
+      : null;
+  const focusId = selection?.kind === 'point' ? selection.id : null;
   const stop = (event: { originalEvent: MouseEvent }) => {
     event.originalEvent.stopPropagation();
   };
+  const lineAt = (props: { leg?: number; section?: number } | null | undefined) =>
+    props?.leg !== undefined && props.section !== undefined
+      ? { l: props.leg, s: props.section }
+      : null;
 
   return (
     <BaseMap
       initialViewState={{ ...DEFAULT_CENTER, zoom: 15 }}
       cooperativeGestures={false}
       interactiveLayerIds={[HIT]}
-      cursor={marking ? 'crosshair' : overLine ? 'pointer' : undefined}
+      cursor={tool === 'chain' ? 'crosshair' : ghost ? 'copy' : overLine ? 'pointer' : undefined}
       onMouseEnter={() => {
         setOverLine(true);
       }}
       onMouseLeave={() => {
         setOverLine(false);
+        setGhost(null);
+      }}
+      onMouseMove={(event) => {
+        const over = lineAt(event.features?.[0]?.properties);
+        const onPart = editable && part && over?.l === part.l && over.s === part.s;
+        setGhost(onPart ? [event.lngLat.lng, event.lngLat.lat] : null);
       }}
       onClick={(event) => {
         const at: LngLat = [event.lngLat.lng, event.lngLat.lat];
-        const props = event.features?.[0]?.properties as
-          { leg?: number; section?: number } | undefined;
-        if (props?.leg !== undefined && props.section !== undefined)
-          onLineClick({ l: props.leg, s: props.section }, at);
-        else onMapClick(at);
+        const over = lineAt(event.features?.[0]?.properties);
+        if (!over) {
+          if (tool === 'select') onSelect?.(null);
+          return;
+        }
+        if (editable && part?.l === over.l && part.s === over.s) onAddVia?.(over.l, over.s, at);
+        else onSelect?.({ kind: 'part', ...over });
       }}
     >
       <FitPoints
@@ -141,15 +168,17 @@ export function RouteEditorView({
         line={display.legs.flatMap((leg) => leg.sections.flatMap((section) => section.geometry))}
       />
       <FollowFocus point={points.find((p) => p.id === focusId)} />
-      <RouteLayers points={layerPoints} routes={routes} dark={dark} showWaypoints={false} />
-      {active && (
+      <RouteLayers points={layerPoints} routes={routes} dark={dark} editor={editable} />
+      {part && (
+        // Halo de la parte elegida, debajo de la línea para no tapar su patrón.
         <Layer
           id="route-active"
           type="line"
           source="route"
-          filter={['all', ['==', ['get', 'leg'], active.l], ['==', ['get', 'section'], active.s]]}
+          beforeId="route-casing"
+          filter={['all', ['==', ['get', 'leg'], part.l], ['==', ['get', 'section'], part.s]]}
           layout={{ 'line-join': 'round', 'line-cap': 'round' }}
-          paint={{ 'line-color': info, 'line-width': 7 }}
+          paint={{ 'line-color': ink, 'line-width': 12, 'line-opacity': 0.22 }}
         />
       )}
       {/* Franja invisible y ancha para que la línea sea fácil de tocar. */}
@@ -159,60 +188,105 @@ export function RouteEditorView({
         source="route"
         paint={{ 'line-color': ink, 'line-opacity': 0, 'line-width': 22 }}
       />
+      {ghost && (
+        <Marker latitude={ghost[1]} longitude={ghost[0]} anchor="center" style={{ zIndex: 1 }}>
+          <span aria-hidden="true" className="pointer-events-none block opacity-70">
+            <GuideMark />
+          </span>
+        </Marker>
+      )}
       {route.legs.map((leg, l) => (
         <span key={`leg-${String(l)}`}>
-          {leg.waypoints.map(([lng, lat], k) => (
-            <Marker
-              key={`wp-${String(l)}-${String(k)}`}
-              latitude={lat}
-              longitude={lng}
-              anchor="center"
-              draggable
-              onClick={stop}
-              onDragEnd={(event) => {
-                onRouteChange(
-                  routeEdits.moveWaypoint(route, l, k, [event.lngLat.lng, event.lngLat.lat]),
-                );
-              }}
-            >
-              <span
-                title="Punto de paso: arrastralo para moverlo, clic derecho lo borra"
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  onRouteChange(routeEdits.removeWaypoint(route, l, k));
-                }}
-                className={cn(
-                  'block size-3.5 rotate-45 cursor-grab border-2 bg-card',
-                  active?.l === l ? 'border-foreground' : 'border-muted-foreground',
-                )}
-              />
-            </Marker>
-          ))}
-          {leg.sections.flatMap((section, s) =>
-            section.via.map(([lng, lat], i) => (
+          {leg.waypoints.map(([lng, lat], k) => {
+            const chosen = selection?.kind === 'waypoint' && selection.l === l && selection.k === k;
+            return (
               <Marker
-                key={`via-${String(l)}-${String(s)}-${String(i)}`}
+                key={`wp-${String(l)}-${String(k)}`}
                 latitude={lat}
                 longitude={lng}
                 anchor="center"
-                draggable
-                onClick={stop}
+                draggable={editable}
+                style={{ zIndex: 4 }}
+                onClick={(event) => {
+                  stop(event);
+                  onSelect?.({ kind: 'waypoint', l, k });
+                }}
                 onDragEnd={(event) => {
-                  onRouteChange(
-                    routeEdits.moveVia(route, l, s, i, [event.lngLat.lng, event.lngLat.lat]),
+                  onRouteChange?.(
+                    routeEdits.moveWaypoint(route, l, k, [event.lngLat.lng, event.lngLat.lat]),
                   );
                 }}
               >
                 <span
-                  title="Quiebre: arrastralo para moverlo, clic derecho lo borra"
+                  aria-hidden="true"
+                  title="Cambio de modo: arrastralo para moverlo; clic derecho lo elimina"
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    onRouteChange(routeEdits.removeVia(route, l, s, i));
+                    if (editable) onRouteChange?.(routeEdits.removeWaypoint(route, l, k));
                   }}
-                  className="block size-2.5 cursor-grab rounded-full border-2 border-foreground bg-card"
-                />
+                  className={cn(
+                    'block p-1',
+                    editable && 'cursor-grab',
+                    chosen && 'outline-2 outline-foreground',
+                  )}
+                >
+                  <ModeChangeMark
+                    from={leg.sections[k]?.mode ?? 'streets'}
+                    to={leg.sections[k + 1]?.mode ?? 'streets'}
+                  />
+                </span>
               </Marker>
-            )),
+            );
+          })}
+          {leg.sections.flatMap((section, s) =>
+            section.via.map(([lng, lat], i) => {
+              const chosen =
+                selection?.kind === 'via' &&
+                selection.l === l &&
+                selection.s === s &&
+                selection.i === i;
+              return (
+                <Marker
+                  key={`via-${String(l)}-${String(s)}-${String(i)}`}
+                  latitude={lat}
+                  longitude={lng}
+                  anchor="center"
+                  draggable={editable}
+                  style={{ zIndex: 4 }}
+                  onClick={(event) => {
+                    stop(event);
+                    onSelect?.({ kind: 'via', l, s, i });
+                  }}
+                  onDragEnd={(event) => {
+                    onRouteChange?.(
+                      routeEdits.moveVia(route, l, s, i, [event.lngLat.lng, event.lngLat.lat]),
+                    );
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    title="Punto de guía: arrastralo para moverlo; clic derecho lo elimina"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      if (editable) onRouteChange?.(routeEdits.removeVia(route, l, s, i));
+                    }}
+                    className={cn(
+                      'relative grid size-6 place-items-center rounded-full',
+                      editable && 'cursor-grab',
+                      chosen && 'outline-2 -outline-offset-2 outline-foreground',
+                    )}
+                  >
+                    <GuideMark />
+                    {numbered?.has(partKey(l, s)) && (
+                      // Número chico debajo, distinto del de los puntos de control.
+                      <span className="font-cond absolute top-full left-1/2 -mt-1 -translate-x-1/2 rounded-xs bg-card/85 px-0.5 text-[0.625rem] leading-none font-semibold text-foreground">
+                        {i + 1}
+                      </span>
+                    )}
+                  </span>
+                </Marker>
+              );
+            }),
           )}
         </span>
       ))}
@@ -225,10 +299,10 @@ export function RouteEditorView({
             latitude={point.lat}
             longitude={point.lng}
             anchor="center"
-            style={{ zIndex: order >= 0 ? 2 : 1 }}
+            style={{ zIndex: order >= 0 ? 5 : 1 }}
             onClick={(event) => {
               stop(event);
-              onPointClick(point.id);
+              onPointClick?.(point.id);
             }}
           >
             {/* El mapa es un atajo con mouse: la lista de puntos ofrece lo mismo con teclado. */}
@@ -238,7 +312,7 @@ export function RouteEditorView({
               className={cn(
                 'font-cond grid cursor-pointer place-items-center border-2 font-semibold tabular-nums',
                 order >= 0
-                  ? 'size-6 border-foreground bg-card text-xs text-foreground'
+                  ? 'size-7 border-foreground bg-card text-sm text-foreground'
                   : 'size-3.5 border-muted-foreground bg-card',
                 focused &&
                   'bg-primary text-primary-foreground outline-2 outline-offset-2 outline-foreground',

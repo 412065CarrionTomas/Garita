@@ -1,15 +1,28 @@
-import { defaultRouteInput, type LngLat, type RouteInput } from '@garita/shared';
 import {
-  failedLegs,
+  defaultRouteInput,
+  distanceMeters,
+  type LngLat,
+  type RoundRoute,
+  type RouteInput,
+} from '@garita/shared';
+import {
+  GUIDE_STEP_METERS,
   failureMessages,
   formatMeters,
   legMeters,
   legLabel,
+  partLabel,
+  pointAfterLast,
+  rebaseRoute,
   reconcileRoute,
+  rememberFailures,
+  rememberRoute,
+  requestEstimate,
+  resolveRoute,
   routeEdits,
-  sectionOptions,
-  sectionMidpoint,
   storedRouteInput,
+  viaInsertIndex,
+  type SectionMemo,
 } from './route-draft';
 
 const gate: LngLat = [-64.15, -31.4];
@@ -52,120 +65,228 @@ describe('reconcileRoute', () => {
   });
 });
 
+const A: LngLat = [0, 0];
+const B: LngLat = [0.01, 0];
+const C: LngLat = [0.02, 0];
+const p1: LngLat = [0.002, 0.001];
+const p2: LngLat = [0.005, 0.001];
+const p3: LngLat = [0.008, 0.001];
+
+const oneLeg = (leg: RouteInput['legs'][number]): RouteInput => ({ closed: false, legs: [leg] });
+
 describe('routeEdits', () => {
-  const base = defaultRouteInput(2, false);
+  const guided = oneLeg({ waypoints: [], sections: [{ mode: 'streets', via: [p1, p2, p3] }] });
 
-  it('un punto de paso parte el tramo y al quitarlo las secciones se unen con sus quiebres', () => {
-    const withGate = routeEdits.addWaypoint(base, 0, gate);
-    expect(withGate.legs[0]?.sections).toHaveLength(2);
-    const traced = routeEdits.addVia(routeEdits.setMode(withGate, 0, 1, 'manual'), 0, 1, bend);
-    const merged = routeEdits.removeWaypoint(traced, 0, 0);
-    expect(merged.legs[0]).toEqual({ waypoints: [], sections: [{ mode: 'streets', via: [bend] }] });
+  it('un punto de guía pasa a cambio de modo y vuelve: las partes se parten y se unen', () => {
+    const split = routeEdits.splitAtVia(guided, 0, 0, 1);
+    expect(split.legs[0]).toEqual({
+      waypoints: [p2],
+      sections: [
+        { mode: 'streets', via: [p1] },
+        { mode: 'manual', via: [p3] },
+      ],
+    });
+    expect(routeEdits.mergeAtWaypoint(split, 0, 0)).toEqual(guided);
+    // Eliminar el cambio de modo une las partes sin ese punto.
+    expect(routeEdits.removeWaypoint(split, 0, 0).legs[0]?.sections).toEqual([
+      { mode: 'streets', via: [p1, p3] },
+    ]);
   });
 
-  it('deshace el último quiebre y borra el trazado', () => {
-    const two = routeEdits.addVia(routeEdits.addVia(base, 0, 0, gate), 0, 0, bend);
-    expect(routeEdits.undoVia(two, 0, 0).legs[0]?.sections[0]?.via).toEqual([gate]);
-    expect(routeEdits.clearVia(two, 0, 0).legs[0]?.sections[0]?.via).toEqual([]);
+  it('suma el otro modo desde el último punto de guía hasta el fin de la parte', () => {
+    const at = pointAfterLast([A, p1, B]);
+    expect(at).toEqual([(p1[0] + B[0]) / 2, (p1[1] + B[1]) / 2]);
+    const single = oneLeg({ waypoints: [], sections: [{ mode: 'manual', via: [p1] }] });
+    expect(routeEdits.appendModeChange(single, 0, 0, p2).legs[0]).toEqual({
+      waypoints: [p2],
+      sections: [
+        { mode: 'manual', via: [p1] },
+        { mode: 'streets', via: [] },
+      ],
+    });
   });
 
-  it('agrega con teclado en la mitad del último tramo recto de la sección', () => {
-    expect(
-      sectionMidpoint(
-        base,
-        [
-          [0, 0],
-          [2, 2],
-        ],
-        0,
-        0,
-      ),
-    ).toEqual([1, 1]);
+  it('el «+» deja el punto de guía nuevo a pocos metros del anterior', () => {
+    const next = pointAfterLast([A, B], GUIDE_STEP_METERS) ?? A;
+    expect(distanceMeters(A, next)).toBeCloseTo(GUIDE_STEP_METERS, 0);
+    // Si no entra, va a la mitad para no pisar el destino.
+    const near: LngLat = [0.0001, 0];
+    expect(pointAfterLast([A, near], GUIDE_STEP_METERS)).toEqual([0.00005, 0]);
+  });
+
+  it('inserta el punto de guía según dónde se tocó a lo largo de la línea', () => {
+    const line = [A, p1, p2, p3, B];
+    expect(viaInsertIndex([p1, p2, p3], line, [0.0065, 0.0011])).toBe(2);
+    expect(viaInsertIndex([p1, p2, p3], line, [0.0005, 0])).toBe(0);
+    expect(viaInsertIndex([p1, p2, p3], line, [0.0095, 0])).toBe(3);
+    const next = routeEdits.insertVia(guided, 0, 0, 2, [0.0065, 0.001]);
+    expect(next.legs[0]?.sections[0]?.via).toEqual([p1, p2, [0.0065, 0.001], p3]);
   });
 });
 
 describe('storedRouteInput', () => {
-  it('saca la geometría del recorrido guardado y rechaza lo inválido', () => {
-    const stored = {
-      v: 1,
-      closed: false,
-      legs: [
-        {
-          from: [0, 0],
-          to: [1, 1],
-          waypoints: [],
-          sections: [
-            {
-              mode: 'streets',
-              via: [],
-              geometry: [
-                [0, 0],
-                [1, 1],
-              ],
-              fallback: true,
-            },
-          ],
-        },
-      ],
-    };
-    expect(storedRouteInput(stored)).toEqual({
-      closed: false,
-      legs: [{ waypoints: [], sections: [{ mode: 'streets', via: [] }] }],
-    });
+  type Mode = 'streets' | 'manual';
+  const stored = (first: Mode, second: Mode) => ({
+    v: 1,
+    closed: false,
+    legs: [
+      {
+        from: A,
+        to: B,
+        waypoints: [p2],
+        sections: [
+          { mode: first, via: [p1], geometry: [A, p1, p2], fallback: false },
+          { mode: second, via: [], geometry: [p2, B], fallback: false },
+        ],
+      },
+    ],
+  });
+
+  it('une las partes con el mismo modo a los dos lados de un cambio de modo viejo', () => {
+    expect(storedRouteInput(stored('streets', 'streets'))).toEqual(
+      oneLeg({ waypoints: [], sections: [{ mode: 'streets', via: [p1, p2] }] }),
+    );
+    expect(storedRouteInput(stored('streets', 'manual'))?.legs[0]?.waypoints).toEqual([p2]);
     expect(storedRouteInput(null)).toBeNull();
   });
 });
 
-describe('mensajes de falla', () => {
-  it('nombra el tramo culpable, junta las fallas generales y no cuenta las salteadas', () => {
-    const failures = [
-      { leg: 1, section: 0, reason: 'unreachable_point' as const },
-      { leg: 2, section: 0, reason: 'skipped' as const },
-      { leg: 0, section: 0, reason: 'unavailable' as const },
-      { leg: 2, section: 1, reason: 'unavailable' as const },
-    ];
-    expect(failureMessages(failures, 3, true)).toEqual([
-      expect.stringContaining('tramo 2 → 3'),
-      'El servicio de rutas no respondió. Reintentá en un momento.',
-    ]);
-    expect([...failedLegs(failures)].sort()).toEqual([0, 1, 2]);
-    expect(legLabel(2, 3, true)).toBe('3 → 1 (regreso)');
+describe('estado de cada parte', () => {
+  const mixed = oneLeg({
+    waypoints: [p2],
+    sections: [
+      { mode: 'streets', via: [p1] },
+      { mode: 'manual', via: [] },
+    ],
   });
-});
-
-describe('edición desde el mapa', () => {
-  const route: RouteInput = {
+  const calculated: RoundRoute = {
+    v: 1,
     closed: false,
     legs: [
       {
-        waypoints: [gate],
+        from: A,
+        to: B,
+        waypoints: [p2],
         sections: [
-          { mode: 'streets', via: [] },
-          { mode: 'manual', via: [bend] },
+          { mode: 'streets', via: [p1], geometry: [A, [0.001, 0], p1, p2], fallback: false },
+          { mode: 'manual', via: [], geometry: [p2, B], fallback: false },
         ],
       },
     ],
   };
+  const states = (route: RouteInput, memo: SectionMemo, coords = [A, B]) =>
+    resolveRoute(route, coords, memo).parts.map((part) => part.state);
 
-  it('inserta el punto de paso en la sección tocada y la parte con su mismo modo', () => {
-    const at: LngLat = [-64.17, -31.42];
-    const next = routeEdits.insertWaypoint(route, 0, 1, at);
-    expect(next.legs[0]?.waypoints).toEqual([gate, at]);
-    expect(next.legs[0]?.sections).toEqual([
-      { mode: 'streets', via: [] },
-      { mode: 'manual', via: [bend] },
-      { mode: 'manual', via: [] },
-    ]);
-    // Al principio de la sección 0 queda antes del punto de paso existente.
-    expect(routeEdits.insertWaypoint(route, 0, 0, at).legs[0]?.waypoints).toEqual([at, gate]);
+  it('sin calcular hasta tener su línea, y vuelve a sin calcular al tocarla', () => {
+    expect(states(mixed, new Map())).toEqual(['pending', 'manual']);
+    const memo = rememberRoute(new Map(), calculated);
+    const { display, parts } = resolveRoute(mixed, [A, B], memo);
+    expect(parts.map((part) => part.state)).toEqual(['calculated', 'manual']);
+    expect(display.legs[0]?.sections[0]).toMatchObject({ fallback: false });
+    expect(display.legs[0]?.sections[0]?.geometry).toHaveLength(4);
+    const moved = routeEdits.moveVia(mixed, 0, 0, 0, [0.003, 0.001]);
+    expect(states(moved, memo)).toEqual(['pending', 'manual']);
+    // Mover un punto de control también cambia la parte.
+    expect(states(mixed, memo, [[0.0001, 0], B])).toEqual(['pending', 'manual']);
   });
 
-  it('borra un quiebre puntual y lista las secciones con su nombre', () => {
-    expect(routeEdits.removeVia(route, 0, 1, 0).legs[0]?.sections[1]?.via).toEqual([]);
-    expect(sectionOptions(route).map((option) => option.label)).toEqual([
-      'Tramo 1 → 2 (parte 1)',
-      'Tramo 1 → 2 (parte 2)',
+  it('falló hasta que se edita; las fallas pasajeras quedan para reintentar', () => {
+    const failed = rememberFailures(
+      new Map(),
+      mixed,
+      [A, B],
+      [{ leg: 0, section: 0, reason: 'unreachable_point' }],
+    );
+    expect(resolveRoute(mixed, [A, B], failed).parts[0]).toMatchObject({
+      state: 'failed',
+      failure: 'unreachable_point',
+    });
+    const retry = rememberFailures(
+      failed,
+      mixed,
+      [A, B],
+      [{ leg: 0, section: 0, reason: 'rate_limited' }],
+    );
+    expect(states(mixed, retry)).toEqual(['pending', 'manual']);
+  });
+
+  it('una parte guardada recta se reconoce', () => {
+    const straight = rememberRoute(new Map(), {
+      ...calculated,
+      legs: calculated.legs.map((leg) => ({
+        ...leg,
+        sections: leg.sections.map((section) => ({ ...section, fallback: true })),
+      })),
+    });
+    expect(states(mixed, straight)).toEqual(['straight', 'manual']);
+  });
+
+  it('estima un pedido por cada corrida de partes por calles seguidas sin calcular', () => {
+    const streets = defaultRouteInput(3, false);
+    const coords = [A, B, C];
+    expect(requestEstimate(resolveRoute(streets, coords, new Map()).parts)).toEqual({
+      pending: 2,
+      requests: 1,
+    });
+    const cut = routeEdits.setMode(defaultRouteInput(4, false), 1, 0, 'manual');
+    expect(requestEstimate(resolveRoute(cut, [A, B, C, [0.03, 0]], new Map()).parts)).toEqual({
+      pending: 2,
+      requests: 2,
+    });
+    const first: RoundRoute = {
+      v: 1,
+      closed: false,
+      legs: [
+        {
+          from: A,
+          to: B,
+          waypoints: [],
+          sections: [{ mode: 'streets', via: [], geometry: [A, B], fallback: false }],
+        },
+      ],
+    };
+    const done = rememberRoute(new Map(), first);
+    expect(requestEstimate(resolveRoute(streets, coords, done).parts)).toEqual({
+      pending: 1,
+      requests: 1,
+    });
+    const all = rememberRoute(new Map(), calculated);
+    expect(requestEstimate(resolveRoute(mixed, [A, B], all).parts)).toEqual({
+      pending: 0,
+      requests: 0,
+    });
+  });
+
+  it('lo guardado sigue valiendo si los puntos se movieron hasta 5 m', () => {
+    const memo = (coords: LngLat[]) => rememberRoute(new Map(), rebaseRoute(calculated, coords));
+    const near: LngLat = [0.00002, 0]; // unos 2 m
+    const far: LngLat = [0.001, 0]; // unos 110 m
+    expect(states(mixed, memo([near, B]), [near, B])).toEqual(['calculated', 'manual']);
+    expect(states(mixed, memo([far, B]), [far, B])).toEqual(['pending', 'manual']);
+  });
+});
+
+describe('textos', () => {
+  it('nombra la parte culpable, junta las fallas generales y no cuenta las salteadas', () => {
+    const route = defaultRouteInput(3, true);
+    const failures = [
+      { leg: 1, section: 0, reason: 'unreachable_point' as const },
+      { leg: 2, section: 0, reason: 'skipped' as const },
+      { leg: 0, section: 0, reason: 'unavailable' as const },
+      { leg: 2, section: 0, reason: 'unavailable' as const },
+    ];
+    expect(failureMessages(failures, route)).toEqual([
+      expect.stringContaining('Tramo 2 → 3: Un punto'),
+      'El servicio de rutas no respondió. Reintentá en un momento.',
     ]);
+    expect(legLabel(2, 3, true)).toBe('3 → 1 (vuelta)');
+    const split = routeEdits.splitAtVia(
+      oneLeg({ waypoints: [], sections: [{ mode: 'streets', via: [p1] }] }),
+      0,
+      0,
+      0,
+    );
+    expect(partLabel(split, 0, 1)).toBe('Tramo 1 → 2, parte 2');
   });
 
   it('mide cada tramo sobre la línea y formatea en m o km', () => {

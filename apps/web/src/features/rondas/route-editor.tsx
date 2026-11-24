@@ -4,7 +4,7 @@ import type { RouteEditorProps } from './route-editor-view';
 export type {
   RouteEditorPoint,
   RouteEditorProps,
-  RouteSection,
+  RouteSelection,
   RouteTool,
 } from './route-editor-view';
 

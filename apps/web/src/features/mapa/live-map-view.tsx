@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { BaseMap } from './base-map';
 import { DEFAULT_CENTER, useDark } from './map-style';
 import { arrowImage, routeFeatures, type LiveMapRoute } from './route-features';
+import { ModeChangeMark, RouteLegend } from './route-legend';
 
 export type { LiveMapRoute } from './route-features';
 
@@ -180,20 +181,20 @@ const PATTERNS = [
 
 /**
  * Recorrido ideal: línea con borde del color de la tarjeta para que se lea sobre la foto
- * satelital, flechas de sentido y puntos de paso como rombos. Sólida y ancha hasta donde se
- * llegó; fina y atenuada lo que falta.
+ * satelital, flechas de sentido, cambios de modo y la leyenda. Ancha hasta donde se llegó; fina y
+ * atenuada lo que falta.
  */
 export function RouteLayers({
   points,
   routes,
   dark,
-  showWaypoints = true,
+  editor = false,
 }: {
   points: Pick<LiveMapPoint, 'id' | 'lat' | 'lng' | 'status'>[];
   routes: LiveMapRoute[];
   dark: boolean;
-  /** El editor dibuja sus propios puntos de paso, que se pueden arrastrar. */
-  showWaypoints?: boolean;
+  /** El editor dibuja sus propios marcadores y explica todos en la leyenda. */
+  editor?: boolean;
 }) {
   const { current: map } = useMap();
   // Los tokens son hex en :root/.dark; se leen del documento para no repetir colores acá.
@@ -204,10 +205,7 @@ export function RouteLayers({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dark]);
-  const { lines, waypoints, hasFallback } = useMemo(
-    () => routeFeatures(routes, points),
-    [routes, points],
-  );
+  const { lines, modeChanges } = useMemo(() => routeFeatures(routes, points), [routes, points]);
   // Al cambiar Mapa/Satélite el estilo nuevo no trae la flecha: se vuelve a registrar.
   useEffect(() => {
     const instance = map?.getMap();
@@ -225,6 +223,7 @@ export function RouteLayers({
     };
   }, [map]);
   const color = COLOR(ink ?? '', muted ?? '');
+  const kinds = [...new Set(lines.features.map((feature) => feature.properties.kind))];
   return (
     <>
       <Source id="route" type="geojson" data={lines}>
@@ -262,26 +261,21 @@ export function RouteLayers({
           paint={{ 'icon-color': color }}
         />
       </Source>
-      {showWaypoints &&
-        waypoints.map(([lng, lat], i) => (
+      {!editor &&
+        modeChanges.map(({ at: [lng, lat], from, to }, i) => (
           <Marker
             key={`${String(i)}-${String(lng)}-${String(lat)}`}
             latitude={lat}
             longitude={lng}
             anchor="center"
           >
-            {/* Punto de paso: no se registra ni se toca; solo da forma al camino. */}
-            <span
-              aria-hidden="true"
-              className="pointer-events-none block size-2 rotate-45 border-[1.5px] border-muted-foreground bg-card"
-            />
+            {/* Cambio de modo: no se registra ni se toca; muestra dónde cambia la línea. */}
+            <span aria-hidden="true" className="pointer-events-none block scale-75">
+              <ModeChangeMark from={from} to={to} />
+            </span>
           </Marker>
         ))}
-      {hasFallback && (
-        <p className="absolute bottom-3.5 left-3.5 z-10 rounded-sm border border-border bg-card/90 px-2 py-1 text-xs text-foreground">
-          Línea de puntos: tramo sin calcular por calles (se muestra recto).
-        </p>
-      )}
+      <RouteLegend kinds={kinds} markers={editor} />
     </>
   );
 }

@@ -34,7 +34,7 @@ const route: RoundRoute = {
 
 describe('routeFeatures', () => {
   it('dibuja la geometría guardada con el tipo de cada sección y el estado del destino', () => {
-    const { lines, waypoints, hasFallback } = routeFeatures(
+    const { lines, modeChanges } = routeFeatures(
       [{ checkpointIds: ['a', 'b', 'c'], route }],
       points,
     );
@@ -47,25 +47,20 @@ describe('routeFeatures', () => {
       // Regreso al inicio: el destino es el primer punto, ya registrado.
       [{ kind: 'streets', solid: true, leg: 2, section: 0 }, [c, a]],
     ]);
-    expect(waypoints).toEqual([gate]);
-    expect(hasFallback).toBe(true);
+    expect(modeChanges).toEqual([{ at: gate, from: 'streets', to: 'manual' }]);
   });
 
   it('dibuja recta y como fallback una ronda sin recorrido guardado, sin cerrar el circuito', () => {
-    const { lines, hasFallback } = routeFeatures(
-      [{ checkpointIds: ['a', 'b', 'c'], route: null }],
-      points,
-    );
+    const { lines } = routeFeatures([{ checkpointIds: ['a', 'b', 'c'], route: null }], points);
     expect(lines.features.map((f) => [f.properties, f.geometry.coordinates])).toEqual([
       [{ kind: 'fallback', solid: true, leg: 0, section: 0 }, [a, b]],
       [{ kind: 'fallback', solid: false, leg: 1, section: 0 }, [b, c]],
     ]);
-    expect(hasFallback).toBe(true);
   });
 
-  it('dibuja un recorrido por ronda y no avisa si todo se calculó', () => {
+  it('dibuja un recorrido por ronda', () => {
     const open: RoundRoute = { v: 1, closed: false, legs: [route.legs[0] ?? never()] };
-    const { lines, hasFallback } = routeFeatures(
+    const { lines } = routeFeatures(
       [
         { checkpointIds: ['a', 'b'], route: open },
         {
@@ -76,7 +71,6 @@ describe('routeFeatures', () => {
       points,
     );
     expect(lines.features).toHaveLength(3);
-    expect(hasFallback).toBe(false);
   });
 });
 

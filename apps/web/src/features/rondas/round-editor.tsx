@@ -7,7 +7,6 @@ import {
   roundInputSchema,
   roundRoutePreviewInputSchema,
   roundRoutePreviewResponseSchema,
-  roundRouteSchema,
   routeFailuresErrorSchema,
   staleLegs,
   type LngLat,
@@ -15,33 +14,47 @@ import {
   type RouteInput,
   type RouteMode,
 } from '@garita/shared';
-import { ArrowLeft, ChevronDown, ChevronUp, GripVertical, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, CircleHelp, GripVertical, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { SegmentedFilter } from '@/components/segmented-filter';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { ApiError, apiPatch, apiPost } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
 import { cn } from '@/lib/utils';
-import { RouteEditor, type RouteSection, type RouteTool } from './route-editor';
+import { LegsList } from './legs-list';
+import { RouteEditor, type RouteSelection, type RouteTool } from './route-editor';
 import {
-  draftGeometry,
-  failedLegs,
   failureMessages,
   formatMeters,
-  legLabel,
   legMeters,
+  GUIDE_STEP_METERS,
+  partKey,
+  pointAfterLast,
+  rebaseRoute,
   reconcileRoute,
+  rememberFailures,
+  rememberRoute,
+  requestEstimate,
+  resolveRoute,
   routeEdits,
-  sectionMidpoint,
-  sectionOptions,
+  storedRoute,
   storedRouteInput,
+  viaInsertIndex,
   type RouteDraft,
+  type SectionMemo,
 } from './route-draft';
+import { RouteInspector } from './route-inspector';
 
 export interface EditorPoint {
   id: string;
@@ -64,31 +77,109 @@ export interface EditorRound {
 }
 
 const TOOLS: { value: RouteTool; label: string }[] = [
-  { value: 'hand', label: 'Mano' },
-  { value: 'chain', label: 'Encadenar puntos' },
-  { value: 'waypoint', label: 'Punto de paso' },
-  { value: 'bend', label: 'Quiebre' },
+  { value: 'select', label: 'Seleccionar' },
+  { value: 'chain', label: 'Sumar puntos de control' },
 ];
-const SHORTCUTS: Record<string, RouteTool> = {
-  v: 'hand',
-  e: 'chain',
-  p: 'waypoint',
-  q: 'bend',
-  escape: 'hand',
-};
-const HINTS: Record<RouteTool, string> = {
-  hand: 'Tocá una línea para elegir su tramo. Arrastrá los rombos (puntos de paso) y los círculos (quiebres) para moldear el camino; clic derecho los borra.',
-  chain:
-    'Tocá los puntos en el orden en que se recorren: se suman al final. Tocá el último para sacarlo.',
-  waypoint:
-    'Tocá una línea para poner un punto de paso ahí, o el mapa para sumarlo al tramo elegido. Obliga al camino a pasar por ese lugar, por ejemplo un portón.',
-  bend: 'Tocá el mapa para agregar un quiebre al tramo elegido. A mano dibuja el camino; por calles lo obliga a pasar cerca.',
-};
-const MODES: { value: RouteMode; label: string }[] = [
-  { value: 'streets', label: 'Por calles' },
-  { value: 'manual', label: 'A mano' },
+const SHORTCUTS: Record<string, RouteTool> = { v: 'select', e: 'chain' };
+const TABS: { value: 'order' | 'legs'; label: string }[] = [
+  { value: 'order', label: 'Orden' },
+  { value: 'legs', label: 'Tramos' },
 ];
 const idSchema = z.looseObject({ id: z.string() });
+
+/** Qué hace cada control del editor que no se explica solo con su nombre. */
+const HELP: { title: string; items: [string, string][] }[] = [
+  {
+    title: 'Horario',
+    items: [
+      ['Franja', 'Horas del día en que la ronda está vigente.'],
+      ['Frecuencia', 'Cada cuántos minutos empieza una vuelta nueva dentro de la franja.'],
+      [
+        'Ventana',
+        'Cada período de la frecuencia. En cada ventana hay que pasar por todos los puntos.',
+      ],
+      [
+        'Gracia',
+        'Minutos después del fin de una ventana en que un registro todavía cuenta para ella, marcado como tarde.',
+      ],
+    ],
+  },
+  {
+    title: 'Orden',
+    items: [
+      ['Compartido', 'El punto también forma parte de otra ronda del predio.'],
+      ['Fuera de la ronda', 'Puntos del predio que esta ronda no incluye.'],
+    ],
+  },
+  {
+    title: 'Recorrido',
+    items: [
+      ['Tramo', 'El camino de un punto de control al siguiente.'],
+      ['Parte', 'Un pedazo del tramo con un solo modo: por calles o trazo libre.'],
+      [
+        'Punto de guía',
+        'Da forma a la línea de su parte. Por calles, la ruta pasa por ahí; en trazo libre, la línea dobla ahí. No se escanea.',
+      ],
+      ['Cambio de modo', 'Punto donde termina una parte y empieza otra con el otro modo.'],
+      ['Por calles', 'La línea sigue las calles; se calcula con «Calcular por calles».'],
+      ['Trazo libre', 'Rectas entre sus puntos. No se calcula.'],
+    ],
+  },
+  {
+    title: 'Herramientas del mapa',
+    items: [
+      [
+        'Seleccionar',
+        'Tocá una línea para elegir su parte; sobre la parte elegida, un clic suma un punto de guía. Los puntos se arrastran y el clic derecho los elimina.',
+      ],
+      [
+        'Sumar puntos de control',
+        'Tocá los puntos del predio en el orden en que se recorren: se suman al final. Tocar el último lo saca.',
+      ],
+      ['Volver al inicio', 'Agrega un último tramo del último punto al primero.'],
+      [
+        'Calcular por calles',
+        'Pide al servicio de rutas solo las partes por calles sin calcular. Hasta calcularlas se ven como línea de puntos recta.',
+      ],
+    ],
+  },
+];
+
+function EditorHelp() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="self-center text-muted-foreground"
+          aria-label="Ayuda del editor de rondas"
+          title="Ayuda"
+        >
+          <CircleHelp aria-hidden="true" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85dvh] overflow-y-auto">
+        <DialogTitle className="text-lg font-semibold">Cómo se arma una ronda</DialogTitle>
+        <DialogDescription className="sr-only">Qué hace cada control del editor.</DialogDescription>
+        {HELP.map((group) => (
+          <section key={group.title} className="mt-4">
+            <h4 className="t-label">{group.title}</h4>
+            <dl className="mt-1 grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[11rem_1fr]">
+              {group.items.map(([term, text]) => (
+                <div key={term} className="contents">
+                  <dt className="font-semibold">{term}</dt>
+                  <dd className="text-muted-foreground">{text}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ))}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 interface Snapshot {
   selected: string[];
@@ -124,26 +215,39 @@ export function RoundEditor({
     route: storedRouteInput(version?.route) ?? defaultRouteInput(initialIds.length),
   }));
   const [past, setPast] = useState<Snapshot[]>([]);
-  const [tool, setTool] = useState<RouteTool>('hand');
-  const [picked, setPicked] = useState<RouteSection | null>(null);
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [tool, setTool] = useState<RouteTool>('select');
+  const [selection, setSelection] = useState<RouteSelection | null>(null);
+  const [tab, setTab] = useState<'order' | 'legs'>('order');
+  // Partes con la lista de puntos de guía abierta: esos puntos muestran su número en el mapa.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(new Set());
+  // Lo que ya se sabe de cada parte por calles: arranca con lo guardado.
+  const [memo, setMemo] = useState<SectionMemo>(() => {
+    const saved = storedRoute(version?.route);
+    if (!saved) return new Map();
+    const at = initialIds.flatMap((id) => {
+      const point = points.find((p) => p.id === id);
+      return point?.latitude !== undefined && point.longitude !== undefined
+        ? [[point.longitude, point.latitude] as LngLat]
+        : [];
+    });
+    return rememberRoute(
+      new Map(),
+      at.length === initialIds.length ? rebaseRoute(saved, at) : saved,
+    );
+  });
   const [filter, setFilter] = useState('');
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
+  const [summary, setSummary] = useState('');
   const [routeFailures, setRouteFailures] = useState<RouteFailure[]>();
   const { busy, run } = useBusy();
   const sectionRef = useRef<HTMLElement>(null);
 
   // El recorrido sigue a la lista de puntos: conserva los tramos que no cambiaron.
   const route = reconcileRoute(draft, selected);
-  const active =
-    picked && route.legs[picked.l]?.sections[picked.s]
-      ? picked
-      : route.legs.length
-        ? { l: 0, s: 0 }
-        : null;
 
   const located = points.flatMap((p) =>
     p.latitude !== undefined && p.longitude !== undefined
@@ -158,36 +262,36 @@ export function RoundEditor({
   const allLocated = coords.length === selected.length;
   const nameOf = (id: string) => points.find((p) => p.id === id)?.name ?? '';
 
-  const requestKey = JSON.stringify({ selected, route });
+  const { display, parts } = resolveRoute(route, coords, memo);
+  const estimate = requestEstimate(parts);
+  const savedRoute = initialIds.join() === selected.join() ? storedRoute(version?.route) : null;
+  const stale = new Set(savedRoute && allLocated ? staleLegs(savedRoute, coords) : []);
+  const meters = legMeters(display);
+  const total = meters.reduce((sum, m) => sum + m, 0);
+  const partsOfLeg = (l: number) => parts.filter((p) => p.l === l);
+
   const calculate = useMutation({
-    mutationFn: async () => {
-      const result = await apiPost(
+    mutationFn: () =>
+      apiPost(
         '/rondas/ruteo-previsualizar',
         { siteId, checkpointIds: selected, route },
         roundRoutePreviewInputSchema,
         roundRoutePreviewResponseSchema,
+      ),
+    onSuccess: (result) => {
+      setMemo((current) => rememberRoute(current, result.route, result.failures));
+      const streets = result.route.legs.flatMap((leg) =>
+        leg.sections.filter((section) => section.mode === 'streets'),
+      ).length;
+      const failed = new Set(result.failures.map((f) => `${String(f.leg)}-${String(f.section)}`))
+        .size;
+      setSummary(
+        failed
+          ? `Se calcularon ${String(streets - failed)} de ${String(streets)} partes por calles. ${String(failed)} no se pudieron calcular: ${failureMessages(result.failures, route).join(' ')}`
+          : `Se calcularon las ${String(streets)} partes por calles.`,
       );
-      return { ...result, key: requestKey };
     },
   });
-  const savedRoute =
-    initialIds.join() === selected.join()
-      ? roundRouteSchema.safeParse(version?.route).data
-      : undefined;
-  // Lo calculado (o lo guardado, si no se tocó nada) vale hasta el próximo cambio; después se ve el borrador.
-  const calculated =
-    calculate.data?.key === requestKey
-      ? calculate.data
-      : savedRoute && JSON.stringify(storedRouteInput(savedRoute)) === JSON.stringify(route)
-        ? { route: savedRoute, failures: [] }
-        : undefined;
-  const display = calculated?.route ?? draftGeometry(route, coords);
-  const previewFailures = calculated?.failures ?? [];
-  const failed = failedLegs(previewFailures);
-  const previewMessages = failureMessages(previewFailures, route.legs.length, route.closed);
-  const stale = new Set(savedRoute && allLocated ? staleLegs(savedRoute, coords) : []);
-  const meters = legMeters(display);
-  const total = meters.reduce((sum, m) => sum + m, 0);
 
   const labels = previewWindows({
     windowStartLocal: start,
@@ -200,6 +304,26 @@ export function RoundEditor({
     fieldErrors.windowEndLocal ??
     fieldErrors.graceMinutes,
   );
+
+  // Lo elegido puede dejar de existir al editar o deshacer: entonces no hay nada elegido.
+  const current = ((): RouteSelection | null => {
+    if (!selection) return null;
+    if (selection.kind === 'point')
+      return points.some((p) => p.id === selection.id) ? selection : null;
+    const leg = route.legs[selection.l];
+    if (selection.kind === 'waypoint') return leg?.waypoints[selection.k] ? selection : null;
+    const section = leg?.sections[selection.s];
+    if (selection.kind === 'part') return section ? selection : null;
+    return section?.via[selection.i] ? selection : null;
+  })();
+  // La pestaña sigue a lo elegido: un punto de control en Orden, lo del recorrido en Tramos.
+  const select = (next: RouteSelection | null) => {
+    setSelection(next);
+    if (next) setTab(next.kind === 'point' ? 'order' : 'legs');
+    // Lo elegido en el mapa tiene que verse en la lista: su tramo se despliega.
+    if (next && next.kind !== 'point')
+      setCollapsed((closed) => new Set([...closed].filter((l) => l !== next.l)));
+  };
 
   // Cada cambio del recorrido o de la lista se puede deshacer.
   const commit = (nextSelected: string[], nextRoute: RouteInput) => {
@@ -223,7 +347,6 @@ export function RoundEditor({
   };
   const addPoint = (id: string) => {
     setPoints([...selected, id]);
-    setPicked({ l: Math.max(0, selected.length - 1), s: 0 });
   };
   const removePoint = (id: string) => {
     setPoints(selected.filter((item) => item !== id));
@@ -233,30 +356,50 @@ export function RoundEditor({
     if (rest.length === selected.length || index < 0 || index > rest.length) return;
     setPoints([...rest.slice(0, index), id, ...rest.slice(index)]);
   };
-  const canAddWaypoint = (l: number) => {
-    const ok = (route.legs[l]?.waypoints.length ?? 0) < ROUTE_LIMITS.waypointsPerLeg;
-    if (!ok)
-      setNotice(`Un tramo admite hasta ${String(ROUTE_LIMITS.waypointsPerLeg)} puntos de paso.`);
-    return ok;
-  };
-  const canAddVia = ({ l, s }: RouteSection) => {
+  const viaRoom = (l: number, s: number) => {
     const ok = (route.legs[l]?.sections[s]?.via.length ?? 0) < ROUTE_LIMITS.viaPerSection;
-    if (!ok) setNotice(`Una sección admite hasta ${String(ROUTE_LIMITS.viaPerSection)} quiebres.`);
+    if (!ok)
+      setNotice(`Una parte admite hasta ${String(ROUTE_LIMITS.viaPerSection)} puntos de guía.`);
     return ok;
   };
-  const insertWaypoint = (section: RouteSection, at: LngLat) => {
-    if (!canAddWaypoint(section.l)) return;
-    editRoute(routeEdits.insertWaypoint(route, section.l, section.s, at));
-    setPicked({ l: section.l, s: section.s + 1 });
+  /** Punto de guía tocado sobre la línea de la parte: va en su lugar a lo largo de la línea. */
+  const addVia = (l: number, s: number, at: LngLat) => {
+    const section = route.legs[l]?.sections[s];
+    const line = display.legs[l]?.sections[s]?.geometry;
+    if (!section || !line || !viaRoom(l, s)) return;
+    const i = viaInsertIndex(section.via, line, at);
+    editRoute(routeEdits.insertVia(route, l, s, i, at));
+    select({ kind: 'via', l, s, i });
   };
-  const addVia = (section: RouteSection, at: LngLat) => {
-    if (!canAddVia(section)) return;
-    editRoute(routeEdits.addVia(route, section.l, section.s, at));
-    setPicked(section);
+  const controlOf = (l: number, s: number) =>
+    parts.find((p) => p.l === l && p.s === s)?.control ?? [];
+  /** «+» de la lista: un punto de guía a poca distancia del último, para sumar varios y moldearlos. */
+  const addGuide = (l: number, s: number) => {
+    const at = pointAfterLast(controlOf(l, s), GUIDE_STEP_METERS);
+    const i = route.legs[l]?.sections[s]?.via.length ?? 0;
+    if (!at || !viaRoom(l, s)) return;
+    editRoute(routeEdits.insertVia(route, l, s, i, at));
+    select({ kind: 'via', l, s, i });
   };
-  const atMidpoint = (section: RouteSection, apply: (at: LngLat) => void) => {
-    const at = sectionMidpoint(route, coords, section.l, section.s);
-    if (at) apply(at);
+  /** «+<modo>» de la lista: desde la mitad del último tramo recto hasta el destino, el otro modo. */
+  const addModeChange = (l: number, s: number) => {
+    const at = pointAfterLast(controlOf(l, s));
+    if (!at) return;
+    editRoute(routeEdits.appendModeChange(route, l, s, at));
+    select({ kind: 'part', l, s: s + 1 });
+  };
+  const removeGuide = (l: number, s: number, i: number) => {
+    editRoute(routeEdits.removeVia(route, l, s, i));
+    select({ kind: 'part', l, s });
+  };
+  const split = (l: number, s: number, i: number) => {
+    editRoute(routeEdits.splitAtVia(route, l, s, i));
+    select({ kind: 'waypoint', l, k: s });
+  };
+  const merge = (l: number, k: number) => {
+    const i = route.legs[l]?.sections[k]?.via.length ?? 0;
+    editRoute(routeEdits.mergeAtWaypoint(route, l, k));
+    select({ kind: 'via', l, s: k, i });
   };
 
   // El editor ocupa el alto de la ventana: se lo trae a la vista al abrir (jsdom no tiene scrollIntoView).
@@ -274,6 +417,11 @@ export function RoundEditor({
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === 'Escape') {
+        setTool('select');
+        setSelection(null);
+        return;
+      }
       const next = SHORTCUTS[event.key.toLowerCase()];
       if (next) setTool(next);
     };
@@ -332,7 +480,9 @@ export function RoundEditor({
           ? routeFailuresErrorSchema.safeParse(error.body)
           : undefined;
       if (routeError?.success) {
-        setRouteFailures(routeError.data.failures);
+        const { failures } = routeError.data;
+        setMemo((known) => rememberFailures(known, route, coords, failures));
+        setRouteFailures(failures);
         setMessage('');
         return;
       }
@@ -350,11 +500,6 @@ export function RoundEditor({
   const matches = (id: string) =>
     !filter || nameOf(id).toLowerCase().includes(filter.toLowerCase());
   const outside = points.filter((p) => !selected.includes(p.id) && matches(p.id));
-  const activeLeg = active ? route.legs[active.l] : undefined;
-  const activeSection = active ? activeLeg?.sections[active.s] : undefined;
-  const activeOption = active
-    ? sectionOptions(route).find((o) => o.l === active.l && o.s === active.s)
-    : undefined;
 
   return (
     <section
@@ -371,18 +516,8 @@ export function RoundEditor({
         }}
         className="flex flex-wrap items-end gap-x-4 gap-y-3 border-b border-border px-4 py-3"
       >
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            leave();
-          }}
-        >
-          <ArrowLeft aria-hidden="true" />
-          Rondas
-        </Button>
-        <h3 id="round-editor-title" className="t-headline self-center">
+        {/* Sin título ni «volver» a la vista: se sale con Cancelar. */}
+        <h3 id="round-editor-title" className="sr-only">
           {round ? 'Editar ronda' : 'Nueva ronda'}
         </h3>
         <div className="grid min-w-56 gap-1.5">
@@ -496,6 +631,7 @@ export function RoundEditor({
             </ol>
           </div>
         </details>
+        <EditorHelp />
         <div className="ml-auto flex gap-2 self-center">
           <Button
             type="button"
@@ -539,18 +675,19 @@ export function RoundEditor({
           <p className="font-medium">
             Hubo un fallo al calcular el recorrido por calles. No se guardó nada.
           </p>
-          {failureMessages(routeFailures, route.legs.length, route.closed).map((text) => (
+          {failureMessages(routeFailures, route).map((text) => (
             <p key={text}>{text}</p>
           ))}
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
-              disabled={busy}
               onClick={() => {
-                void save();
+                const first = routeFailures.find((f) => f.reason !== 'skipped') ?? routeFailures[0];
+                if (first) select({ kind: 'part', l: first.leg, s: first.section });
+                setRouteFailures(undefined);
               }}
             >
-              Reintentar
+              Ver la parte con falla
             </Button>
             <Button
               type="button"
@@ -560,7 +697,7 @@ export function RoundEditor({
                 void save(true);
               }}
             >
-              Guardar con tramos rectos
+              Guardar con esas partes rectas
             </Button>
             <Button
               type="button"
@@ -577,147 +714,200 @@ export function RoundEditor({
 
       <div className="flex min-h-0 flex-1">
         <aside
-          aria-label="Puntos de la ronda"
+          aria-label="Puntos y tramos de la ronda"
           className="flex w-[clamp(17rem,22vw,24rem)] shrink-0 flex-col border-r border-border"
         >
           <div className="grid gap-2 border-b border-border p-3">
-            <div className="flex items-baseline justify-between gap-2">
-              <h4 className="font-cond text-lg font-semibold tracking-wider uppercase">Orden</h4>
-              <span className="text-sm text-muted-foreground tabular-nums">
-                {selected.length} de {points.length}
-              </span>
-            </div>
-            <Input
-              aria-label="Buscar punto"
-              placeholder="Buscar punto"
-              value={filter}
-              onChange={(event) => {
-                setFilter(event.target.value);
-              }}
+            <SegmentedFilter
+              ariaLabel="Columna"
+              options={TABS}
+              value={tab}
+              onChange={setTab}
+              className="[&>button]:flex-1"
             />
-            {fieldError('checkpointIds', 'round-checkpoints-error')}
+            {tab === 'order' ? (
+              <>
+                <div className="flex items-baseline justify-between gap-2">
+                  <h4 className="font-cond text-lg font-semibold tracking-wider uppercase">
+                    Orden
+                  </h4>
+                  <span className="text-sm text-muted-foreground tabular-nums">
+                    {selected.length} de {points.length}
+                  </span>
+                </div>
+                <Input
+                  aria-label="Buscar punto"
+                  placeholder="Buscar punto"
+                  value={filter}
+                  onChange={(event) => {
+                    setFilter(event.target.value);
+                  }}
+                />
+                {fieldError('checkpointIds', 'round-checkpoints-error')}
+              </>
+            ) : (
+              <div className="flex items-baseline justify-between gap-2">
+                <h4 className="font-cond text-lg font-semibold tracking-wider uppercase">Tramos</h4>
+                <span className="text-sm text-muted-foreground tabular-nums">
+                  {route.legs.length} · {formatMeters(total)}
+                </span>
+              </div>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {selected.length === 0 && (
-              <p className="p-3 text-sm text-muted-foreground">
-                Sumá puntos desde la lista de abajo o con Encadenar puntos en el mapa.
-              </p>
-            )}
-            <ol aria-label="Orden de puntos">
-              {selected.map((id, index) => {
-                if (!matches(id)) return null;
-                const leg = route.legs[index];
-                const label = nameOf(id);
-                const isFocus = focusId === id || active?.l === index;
-                return (
-                  <li
-                    key={id}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData('text/plain', id);
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                    }}
-                    onDrop={(event) => {
-                      moveTo(event.dataTransfer.getData('text/plain'), index);
-                    }}
-                    className={cn(
-                      'group flex min-h-11 items-center gap-1.5 border-b border-border pr-1 pl-2',
-                      isFocus && 'bg-muted',
-                    )}
-                  >
-                    <GripVertical
-                      aria-hidden="true"
-                      className="size-4 shrink-0 cursor-grab text-muted-foreground"
-                    />
-                    <span className="t-numeral w-7 shrink-0 text-right">{index + 1}</span>
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 py-1 text-left"
-                      onClick={() => {
-                        setFocusId(id);
-                        if (leg) setPicked({ l: index, s: 0 });
-                      }}
-                    >
-                      <span className="block truncate font-medium">{label}</span>
-                      <span className="block text-xs text-muted-foreground tabular-nums">
-                        {leg
-                          ? `→ ${formatMeters(meters[index] ?? 0)}${leg.waypoints.length ? ` · ${String(leg.waypoints.length)} ${leg.waypoints.length === 1 ? 'paso' : 'pasos'}` : ''}`
-                          : 'Fin del recorrido'}
-                        {failed.has(index) && ' · ✕ sin calcular'}
-                        {stale.has(index) && ' · se movió un punto'}
-                        {sharedIds.has(id) && ' · compartido'}
-                      </span>
-                    </button>
-                    <span className="flex opacity-60 group-focus-within:opacity-100 group-hover:opacity-100">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Subir ${label}`}
-                        disabled={index === 0}
-                        onClick={() => {
-                          moveTo(id, index - 1);
-                        }}
-                      >
-                        <ChevronUp aria-hidden="true" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Bajar ${label}`}
-                        disabled={index === selected.length - 1}
-                        onClick={() => {
-                          moveTo(id, index + 1);
-                        }}
-                      >
-                        <ChevronDown aria-hidden="true" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Quitar ${label}`}
-                        onClick={() => {
-                          removePoint(id);
-                        }}
-                      >
-                        <X aria-hidden="true" />
-                      </Button>
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-            {outside.length > 0 && (
+            {tab === 'legs' ? (
+              <LegsList
+                route={route}
+                parts={parts}
+                meters={meters}
+                selection={current}
+                onSelect={select}
+                onAddGuide={addGuide}
+                onAddModeChange={addModeChange}
+                expanded={expanded}
+                collapsed={collapsed}
+                onToggleLeg={(l) => {
+                  setCollapsed((closed) => {
+                    const next = new Set(closed);
+                    if (!next.delete(l)) next.add(l);
+                    return next;
+                  });
+                }}
+                onToggle={(l, s) => {
+                  const key = partKey(l, s);
+                  setExpanded((open) => {
+                    const next = new Set(open);
+                    if (!next.delete(key)) next.add(key);
+                    return next;
+                  });
+                }}
+                onRemoveGuide={removeGuide}
+              />
+            ) : (
               <>
-                <h4 className="t-label px-3 pt-4 pb-1">Fuera de la ronda</h4>
-                <ul aria-label="Puntos fuera de la ronda">
-                  {outside.map((point) => (
-                    <li
-                      key={point.id}
-                      className="flex min-h-10 items-center gap-2 border-b border-border pr-1 pl-3"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                        {point.name}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Sumar ${point.name}`}
-                        onClick={() => {
-                          addPoint(point.id);
+                {selected.length === 0 && (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    Sumá puntos desde la lista de abajo o con «Sumar puntos de control» en el mapa.
+                  </p>
+                )}
+                <ol aria-label="Orden de puntos">
+                  {selected.map((id, index) => {
+                    if (!matches(id)) return null;
+                    const leg = route.legs[index];
+                    const label = nameOf(id);
+                    const legParts = partsOfLeg(index);
+                    const isFocus = current?.kind === 'point' && current.id === id;
+                    return (
+                      <li
+                        key={id}
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData('text/plain', id);
                         }}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                        }}
+                        onDrop={(event) => {
+                          moveTo(event.dataTransfer.getData('text/plain'), index);
+                        }}
+                        className={cn(
+                          'group flex min-h-11 items-center gap-1.5 border-b border-border pr-1 pl-2',
+                          isFocus && 'bg-muted',
+                        )}
                       >
-                        <Plus aria-hidden="true" />
-                        Sumar
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
+                        <GripVertical
+                          aria-hidden="true"
+                          className="size-4 shrink-0 cursor-grab text-muted-foreground"
+                        />
+                        <span className="t-numeral w-7 shrink-0 text-right">{index + 1}</span>
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 py-1 text-left"
+                          onClick={() => {
+                            select({ kind: 'point', id });
+                          }}
+                        >
+                          <span className="block truncate font-medium">{label}</span>
+                          <span className="block text-xs text-muted-foreground tabular-nums">
+                            {leg
+                              ? `→ ${formatMeters(meters[index] ?? 0)}${leg.sections.length > 1 ? ` · ${String(leg.sections.length)} partes` : ''}`
+                              : 'Fin del recorrido'}
+                            {legParts.some((p) => p.state === 'failed') && ' · ✕ falló'}
+                            {legParts.some((p) => p.state === 'pending') && ' · sin calcular'}
+                            {stale.has(index) && ' · se movió un punto'}
+                            {sharedIds.has(id) && ' · compartido'}
+                          </span>
+                        </button>
+                        <span className="flex opacity-60 group-focus-within:opacity-100 group-hover:opacity-100">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`Subir ${label}`}
+                            disabled={index === 0}
+                            onClick={() => {
+                              moveTo(id, index - 1);
+                            }}
+                          >
+                            <ChevronUp aria-hidden="true" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`Bajar ${label}`}
+                            disabled={index === selected.length - 1}
+                            onClick={() => {
+                              moveTo(id, index + 1);
+                            }}
+                          >
+                            <ChevronDown aria-hidden="true" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`Quitar ${label}`}
+                            onClick={() => {
+                              removePoint(id);
+                            }}
+                          >
+                            <X aria-hidden="true" />
+                          </Button>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+                {outside.length > 0 && (
+                  <>
+                    <h4 className="t-label px-3 pt-4 pb-1">Fuera de la ronda</h4>
+                    <ul aria-label="Puntos fuera de la ronda">
+                      {outside.map((point) => (
+                        <li
+                          key={point.id}
+                          className="flex min-h-10 items-center gap-2 border-b border-border pr-1 pl-3"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                            {point.name}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Sumar ${point.name}`}
+                            onClick={() => {
+                              addPoint(point.id);
+                            }}
+                          >
+                            <Plus aria-hidden="true" />
+                            Sumar
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -734,6 +924,7 @@ export function RoundEditor({
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
+                role="switch"
                 className="size-4 accent-primary"
                 checked={route.closed}
                 onChange={(event) => {
@@ -757,14 +948,18 @@ export function RoundEditor({
             </Button>
             <span className="ml-auto t-stamp tabular-nums">
               {route.legs.length ? formatMeters(total) : ''}
-              {route.legs.length > 0 && !calculated && ' · borrador'}
+            </span>
+            <span className="text-sm text-muted-foreground tabular-nums">
+              {estimate.pending
+                ? `${String(estimate.pending)} ${estimate.pending === 1 ? 'parte' : 'partes'} sin calcular · hasta ${String(estimate.requests)} ${estimate.requests === 1 ? 'pedido' : 'pedidos'}`
+                : 'No hay partes por calles sin calcular'}
             </span>
             <Button
               type="button"
-              variant={calculated ? 'outline' : 'default'}
               size="sm"
-              disabled={calculate.isPending || route.legs.length === 0}
+              disabled={calculate.isPending || estimate.pending === 0}
               onClick={() => {
+                setSummary('');
                 calculate.mutate();
               }}
             >
@@ -779,31 +974,20 @@ export function RoundEditor({
                 selected={selected}
                 route={route}
                 display={display}
-                active={active}
-                focusId={focusId}
+                selection={current}
                 tool={tool}
+                onSelect={select}
                 onPointClick={(id) => {
                   if (tool === 'chain') {
                     if (!selected.includes(id)) addPoint(id);
                     else if (selected.at(-1) === id) removePoint(id);
-                    else setFocusId(id);
+                    else select({ kind: 'point', id });
                     return;
                   }
-                  setFocusId(id);
-                  const k = selected.indexOf(id);
-                  if (k >= 0 && route.legs.length)
-                    setPicked({ l: Math.min(k, route.legs.length - 1), s: 0 });
+                  select({ kind: 'point', id });
                 }}
-                onLineClick={(section, at) => {
-                  if (tool === 'waypoint') insertWaypoint(section, at);
-                  else if (tool === 'bend') addVia(section, at);
-                  else setPicked(section);
-                }}
-                onMapClick={(at) => {
-                  if (active && tool === 'waypoint') insertWaypoint(active, at);
-                  else if (active && tool === 'bend') addVia(active, at);
-                  else setFocusId(null);
-                }}
+                onAddVia={addVia}
+                numbered={expanded}
                 onRouteChange={editRoute}
               />
             ) : (
@@ -814,140 +998,36 @@ export function RoundEditor({
           </div>
 
           <div className="grid gap-2 border-t border-border px-3 py-2 text-sm">
-            {active && activeLeg && activeSection ? (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <NativeSelect
-                  aria-label="Tramo elegido"
-                  size="sm"
-                  value={`${String(active.l)}-${String(active.s)}`}
-                  onChange={(event) => {
-                    const [l, s] = event.target.value.split('-').map(Number);
-                    if (l !== undefined && s !== undefined) setPicked({ l, s });
-                  }}
-                >
-                  {sectionOptions(route).map((option) => (
-                    <NativeSelectOption
-                      key={`${String(option.l)}-${String(option.s)}`}
-                      value={`${String(option.l)}-${String(option.s)}`}
-                    >
-                      {option.label}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-                <SegmentedFilter
-                  ariaLabel={`Modo del ${(activeOption?.label ?? '').replace('Tramo', 'tramo')}`}
-                  options={MODES}
-                  value={activeSection.mode}
-                  onChange={(mode) => {
-                    editRoute(routeEdits.setMode(route, active.l, active.s, mode));
-                  }}
-                />
-                <span className="text-muted-foreground tabular-nums">
-                  {nameOf(selected[active.l] ?? '')} →{' '}
-                  {nameOf(
-                    selected[
-                      route.closed && active.l === route.legs.length - 1 ? 0 : active.l + 1
-                    ] ?? '',
-                  )}{' '}
-                  · {formatMeters(meters[active.l] ?? 0)}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={activeLeg.waypoints.length >= ROUTE_LIMITS.waypointsPerLeg}
-                  onClick={() => {
-                    const last = activeLeg.sections.length - 1;
-                    atMidpoint({ l: active.l, s: last }, (at) => {
-                      editRoute(routeEdits.addWaypoint(route, active.l, at));
-                      setPicked({ l: active.l, s: last + 1 });
-                    });
-                  }}
-                >
-                  Agregar punto de paso al tramo{' '}
-                  {legLabel(active.l, route.legs.length, route.closed)}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={activeSection.via.length >= ROUTE_LIMITS.viaPerSection}
-                  onClick={() => {
-                    atMidpoint(active, (at) => {
-                      addVia(active, at);
-                    });
-                  }}
-                >
-                  Agregar {activeSection.mode === 'manual' ? 'quiebre' : 'punto intermedio'}
-                </Button>
-                {activeLeg.waypoints.length > 0 && (
-                  <ol
-                    aria-label={`Puntos de paso del tramo ${legLabel(active.l, route.legs.length, route.closed)}`}
-                    className="flex flex-wrap gap-1.5"
-                  >
-                    {activeLeg.waypoints.map((_, k) => (
-                      <li key={`wp-${String(k)}`} className="flex items-center gap-1 bg-muted pl-2">
-                        Punto de paso {k + 1}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={`Quitar punto de paso ${String(k + 1)}`}
-                          onClick={() => {
-                            editRoute(routeEdits.removeWaypoint(route, active.l, k));
-                          }}
-                        >
-                          <X aria-hidden="true" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-                {activeSection.via.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      editRoute(routeEdits.clearVia(route, active.l, active.s));
-                    }}
-                  >
-                    Borrar {activeSection.via.length}{' '}
-                    {activeSection.mode === 'manual' ? 'quiebres' : 'intermedios'}
-                  </Button>
-                )}
-                {stale.has(active.l) && (
-                  <span className="text-warning">
-                    El punto se movió desde que se trazó este tramo: calculá de nuevo.
-                  </span>
-                )}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">
-                Elegí dos o más puntos para armar el recorrido.
-              </p>
-            )}
-            {previewMessages.length > 0 && (
-              <div
-                role="alert"
-                aria-label="Fallas del recorrido"
-                className="grid gap-1 text-danger"
-              >
-                {previewMessages.map((text) => (
-                  <p key={text}>{text}</p>
-                ))}
-              </div>
-            )}
+            <RouteInspector
+              route={route}
+              parts={parts}
+              selection={current}
+              meters={meters}
+              stale={stale}
+              pointName={nameOf}
+              pointOrder={(id) => selected.indexOf(id)}
+              onSetMode={(l, s, mode: RouteMode) => {
+                editRoute(routeEdits.setMode(route, l, s, mode));
+              }}
+              onSplit={split}
+              onMerge={merge}
+              onRemoveVia={removeGuide}
+              onRemoveWaypoint={(l, k) => {
+                editRoute(routeEdits.removeWaypoint(route, l, k));
+                select({ kind: 'part', l, s: k });
+              }}
+              onRemovePoint={(id) => {
+                removePoint(id);
+                setSelection(null);
+              }}
+            />
             {calculate.isError && (
               <p role="alert" className="text-danger">
                 No se pudo calcular el recorrido. Tu recorrido no se modificó: reintentá.
               </p>
             )}
-            <p role="status" className="text-muted-foreground">
-              {notice ||
-                (calculated && previewMessages.length === 0
-                  ? 'Recorrido calculado por calles.'
-                  : `${HINTS[tool]} Atajos: V, E, P, Q y Ctrl+Z.`)}
+            <p role="status" aria-live="polite" className="text-muted-foreground empty:hidden">
+              {notice || summary}
             </p>
           </div>
         </div>

@@ -66,11 +66,11 @@ describe('RoundsPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Deshacer' }));
     expect(screen.getByRole('list', { name: 'Orden de puntos' }).children).toHaveLength(1);
     // Con cambios, salir pide confirmación: si se rechaza, el editor sigue abierto.
-    window.confirm = jest.fn(() => false);
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
     await user.click(screen.getByRole('button', { name: 'Cancelar' }));
-    expect(window.confirm).toHaveBeenCalledWith('¿Descartar los cambios de la ronda?');
+    expect(confirm).toHaveBeenCalledWith('¿Descartar los cambios de la ronda?');
     expect(screen.getByLabelText('Nombre')).toBeInTheDocument();
-    window.confirm = jest.fn(() => true);
+    confirm.mockReturnValue(true);
     await user.click(screen.getByRole('button', { name: 'Cancelar' }));
     expect(await screen.findByRole('button', { name: 'Nueva ronda' })).toBeInTheDocument();
     expect(apiPost).not.toHaveBeenCalledWith(
@@ -145,8 +145,17 @@ describe('RoundsPanel', () => {
       await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
       await user.click(screen.getByRole('button', { name: 'Sumar Portón' }));
       await user.click(screen.getByRole('button', { name: 'Sumar Depósito' }));
-      expect(screen.getByRole('combobox', { name: 'Tramo elegido' })).toBeInTheDocument();
       return { view, user };
+    }
+    /** Le suma al tramo 1 → 2 un punto de guía desde la lista y lo vuelve cambio de modo. */
+    async function splitFirstLeg(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole('button', { name: 'Tramos' }));
+      await user.click(screen.getByRole('button', { name: 'Sumar punto de guía a Tramo 1 → 2' }));
+      expect(screen.getByText(/Punto de guía 1 · Tramo 1 → 2/)).toBeInTheDocument();
+      await user.click(screen.getByRole('switch', { name: /Cambiar de modo en este punto/ }));
+      expect(
+        screen.getByText('De Por calles a Trazo libre. No se escanea ni se controla.'),
+      ).toBeInTheDocument();
     }
     const sentRoute = () => {
       const call = jest.mocked(apiPost).mock.calls.find(([path]) => path.endsWith('/rondas'));
@@ -160,8 +169,21 @@ describe('RoundsPanel', () => {
 
     it('arma un circuito por calles y lo manda al guardar', async () => {
       const { user } = await fillRound();
-      expect(screen.getByRole('checkbox', { name: 'Volver al inicio' })).toBeChecked();
-      expect(screen.getByRole('option', { name: 'Tramo 2 → 1 (regreso)' })).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: 'Volver al inicio' })).toBeChecked();
+      await user.click(screen.getByRole('button', { name: 'Tramos' }));
+      expect(screen.getByText('Tramo 2 → 1 (vuelta)')).toBeInTheDocument();
+      expect(screen.getByText('2 partes sin calcular · hasta 1 pedido')).toBeInTheDocument();
+      // Plegar un tramo esconde sus partes.
+      const leg = screen.getByRole('button', { name: /^Tramo 1 → 2/ });
+      await user.click(leg);
+      expect(leg).toHaveAttribute('aria-expanded', 'false');
+      expect(
+        screen.queryByRole('button', { name: 'Sumar punto de guía a Tramo 1 → 2' }),
+      ).not.toBeInTheDocument();
+      await user.click(leg);
+      expect(
+        screen.getByRole('button', { name: 'Sumar punto de guía a Tramo 1 → 2' }),
+      ).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
       await waitFor(() => {
         expect(sentRoute()?.route).toEqual({
@@ -174,17 +196,41 @@ describe('RoundsPanel', () => {
       });
     });
 
-    it('cambia el modo, agrega un punto de paso desde la lista y quita el regreso', async () => {
+    it('despliega los puntos de guía de una parte, elige uno y lo borra', async () => {
       const { user } = await fillRound();
-      await user.click(screen.getByRole('checkbox', { name: 'Volver al inicio' }));
-      expect(screen.queryByRole('option', { name: /regreso/ })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('switch', { name: 'Volver al inicio' }));
+      await user.click(screen.getByRole('button', { name: 'Tramos' }));
+      const add = screen.getByRole('button', { name: 'Sumar punto de guía a Tramo 1 → 2' });
+      await user.click(add);
+      await user.click(add);
+      await user.click(screen.getByRole('button', { name: 'Ver puntos de guía de Tramo 1 → 2' }));
+      const guides = screen.getByRole('list', { name: 'Puntos de guía de Tramo 1 → 2' });
+      expect(within(guides).getAllByRole('listitem')).toHaveLength(2);
+      await user.click(within(guides).getByRole('button', { name: /^2 ?Punto de guía$/ }));
+      expect(screen.getByText(/Punto de guía 2 · Tramo 1 → 2/)).toBeInTheDocument();
       await user.click(
-        screen.getByRole('button', { name: 'Agregar punto de paso al tramo 1 → 2' }),
+        screen.getByRole('button', { name: 'Eliminar punto de guía 2 de Tramo 1 → 2' }),
       );
-      expect(screen.getByText('Punto de paso 1')).toBeInTheDocument();
-      const second = screen.getByRole('group', { name: 'Modo del tramo 1 → 2 (parte 2)' });
-      await user.click(within(second).getByRole('button', { name: 'A mano' }));
-      expect(within(second).getByRole('button', { name: 'A mano' })).toHaveAttribute(
+      expect(within(guides).getAllByRole('listitem')).toHaveLength(1);
+    });
+
+    it('suma trazo libre hasta el destino desde la lista y quita la vuelta', async () => {
+      const { user } = await fillRound();
+      await user.click(screen.getByRole('switch', { name: 'Volver al inicio' }));
+      await user.click(screen.getByRole('button', { name: 'Tramos' }));
+      expect(screen.queryByText(/vuelta/)).not.toBeInTheDocument();
+      await user.click(
+        screen.getByRole('button', { name: 'Sumar Trazo libre al final de Tramo 1 → 2' }),
+      );
+      // Solo la última parte ofrece el otro modo.
+      expect(
+        screen.queryByRole('button', { name: /Sumar .* al final de Tramo 1 → 2, parte 1/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Sumar Por calles al final de Tramo 1 → 2, parte 2' }),
+      ).toBeInTheDocument();
+      const mode = screen.getByRole('group', { name: 'Modo de Tramo 1 → 2, parte 2' });
+      expect(within(mode).getByRole('button', { name: 'Trazo libre' })).toHaveAttribute(
         'aria-pressed',
         'true',
       );
@@ -205,37 +251,32 @@ describe('RoundsPanel', () => {
       });
     });
 
-    it('si el ruteo falla avisa los tramos, conserva el trabajo y permite guardar recto', async () => {
+    it('si el ruteo falla avisa la parte, la muestra y permite guardarla recta', async () => {
       const { user } = await fillRound();
-      await user.click(
-        screen.getByRole('button', { name: 'Agregar punto de paso al tramo 1 → 2' }),
-      );
-      jest.mocked(apiPost).mockRejectedValueOnce(
+      await user.click(screen.getByRole('switch', { name: 'Volver al inicio' }));
+      await splitFirstLeg(user);
+      const failure = () =>
         new ApiError('422', 422, {
           message: 'No se pudo calcular',
-          failures: [{ leg: 0, section: 1, reason: 'unreachable_point' }],
-        }),
-      );
+          failures: [{ leg: 0, section: 0, reason: 'unreachable_point' }],
+        });
+      jest.mocked(apiPost).mockRejectedValueOnce(failure());
       await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
       const dialog = await screen.findByRole('alertdialog', {
         name: 'No se pudo calcular el recorrido',
       });
-      expect(dialog).toHaveTextContent(
-        'No se encontró una calle cerca de un punto de el tramo 1 → 2',
-      );
-      await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+      expect(dialog).toHaveTextContent('Tramo 1 → 2, parte 1: Un punto no está cerca');
+      await user.click(within(dialog).getByRole('button', { name: 'Ver la parte con falla' }));
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-      expect(screen.getByText('Punto de paso 1')).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Modo de Tramo 1 → 2, parte 1' })).toBeVisible();
+      expect(screen.getAllByText(/Falló/).length).toBeGreaterThan(0);
       expect(screen.getByLabelText('Nombre')).toHaveValue('Perimetral');
 
-      jest.mocked(apiPost).mockRejectedValueOnce(
-        new ApiError('422', 422, {
-          message: 'No se pudo calcular',
-          failures: [{ leg: 0, section: 1, reason: 'unreachable_point' }],
-        }),
-      );
+      jest.mocked(apiPost).mockRejectedValueOnce(failure());
       await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
-      await user.click(await screen.findByRole('button', { name: 'Guardar con tramos rectos' }));
+      await user.click(
+        await screen.findByRole('button', { name: 'Guardar con esas partes rectas' }),
+      );
       await waitFor(() => {
         expect(jest.mocked(apiPost).mock.calls.at(-1)?.[1]).toMatchObject({ allowStraight: true });
       });
