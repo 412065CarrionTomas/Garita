@@ -1,6 +1,7 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { adminSummaryCatalog, defineViewCatalog } from '@garita/shared';
 import { z } from 'zod';
+import { Prisma } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { FavoriteVisibilityPort } from './favorites-visibility.port';
@@ -12,6 +13,9 @@ const admin: AuthenticatedUser = {
   role: 'admin',
   status: 'active',
 };
+
+const prismaError = (code: string) =>
+  new Prisma.PrismaClientKnownRequestError('choque', { code, clientVersion: 'test' });
 
 function setup(visible: string[]) {
   const favorites = {
@@ -71,10 +75,28 @@ describe('FavoritesService', () => {
   });
 
   it('reintenta si otra escritura concurrente del mismo ámbito chocó', async () => {
+    for (const code of ['P2034', 'P2002']) {
+      const { favorites, service } = setup(['a']);
+      favorites.createMany.mockRejectedValueOnce(prismaError(code));
+      await service.put(adminSummaryCatalog, 'site', ['a'], admin);
+      expect(favorites.createMany).toHaveBeenCalledTimes(2);
+    }
+    const { favorites, service } = setup([]);
+    favorites.deleteMany.mockRejectedValueOnce(prismaError('P2034'));
+    await service.put(adminSummaryCatalog, 'site', [], admin);
+    expect(favorites.deleteMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('responde 409 si sigue chocando y no reintenta otros errores', async () => {
     const { favorites, service } = setup(['a']);
-    favorites.createMany.mockRejectedValueOnce({ code: 'P2034' });
-    await service.put(adminSummaryCatalog, 'site', ['a'], admin);
-    expect(favorites.createMany).toHaveBeenCalledTimes(2);
+    favorites.createMany.mockRejectedValue(prismaError('P2034'));
+    await expect(service.put(adminSummaryCatalog, 'site', ['a'], admin)).rejects.toThrow(
+      ConflictException,
+    );
+    expect(favorites.createMany).toHaveBeenCalledTimes(3);
+    favorites.createMany.mockReset().mockRejectedValue(new Error('caída'));
+    await expect(service.put(adminSummaryCatalog, 'site', ['a'], admin)).rejects.toThrow('caída');
+    expect(favorites.createMany).toHaveBeenCalledTimes(1);
   });
 
   it('no deja fijar lo que el usuario no puede ver', async () => {

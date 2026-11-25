@@ -1,15 +1,15 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
 import type { FavoriteEntityType, FavoritesResponse, ViewCatalog } from '@garita/shared';
+import { isPrismaError } from '../../common/prisma-errors';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { FAVORITE_VISIBILITY_PORT, type FavoriteVisibilityPort } from './favorites-visibility.port';
 
 const MAX_ATTEMPTS = 3;
 
-function isWriteConflict(error: unknown) {
-  const code = typeof error === 'object' && error && 'code' in error ? error.code : undefined;
-  return code === 'P2034' || code === 'P2002';
-}
+/** Espera creciente con azar: dos reintentos del mismo choque no vuelven a chocar a la par. */
+const backoff = (attempt: number) =>
+  new Promise((resolve) => setTimeout(resolve, 25 * attempt + Math.random() * 25));
 
 /** Entidades fijadas arriba de las listas de una pantalla, en el orden que eligió el usuario. */
 @Injectable()
@@ -66,7 +66,12 @@ export class FavoritesService {
         );
         break;
       } catch (error) {
-        if (attempt >= MAX_ATTEMPTS || !isWriteConflict(error)) throw error;
+        if (!isPrismaError(error, 'P2034', 'P2002')) throw error;
+        if (attempt >= MAX_ATTEMPTS)
+          throw new ConflictException(
+            'Los fijados cambiaron a la vez desde otro lado. Probá de nuevo.',
+          );
+        await backoff(attempt);
       }
     }
     return { ids: [...ids] };

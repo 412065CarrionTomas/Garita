@@ -9,6 +9,7 @@ import {
   type ViewPreferenceResponse,
 } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
+import { isPrismaError } from '../../common/prisma-errors';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -62,8 +63,7 @@ export class ViewPreferencesService {
         });
         return { layout: sanitized, updatedAt: row.updatedAt.toISOString() };
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
-          throw conflict();
+        if (isPrismaError(error, 'P2002')) throw conflict();
         throw error;
       }
     }
