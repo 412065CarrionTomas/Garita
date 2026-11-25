@@ -4,7 +4,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedUser } from '../../auth/auth.types';
 import { SecureTagsService } from './secure-tags.service';
 import { aesCbc, aesCmac, deriveTagKey, truncateMac } from './crypto';
-import { authFirst, authContinue, FACTORY_KEY } from './ev2';
+import { authFirst, authContinue, FACTORY_KEY, ndefTemplate } from './ev2';
 const uid = '04DE5F1EACC040';
 const user: AuthenticatedUser = { userId: 'u', companyId: 'c', role: 'admin', status: 'active' };
 const master = Buffer.alloc(16);
@@ -163,6 +163,34 @@ describe('SecureTagsService recovery', () => {
       ).toMatchObject({ complete: false, apdu: expect.stringMatching(/^908D/) as unknown });
     },
   );
+  it('escribe el NDEF en modo plano y avanza con el 9100 plano de la etiqueta', async () => {
+    const { service, session, db } = setup('auth_2', { ...state, authKind: 'factory' });
+    const { apdu } = await service.command('session', success(FACTORY_KEY), user);
+    const data = ndefTemplate().data;
+    // Plano: Lc = 7 de cabecera + NDEF, sin relleno cifrado ni MAC (si no, la etiqueta da 917E).
+    expect(apdu).toBe(
+      (
+        '908D0000' +
+        (7 + data.length).toString(16).padStart(2, '0') +
+        '02000000' +
+        data.length.toString(16).padStart(2, '0') +
+        '0000' +
+        data.toString('hex') +
+        '00'
+      ).toUpperCase(),
+    );
+    session.step = 'write_ndef';
+    session.state = db.secureTagSession.updateMany.mock.calls[0]?.[0].data.state ?? {};
+    expect(await service.command('session', '9100', user)).toMatchObject({
+      apdu: expect.stringMatching(/^905F/) as unknown,
+    });
+    expect(db.secureTagSession.updateMany.mock.calls[1]?.[0].data).toMatchObject({
+      step: 'file_settings',
+      state: { counter: 1 },
+    });
+    session.step = 'write_ndef';
+    await expect(service.command('session', '917E', user)).rejects.toMatchObject({ status: 400 });
+  });
   it.each(['key_1', 'key_2', 'key_3', 'key_4'])(
     '911E en %s reautentica antes de reintentar con XOR derivada y contador cero',
     async (step) => {
