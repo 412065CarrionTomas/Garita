@@ -51,9 +51,12 @@ export function useFavorites(view: ViewKey, type: FavoriteEntityType): Favorites
     previous: readonly string[];
   } | null>(null);
 
-  // Cada PUT lleva su número: solo el último toca la caché, así una respuesta vieja no pisa la nueva.
+  // Los PUT de una misma lista van en fila (scope): llegan a la base en el orden en que se hicieron.
+  // Cada uno lleva su número y solo el último decide la caché y el aviso: si un PUT viejo falla
+  // pero el siguiente guarda, lo que quedó es lo del siguiente.
   const sequence = useRef(0);
   const mutation = useMutation({
+    scope: { id: path },
     mutationFn: ({ ids }: { ids: readonly string[]; seq: number }) =>
       apiPut(path, { ids: [...ids] }, favoritesInputSchema, favoritesResponseSchema),
     onMutate: async ({ ids }) => {
@@ -63,7 +66,10 @@ export function useFavorites(view: ViewKey, type: FavoriteEntityType): Favorites
       return { previous };
     },
     onError: (_error, { seq }, context) => {
-      if (seq === sequence.current) queryClient.setQueryData(queryKey, context?.previous);
+      if (seq !== sequence.current) return;
+      // Lo anterior puede ser otro cambio optimista que tampoco se guardó: se vuelve a leer la base.
+      queryClient.setQueryData(queryKey, context?.previous);
+      void queryClient.invalidateQueries({ queryKey });
       // Aunque el aviso ya no esté (p. ej. al deshacer), la falla se muestra.
       setNotice((current) => ({
         previous: current?.previous ?? NO_IDS,
