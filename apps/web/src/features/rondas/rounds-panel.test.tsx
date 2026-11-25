@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
-import { ApiError, apiGet, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { RoundsPanel } from './rounds-panel';
 
@@ -38,6 +38,60 @@ async function openNew() {
 }
 
 describe('RoundsPanel', () => {
+  it('elige la ronda del mapa y la da de baja desde su menú con confirmación', async () => {
+    const version = (ids: string[]) => ({
+      frequencyMinutes: 120,
+      windowStartLocal: '22:00',
+      windowEndLocal: '06:00',
+      graceMinutes: 15,
+      route: null,
+      checkpoints: ids.map((id, position) => ({ position, checkpoint: { id, name: id } })),
+    });
+    const rounds = [
+      { id: 'r-old', name: 'Vieja', status: 'inactive', currentVersion: version(['p1']) },
+      { id: 'r1', name: 'Perimetral', status: 'active', currentVersion: version(['p1', 'p2']) },
+    ];
+    jest
+      .mocked(useAuth)
+      .mockReturnValue({ user: { role: 'admin' }, loading: false } as ReturnType<typeof useAuth>);
+    jest
+      .mocked(apiGet)
+      .mockImplementation((path: string) =>
+        Promise.resolve((path.includes('puntos') ? points : rounds) as never),
+      );
+    renderWithQueryClient(<RoundsPanel site={site} />);
+    const user = userEvent.setup();
+    // Activas primero y elegida por defecto; la inactiva va al final con su sello.
+    const list = await screen.findByRole('list', { name: 'Rondas del predio' });
+    const first = within(list).getByRole('button', { name: /^Perimetral/ });
+    const second = within(list).getByRole('button', { name: /^Vieja/ });
+    expect(list.firstElementChild).toContainElement(first);
+    expect(first).toHaveTextContent('Perimetral');
+    expect(first).toHaveAttribute('aria-pressed', 'true');
+    expect(first).toHaveTextContent('2 puntos · Sin recorrido');
+    expect(second).toHaveTextContent('Inactiva');
+    expect(screen.getByRole('heading', { name: 'Recorrido · Perimetral' })).toBeInTheDocument();
+    await user.click(second);
+    expect(screen.getByRole('heading', { name: 'Recorrido · Vieja' })).toBeInTheDocument();
+    // La inactiva solo se duplica; la activa además se edita y se da de baja.
+    await user.click(screen.getByRole('button', { name: 'Acciones de Vieja' }));
+    expect(await screen.findByRole('menuitem', { name: 'Duplicar' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Editar' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Acciones de Perimetral' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Dar de baja' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Dar de baja la ronda' });
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar baja' }));
+    expect(apiPost).toHaveBeenCalledWith(
+      '/rondas/r1/baja',
+      {},
+      expect.anything(),
+      expect.anything(),
+    );
+    // El archivo no limpia los mocks entre tests: esta baja no debe contar en los siguientes.
+    jest.mocked(apiPost).mockClear();
+  });
+
   it.each(['light', 'dark'])('conserva el editor y los tokens en tema %s', async (theme) => {
     setup().unmount();
     const { container } = renderWithQueryClient(
@@ -102,9 +156,9 @@ describe('RoundsPanel', () => {
     await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
     await user.click(await screen.findByRole('button', { name: 'Sumar Portón' }));
     await user.click(screen.getByRole('button', { name: 'Sumar Depósito' }));
-    fireEvent.change(screen.getByLabelText('Frecuencia (minutos)'), { target: { value: '30' } });
+    fireEvent.change(screen.getByLabelText('Frecuencia (min)'), { target: { value: '30' } });
     fireEvent.change(screen.getByLabelText(/Gracia/), { target: { value: '20' } });
-    await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
     expect(await screen.findByText(/como máximo, 15 minutos/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Gracia/), { target: { value: '10' } });
     await user.click(screen.getByRole('button', { name: 'Bajar Portón' }));
@@ -112,19 +166,29 @@ describe('RoundsPanel', () => {
     expect(ordered.firstElementChild).toHaveTextContent('Depósito');
   });
 
+  it('sin puntos, guardar desde Tramos vuelve a Orden y muestra el error', async () => {
+    await openNew();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
+    await user.click(screen.getByRole('button', { name: 'Tramos' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
+    expect(await screen.findByText('Sumá al menos un punto a la ronda.')).toBeVisible();
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
   it('muestra los errores de frecuencia y gracia junto a sus campos', async () => {
     await openNew();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Nombre'), 'Perimetral');
     await user.click(await screen.findByRole('button', { name: 'Sumar Portón' }));
-    fireEvent.change(screen.getByLabelText('Frecuencia (minutos)'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Frecuencia (min)'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText(/Gracia/), { target: { value: '10' } });
-    const form = screen.getByRole('button', { name: 'Guardar ronda' }).closest('form');
+    const form = screen.getByRole('button', { name: 'Guardar' }).closest('form');
     if (!form) throw new Error('No se encontró el formulario de ronda.');
     form.noValidate = true;
-    await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
 
-    const frequencyInput = screen.getByLabelText('Frecuencia (minutos)');
+    const frequencyInput = screen.getByLabelText('Frecuencia (min)');
     const graceInput = screen.getByLabelText(/Gracia/);
     await waitFor(() => {
       expect(frequencyInput).toHaveAttribute('aria-invalid', 'true');
@@ -210,7 +274,7 @@ describe('RoundsPanel', () => {
       expect(
         screen.getByRole('button', { name: 'Sumar punto de guía a Tramo 1 → 2' }),
       ).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
       await waitFor(() => {
         expect(sentRoute()?.route).toEqual({
           closed: true,
@@ -260,7 +324,7 @@ describe('RoundsPanel', () => {
         'aria-pressed',
         'true',
       );
-      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
       await waitFor(() => {
         expect(sentRoute()?.route).toEqual({
           closed: false,
@@ -287,7 +351,7 @@ describe('RoundsPanel', () => {
           failures: [{ leg: 0, section: 0, reason: 'unreachable_point' }],
         });
       jest.mocked(apiPost).mockRejectedValueOnce(failure());
-      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
       const dialog = await screen.findByRole('alertdialog', {
         name: 'No se pudo calcular el recorrido',
       });
@@ -299,7 +363,7 @@ describe('RoundsPanel', () => {
       expect(screen.getByLabelText('Nombre')).toHaveValue('Perimetral');
 
       jest.mocked(apiPost).mockRejectedValueOnce(failure());
-      await user.click(screen.getByRole('button', { name: 'Guardar ronda' }));
+      await user.click(screen.getByRole('button', { name: 'Guardar' }));
       await user.click(
         await screen.findByRole('button', { name: 'Guardar con esas partes rectas' }),
       );
@@ -308,5 +372,68 @@ describe('RoundsPanel', () => {
       });
       expect(await screen.findByText('Ronda creada.')).toBeInTheDocument();
     });
+  });
+
+  it('duplica una ronda como una nueva y ajusta el ancho de la lista con el teclado', async () => {
+    const rounds = [
+      {
+        id: 'r1',
+        name: 'Perimetral',
+        status: 'active',
+        currentVersion: {
+          frequencyMinutes: 60,
+          windowStartLocal: '20:00',
+          windowEndLocal: '08:00',
+          graceMinutes: 10,
+          route: null,
+          checkpoints: [
+            { position: 0, checkpoint: { id: 'p1', name: 'Portón' } },
+            { position: 1, checkpoint: { id: 'p2', name: 'Depósito' } },
+          ],
+        },
+      },
+    ];
+    jest
+      .mocked(useAuth)
+      .mockReturnValue({ user: { role: 'admin' }, loading: false } as ReturnType<typeof useAuth>);
+    jest
+      .mocked(apiGet)
+      .mockImplementation((path: string) =>
+        Promise.resolve((path.includes('puntos') ? points : rounds) as never),
+      );
+    renderWithQueryClient(<RoundsPanel site={site} />);
+    const user = userEvent.setup();
+    const resizer = await screen.findByRole('separator', { name: 'Ancho de la lista de rondas' });
+    const before = Number(resizer.getAttribute('aria-valuenow'));
+    resizer.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(Number(resizer.getAttribute('aria-valuenow'))).toBe(before + 2);
+    await user.keyboard('{End}');
+    expect(resizer).toHaveAttribute('aria-valuenow', '75');
+
+    await user.click(screen.getByRole('button', { name: 'Acciones de Perimetral' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Duplicar' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Duplicar ronda', level: 3 }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Copia de Perimetral');
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/predios/site-1/rondas',
+        expect.objectContaining({
+          name: 'Copia de Perimetral',
+          checkpointIds: ['p1', 'p2'],
+          frequencyMinutes: 60,
+          windowStartLocal: '20:00',
+          windowEndLocal: '08:00',
+          graceMinutes: 10,
+        }),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+    expect(apiPatch).not.toHaveBeenCalled();
+    jest.mocked(apiPost).mockClear();
   });
 });
