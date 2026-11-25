@@ -78,19 +78,26 @@ export class ViewPreferencesService {
   }
 
   /**
-   * Restablecer: sin fila, la pantalla vuelve al diseño por defecto. Con `baseUpdatedAt` solo
-   * borra si nadie guardó desde entonces; si otra pestaña ya lo borró, el resultado es el mismo.
+   * Restablecer: sin fila, la pantalla vuelve al diseño por defecto. Con `baseUpdatedAt` (como en
+   * el PUT) solo borra si nadie guardó desde entonces; `null` exige que no haya nada guardado. Si
+   * otra pestaña ya lo borró, el resultado es el mismo y no es conflicto.
    */
   async reset(
     catalog: ViewCatalog,
     user: AuthenticatedUser,
-    baseUpdatedAt?: string,
+    baseUpdatedAt?: string | null,
   ): Promise<void> {
     const where = { userId: user.userId, viewKey: catalog.key };
-    const { count } = await this.prisma.tenantPrisma.userViewPreference.deleteMany({
-      where: baseUpdatedAt ? { ...where, updatedAt: new Date(baseUpdatedAt) } : where,
-    });
-    if (count > 0 || !baseUpdatedAt) return;
+    if (baseUpdatedAt === undefined) {
+      await this.prisma.tenantPrisma.userViewPreference.deleteMany({ where });
+      return;
+    }
+    if (baseUpdatedAt !== null) {
+      const { count } = await this.prisma.tenantPrisma.userViewPreference.deleteMany({
+        where: { ...where, updatedAt: new Date(baseUpdatedAt) },
+      });
+      if (count > 0) return;
+    }
     const remaining = await this.prisma.tenantPrisma.userViewPreference.findFirst({
       where,
       select: { updatedAt: true },

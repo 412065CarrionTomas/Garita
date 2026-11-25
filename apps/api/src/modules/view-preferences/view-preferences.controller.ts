@@ -10,8 +10,12 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { VIEW_KEYS, viewPreferenceInputSchema } from '@garita/shared';
-import { z } from 'zod';
+import {
+  VIEW_KEYS,
+  VIEW_PREFERENCE_NO_BASE,
+  viewPreferenceBaseSchema,
+  viewPreferenceInputSchema,
+} from '@garita/shared';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { viewCatalogFor } from './view-access';
@@ -47,14 +51,22 @@ export class ViewPreferencesController {
   @ApiOperation({
     summary: 'Restablece la pantalla al diseño por defecto; 409 si cambió desde baseUpdatedAt',
   })
-  @ApiQuery({ name: 'baseUpdatedAt', required: false })
+  @ApiQuery({
+    name: 'baseUpdatedAt',
+    required: false,
+    description: 'Fecha del diseño editado, o "null" si no había ninguno guardado',
+  })
   async reset(
     @Param('vista') vista: string,
     @Query('baseUpdatedAt') rawBase: unknown,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const catalog = viewCatalogFor(vista, user);
-    const base = z.iso.datetime().optional().safeParse(rawBase);
+    // Sin parámetro (clientes viejos) restablece sin control optimista.
+    if (rawBase === undefined) return this.preferences.reset(catalog, user);
+    const base = viewPreferenceBaseSchema.safeParse(
+      rawBase === VIEW_PREFERENCE_NO_BASE ? null : rawBase,
+    );
     if (!base.success) throw new BadRequestException(base.error.issues);
     await this.preferences.reset(catalog, user, base.data);
   }

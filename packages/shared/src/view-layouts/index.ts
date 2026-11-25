@@ -28,10 +28,15 @@ export const viewPreferenceResponseSchema = z.object({
 
 /**
  * `baseUpdatedAt` es la fecha del diseño que se editó (nula si no había ninguno guardado): si otra
- * pestaña guardó después, la API responde 409 en lugar de pisarlo.
+ * pestaña guardó después, la API responde 409 en lugar de pisarlo. Lo comparten PUT y DELETE.
  */
+export const viewPreferenceBaseSchema = z.iso.datetime().nullable();
+
+/** En el DELETE la fecha base viaja en la query: `null` es el texto "null". */
+export const VIEW_PREFERENCE_NO_BASE = 'null';
+
 export const viewPreferenceInputSchema = z
-  .object({ layout: viewLayoutSchema, baseUpdatedAt: z.iso.datetime().nullable() })
+  .object({ layout: viewLayoutSchema, baseUpdatedAt: viewPreferenceBaseSchema })
   .strict();
 
 export type ViewPreferenceResponse = z.infer<typeof viewPreferenceResponseSchema>;

@@ -158,18 +158,38 @@ describe('ViewPreferencesService', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('guarda solo los ajustes que declara cada bloque', async () => {
+  it('guarda solo los ajustes que declara cada bloque, al crear y al actualizar', async () => {
     const { delegate, service } = setup();
     const dirty = layout();
     const first = dirty.items[0];
     if (!first) throw new Error('sin bloques');
     first.settings = { ...first.settings, intruso: 'x'.repeat(100) };
-    const saved = await service.put(
+    const firstArg = (mock: jest.Mock): unknown => (mock.mock.calls as unknown[][])[0]?.[0];
+    const storedSettings = (call: unknown) =>
+      (call as { data: { layout: { items: { settings: object }[] } } }).data.layout.items[0]
+        ?.settings;
+    const created = await service.put(
       adminSummaryCatalog,
-      { layout: dirty, baseUpdatedAt: null },
+      { layout: structuredClone(dirty), baseUpdatedAt: null },
       admin,
     );
-    expect(saved.layout?.items[0]?.settings).not.toHaveProperty('intruso');
-    expect(delegate.create).toHaveBeenCalled();
+    expect(created.layout?.items[0]?.settings).not.toHaveProperty('intruso');
+    expect(storedSettings(firstArg(delegate.create))).not.toHaveProperty('intruso');
+    await service.put(
+      adminSummaryCatalog,
+      { layout: structuredClone(dirty), baseUpdatedAt: savedAt.toISOString() },
+      admin,
+    );
+    expect(storedSettings(firstArg(delegate.updateManyAndReturn))).not.toHaveProperty('intruso');
+  });
+
+  it('restablecer con base nula da 409 solo si otra pestaña ya guardó un diseño', async () => {
+    const { delegate, service } = setup();
+    await expect(service.reset(adminSummaryCatalog, admin, null)).resolves.toBeUndefined();
+    expect(delegate.deleteMany).not.toHaveBeenCalled();
+    delegate.findFirst.mockResolvedValue({ updatedAt: savedAt });
+    await expect(service.reset(adminSummaryCatalog, admin, null)).rejects.toThrow(
+      ConflictException,
+    );
   });
 });
