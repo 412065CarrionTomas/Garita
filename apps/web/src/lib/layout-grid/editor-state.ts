@@ -89,9 +89,15 @@ export function createEditorReducer(catalog: ViewCatalog) {
         // Otro guardó mientras se editaba: el borrador se conserva y pasa a compararse con eso.
         return { ...state, base: action.items };
       case 'move':
-        return commit(state, moveItem(catalog, state.gesture ?? draft, action.id, action.to));
+        return commit(
+          state,
+          moveItem(catalog, state.gesture ?? draft, action.id, action.to, draft),
+        );
       case 'resize':
-        return commit(state, resizeItem(catalog, state.gesture ?? draft, action.id, action.size));
+        return commit(
+          state,
+          resizeItem(catalog, state.gesture ?? draft, action.id, action.size, draft),
+        );
       case 'step':
         return commit(
           state,

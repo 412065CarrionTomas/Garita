@@ -197,6 +197,48 @@ describe('visibilidad, presentación y ajustes', () => {
   });
 });
 
+describe('tope de filas', () => {
+  // c queda en la última fila admitida: cualquier cosa que lo empuje lo pasaría del tope.
+  const nearLimit = (): readonly LayoutItem[] =>
+    start().map((item) =>
+      item.id === 'c' ? { ...item, y: 2000 } : item.id === 'd' ? { ...item, y: 1990 } : item,
+    );
+
+  it('en un gesto, el bloque se queda en el último paso válido en vez de volver al inicio', () => {
+    const before = nearLimit();
+    const step = moveItem(catalog, before, 'd', { x: 0, y: 1995 });
+    expect(at(step).d).toEqual([0, 1995, 2, 1]);
+    // Bajar d a la fila de c empujaría a c más allá del tope: se queda en el paso anterior.
+    expect(moveItem(catalog, before, 'd', { x: 0, y: 2000 }, step)).toBe(step);
+    // Desde la fila 1995, agrandar d a 6 de alto pisaría a c y lo pasaría del tope.
+    const grown = resizeItem(catalog, step, 'd', { w: 2, h: 2 });
+    expect(at(grown).d).toEqual([0, 1995, 2, 2]);
+    expect(resizeItem(catalog, step, 'd', { w: 4, h: 6 }, grown)).toBe(grown);
+  });
+
+  it('un paso de teclado contra el borde conserva la referencia del borrador', () => {
+    const items = start();
+    const moved = stepItem(catalog, items, 'a', 'left');
+    expect(moved).toBe(items);
+    const base = start();
+    expect(stepItem(catalog, items, 'a', 'left', base)).toBe(items);
+  });
+
+  it('mostrar un bloque que empujaría a otro más allá del tope lo pone en el primer hueco', () => {
+    // a, oculto, pisa a d (en la fila 2000): mostrarlo ahí empujaría a d más allá del tope.
+    const items = start().map((item) =>
+      item.id === 'd'
+        ? { ...item, y: 2000 }
+        : item.id === 'a'
+          ? { ...item, hidden: true, y: 1999 }
+          : item,
+    );
+    const shown = setHidden(items, 'a', false);
+    expect(shown.find((item) => item.id === 'a')).toMatchObject({ hidden: false, x: 0, y: 0 });
+    expect(overlappingIds(shown)).toEqual([]);
+  });
+});
+
 describe('scaleLayout', () => {
   it('apila en orden de lectura con una sola columna', () => {
     const stacked = scaleLayout(start(), 4, 1);

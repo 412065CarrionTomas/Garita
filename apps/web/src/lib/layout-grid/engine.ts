@@ -52,15 +52,37 @@ function indexOf(items: readonly LayoutItem[], id: string): number {
 
 /**
  * Pone `item` en `index`, lo deja donde está y baja lo justo a los que pisa (ver
- * `settleLayoutItems`). Si la cascada pasa el tope de filas que admite la API, no hace nada.
+ * `settleLayoutItems`). Devuelve null si la cascada pasa el tope de filas que admite la API.
  */
 function relocate(
   items: readonly LayoutItem[],
   index: number,
   item: LayoutItem,
-): readonly LayoutItem[] {
+): LayoutItem[] | null {
   const next = settleLayoutItems(replaceAt(items, index, item), index);
-  return exceedsRows(next) ? items : next;
+  return exceedsRows(next) ? null : next;
+}
+
+/**
+ * Como `relocate`, pero si en su lugar empujaría a alguien más allá del tope, lo pone en el primer
+ * hueco libre de su columna (o, si no hay, de la izquierda), donde no pisa a nadie: mostrar un
+ * bloque o cambiar su presentación no se pierde en silencio. Sin hueco, no hace nada.
+ */
+function relocateOrFill(
+  items: readonly LayoutItem[],
+  index: number,
+  item: LayoutItem,
+): readonly LayoutItem[] {
+  const placed = relocate(items, index, item);
+  if (placed) return placed;
+  const others = items.filter((other, i) => i !== index && !other.hidden);
+  for (const x of new Set([item.x, 0]))
+    for (let y = 0; y <= LAYOUT_LIMITS.maxRows; y++) {
+      const candidate = { ...item, x, y };
+      if (!others.some((other) => rectsOverlap(candidate, other)))
+        return replaceAt(items, index, candidate);
+    }
+  return items;
 }
 
 function replaceAt(items: readonly LayoutItem[], index: number, item: LayoutItem): LayoutItem[] {
@@ -105,38 +127,46 @@ function keepIfSame(
   return sameLayout(items, next) ? items : next;
 }
 
-/** Mueve un bloque visible a la celda de destino de su esquina superior izquierda. */
+/**
+ * Mueve un bloque visible a la celda de destino de su esquina superior izquierda. Durante un
+ * gesto, `items` es el diseño de antes del gesto y `current` el último paso: si el destino pasa
+ * el tope de filas, el bloque se queda en `current` en vez de volver al inicio del gesto.
+ */
 export function moveItem(
   catalog: ViewCatalog,
   items: readonly LayoutItem[],
   id: string,
   to: Cell,
+  current: readonly LayoutItem[] = items,
 ): readonly LayoutItem[] {
   const index = indexOf(items, id);
   const item = items[index];
-  if (!item || item.hidden) return items;
+  if (!item || item.hidden) return current;
   const moved = {
     ...item,
     x: clamp(Math.round(to.x), 0, catalog.columns - item.w),
     y: clamp(Math.round(to.y), 0, LAYOUT_LIMITS.maxRows),
   };
-  return keepIfSame(items, relocate(items, index, moved));
+  const next = relocate(items, index, moved);
+  return next ? keepIfSame(current, next) : current;
 }
 
 /**
  * Cambia el tamaño de un bloque visible dentro de los límites de su definición y de la grilla.
  * El bloque crece hacia la derecha y hacia abajo: su esquina superior izquierda no se mueve.
+ * `current` funciona como en `moveItem`.
  */
 export function resizeItem(
   catalog: ViewCatalog,
   items: readonly LayoutItem[],
   id: string,
   to: Size,
+  current: readonly LayoutItem[] = items,
 ): readonly LayoutItem[] {
   const index = indexOf(items, id);
   const item = items[index];
   const widget = widgetOf(catalog, id);
-  if (!item || item.hidden || !widget) return items;
+  if (!item || item.hidden || !widget) return current;
   const { max } = widget.size;
   const min = widgetMinSize(widget, item.presentation);
   const resized = {
@@ -144,7 +174,8 @@ export function resizeItem(
     w: clamp(Math.round(to.w), min.w, Math.min(max.w, catalog.columns - item.x)),
     h: clamp(Math.round(to.h), min.h, max.h),
   };
-  return keepIfSame(items, relocate(items, index, resized));
+  const next = relocate(items, index, resized);
+  return next ? keepIfSame(current, next) : current;
 }
 
 /**
@@ -164,7 +195,7 @@ export function stepItem(
   const step = keyboardStep(catalog);
   const dx = direction === 'left' ? -step.columns : direction === 'right' ? step.columns : 0;
   const dy = direction === 'up' ? -step.rows : direction === 'down' ? step.rows : 0;
-  return moveItem(catalog, base, id, { x: item.x + dx, y: item.y + dy });
+  return moveItem(catalog, base, id, { x: item.x + dx, y: item.y + dy }, items);
 }
 
 /** Un paso de teclado de tamaño: derecha e izquierda cambian el ancho; abajo y arriba, el alto. */
@@ -180,10 +211,16 @@ export function stepSize(
   const step = keyboardStep(catalog);
   const sign = direction === 'right' || direction === 'down' ? 1 : -1;
   const horizontal = direction === 'left' || direction === 'right';
-  return resizeItem(catalog, base, id, {
-    w: item.w + (horizontal ? sign * step.columns : 0),
-    h: item.h + (horizontal ? 0 : sign * step.rows),
-  });
+  return resizeItem(
+    catalog,
+    base,
+    id,
+    {
+      w: item.w + (horizontal ? sign * step.columns : 0),
+      h: item.h + (horizontal ? 0 : sign * step.rows),
+    },
+    items,
+  );
 }
 
 /**
@@ -200,7 +237,7 @@ export function setHidden(
   if (!item || item.hidden === hidden) return items;
   return hidden
     ? replaceAt(items, index, { ...item, hidden })
-    : relocate(items, index, { ...item, hidden });
+    : relocateOrFill(items, index, { ...item, hidden });
 }
 
 /**
@@ -227,7 +264,7 @@ export function setPresentation(
     h: Math.max(item.h, min.h),
     x: Math.min(item.x, catalog.columns - w),
   };
-  return item.hidden ? replaceAt(items, index, grown) : relocate(items, index, grown);
+  return item.hidden ? replaceAt(items, index, grown) : relocateOrFill(items, index, grown);
 }
 
 /** Combina ajustes nuevos con los actuales; ignora el cambio si el resultado no es válido. */
