@@ -63,9 +63,16 @@ export function Section({
       onToggle={(event) => {
         // "nearest": si entra, lo muestra entero; si es más alto que el panel, deja el título arriba.
         if (!event.currentTarget.open) return;
+        // Con movimiento reducido salta sin animar, como el resto de los desplazamientos.
+        const reduce =
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         // jsdom no implementa scrollIntoView
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        event.currentTarget.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+        event.currentTarget.scrollIntoView?.({
+          block: 'nearest',
+          behavior: reduce ? 'auto' : 'smooth',
+        });
       }}
     >
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2.5 py-2.5 hover:bg-accent [&::-webkit-details-marker]:hidden">

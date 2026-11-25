@@ -180,7 +180,8 @@ export function time(value: string) {
 /** Demora legible entre dos instantes, ej. "12 min" o "1 h 05 min"; null si no hay demora. */
 export function delay(from: string, to: Date) {
   const minutes = Math.floor((to.getTime() - new Date(from).getTime()) / 60_000);
-  if (minutes <= 0) return null;
+  // `!(> 0)` también descarta NaN: una fecha inválida no muestra «NaN min».
+  if (!(minutes > 0)) return null;
   const hours = Math.floor(minutes / 60);
   return hours ? `${hours} h ${String(minutes % 60).padStart(2, '0')} min` : `${minutes} min`;
 }
