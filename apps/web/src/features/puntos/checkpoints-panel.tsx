@@ -118,7 +118,11 @@ function NumberField({
         type="button"
         className="min-w-5 cursor-pointer rounded-sm underline decoration-dotted underline-offset-2 hover:bg-muted"
         aria-label={`Cambiar el número de ${name} (ahora ${String(value)})`}
-        onClick={onEdit}
+        onClick={() => {
+          // Al abrir el campo de nuevo, la salida anterior ya no cuenta (por si no llega el foco).
+          settled.current = false;
+          onEdit();
+        }}
       >
         {value}
       </button>
