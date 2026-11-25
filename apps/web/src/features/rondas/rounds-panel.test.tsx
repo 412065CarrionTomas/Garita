@@ -450,7 +450,45 @@ describe('RoundsPanel', () => {
           windowStartLocal: '22:00',
           windowEndLocal: '06:00',
           graceMinutes: 15,
-          route: null,
+          // Recorrido guardado con el punto que después se dio de baja.
+          route: {
+            v: 1,
+            closed: false,
+            legs: [
+              {
+                from: [-64.2, -31.4],
+                to: [-64.3, -31.5],
+                waypoints: [],
+                sections: [
+                  {
+                    mode: 'streets',
+                    via: [],
+                    geometry: [
+                      [-64.2, -31.4],
+                      [-64.3, -31.5],
+                    ],
+                    fallback: false,
+                  },
+                ],
+              },
+              {
+                from: [-64.3, -31.5],
+                to: [-64.201, -31.401],
+                waypoints: [],
+                sections: [
+                  {
+                    mode: 'streets',
+                    via: [],
+                    geometry: [
+                      [-64.3, -31.5],
+                      [-64.201, -31.401],
+                    ],
+                    fallback: false,
+                  },
+                ],
+              },
+            ],
+          },
           checkpoints: [
             { position: 0, checkpoint: { id: 'p1', name: 'Portón' } },
             { position: 1, checkpoint: { id: 'gone', name: 'Garita vieja' } },
@@ -475,6 +513,8 @@ describe('RoundsPanel', () => {
       'No se copiaron puntos dados de baja: Garita vieja.',
     );
     expect(screen.getByRole('list', { name: 'Orden de puntos' }).children).toHaveLength(2);
+    // Ningún punto se movió: lo guardado no se compara contra la lista sin el omitido.
+    expect(screen.queryByText(/se movió un punto/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith(

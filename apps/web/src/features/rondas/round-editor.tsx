@@ -205,7 +205,8 @@ export function RoundEditor({
 
   const { display, parts } = resolveRoute(route, coords, memo);
   const estimate = requestEstimate(parts);
-  const savedRoute = initialIds.join() === selected.join() ? storedRoute(version?.route) : null;
+  // Contra los puntos de la versión: si al duplicar se omitió alguno, lo guardado ya no aplica.
+  const savedRoute = versionIds.join() === selected.join() ? storedRoute(version?.route) : null;
   // Un tramo con un punto movido deja de avisar cuando sus partes por calles se recalcularon.
   const stale = new Set(
     (savedRoute && allLocated ? staleLegs(savedRoute, coords) : []).filter((l) =>
