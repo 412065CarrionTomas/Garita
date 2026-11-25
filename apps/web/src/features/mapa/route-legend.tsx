@@ -1,5 +1,6 @@
 import type { RouteMode } from '@garita/shared';
-import { PenLine, Route } from 'lucide-react';
+import { ChevronDown, PenLine, Route } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import type { SectionKind } from './route-features';
 
@@ -20,6 +21,11 @@ export function ModeChangeMark({ from, to }: { from: RouteMode; to: RouteMode })
       ))}
     </span>
   );
+}
+
+/** Punto del predio que no está en la ronda: chico, tenue y sin número. */
+export function OutsideMark() {
+  return <span className="block size-3 border-2 border-muted-foreground bg-card opacity-60" />;
 }
 
 /** Punto de guía: chico y hueco. */
@@ -51,56 +57,88 @@ const LINES: { kind: SectionKind; label: string }[] = [
   { kind: 'fallback', label: 'Sin calcular o falló (recta)' },
 ];
 
+function Row({ mark, children }: { mark: ReactNode; children: ReactNode }) {
+  return (
+    <li className="flex items-center gap-2">
+      <span className="grid w-7 shrink-0 place-items-center">{mark}</span>
+      {children}
+    </li>
+  );
+}
+
 /**
- * Leyenda del recorrido, plegable, en la esquina del mapa. Los símbolos son los mismos del mapa.
- * Con `markers` explica también los marcadores del editor.
+ * Leyenda del recorrido, plegable, arriba a la izquierda debajo de Mapa/Satélite.
+ * Los símbolos son los mismos del mapa. Con `markers` explica también los marcadores del editor;
+ * con `checkpoints`, solo el punto de control (vista previa); con `outside`, los puntos del predio
+ * que no están en la ronda.
  */
 export function RouteLegend({
   kinds,
   markers = false,
+  checkpoints = false,
+  outside = false,
 }: {
   kinds: SectionKind[];
   markers?: boolean;
+  checkpoints?: boolean;
+  outside?: boolean;
 }) {
   const lines = LINES.filter(({ kind }) => kinds.includes(kind));
-  if (!lines.length && !markers) return null;
+  const points = markers || checkpoints || outside;
+  if (!lines.length && !points) return null;
   return (
     <details
       open
-      className="absolute bottom-3.5 left-3.5 z-10 max-w-[calc(100%-1.75rem)] rounded-sm border border-border bg-card/90 px-2 py-1 text-xs text-foreground"
+      className="group absolute top-15 left-3.5 z-10 w-max max-w-[min(16rem,calc(100%-1.75rem))] rounded-md border-[1.5px] border-border bg-card/95 text-xs text-foreground shadow-sm"
     >
-      <summary className="t-label cursor-pointer">Leyenda</summary>
-      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-        {markers && (
-          <>
-            <li className="flex items-center gap-1.5">
-              <span className="font-cond grid size-4 place-items-center border-2 border-foreground bg-card text-xs font-semibold">
-                1
-              </span>
-              Punto de control: se escanea
-            </li>
-            <li className="flex items-center gap-1.5">
-              <GuideMark />
-              Punto de guía
-            </li>
-            <li className="flex items-center gap-1.5">
-              <ModeChangeMark from="streets" to="manual" />
-              Cambio de modo
-            </li>
-          </>
+      <summary className="t-label flex cursor-pointer list-none items-center justify-between gap-3 px-2.5 py-1.5 [&::-webkit-details-marker]:hidden">
+        Leyenda
+        <ChevronDown
+          aria-hidden="true"
+          className="size-3.5 transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <div className="grid gap-2 border-t border-border px-2.5 pt-2 pb-2.5">
+        {points && (
+          <ul className="grid gap-1.5" aria-label="Marcadores">
+            {(markers || checkpoints) && (
+              <Row
+                mark={
+                  <span className="font-cond grid size-4 place-items-center border-2 border-foreground bg-card text-xs font-semibold">
+                    1
+                  </span>
+                }
+              >
+                Punto de control: se escanea
+              </Row>
+            )}
+            {outside && <Row mark={<OutsideMark />}>Punto del predio fuera de la ronda</Row>}
+            {markers && (
+              <>
+                <Row mark={<GuideMark />}>Punto de guía: solo da forma</Row>
+                <Row mark={<ModeChangeMark from="streets" to="manual" />}>Cambio de modo</Row>
+              </>
+            )}
+          </ul>
         )}
-        {lines.map(({ kind, label }) => (
-          <li key={kind} className="flex items-center gap-1.5">
-            <LineSwatch kind={kind} />
-            {label}
-          </li>
-        ))}
-      </ul>
-      {markers && (
-        <p className="mt-1 text-muted-foreground">
-          El recorrido es una guía: solo se controlan los puntos de control.
-        </p>
-      )}
+        {lines.length > 0 && (
+          <ul
+            className={cn('grid gap-1.5', points && 'border-t border-border pt-2')}
+            aria-label="Líneas"
+          >
+            {lines.map(({ kind, label }) => (
+              <Row key={kind} mark={<LineSwatch kind={kind} />}>
+                {label}
+              </Row>
+            ))}
+          </ul>
+        )}
+        {markers && (
+          <p className="text-muted-foreground">
+            El recorrido es una guía: solo se controlan los puntos de control.
+          </p>
+        )}
+      </div>
     </details>
   );
 }

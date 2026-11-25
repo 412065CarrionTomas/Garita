@@ -52,22 +52,52 @@ const HIT = 'route-hit';
  * Encuadra los puntos de la ronda (o todos, si todavía no tiene) y la línea dibujada, al abrir y al
  * sumar o quitar puntos.
  */
-function FitPoints({ points, line }: { points: RouteEditorPoint[]; line: LngLat[] }) {
+function FitPoints({
+  points,
+  line,
+  refit = false,
+}: {
+  points: RouteEditorPoint[];
+  line: LngLat[];
+  /** Vista previa: vuelve a encuadrar si el mapa cambia de tamaño, hasta que alguien lo mueva. */
+  refit?: boolean;
+}) {
   const { current: map } = useMap();
   const key = points.map((p) => p.id).join('|');
   useEffect(() => {
     if (!map || points.length === 0) return;
     const lngs = [...points.map((p) => p.lng), ...line.map(([lng]) => lng)];
     const lats = [...points.map((p) => p.lat), ...line.map(([, lat]) => lat)];
-    // El contenedor pudo cambiar de alto después de crear el mapa: se mide antes de encuadrar.
-    map.resize();
-    map.fitBounds(
-      [
-        [Math.min(...lngs), Math.min(...lats)],
-        [Math.max(...lngs), Math.max(...lats)],
-      ],
-      { padding: 72, maxZoom: 18, duration: 0 },
-    );
+    const fit = () => {
+      // El contenedor pudo cambiar de alto después de crear el mapa: se mide antes de encuadrar.
+      map.resize();
+      map.fitBounds(
+        [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ],
+        { padding: 72, maxZoom: 18, duration: 0 },
+      );
+    };
+    fit();
+    if (!refit) return;
+    // El alto llega después (se mide la ventana): se vuelve a encuadrar mientras nadie mueva el mapa.
+    const container = map.getContainer();
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(() => {
+            fit();
+          });
+    observer?.observe(container);
+    const stop = () => observer?.disconnect();
+    container.addEventListener('pointerdown', stop, { once: true });
+    container.addEventListener('wheel', stop, { once: true });
+    return () => {
+      observer?.disconnect();
+      container.removeEventListener('pointerdown', stop);
+      container.removeEventListener('wheel', stop);
+    };
     // Solo al cambiar qué puntos hay: reordenar o mover un punto no debe mover la cámara.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, key.split('|').sort().join('|')]);
@@ -202,11 +232,18 @@ export function RouteEditorView({
       }}
     >
       <FitPoints
+        refit={!interactive}
         points={inRoute.length ? inRoute : points}
         line={display.legs.flatMap((leg) => leg.sections.flatMap((section) => section.geometry))}
       />
       <FollowFocus point={points.find((p) => p.id === focusId)} />
-      <RouteLayers points={layerPoints} routes={routes} dark={dark} editor={editable} />
+      <RouteLayers
+        points={layerPoints}
+        routes={routes}
+        dark={dark}
+        editor={editable}
+        legend={{ checkpoints: !editable, outside: points.length > inRoute.length }}
+      />
       {part && (
         // Halo de la parte elegida, debajo de la línea para no tapar su patrón.
         <Layer
@@ -358,7 +395,7 @@ export function RouteEditorView({
                 onPointClick && 'cursor-pointer',
                 order >= 0
                   ? 'size-7 border-foreground bg-card text-sm text-foreground'
-                  : 'size-3.5 border-muted-foreground bg-card',
+                  : 'size-3.5 border-muted-foreground bg-card opacity-60',
                 focused &&
                   'bg-primary text-primary-foreground outline-2 outline-offset-2 outline-foreground',
               )}

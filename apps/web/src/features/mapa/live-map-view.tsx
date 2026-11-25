@@ -182,12 +182,15 @@ export function RouteLayers({
   routes,
   dark,
   editor = false,
+  legend,
 }: {
   points: Pick<LiveMapPoint, 'id' | 'lat' | 'lng' | 'status'>[];
   routes: LiveMapRoute[];
   dark: boolean;
   /** El editor dibuja sus propios marcadores y explica todos en la leyenda. */
   editor?: boolean;
+  /** Marcadores que la leyenda explica además de las líneas (vista previa de una ronda). */
+  legend?: { checkpoints?: boolean; outside?: boolean };
 }) {
   const { current: map } = useMap();
   // Los tokens son hex en :root/.dark; se leen del documento para no repetir colores acá.
@@ -268,7 +271,7 @@ export function RouteLayers({
             </span>
           </Marker>
         ))}
-      <RouteLegend kinds={kinds} markers={editor} />
+      <RouteLegend kinds={kinds} markers={editor} {...legend} />
     </>
   );
 }
