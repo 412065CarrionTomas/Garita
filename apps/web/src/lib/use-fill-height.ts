@@ -27,9 +27,21 @@ export function useFillHeight<T extends HTMLElement>(gap = 8, min = 320) {
       observer?.observe(child);
     // Al mostrarse su pestaña el elemento pasa de 0 a su tamaño, aunque la página no cambie.
     observer?.observe(element);
+    // Avisos que aparecen después (pánico, prueba, gracia) son hijos nuevos de `main`: empujan el
+    // elemento sin cambiar el tamaño de los ya observados, así que también se miden y se observan.
+    const added =
+      scroller && typeof MutationObserver !== 'undefined'
+        ? new MutationObserver((records) => {
+            for (const node of records.flatMap((record) => Array.from(record.addedNodes)))
+              if (node instanceof Element) observer?.observe(node);
+            update();
+          })
+        : undefined;
+    if (scroller) added?.observe(scroller, { childList: true });
     return () => {
       window.removeEventListener('resize', update);
       observer?.disconnect();
+      added?.disconnect();
     };
   }, [element, gap, min]);
   return [measure, height] as const;
