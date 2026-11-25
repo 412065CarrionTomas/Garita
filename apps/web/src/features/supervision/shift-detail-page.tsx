@@ -209,6 +209,7 @@ function Foja({ detail, noticePending }: { detail: ShiftDetail; noticePending: b
           }
           selectedSiteId={detail.site.id}
           points={mapPoints}
+          routes={detail.routes}
           selectedPointId={selectedPointId}
           onSelectPoint={setSelectedPointId}
         />

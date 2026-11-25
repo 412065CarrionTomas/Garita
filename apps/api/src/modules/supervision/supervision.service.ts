@@ -1,5 +1,10 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { computeSyncStatus, type RecordFlagSeverity } from '@garita/shared';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  computeSyncStatus,
+  roundRouteSchema,
+  type RecordFlagSeverity,
+  type RoundRoute,
+} from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { MarcasService } from '../marcas/marcas.service';
 import { CLOCK, type Clock } from '../../common/clock';
@@ -8,6 +13,7 @@ import { suspendedVisibleShiftWhere } from '../auth/account-suspension.policy';
 
 @Injectable()
 export class SupervisionService {
+  private readonly logger = new Logger(SupervisionService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly marcas: MarcasService,
@@ -247,6 +253,16 @@ export class SupervisionService {
       phoneWithoutNfc: records.phoneWithoutNfc,
       assignments: shift.assignments,
       rounds: shift.rounds.map((round) => ({ id: round.roundId, name: round.round.name })),
+      // Recorrido ideal de cada ronda, de la misma versión que los puntos del turno.
+      routes: shift.rounds.map((round) => {
+        const version = round.roundVersion ?? round.round.currentVersion;
+        return {
+          roundId: round.roundId,
+          roundName: round.round.name,
+          checkpointIds: version?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [],
+          route: this.storedRoute(version?.route, round.roundId),
+        };
+      }),
       windows: shift.roundWindowStates,
       points,
       route: orderedRecords
@@ -267,5 +283,14 @@ export class SupervisionService {
             shift.closedEarly &&
             shift.closeReason !== 'baja del predio')),
     };
+  }
+
+  /** Lo que sale de la base también se valida: un recorrido inválido se dibuja recto. */
+  private storedRoute(value: unknown, roundId: string): RoundRoute | null {
+    if (value === null || value === undefined) return null;
+    const parsed = roundRouteSchema.safeParse(value);
+    if (parsed.success) return parsed.data;
+    this.logger.warn({ event: 'supervision.invalid_round_route', roundId });
+    return null;
   }
 }

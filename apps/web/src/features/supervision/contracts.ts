@@ -1,4 +1,4 @@
-import { ASSIGNMENT_RESULTS, ROUND_WINDOW_STATUSES } from '@garita/shared';
+import { ASSIGNMENT_RESULTS, ROUND_WINDOW_STATUSES, roundRouteSchema } from '@garita/shared';
 import { z } from 'zod';
 import type { StatusTone } from '@/components/status-badge';
 import type { PathPoint } from '@/components/point-path';
@@ -68,6 +68,17 @@ export const shiftDetailSchema = z.object({
     }),
   ),
   rounds: z.array(z.object({ id: z.string(), name: z.string() })),
+  /** Recorrido ideal por ronda; null en rondas previas (se dibujan rectas). Default: API anterior. */
+  routes: z
+    .array(
+      z.object({
+        roundId: z.string(),
+        roundName: z.string(),
+        checkpointIds: z.array(z.string()),
+        route: roundRouteSchema.nullable(),
+      }),
+    )
+    .default([]),
   windows: z.array(
     z.object({
       id: z.string(),

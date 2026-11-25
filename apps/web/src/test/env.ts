@@ -9,4 +9,5 @@ export const env = {
   VITE_FIREBASE_VAPID_KEY: '',
   VITE_MAP_STYLE_URL: 'https://tiles.openfreemap.org/styles/positron',
   VITE_GEOCODER_URL: 'https://photon.komoot.io/api/',
+  VITE_SATELLITE_TILES_URL: 'https://satellite.test/{z}/{y}/{x}',
 };

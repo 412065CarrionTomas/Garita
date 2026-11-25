@@ -1,9 +1,26 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
-import { previewWindows } from '@garita/shared';
+import {
+  defaultRouteInput,
+  previewWindows,
+  validateRouteInput,
+  type LngLat,
+  type RoundRoute,
+  type RouteInput,
+  type RoundRoutePreviewInput,
+  type RoundRoutePreviewResponse,
+} from '@garita/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
+import { RouteBuilder } from '../routing/route-builder';
 
 interface RoundInput {
   name: string;
@@ -12,6 +29,8 @@ interface RoundInput {
   windowStartLocal: string;
   windowEndLocal: string;
   graceMinutes: number;
+  route?: RouteInput;
+  allowStraight?: boolean;
 }
 
 @Injectable()
@@ -20,6 +39,7 @@ export class RoundsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
+    private readonly routes: RouteBuilder,
   ) {}
 
   async list(siteId: string) {
@@ -38,7 +58,9 @@ export class RoundsService {
   async create(siteId: string, input: RoundInput, user: AuthenticatedUser) {
     const site = await this.resources.findOwnedOrThrow('Site', siteId);
     if (site.status !== 'active') throw new NotFoundException('Recurso no encontrado');
-    await this.assertCheckpoints(siteId, input.checkpointIds);
+    const points = await this.assertCheckpoints(siteId, input.checkpointIds);
+    // Network call to the routing provider: never inside the transaction.
+    const route = await this.buildRoute(siteId, input, points);
     try {
       // One transaction: a round left without currentVersion would block every shift using it.
       const { round, updated } = await this.prisma.tenantPrisma.$transaction(async (tx) => {
@@ -54,6 +76,7 @@ export class RoundsService {
                 windowStartLocal: input.windowStartLocal,
                 windowEndLocal: input.windowEndLocal,
                 graceMinutes: input.graceMinutes,
+                route,
                 createdById: user.userId,
                 checkpoints: {
                   create: input.checkpointIds.map((checkpointId, position) => ({
@@ -75,7 +98,12 @@ export class RoundsService {
         });
         return { round, updated };
       });
-      this.logger.log({ action: 'round.created', roundId: round.id, userId: user.userId });
+      this.logger.log({
+        action: 'round.created',
+        roundId: round.id,
+        userId: user.userId,
+        fallbackSections: fallbackSections(route),
+      });
       return updated;
     } catch (error) {
       this.handleUnique(error);
@@ -84,7 +112,9 @@ export class RoundsService {
 
   async update(id: string, input: RoundInput, user: AuthenticatedUser) {
     const round = await this.resources.findOwnedOrThrow('Round', id);
-    await this.assertCheckpoints(String(round.siteId), input.checkpointIds);
+    const siteId = String(round.siteId);
+    const points = await this.assertCheckpoints(siteId, input.checkpointIds);
+    const route = await this.buildRoute(siteId, input, points);
     try {
       return await this.prisma.tenantPrisma.$transaction(async (tx) => {
         const latest = await tx.roundVersion.findFirstOrThrow({
@@ -99,6 +129,7 @@ export class RoundsService {
             windowStartLocal: input.windowStartLocal,
             windowEndLocal: input.windowEndLocal,
             graceMinutes: input.graceMinutes,
+            route,
             createdById: user.userId,
             checkpoints: {
               create: input.checkpointIds.map((checkpointId, position) => ({
@@ -118,6 +149,7 @@ export class RoundsService {
           roundId: id,
           versionId: version.id,
           userId: user.userId,
+          fallbackSections: fallbackSections(route),
         });
         return updated;
       });
@@ -140,13 +172,67 @@ export class RoundsService {
     return { windows: previewWindows(input) };
   }
 
-  private async assertCheckpoints(siteId: string, ids: string[]) {
+  /** "Calcular recorrido": la ronda completa con sus fallas, sin guardar nada. */
+  async previewRoute(input: RoundRoutePreviewInput): Promise<RoundRoutePreviewResponse> {
+    await this.resources.findOwnedOrThrow('Site', input.siteId);
+    const points = await this.assertCheckpoints(input.siteId, input.checkpointIds);
+    return this.computeRoute(input.siteId, input.route, points);
+  }
+
+  /** Checks the points and returns their location in the round's order. */
+  private async assertCheckpoints(siteId: string, ids: string[]): Promise<LngLat[]> {
     const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
       where: { id: { in: ids }, siteId, status: 'active' },
-      select: { id: true },
+      select: { id: true, latitude: true, longitude: true },
     });
-    if (checkpoints.length !== ids.length)
-      throw new NotFoundException('Uno o más puntos no están activos en este predio');
+    const byId = new Map(
+      checkpoints.map((c) => [c.id, [Number(c.longitude), Number(c.latitude)] as LngLat]),
+    );
+    const points: LngLat[] = [];
+    for (const id of ids) {
+      const point = byId.get(id);
+      if (!point) throw new NotFoundException('Uno o más puntos no están activos en este predio');
+      points.push(point);
+    }
+    return points;
+  }
+
+  private async siteRouting(siteId: string) {
+    const site = await this.prisma.tenantPrisma.site.findFirstOrThrow({
+      where: { id: siteId },
+      select: { latitude: true, longitude: true, maxSpeedProfile: true },
+    });
+    const location: LngLat = [Number(site.longitude), Number(site.latitude)];
+    return { location, profile: site.maxSpeedProfile };
+  }
+
+  /**
+   * Recorrido a guardar. Si el supervisor lo armó y alguna sección no se pudo calcular, no se
+   * guarda nada hasta que acepte dejarlas rectas (allowStraight). Sin recorrido (panel anterior
+   * o backfill) no hay a quién preguntarle: se guarda recto.
+   */
+  private async buildRoute(siteId: string, input: RoundInput, points: LngLat[]) {
+    const { route, failures } = await this.computeRoute(
+      siteId,
+      input.route ?? defaultRouteInput(points.length),
+      points,
+    );
+    if (input.route && failures.length > 0 && !input.allowStraight)
+      throw new UnprocessableEntityException({
+        message: 'No se pudo calcular el recorrido por calles en algunos tramos.',
+        failures,
+      });
+    return route;
+  }
+
+  private async computeRoute(siteId: string, input: RouteInput, points: LngLat[]) {
+    const site = await this.siteRouting(siteId);
+    const issues = validateRouteInput(input, points, site.location);
+    if (issues.length > 0)
+      throw new BadRequestException(
+        issues.map((issue) => ({ ...issue, path: ['route', ...issue.path] })),
+      );
+    return this.routes.build(input, points, site.profile);
   }
 
   private handleUnique(error: unknown): never {
@@ -154,4 +240,8 @@ export class RoundsService {
       throw new ConflictException('Ya existe una ronda con ese nombre en el predio');
     throw error;
   }
+}
+
+function fallbackSections(route: RoundRoute): number {
+  return route.legs.flatMap((leg) => leg.sections).filter((section) => section.fallback).length;
 }

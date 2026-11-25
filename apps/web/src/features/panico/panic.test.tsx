@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import type * as ReactRouter from 'react-router';
@@ -46,7 +46,7 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-it('anuncia una alerta activa con texto, ícono, enlace y control para activar sonido', () => {
+it('anuncia una alerta activa con texto, ícono y enlace, sin botón de sonido', () => {
   renderWithQueryClient(
     <MemoryRouter>
       <PanicBanner alerts={[alert]} count={1} />
@@ -58,7 +58,7 @@ it('anuncia una alerta activa con texto, ícono, enlace y control para activar s
     'href',
     `/alertas-panico/${alert.id}`,
   );
-  expect(screen.getByRole('button', { name: 'Activar sonido de alertas' })).toBeEnabled();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });
 
 it('repite el tono y lo detiene cuando ya no hay activas', async () => {
@@ -94,12 +94,19 @@ it('repite el tono y lo detiene cuando ya no hay activas', async () => {
         <PanicBanner alerts={[alert]} count={1} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Activar sonido de alertas' }));
+    // El primer gesto en la página habilita el audio.
+    fireEvent.pointerDown(document);
     await waitFor(() => {
-      expect(localStorage.getItem('garita-panic-sound')).toBe('enabled');
+      expect(audio.resume).toHaveBeenCalled();
     });
+    // Con la alerta ya activa suena enseguida, sin esperar el próximo intervalo.
+    await waitFor(() => {
+      expect(start).toHaveBeenCalled();
+    });
+    // Habilitado el audio, los gestos siguientes ya no lo tocan.
+    fireEvent.pointerDown(document);
+    expect(audio.resume).toHaveBeenCalledTimes(1);
     const initial = start.mock.calls.length;
-    const { act } = await import('@testing-library/react');
     act(() => {
       jest.advanceTimersByTime(8000);
     });
@@ -126,8 +133,8 @@ it('repite el tono y lo detiene cuando ya no hay activas', async () => {
   }
 });
 
-it('recupera el sonido recordado al remontar los efectos en modo estricto', () => {
-  localStorage.setItem('garita-panic-sound', 'enabled');
+it('suena tras el primer gesto aunque los efectos se remonten en modo estricto', () => {
+  jest.useFakeTimers();
   const previous = window.AudioContext;
   const start = jest.fn();
   const contexts: { state: string }[] = [];
@@ -139,6 +146,7 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
         state: 'running',
         currentTime: 0,
         destination: {},
+        resume: () => Promise.resolve(),
         close: () => {
           audio.state = 'closed';
           return Promise.resolve();
@@ -166,11 +174,12 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
         </MemoryRouter>
       </StrictMode>,
     );
-    expect(start).toHaveBeenCalledTimes(2);
-    expect(contexts.map((audio) => audio.state)).toEqual(['closed', 'running']);
-    expect(
-      screen.queryByRole('button', { name: 'Activar sonido de alertas' }),
-    ).not.toBeInTheDocument();
+    fireEvent.pointerDown(document);
+    act(() => {
+      jest.advanceTimersByTime(4000);
+    });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(contexts.map((audio) => audio.state)).toEqual(['running']);
     view.unmount();
   } finally {
     Object.defineProperty(window, 'AudioContext', {
@@ -178,6 +187,7 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
       writable: true,
       value: previous,
     });
+    jest.useRealTimers();
   }
 });
 

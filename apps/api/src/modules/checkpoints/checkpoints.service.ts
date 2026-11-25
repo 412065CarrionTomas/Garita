@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import type { CheckpointArrangementInput } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { TenantResourceService } from '../auth/tenant-resource.service';
@@ -51,11 +52,11 @@ export class CheckpointsService {
     if (!includeNfcTag)
       return this.prisma.tenantPrisma.checkpoint.findMany({
         where: { siteId, status: 'active' },
-        orderBy: { name: 'asc' },
+        orderBy: [{ position: 'asc' }, { name: 'asc' }],
       });
     const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
       where: { siteId, status: 'active' },
-      orderBy: { name: 'asc' },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
       include: {
         nfcTags: {
           where: { status: 'active' },
@@ -79,6 +80,11 @@ export class CheckpointsService {
   async create(siteId: string, input: CheckpointInput, user: AuthenticatedUser) {
     const site = await this.sites.assertSiteIsActive(siteId, user);
     this.assertNearSite(input, site.latitude.toNumber(), site.longitude.toNumber());
+    // El punto nuevo va al final de la numeración del predio.
+    const last = await this.prisma.tenantPrisma.checkpoint.aggregate({
+      where: { siteId },
+      _max: { position: true },
+    });
     try {
       const checkpoint = await this.prisma.tenantPrisma.checkpoint.create({
         data: {
@@ -90,6 +96,7 @@ export class CheckpointsService {
           toleranceRadiusMeters: input.toleranceRadiusMeters,
           stickerLocation: input.stickerLocation,
           isIndoor: input.isIndoor,
+          position: (last._max.position ?? 0) + 1,
           qrVersion: 1,
         },
       });
@@ -126,6 +133,55 @@ export class CheckpointsService {
     } catch (error) {
       this.handleUnique(error);
     }
+  }
+
+  /** Guarda de una vez el orden y la ubicación de todos los puntos activos del predio. */
+  async arrange(siteId: string, input: CheckpointArrangementInput, user: AuthenticatedUser) {
+    const site = await this.sites.assertSiteIsActive(siteId, user);
+    const outdated = () =>
+      new ConflictException({
+        code: 'CHECKPOINT_LIST_OUTDATED',
+        message: 'Los puntos del predio cambiaron. Recargá la página y volvé a intentar.',
+      });
+    // Leer, validar y escribir en la misma transacción: otro usuario pudo sumar o dar de baja
+    // puntos mientras tanto y no se pisa a ciegas.
+    await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const current = await tx.checkpoint.findMany({
+        where: { siteId, status: 'active' },
+        select: { id: true, latitude: true, longitude: true },
+      });
+      const byId = new Map(current.map((point) => [point.id, point]));
+      const ids = new Set(input.puntos.map(({ id }) => id));
+      if (
+        ids.size !== input.puntos.length ||
+        ids.size !== byId.size ||
+        input.puntos.some(({ id }) => !byId.has(id))
+      )
+        throw outdated();
+      for (const point of input.puntos) {
+        const before = byId.get(point.id);
+        if (
+          before &&
+          (before.latitude.toNumber() !== point.latitude ||
+            before.longitude.toNumber() !== point.longitude)
+        )
+          this.assertNearSite(
+            { ...point, confirmFarLocation: input.confirmFarLocation },
+            site.latitude.toNumber(),
+            site.longitude.toNumber(),
+          );
+      }
+      for (const [index, point] of input.puntos.entries()) {
+        // Solo si sigue activo en este predio: si lo dieron de baja recién, la lista quedó vieja.
+        const { count } = await tx.checkpoint.updateMany({
+          where: { id: point.id, siteId, status: 'active' },
+          data: { position: index + 1, latitude: point.latitude, longitude: point.longitude },
+        });
+        if (count !== 1) throw outdated();
+      }
+    });
+    this.logger.log({ action: 'checkpoint.arranged', siteId, userId: user.userId });
+    return this.list(siteId);
   }
 
   async deactivate(id: string, user: AuthenticatedUser) {
@@ -174,7 +230,7 @@ export class CheckpointsService {
     if (ids?.some((id) => !id)) throw new NotFoundException('Punto no encontrado');
     const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
       where: { siteId, status: 'active', ...(ids ? { id: { in: ids } } : {}) },
-      orderBy: { name: 'asc' },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
     });
     if (ids && checkpoints.length !== new Set(ids).size)
       throw new NotFoundException('Punto no encontrado');
@@ -238,7 +294,11 @@ export class CheckpointsService {
     return finished;
   }
 
-  private assertNearSite(input: CheckpointInput, latitude: number, longitude: number): void {
+  private assertNearSite(
+    input: Pick<CheckpointInput, 'latitude' | 'longitude' | 'confirmFarLocation'>,
+    latitude: number,
+    longitude: number,
+  ): void {
     if (
       distanceMeters(latitude, longitude, input.latitude, input.longitude) > 1000 &&
       !input.confirmFarLocation

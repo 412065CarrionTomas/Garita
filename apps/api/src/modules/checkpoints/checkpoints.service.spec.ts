@@ -11,6 +11,7 @@ function setup() {
     checkpoint: {
       update: jest.fn().mockResolvedValue({ id: 'point', status: 'inactive' }),
       findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     nfcTag: { updateMany: jest.fn() },
   };
@@ -46,4 +47,66 @@ it('baja punto y retira etiquetas activas en una transaccion', async () => {
 it.each([undefined, []])('rechaza PDF sin puntos %j', async (ids) => {
   const { service } = setup();
   await expect(service.createStickerPdf('site', ids)).rejects.toMatchObject({ status: 400 });
+});
+describe('arrange', () => {
+  const site = { latitude: { toNumber: () => -31.35 }, longitude: { toNumber: () => -64.29 } };
+  const at = (id: string) => ({
+    id,
+    latitude: { toNumber: () => -31.35 },
+    longitude: { toNumber: () => -64.29 },
+  });
+  function arrangeSetup() {
+    const { db, service } = setup();
+    db.checkpoint.findMany.mockResolvedValue([at('a'), at('b')]);
+    (service as unknown as { sites: unknown }).sites = {
+      assertSiteIsActive: jest.fn().mockResolvedValue(site),
+    };
+    return { db, service };
+  }
+  const point = (id: string, latitude = -31.35) => ({ id, latitude, longitude: -64.29 });
+
+  it('numera los puntos en el orden recibido', async () => {
+    const { db, service } = arrangeSetup();
+    await service.arrange('site', { puntos: [point('b'), point('a')] }, user);
+    expect(db.checkpoint.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: 'b', siteId: 'site', status: 'active' },
+      data: { position: 1, latitude: -31.35, longitude: -64.29 },
+    });
+    expect(db.checkpoint.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: 'a', siteId: 'site', status: 'active' },
+      data: { position: 2, latitude: -31.35, longitude: -64.29 },
+    });
+  });
+
+  it('rechaza si un punto se dio de baja entre la lectura y la escritura', async () => {
+    const { db, service } = arrangeSetup();
+    db.checkpoint.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.arrange('site', { puntos: [point('a'), point('b')] }, user),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it.each([[[point('a')]], [[point('a'), point('a')]], [[point('a'), point('x')]]])(
+    'rechaza una lista que no es la de los puntos activos %#',
+    async (puntos) => {
+      const { db, service } = arrangeSetup();
+      await expect(service.arrange('site', { puntos }, user)).rejects.toMatchObject({
+        status: 409,
+      });
+      expect(db.checkpoint.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('pide confirmar un punto movido a más de 1 km', async () => {
+    const { db, service } = arrangeSetup();
+    const puntos = [point('a', -31.4), point('b')];
+    await expect(service.arrange('site', { puntos }, user)).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(db.checkpoint.updateMany).not.toHaveBeenCalled();
+    await service.arrange('site', { puntos, confirmFarLocation: true }, user);
+    expect(db.checkpoint.updateMany).toHaveBeenCalledTimes(2);
+  });
 });

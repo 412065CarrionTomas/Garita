@@ -91,8 +91,45 @@ export function recolor(base: StyleSpecification, isDark: boolean): StyleSpecifi
   return { ...base, layers };
 }
 
+// Esri World Imagery no tiene fotos más allá del nivel 19 en Córdoba (devuelve "Map data not yet
+// available"): con maxzoom 19 MapLibre estira ese nivel al acercar.
+const SATELLITE_MAX_ZOOM = 19;
+const SATELLITE_ATTRIBUTION =
+  'Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community';
+
+/**
+ * Vista híbrida: la foto satelital debajo y solo las etiquetas del estilo base encima.
+ * Se descartan rellenos y líneas porque taparían la foto (las calles ya se ven en ella).
+ */
+export function withSatellite(base: StyleSpecification, tilesUrl: string): StyleSpecification {
+  const labels = base.layers.flatMap((layer): LayerSpecification[] =>
+    layer.type === 'symbol'
+      ? [
+          {
+            ...layer,
+            paint: { ...layer.paint, 'text-color': '#FFFFFF', 'text-halo-color': '#000000B3' },
+          },
+        ]
+      : [],
+  );
+  return {
+    ...base,
+    sources: {
+      ...base.sources,
+      satellite: {
+        type: 'raster',
+        tiles: [tilesUrl],
+        tileSize: 256,
+        maxzoom: SATELLITE_MAX_ZOOM,
+        attribution: SATELLITE_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: 'satellite', type: 'raster', source: 'satellite' }, ...labels],
+  };
+}
+
 /** Descarga el estilo base una sola vez (VITE_MAP_STYLE_URL) y lo recolorea según el tema. */
-export function useMapStyle(isDark: boolean) {
+export function useMapStyle(isDark: boolean, satellite = false) {
   const query = useQuery({
     queryKey: ['map-style', env.VITE_MAP_STYLE_URL],
     queryFn: async () => {
@@ -103,11 +140,34 @@ export function useMapStyle(isDark: boolean) {
     staleTime: Infinity,
     retry: 1,
   });
-  const style = useMemo(
-    () => (query.data ? recolor(query.data, isDark) : undefined),
-    [query.data, isDark],
-  );
+  const style = useMemo(() => {
+    if (!query.data) return undefined;
+    const themed = recolor(query.data, isDark);
+    return satellite ? withSatellite(themed, env.VITE_SATELLITE_TILES_URL) : themed;
+  }, [query.data, isDark, satellite]);
   return { style, isError: query.isError };
+}
+
+const SATELLITE_KEY = 'garita.map.satellite';
+
+/** Preferencia Mapa/Satélite de este navegador; si el almacenamiento falla, arranca en Mapa. */
+export function useSatellitePreference() {
+  const [satellite, setSatellite] = useState(() => {
+    try {
+      return localStorage.getItem(SATELLITE_KEY) === 'on';
+    } catch {
+      return false;
+    }
+  });
+  const change = (next: boolean) => {
+    setSatellite(next);
+    try {
+      localStorage.setItem(SATELLITE_KEY, next ? 'on' : 'off');
+    } catch {
+      // Sin almacenamiento (modo privado): la elección dura lo que dura la página.
+    }
+  };
+  return [satellite, change] as const;
 }
 
 /** Tema según la clase `.dark` del documento (la pone ThemeProvider). */

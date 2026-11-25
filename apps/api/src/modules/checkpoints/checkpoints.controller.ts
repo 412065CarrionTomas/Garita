@@ -13,6 +13,7 @@ import {
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
+  checkpointArrangementInputSchema,
   checkpointInputSchema,
   checkpointListQuerySchema,
   includeNfcTagQuerySchema,
@@ -58,6 +59,20 @@ export class CheckpointsController {
     const input = checkpointInputSchema.safeParse(body);
     if (!input.success) throw new BadRequestException('Los datos enviados no son válidos');
     return this.checkpoints.create(siteId, input.data, user);
+  }
+
+  @Patch('predios/:id/puntos/orden')
+  @Roles('admin')
+  @ApiResponse({ status: 200, description: 'Puntos del predio con su nuevo orden y ubicación.' })
+  @ApiResponse({ status: 409, description: 'Los puntos cambiaron o alguno quedó a más de 1 km.' })
+  arrange(
+    @Param('id') siteId: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const input = checkpointArrangementInputSchema.safeParse(body);
+    if (!input.success) throw new BadRequestException('Los datos enviados no son válidos');
+    return this.checkpoints.arrange(siteId, input.data, user);
   }
 
   @Patch('puntos/:id')

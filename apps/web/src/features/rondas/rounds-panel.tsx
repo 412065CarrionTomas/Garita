@@ -1,19 +1,27 @@
 import { useQuery } from '@tanstack/react-query';
-import { defaultGraceMinutes, previewWindows, roundInputSchema } from '@garita/shared';
+import { defaultRouteInput, roundRouteSchema, type LngLat } from '@garita/shared';
 import { useState } from 'react';
 import { z } from 'zod';
-import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
-import { useBusy } from '@/lib/use-busy';
-import { useAuth } from '../auth/auth-context';
-
+import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { apiGet, apiPost } from '@/lib/api-client';
+import { useAuth } from '../auth/auth-context';
+import { cn } from '@/lib/utils';
+import { useFillHeight } from '@/lib/use-fill-height';
+import { RoundEditor } from './round-editor';
+import { RouteEditor } from './route-editor';
+import { resolveRoute, storedRoute, storedRouteInput } from './route-draft';
 
-const checkpointsSchema = z.array(z.looseObject({ id: z.string(), name: z.string() }));
+const checkpointsSchema = z.array(
+  z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    latitude: z.coerce.number().optional(),
+    longitude: z.coerce.number().optional(),
+  }),
+);
 const roundsSchema = z.array(
   z.looseObject({
     id: z.string(),
@@ -25,6 +33,7 @@ const roundsSchema = z.array(
         windowStartLocal: z.string(),
         windowEndLocal: z.string(),
         graceMinutes: z.number(),
+        route: z.unknown().optional(),
         checkpoints: z.array(
           z.looseObject({
             position: z.number(),
@@ -37,9 +46,11 @@ const roundsSchema = z.array(
 );
 const idSchema = z.looseObject({ id: z.string() });
 
+/** Rondas del predio: la lista y, al crear o editar una, el editor con el mapa. */
 export function RoundsPanel({ site }: { site: { id: string; status: 'active' | 'inactive' } }) {
   const { user } = useAuth();
-  const canWrite = user?.role === 'admin' || user?.role === 'supervisor';
+  const canWrite =
+    (user?.role === 'admin' || user?.role === 'supervisor') && site.status === 'active';
   const rounds = useQuery({
     queryKey: ['rondas', site.id],
     queryFn: () => apiGet(`/predios/${site.id}/rondas`, roundsSchema),
@@ -48,410 +59,252 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
     queryKey: ['puntos', site.id],
     queryFn: () => apiGet(`/predios/${site.id}/puntos`, checkpointsSchema),
   });
-  const [name, setName] = useState('');
-  const { busy, run } = useBusy();
-  const [frequency, setFrequency] = useState(120);
-  const [start, setStart] = useState('22:00');
-  const [end, setEnd] = useState('06:00');
-  const [grace, setGrace] = useState(15);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [editingId, setEditingId] = useState<string>();
+  // undefined = lista; null = ronda nueva; string = ronda que se edita.
+  const [editingId, setEditingId] = useState<string | null>();
   const [confirmId, setConfirmId] = useState<string>();
   const [message, setMessage] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
-  const labels = previewWindows({
-    windowStartLocal: start,
-    windowEndLocal: end,
-    frequencyMinutes: frequency,
+  const [previewId, setPreviewId] = useState<string>();
+  const [measureFill, fillHeight] = useFillHeight<HTMLDivElement>();
+
+  if (editingId !== undefined) {
+    const round = rounds.data?.find((item) => item.id === editingId);
+    const sharedIds = new Set(
+      rounds.data
+        ?.filter((item) => item.id !== editingId && item.status === 'active')
+        .flatMap(
+          (item) => item.currentVersion?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [],
+        ),
+    );
+    return points.isPending ? (
+      <p role="status">Cargando puntos…</p>
+    ) : (
+      <RoundEditor
+        key={editingId ?? 'nueva'}
+        siteId={site.id}
+        points={points.data ?? []}
+        round={round}
+        sharedIds={sharedIds}
+        onClose={(saved) => {
+          setEditingId(undefined);
+          if (saved) {
+            setMessage(saved);
+            void rounds.refetch();
+          }
+        }}
+      />
+    );
+  }
+
+  const located = (points.data ?? []).flatMap((p) =>
+    p.latitude !== undefined && p.longitude !== undefined
+      ? [{ id: p.id, name: p.name, lat: p.latitude, lng: p.longitude }]
+      : [],
+  );
+  const preview = rounds.data?.find((round) => round.id === previewId) ?? rounds.data?.[0];
+  const previewIds =
+    preview?.currentVersion?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [];
+  const previewCoords = previewIds.flatMap((id) => {
+    const point = located.find((p) => p.id === id);
+    return point ? [[point.lng, point.lat] as LngLat] : [];
   });
-  const save = () => run(saveNow);
-  const saveNow = async () => {
-    const parsed = roundInputSchema.safeParse({
-      name,
-      checkpointIds: selected,
-      frequencyMinutes: frequency,
-      windowStartLocal: start,
-      windowEndLocal: end,
-      graceMinutes: grace,
-    });
-    if (!parsed.success) {
-      const nextErrors = parsed.error.issues.reduce<Record<string, string[]>>((errors, issue) => {
-        const field = String(issue.path[0] ?? 'form');
-        errors[field] = [...(errors[field] ?? []), issue.message];
-        return errors;
-      }, {});
-      setFieldErrors(nextErrors);
-      setMessage('');
-      return;
-    }
-    setFieldErrors({});
-    try {
-      if (editingId)
-        await apiPatch(`/rondas/${editingId}`, parsed.data, roundInputSchema, idSchema);
-      else await apiPost(`/predios/${site.id}/rondas`, parsed.data, roundInputSchema, idSchema);
-      setMessage(
-        editingId
-          ? 'Ronda actualizada. Los cambios aplican a los turnos futuros.'
-          : 'Ronda creada.',
-      );
-      setEditingId(undefined);
-      await rounds.refetch();
-    } catch {
-      setMessage('No se pudo guardar la ronda. Verificá los puntos y el nombre.');
-    }
-  };
+  const previewRoute =
+    storedRouteInput(preview?.currentVersion?.route) ?? defaultRouteInput(previewIds.length);
+  const previewStored = storedRoute(preview?.currentVersion?.route);
+  const previewDisplay =
+    previewStored ?? resolveRoute(previewRoute, previewCoords, new Map()).display;
+
   return (
-    <section className="mt-4" aria-labelledby={`rounds-${site.id}`}>
-      <Card className="border-0 py-0">
-        <CardHeader>
-          <h3
-            id={`rounds-${site.id}`}
-            className="font-cond text-xl font-semibold uppercase tracking-wider"
-          >
+    <section
+      aria-labelledby={`rounds-${site.id}`}
+      className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+    >
+      <div className="grid gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 id={`rounds-${site.id}`} className="sr-only">
             Rondas
           </h3>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {rounds.isPending ? (
-            <p role="status">Cargando rondas…</p>
-          ) : (
-            rounds.data?.map((round) => (
-              <article key={round.id} className="space-y-3 border-b border-border pb-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h4 className="font-medium">{round.name}</h4>
-                  <StatusBadge tone={round.status === 'active' ? 'success' : 'neutral'}>
-                    {round.status === 'active' ? 'Activo' : 'Inactivo'}
-                  </StatusBadge>
-                </div>
-                <p className="tabular-nums text-muted-foreground">
-                  {round.currentVersion?.windowStartLocal}–{round.currentVersion?.windowEndLocal} ·
-                  cada {round.currentVersion?.frequencyMinutes} min
-                </p>
-                <ol>
-                  {round.currentVersion?.checkpoints.map(({ checkpoint }) => (
-                    <li key={checkpoint.id}>{checkpoint.name}</li>
-                  ))}
-                </ol>
-                {round.status === 'active' && canWrite && (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingId(round.id);
-                        setName(round.name);
-                        setFrequency(round.currentVersion?.frequencyMinutes ?? 120);
-                        setStart(round.currentVersion?.windowStartLocal ?? '22:00');
-                        setEnd(round.currentVersion?.windowEndLocal ?? '06:00');
-                        setGrace(round.currentVersion?.graceMinutes ?? 15);
-                        setSelected(
-                          round.currentVersion?.checkpoints.map(
-                            ({ checkpoint }) => checkpoint.id,
-                          ) ?? [],
-                        );
-                      }}
-                    >
-                      Editar
-                    </Button>
-                    <Button
-                      variant="ghostDestructive"
-                      size="sm"
-                      onClick={() => {
-                        setConfirmId(round.id);
-                      }}
-                    >
-                      Dar de baja
-                    </Button>
-                  </div>
-                )}
-                {confirmId === round.id && (
-                  <Alert
-                    role="alertdialog"
-                    aria-label="Confirmar baja"
-                    className="space-y-3 border-warning bg-warning-soft text-warning"
-                  >
-                    <p>¿Dar de baja {round.name}?</p>
-                    <Button
-                      variant="destructive"
-                      onClick={() => {
-                        void apiPost(`/rondas/${round.id}/baja`, {}, z.object({}), idSchema).then(
-                          () => rounds.refetch(),
-                        );
-                        setConfirmId(undefined);
-                      }}
-                    >
-                      Confirmar baja
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setConfirmId(undefined);
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                  </Alert>
-                )}
-              </article>
-            ))
+          {message && (
+            <p role="status" className="text-sm">
+              {message}
+            </p>
           )}
-          {canWrite && site.status === 'active' && (
-            <form
-              className="grid gap-3"
-              noValidate
-              onSubmit={(event) => {
-                event.preventDefault();
-                void save();
+          {canWrite && (
+            <Button
+              className="ml-auto"
+              onClick={() => {
+                setMessage('');
+                setEditingId(null);
               }}
             >
-              <h4 className="font-cond text-xl font-semibold uppercase tracking-wider">
-                {editingId ? 'Editar ronda' : 'Nueva ronda'}
-              </h4>
-              <Label className="grid min-w-0 gap-2" htmlFor="round-name">
-                Nombre
-                <Input
-                  id="round-name"
-                  aria-invalid={Boolean(fieldErrors.name)}
-                  aria-describedby={fieldErrors.name ? 'round-name-error' : undefined}
-                  className="w-full"
-                  value={name}
-                  onChange={(event) => {
-                    setName(event.target.value);
-                  }}
-                  required
-                />
-              </Label>
-              {fieldErrors.name?.map((error) => (
-                <p className="text-sm text-danger" id="round-name-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-frequency">
-                Frecuencia (minutos)
-                <Input
-                  id="round-frequency"
-                  aria-invalid={Boolean(fieldErrors.frequencyMinutes)}
-                  aria-describedby={
-                    fieldErrors.frequencyMinutes ? 'round-frequency-error' : undefined
-                  }
-                  className="w-full"
-                  type="number"
-                  min="15"
-                  max="1440"
-                  value={frequency}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    setFrequency(next);
-                    setGrace(defaultGraceMinutes(next));
-                  }}
-                />
-              </Label>
-              {fieldErrors.frequencyMinutes?.map((error) => (
-                <p className="text-sm text-danger" id="round-frequency-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-start">
-                Inicio de franja
-                <Input
-                  id="round-start"
-                  aria-invalid={Boolean(fieldErrors.windowStartLocal)}
-                  aria-describedby={fieldErrors.windowStartLocal ? 'round-start-error' : undefined}
-                  className="w-full"
-                  type="time"
-                  value={start}
-                  onChange={(event) => {
-                    setStart(event.target.value);
-                  }}
-                />
-              </Label>
-              {fieldErrors.windowStartLocal?.map((error) => (
-                <p className="text-sm text-danger" id="round-start-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-end">
-                Fin de franja
-                <Input
-                  id="round-end"
-                  aria-invalid={Boolean(fieldErrors.windowEndLocal)}
-                  aria-describedby={fieldErrors.windowEndLocal ? 'round-end-error' : undefined}
-                  className="w-full"
-                  type="time"
-                  value={end}
-                  onChange={(event) => {
-                    setEnd(event.target.value);
-                  }}
-                />
-              </Label>
-              {fieldErrors.windowEndLocal?.map((error) => (
-                <p className="text-sm text-danger" id="round-end-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              {start === end && <p>Todo el día (24 h)</p>}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-grace">
-                Gracia (minutos; predeterminada {defaultGraceMinutes(frequency)}, máximo{' '}
-                {Math.min(60, frequency / 2)})
-                <Input
-                  id="round-grace"
-                  aria-invalid={Boolean(fieldErrors.graceMinutes)}
-                  aria-describedby={fieldErrors.graceMinutes ? 'round-grace-error' : undefined}
-                  className="w-full"
-                  type="number"
-                  min="0"
-                  max="60"
-                  value={grace}
-                  onChange={(event) => {
-                    setGrace(Number(event.target.value));
-                  }}
-                />
-              </Label>
-              {fieldErrors.graceMinutes?.map((error) => (
-                <p className="text-sm text-danger" id="round-grace-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <fieldset className="space-y-3">
-                <legend className="mb-3 font-medium">Puntos en orden de recorrido</legend>
-                {fieldErrors.checkpointIds?.map((error) => (
-                  <p className="text-sm text-danger" id="round-checkpoints-error" key={error}>
-                    {error}
-                  </p>
-                ))}
-                {points.data?.map((point) => (
-                  <Label key={point.id} className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(point.id)}
-                      onChange={(event) => {
-                        setSelected(
-                          event.target.checked
-                            ? [...selected, point.id]
-                            : selected.filter((id) => id !== point.id),
-                        );
-                      }}
-                    />{' '}
-                    {point.name}
-                  </Label>
-                ))}
-              </fieldset>
-              <ol
-                aria-label="Orden de puntos"
-                onDragOver={(event) => {
-                  event.preventDefault();
-                }}
-              >
-                {selected.map((pointId, index) => {
-                  const point = points.data?.find(({ id }) => id === pointId);
-                  const shared = rounds.data?.some(
-                    (round) =>
-                      round.id !== editingId &&
-                      round.currentVersion?.checkpoints.some(
-                        ({ checkpoint }) => checkpoint.id === pointId,
-                      ),
-                  );
+              Nueva ronda
+            </Button>
+          )}
+        </div>
+        {rounds.isPending ? (
+          <p role="status">Cargando rondas…</p>
+        ) : rounds.isError ? (
+          <Alert variant="destructive">No se pudieron cargar las rondas.</Alert>
+        ) : rounds.data.length === 0 ? (
+          <EmptyState
+            title="Todavía no hay rondas"
+            description="Creá una ronda para elegir sus puntos y trazar el recorrido en el mapa."
+          />
+        ) : (
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th scope="col" className="t-label h-9 px-4 text-left">
+                    Ronda
+                  </th>
+                  <th scope="col" className="t-label px-4 text-left">
+                    Franja
+                  </th>
+                  <th scope="col" className="t-label px-4 text-left">
+                    Puntos
+                  </th>
+                  <th scope="col" className="t-label px-4 text-left">
+                    Recorrido
+                  </th>
+                  <th scope="col" className="t-label px-4 text-left">
+                    Estado
+                  </th>
+                  <th scope="col" className="px-4">
+                    <span className="sr-only">Acciones</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rounds.data.map((round) => {
+                  const version = round.currentVersion;
+                  const traced = roundRouteSchema.safeParse(version?.route).success;
                   return (
-                    <li
-                      key={pointId}
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData('text/plain', pointId);
-                      }}
-                      onDrop={(event) => {
-                        const source = event.dataTransfer.getData('text/plain');
-                        setSelected((items) => {
-                          const reordered = [...items];
-                          const from = reordered.indexOf(source);
-                          if (from >= 0) {
-                            reordered.splice(from, 1);
-                            reordered.splice(index, 0, source);
-                          }
-                          return reordered;
-                        });
-                      }}
-                      className="flex flex-wrap items-center gap-2"
-                    >
-                      {point?.name}
-                      {shared && (
-                        <span>Compartido con otra ronda (un registro cuenta para ambas).</span>
+                    <tr
+                      key={round.id}
+                      className={cn(
+                        'border-t border-border align-middle',
+                        round.id === preview?.id && 'bg-muted',
                       )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        type="button"
-                        aria-label={`Subir ${point?.name}`}
-                        disabled={index === 0}
-                        onClick={() => {
-                          setSelected((items) => {
-                            const copy = [...items];
-                            const current = copy[index];
-                            const previous = copy[index - 1];
-                            if (current !== undefined && previous !== undefined) {
-                              copy[index - 1] = current;
-                              copy[index] = previous;
-                            }
-                            return copy;
-                          });
-                        }}
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        type="button"
-                        aria-label={`Bajar ${point?.name}`}
-                        disabled={index === selected.length - 1}
-                        onClick={() => {
-                          setSelected((items) => {
-                            const copy = [...items];
-                            const current = copy[index];
-                            const next = copy[index + 1];
-                            if (current !== undefined && next !== undefined) {
-                              copy[index] = next;
-                              copy[index + 1] = current;
-                            }
-                            return copy;
-                          });
-                        }}
-                      >
-                        ↓
-                      </Button>
-                    </li>
+                    >
+                      <td className="h-14 px-4">
+                        <button
+                          type="button"
+                          aria-pressed={round.id === preview?.id}
+                          className="text-left font-semibold underline-offset-4 hover:underline"
+                          onClick={() => {
+                            setPreviewId(round.id);
+                          }}
+                        >
+                          {round.name}
+                        </button>
+                      </td>
+                      <td className="px-4 tabular-nums">
+                        {version?.windowStartLocal}–{version?.windowEndLocal} · cada{' '}
+                        {version?.frequencyMinutes} min
+                      </td>
+                      <td className="px-4 tabular-nums">{version?.checkpoints.length ?? 0}</td>
+                      <td className="px-4">
+                        <StatusBadge tone={traced ? 'info' : 'neutral'}>
+                          {traced ? 'Trazado' : 'Sin trazar'}
+                        </StatusBadge>
+                      </td>
+                      <td className="px-4">
+                        <StatusBadge tone={round.status === 'active' ? 'success' : 'neutral'}>
+                          {round.status === 'active' ? 'Activo' : 'Inactivo'}
+                        </StatusBadge>
+                      </td>
+                      <td className="px-4 text-right whitespace-nowrap">
+                        {round.status === 'active' && canWrite && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Editar ${round.name}`}
+                              onClick={() => {
+                                setMessage('');
+                                setEditingId(round.id);
+                              }}
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              variant="ghostDestructive"
+                              size="sm"
+                              aria-label={`Dar de baja ${round.name}`}
+                              onClick={() => {
+                                setConfirmId(round.id);
+                              }}
+                            >
+                              Dar de baja
+                            </Button>
+                          </>
+                        )}
+                        {confirmId === round.id && (
+                          <Alert
+                            role="alertdialog"
+                            aria-label="Confirmar baja"
+                            className="mt-2 space-y-3 border-warning bg-warning-soft text-left text-warning"
+                          >
+                            <p>¿Dar de baja {round.name}?</p>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="destructive"
+                                onClick={() => {
+                                  setConfirmId(undefined);
+                                  void apiPost(
+                                    `/rondas/${round.id}/baja`,
+                                    {},
+                                    z.object({}),
+                                    idSchema,
+                                  )
+                                    .then(() => rounds.refetch())
+                                    .catch(() => {
+                                      setMessage(
+                                        'No se pudo dar de baja la ronda. Intentá de nuevo.',
+                                      );
+                                    });
+                                }}
+                              >
+                                Confirmar baja
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setConfirmId(undefined);
+                                }}
+                              >
+                                Cancelar
+                              </Button>
+                            </div>
+                          </Alert>
+                        )}
+                      </td>
+                    </tr>
                   );
                 })}
-              </ol>
-              <div>
-                <h5 className="mb-2 font-medium">Vista previa de ventanas</h5>
-                <ol
-                  className="grid gap-2 tabular-nums text-muted-foreground sm:grid-cols-2"
-                  aria-label="Vista previa de ventanas"
-                >
-                  {labels.map((label) => (
-                    <li key={label}>{label}</li>
-                  ))}
-                </ol>
-              </div>
-              {(Object.keys(fieldErrors).length > 1 || Boolean(fieldErrors.form ?? message)) && (
-                <Alert variant="destructive" role="alert" aria-label="Errores del formulario">
-                  {message && <p>{message}</p>}
-                  {Object.keys(fieldErrors).length > 1 &&
-                    Object.values(fieldErrors)
-                      .flat()
-                      .map((error) => <p key={error}>{error}</p>)}
-                  {fieldErrors.form?.map((error) => (
-                    <p key={error}>{error}</p>
-                  ))}
-                </Alert>
-              )}
-              <Button type="submit" disabled={busy}>
-                Guardar ronda
-              </Button>
-            </form>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {/* El recorrido de la ronda elegida, a la vista sin entrar al editor. */}
+      <div
+        aria-label={preview ? `Recorrido de ${preview.name}` : 'Puntos del predio'}
+        ref={measureFill}
+        style={{ height: fillHeight }}
+        className="overflow-hidden rounded-md border border-border xl:sticky xl:top-4"
+      >
+        {/* Con el recorrido guardado se dibuja aunque falte algún punto (dado de baja después). */}
+        {located.length > 0 &&
+          (previewStored !== null || previewCoords.length === previewIds.length) && (
+            <RouteEditor
+              points={located}
+              selected={previewIds}
+              route={previewRoute}
+              display={previewDisplay}
+            />
           )}
-        </CardContent>
-      </Card>
+      </div>
     </section>
   );
 }
