@@ -201,6 +201,7 @@ export function applySiteAssignmentFilter(
   return { ...filtered, where: { ...where, ...(filtered.where as object) } };
 }
 
+const CREATE_OPERATIONS: readonly string[] = ['create', 'createMany', 'createManyAndReturn'];
 const CLIENT_OWN_ROW_MODELS: readonly string[] = [
   'ReportExport',
   'UserViewPreference',
@@ -225,16 +226,23 @@ export function addClientFilter(
   }
   // Filas propias del usuario: exportaciones, diseño de pantallas y fijados.
   if (CLIENT_OWN_ROW_MODELS.includes(model)) {
-    const writes = [args.data, args.create, args.update].filter((value) => value !== undefined);
-    for (const write of writes) {
-      for (const row of Array.isArray(write) ? write : [write]) {
-        if (!isRecord(row) || row.userId !== user.userId || Object.hasOwn(row, 'user'))
-          throw new ForbiddenException('Solo se registran datos del usuario autenticado');
-      }
-    }
+    const creating = operation !== undefined && CREATE_OPERATIONS.includes(operation);
+    const rows = (write: unknown): unknown[] =>
+      write === undefined ? [] : Array.isArray(write) ? write : [write];
+    // Lo que se crea debe ser del usuario. Lo que se actualiza ya lo acota el where: solo se
+    // rechaza si intenta pasar la fila a otro usuario.
+    for (const row of [...rows(creating ? args.data : undefined), ...rows(args.create)])
+      if (!isRecord(row) || row.userId !== user.userId || Object.hasOwn(row, 'user'))
+        throw new ForbiddenException('Solo se registran datos del usuario autenticado');
+    for (const row of [...rows(creating ? undefined : args.data), ...rows(args.update)])
+      if (
+        !isRecord(row) ||
+        (Object.hasOwn(row, 'userId') && row.userId !== user.userId) ||
+        Object.hasOwn(row, 'user')
+      )
+        throw new ForbiddenException('Solo se registran datos del usuario autenticado');
     // create/createMany no aceptan where; las escrituras ya verificaron el propietario.
-    if (operation && ['create', 'createMany', 'createManyAndReturn'].includes(operation))
-      return args;
+    if (creating) return args;
     return { ...args, where: { ...where, AND: [where, { userId: user.userId }] } };
   }
   if (model === 'Site') return { ...args, where: { ...where, AND: [where, site] } };
