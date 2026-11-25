@@ -30,7 +30,7 @@ if (!apiKey) throw new Error('ORS_API_KEY es obligatoria: sin clave el recorrido
 const builder = new RouteBuilder(
   new OpenRouteServiceRouting(
     apiKey,
-    process.env.ORS_URL ?? 'https://api.openrouteservice.org',
+    process.env.ORS_URL ?? 'https://api.heigit.org/openrouteservice',
     // Sin caché: cada ronda se pide una sola vez.
     { get: () => Promise.resolve(null), set: () => Promise.resolve() },
   ),
