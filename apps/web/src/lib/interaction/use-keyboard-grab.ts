@@ -67,7 +67,10 @@ export function useKeyboardGrab(options: KeyboardGrabOptions): {
   // Desmontarse con algo tomado (bloque oculto, ventana angosta) cancela: no queda un gesto abierto.
   useEffect(
     () => () => {
-      if (grabbedRef.current) latest.current.onCancel();
+      if (!grabbedRef.current) return;
+      // Primero se suelta: un blur durante el desmontaje no vuelve a liberar el gesto.
+      grabbedRef.current = false;
+      latest.current.onCancel();
     },
     [],
   );
