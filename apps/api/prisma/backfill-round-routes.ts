@@ -40,7 +40,8 @@ const PAUSE_MS = 1600;
 /** Al llegar al límite por minuto se espera a que se renueve antes de seguir. */
 const RATE_LIMIT_PAUSE_MS = 60_000;
 /** Fallas que no dependen de la ronda: guardarla recta impediría recalcularla después. */
-const TRANSIENT = new Set<RouteFailureReason>(['rate_limited', 'unavailable', 'skipped']);
+// 'skipped' no entra: solo acompaña a una falla de un punto (sin calle), que no se arregla sola.
+const TRANSIENT = new Set<RouteFailureReason>(['rate_limited', 'unavailable']);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main(): Promise<void> {
