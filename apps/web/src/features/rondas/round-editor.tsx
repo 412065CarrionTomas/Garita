@@ -15,6 +15,7 @@ import {
 } from '@garita/shared';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { z } from 'zod';
+import { FloatingNotice } from '@/components/floating-notice';
 import { SegmentedFilter } from '@/components/segmented-filter';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -71,6 +72,16 @@ export interface EditorRound {
   } | null;
 }
 
+/** Campos que muestran su error al lado: el resto va al aviso de arriba. */
+const INLINE_FIELDS = new Set([
+  'name',
+  'checkpointIds',
+  'frequencyMinutes',
+  'windowStartLocal',
+  'windowEndLocal',
+  'graceMinutes',
+]);
+
 const TOOLS: { value: RouteTool; label: string }[] = [
   { value: 'select', label: 'Seleccionar' },
   { value: 'chain', label: 'Sumar puntos de control' },
@@ -92,20 +103,26 @@ export function RoundEditor({
   siteId,
   points,
   round,
+  copy = false,
   sharedIds,
   onClose,
 }: {
   siteId: string;
   points: EditorPoint[];
   round?: EditorRound;
+  /** Duplicar: arranca con los datos de `round` pero guarda una ronda nueva. */
+  copy?: boolean;
   /** Puntos que ya están en otra ronda del predio. */
   sharedIds: Set<string>;
   /** Vuelve a la lista; con `message` si se guardó. */
   onClose: (message?: string) => void;
 }) {
   const version = round?.currentVersion;
+  // La ronda que se modifica: al duplicar no hay ninguna, se crea otra.
+  const editing = copy ? undefined : round;
+  const initialName = round ? (copy ? `Copia de ${round.name}`.slice(0, 100) : round.name) : '';
   const initialIds = version?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [];
-  const [name, setName] = useState(round?.name ?? '');
+  const [name, setName] = useState(initialName);
   const [frequency, setFrequency] = useState(version?.frequencyMinutes ?? 120);
   const [start, setStart] = useState(version?.windowStartLocal ?? '22:00');
   const [end, setEnd] = useState(version?.windowEndLocal ?? '06:00');
@@ -140,8 +157,11 @@ export function RoundEditor({
   const [filter, setFilter] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [message, setMessage] = useState('');
-  const [notice, setNotice] = useState('');
-  const [summary, setSummary] = useState('');
+  // Aviso flotante; `id` nuevo en cada aviso para que el plazo de 10 s vuelva a empezar.
+  const [notice, setNotice] = useState<{ text: string; tone: 'info' | 'danger'; id: number }>();
+  const notify = (text: string, tone: 'info' | 'danger' = 'info') => {
+    setNotice((prev) => ({ text, tone, id: (prev?.id ?? 0) + 1 }));
+  };
   const [routeFailures, setRouteFailures] = useState<RouteFailure[]>();
   const { busy, run } = useBusy();
   const sectionRef = useRef<HTMLElement>(null);
@@ -191,11 +211,15 @@ export function RoundEditor({
       ).length;
       const failed = new Set(result.failures.map((f) => `${String(f.leg)}-${String(f.section)}`))
         .size;
-      setSummary(
-        failed
-          ? `Se calcularon ${String(streets - failed)} de ${String(streets)} partes por calles. ${String(failed)} no se pudieron calcular: ${failureMessages(result.failures, sent.route).join(' ')}`
-          : `Se calcularon las ${String(streets)} partes por calles.`,
-      );
+      if (failed)
+        notify(
+          `Se calcularon ${String(streets - failed)} de ${String(streets)} partes por calles. ${String(failed)} no se pudieron calcular: ${failureMessages(result.failures, sent.route).join(' ')}`,
+          'danger',
+        );
+      else notify(`Se calcularon las ${String(streets)} partes por calles.`);
+    },
+    onError: () => {
+      notify('No se pudo calcular el recorrido. Tu recorrido no se modificó: reintentá.', 'danger');
     },
   });
 
@@ -224,7 +248,6 @@ export function RoundEditor({
     setPast((items) => [...items.slice(-49), { selected, draft: { ids: selected, route } }]);
     setSelected(nextSelected);
     setDraft({ ids: nextSelected, route: nextRoute });
-    setNotice('');
   };
   const editRoute = (next: RouteInput) => {
     commit(selected, next);
@@ -252,8 +275,7 @@ export function RoundEditor({
   };
   const viaRoom = (l: number, s: number) => {
     const ok = (route.legs[l]?.sections[s]?.via.length ?? 0) < ROUTE_LIMITS.viaPerSection;
-    if (!ok)
-      setNotice(`Una parte admite hasta ${String(ROUTE_LIMITS.viaPerSection)} puntos de guía.`);
+    if (!ok) notify(`Una parte admite hasta ${String(ROUTE_LIMITS.viaPerSection)} puntos de guía.`);
     return ok;
   };
   /** Punto de guía tocado sobre la línea de la parte: va en su lugar a lo largo de la línea. */
@@ -335,7 +357,7 @@ export function RoundEditor({
   // Armar una ronda larga lleva tiempo: salir sin guardar pide confirmación si hubo cambios.
   const dirty =
     past.length > 0 ||
-    name !== (round?.name ?? '') ||
+    name !== initialName ||
     frequency !== (version?.frequencyMinutes ?? 120) ||
     start !== (version?.windowStartLocal ?? '22:00') ||
     end !== (version?.windowEndLocal ?? '06:00') ||
@@ -357,28 +379,29 @@ export function RoundEditor({
       ...(allowStraight ? { allowStraight } : {}),
     });
     if (!parsed.success) {
-      setFieldErrors(
-        parsed.error.issues.reduce<Record<string, string[]>>((errors, issue) => {
-          const field = String(issue.path[0] ?? 'form');
-          // El mensaje genérico de zod para una lista vacía no le dice nada a quien arma la ronda.
-          const text =
-            field === 'checkpointIds' && issue.code === 'too_small'
-              ? 'Sumá al menos un punto a la ronda.'
-              : issue.message;
-          errors[field] = [...(errors[field] ?? []), text];
-          return errors;
-        }, {}),
-      );
+      const errors = parsed.error.issues.reduce<Record<string, string[]>>((all, issue) => {
+        const field = String(issue.path[0] ?? 'form');
+        // El mensaje genérico de zod para una lista vacía no le dice nada a quien arma la ronda.
+        const text =
+          field === 'checkpointIds' && issue.code === 'too_small'
+            ? 'Sumá al menos un punto a la ronda.'
+            : issue.message;
+        all[field] = [...(all[field] ?? []), text];
+        return all;
+      }, {});
+      setFieldErrors(errors);
+      // El error de los puntos se muestra en la pestaña Orden: si estaba en Tramos no se vería.
+      if (errors.checkpointIds) setTab('order');
       setMessage('');
       return;
     }
     setFieldErrors({});
     setRouteFailures(undefined);
     try {
-      if (round) await apiPatch(`/rondas/${round.id}`, parsed.data, roundInputSchema, idSchema);
+      if (editing) await apiPatch(`/rondas/${editing.id}`, parsed.data, roundInputSchema, idSchema);
       else await apiPost(`/predios/${siteId}/rondas`, parsed.data, roundInputSchema, idSchema);
       onClose(
-        round ? 'Ronda actualizada. Los cambios aplican a los turnos futuros.' : 'Ronda creada.',
+        editing ? 'Ronda actualizada. Los cambios aplican a los turnos futuros.' : 'Ronda creada.',
       );
     } catch (error) {
       // El ruteo falló: no se guardó nada y el editor queda como estaba para reintentar.
@@ -404,6 +427,10 @@ export function RoundEditor({
       </p>
     ));
   const errorCount = Object.keys(fieldErrors).length;
+  // Errores sin lugar junto a un campo: van al aviso de arriba aunque sean uno solo.
+  const looseErrors = Object.entries(fieldErrors)
+    .filter(([field]) => !INLINE_FIELDS.has(field))
+    .flatMap(([, errors]) => errors);
   const matches = (id: string) =>
     !filter || nameOf(id).toLowerCase().includes(filter.toLowerCase());
   const outside = points.filter((p) => !selected.includes(p.id) && matches(p.id));
@@ -425,7 +452,7 @@ export function RoundEditor({
       >
         {/* Sin título ni «volver» a la vista: se sale con Cancelar. */}
         <h3 id="round-editor-title" className="sr-only">
-          {round ? 'Editar ronda' : 'Nueva ronda'}
+          {editing ? 'Editar ronda' : copy ? 'Duplicar ronda' : 'Nueva ronda'}
         </h3>
         <div className="grid min-w-56 gap-1.5">
           <Label htmlFor="round-name">Nombre</Label>
@@ -463,12 +490,12 @@ export function RoundEditor({
             Cancelar
           </Button>
           <Button type="submit" disabled={busy}>
-            {busy ? 'Guardando…' : 'Guardar ronda'}
+            {busy ? 'Guardando…' : 'Guardar'}
           </Button>
         </div>
       </form>
 
-      {(errorCount > 1 || Boolean(fieldErrors.form ?? fieldErrors.route ?? message)) && (
+      {(errorCount > 1 || looseErrors.length > 0 || Boolean(message)) && (
         <Alert
           variant="destructive"
           role="alert"
@@ -476,14 +503,9 @@ export function RoundEditor({
           className="m-3 mb-0"
         >
           {message && <p>{message}</p>}
-          {errorCount > 1 &&
-            Object.values(fieldErrors)
-              .flat()
-              .map((error) => <p key={error}>{error}</p>)}
-          {fieldErrors.form?.map((error) => (
+          {(errorCount > 1 ? Object.values(fieldErrors).flat() : looseErrors).map((error) => (
             <p key={error}>{error}</p>
           ))}
-          {errorCount === 1 && fieldErrors.route?.map((error) => <p key={error}>{error}</p>)}
         </Alert>
       )}
       {routeFailures && (
@@ -672,7 +694,6 @@ export function RoundEditor({
               size="sm"
               disabled={calculate.isPending || estimate.pending === 0}
               onClick={() => {
-                setSummary('');
                 calculate.mutate({ siteId, checkpointIds: selected, route });
               }}
             >
@@ -710,48 +731,52 @@ export function RoundEditor({
             )}
           </div>
 
-          <div className="grid gap-2 border-t border-border px-3 py-2 text-sm">
-            <RouteInspector
-              route={route}
-              parts={parts}
-              selection={current}
-              meters={partMeters}
-              stale={stale}
-              pointName={nameOf}
-              pointOrder={(id) => selected.indexOf(id)}
-              onSetMode={(l, s, mode: RouteMode) => {
-                const next = routeEdits.setMode(route, l, s, mode);
-                editRoute(next);
-                // Si se unió con la parte anterior (mismo modo y entra en el tope), la elegida es esa.
-                const joinedBack =
-                  s > 0 &&
-                  route.legs[l]?.sections[s - 1]?.mode === mode &&
-                  canJoinAt(route, l, s - 1, true);
-                select({ kind: 'part', l, s: joinedBack ? s - 1 : s });
-              }}
-              onSplit={split}
-              onMerge={merge}
-              onRemoveVia={removeGuide}
-              onRemoveWaypoint={(l, k) => {
-                editRoute(routeEdits.removeWaypoint(route, l, k));
-                select({ kind: 'part', l, s: k });
-              }}
-              onRemovePoint={(id) => {
-                removePoint(id);
-                setSelection(null);
-              }}
-            />
-            {calculate.isError && (
-              <p role="alert" className="text-danger">
-                No se pudo calcular el recorrido. Tu recorrido no se modificó: reintentá.
-              </p>
-            )}
-            <p role="status" aria-live="polite" className="text-muted-foreground empty:hidden">
-              {notice || summary}
-            </p>
-          </div>
+          {(current !== null || route.legs.length === 0) && (
+            <div className="grid gap-2 border-t border-border px-3 py-2 text-sm">
+              <RouteInspector
+                route={route}
+                parts={parts}
+                selection={current}
+                meters={partMeters}
+                stale={stale}
+                pointName={nameOf}
+                pointOrder={(id) => selected.indexOf(id)}
+                onSetMode={(l, s, mode: RouteMode) => {
+                  const next = routeEdits.setMode(route, l, s, mode);
+                  editRoute(next);
+                  // Si se unió con la parte anterior (mismo modo y entra en el tope), la elegida es esa.
+                  const joinedBack =
+                    s > 0 &&
+                    route.legs[l]?.sections[s - 1]?.mode === mode &&
+                    canJoinAt(route, l, s - 1, true);
+                  select({ kind: 'part', l, s: joinedBack ? s - 1 : s });
+                }}
+                onSplit={split}
+                onMerge={merge}
+                onRemoveVia={removeGuide}
+                onRemoveWaypoint={(l, k) => {
+                  editRoute(routeEdits.removeWaypoint(route, l, k));
+                  select({ kind: 'part', l, s: k });
+                }}
+                onRemovePoint={(id) => {
+                  removePoint(id);
+                  setSelection(null);
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
+      {notice && (
+        <FloatingNotice
+          key={notice.id}
+          text={notice.text}
+          tone={notice.tone}
+          onClose={() => {
+            setNotice(undefined);
+          }}
+        />
+      )}
     </section>
   );
 }

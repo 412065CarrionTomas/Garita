@@ -1,6 +1,6 @@
 import { defaultGraceMinutes, previewWindows } from '@garita/shared';
 import { ChevronDown } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -23,6 +23,18 @@ export function SchedulePicker({
   onChange: (schedule: Schedule) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDetailsElement>(null);
+  // Abierto, un toque fuera del cuadro lo cierra.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [open]);
   const hasError = Boolean(
     errors.frequencyMinutes ??
     errors.windowStartLocal ??
@@ -42,6 +54,7 @@ export function SchedulePicker({
     ));
   return (
     <details
+      ref={ref}
       className="relative"
       open={open || hasError}
       onToggle={(event) => {
@@ -59,7 +72,39 @@ export function SchedulePicker({
       <div className="absolute top-12 left-0 z-20 grid w-[min(36rem,90vw)] gap-3 rounded-md border-[1.5px] border-primary bg-card p-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="grid gap-1.5">
-            <Label htmlFor="round-frequency">Frecuencia (minutos)</Label>
+            <Label htmlFor="round-start" className="text-sm">
+              Inicio de franja
+            </Label>
+            <Input
+              id="round-start"
+              aria-invalid={Boolean(errors.windowStartLocal)}
+              aria-describedby={errors.windowStartLocal ? 'round-start-error' : undefined}
+              type="time"
+              value={schedule.start}
+              onChange={(event) => {
+                onChange({ ...schedule, start: event.target.value });
+              }}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="round-end" className="text-sm">
+              Fin de franja
+            </Label>
+            <Input
+              id="round-end"
+              aria-invalid={Boolean(errors.windowEndLocal)}
+              aria-describedby={errors.windowEndLocal ? 'round-end-error' : undefined}
+              type="time"
+              value={schedule.end}
+              onChange={(event) => {
+                onChange({ ...schedule, end: event.target.value });
+              }}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="round-frequency" className="text-sm">
+              Frecuencia (min)
+            </Label>
             <Input
               id="round-frequency"
               aria-invalid={Boolean(errors.frequencyMinutes)}
@@ -75,33 +120,9 @@ export function SchedulePicker({
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="round-start">Inicio de franja</Label>
-            <Input
-              id="round-start"
-              aria-invalid={Boolean(errors.windowStartLocal)}
-              aria-describedby={errors.windowStartLocal ? 'round-start-error' : undefined}
-              type="time"
-              value={schedule.start}
-              onChange={(event) => {
-                onChange({ ...schedule, start: event.target.value });
-              }}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="round-end">Fin de franja</Label>
-            <Input
-              id="round-end"
-              aria-invalid={Boolean(errors.windowEndLocal)}
-              aria-describedby={errors.windowEndLocal ? 'round-end-error' : undefined}
-              type="time"
-              value={schedule.end}
-              onChange={(event) => {
-                onChange({ ...schedule, end: event.target.value });
-              }}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="round-grace">Gracia (minutos)</Label>
+            <Label htmlFor="round-grace" className="text-sm">
+              Gracia (minutos)
+            </Label>
             <Input
               id="round-grace"
               aria-invalid={Boolean(errors.graceMinutes)}
@@ -117,7 +138,8 @@ export function SchedulePicker({
           </div>
         </div>
         <p id="round-grace-help" className="text-sm text-muted-foreground">
-          Gracia predeterminada {defaultGraceMinutes(schedule.frequency)} min, máximo{' '}
+          Gracia: minutos después del fin de cada ventana en que un escaneo todavía cuenta, marcado
+          como tarde. Sugerida {defaultGraceMinutes(schedule.frequency)}, entre 0 y{' '}
           {Math.min(60, schedule.frequency / 2)}.
           {schedule.start === schedule.end && ' Todo el día (24 h).'}
         </p>
@@ -125,7 +147,8 @@ export function SchedulePicker({
         {errorOf('windowStartLocal', 'round-start-error')}
         {errorOf('windowEndLocal', 'round-end-error')}
         {errorOf('graceMinutes', 'round-grace-error')}
-        <ol aria-label="Vista previa de ventanas" className="flex flex-wrap gap-1.5">
+        <p className="t-label text-muted-foreground">Ventanas (inicio–fin)</p>
+        <ol aria-label="Vista previa de ventanas" className="-mt-1.5 flex flex-wrap gap-1.5">
           {labels.map((label) => (
             <li key={label} className="t-stamp bg-muted px-2 py-1 tabular-nums">
               {label}

@@ -86,13 +86,8 @@ export function RouteInspector(props: RouteInspectorProps) {
   const { route, parts, selection } = props;
   if (route.legs.length === 0)
     return <p className="text-muted-foreground">Elegí dos o más puntos para armar el recorrido.</p>;
-  if (!selection)
-    return (
-      <p className="text-muted-foreground">
-        Tocá una línea para elegir su parte. En la parte elegida, un clic sobre la línea suma un
-        punto de guía. Los puntos se arrastran; clic derecho los elimina.
-      </p>
-    );
+  // Sin nada elegido no hay barra: cómo se edita está en la ayuda del editor.
+  if (!selection) return null;
 
   if (selection.kind === 'point') {
     const order = props.pointOrder(selection.id);
