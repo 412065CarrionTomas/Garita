@@ -168,7 +168,7 @@ it('includes the synchronization status in the detail, ignoring closures of repl
   });
 });
 
-it('keeps in-progress overnight shifts in the default today view, but not for an explicit date', async () => {
+it('keeps overnight shifts still running or inside their hours in the default today view, but not for an explicit date', async () => {
   const findMany = jest.fn<Promise<unknown[]>, [{ where: unknown }]>().mockResolvedValue([]);
   const whereOf = (call: number) => findMany.mock.calls[call]?.[0].where;
   const service = new SupervisionService(
@@ -184,7 +184,11 @@ it('keeps in-progress overnight shifts in the default today view, but not for an
   const serviceDate = new Date('2026-11-01T00:00:00.000Z');
   await service.list({}, user);
   expect(whereOf(0)).toMatchObject({
-    OR: [{ serviceDate }, { status: 'in_progress' }],
+    OR: [
+      { serviceDate },
+      { status: 'in_progress' },
+      { startsAt: { lte: now }, endsAt: { gt: now } },
+    ],
   });
   await service.list({ fecha: '2026-11-01' }, user);
   expect(whereOf(1)).toMatchObject({ serviceDate });

@@ -33,10 +33,18 @@ export class SupervisionService {
       day: '2-digit',
     }).format(now);
     const serviceDate = new Date(`${input.fecha ?? localToday}T00:00:00.000Z`);
-    // Default "today" view keeps overnight shifts started before midnight visible while still running.
+    // Default "today" view keeps overnight shifts started before midnight visible while they still
+    // matter: running, or still inside their scheduled hours (closed early and now uncovered, or
+    // never started / without a guard).
     const dateWhere = input.fecha
       ? { serviceDate }
-      : { OR: [{ serviceDate }, { status: 'in_progress' as const }] };
+      : {
+          OR: [
+            { serviceDate },
+            { status: 'in_progress' as const },
+            { startsAt: { lte: now }, endsAt: { gt: now } },
+          ],
+        };
     const shifts = await this.prisma.tenantPrisma.shift.findMany({
       where: {
         ...(user.suspension ? {} : dateWhere),
