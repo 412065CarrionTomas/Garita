@@ -175,6 +175,31 @@ it('si otro guardó mientras tanto, deja elegir y vuelve a guardar sobre lo nuev
   expect(item(retry, 'compliance')?.w).toBe(80);
 });
 
+it('si no puede traer el diseño del conflicto lo dice, y cancelar no deja avisos', async () => {
+  const user = await startEditing();
+  drag(screen.getByRole('button', { name: 'Cambiar el tamaño de Cumplimiento' }), 206, 0);
+  jest
+    .mocked(apiPut)
+    .mockRejectedValueOnce(new ApiError('conflicto', 409, { code: VIEW_PREFERENCE_CONFLICT_CODE }));
+  await user.click(screen.getByRole('button', { name: 'Guardar diseño' }));
+  const alert = await screen.findByText(/Tu diseño cambió desde otra pestaña/);
+  jest
+    .mocked(apiGet)
+    .mockImplementation((path: string) =>
+      path.startsWith('/mis-preferencias/')
+        ? Promise.reject(new Error('sin conexión'))
+        : api.respond(path),
+    );
+  await user.click(
+    within(alert.parentElement ?? alert).getByRole('button', { name: 'Ver el diseño guardado' }),
+  );
+  expect(await screen.findByText(/No pudimos traer el diseño guardado/)).toBeVisible();
+  expect(screen.queryByText(/No pudimos guardar el diseño/)).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+  await user.click(await screen.findByRole('button', { name: 'Descartar cambios' }));
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
 it('en pantallas angostas no ofrece editar', async () => {
   window.matchMedia = jest.fn().mockReturnValue({
     matches: false,

@@ -114,7 +114,7 @@ export function BlocksPanel({
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="outline" disabled={editor.saving}>
+        <Button variant="outline" disabled={editor.saving || editor.resolving}>
           <LayoutPanelLeft aria-hidden="true" />
           Bloques
           {hidden > 0 && (
