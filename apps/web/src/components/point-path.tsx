@@ -25,7 +25,8 @@ const R = 9;
 const BEND = 14; // el giro entre filas: 45°, tramo recto de 90°, 45°
 const PAD_X = BEND + R + 8;
 const PAD_TOP = R + 12;
-const PAD_BOTTOM = R + 24;
+const PAD_BOTTOM = R + 26;
+const DIGIT_W = 7; // ancho aproximado de un dígito text-xs condensado
 
 function layout(n: number) {
   const cols = Math.min(n, PER_ROW);
@@ -46,7 +47,8 @@ function layout(n: number) {
 /**
  * Camino lineal de una ronda: serpentea en filas de hasta 10 puntos y solo dobla a 45° y 90°.
  * Registrado = círculo lleno; próximo = círculo con aro; sin registro = contorno con cruz;
- * pendiente = hueco con línea punteada. Cada punto es un botón accesible por teclado.
+ * pendiente = hueco con línea punteada. El seleccionado lleva el número en azul con una barra
+ * corta debajo. Cada punto es un botón accesible por teclado.
  */
 export function PointPath({
   points,
@@ -125,15 +127,6 @@ export function PointPath({
             }}
           >
             <circle cx={x} cy={y} r={R + 8} className="fill-transparent" />
-            {selected && (
-              <circle
-                cx={x}
-                cy={y}
-                r={R + 10}
-                strokeWidth={3}
-                className="fill-none stroke-foreground"
-              />
-            )}
             {p.status === 'next' && (
               <circle
                 cx={x}
@@ -167,13 +160,26 @@ export function PointPath({
               textAnchor="middle"
               className={cn(
                 'font-cond text-xs tracking-wide',
-                lit || selected
-                  ? 'fill-foreground font-bold'
-                  : 'fill-muted-foreground font-semibold',
+                selected
+                  ? 'fill-info font-bold'
+                  : lit
+                    ? 'fill-foreground font-bold'
+                    : 'fill-muted-foreground font-semibold',
               )}
             >
               {i + 1}
             </text>
+            {selected && (
+              // Indicador de selección: barra corta bajo el número, del ancho del número.
+              <rect
+                x={x - (DIGIT_W * String(i + 1).length) / 2}
+                y={y + R + 21}
+                width={DIGIT_W * String(i + 1).length}
+                height={2.5}
+                rx={1.25}
+                className="fill-info"
+              />
+            )}
           </g>
         );
       })}
