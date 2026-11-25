@@ -21,6 +21,12 @@ export function ColumnResizer({
 }) {
   const { width, min, max, set, save } = column;
   const [dragging, setDragging] = useState(false);
+  // Soltar, cancelar el gesto o perder la captura terminan el arrastre: nunca queda pegado.
+  const finishDrag = () => {
+    if (!dragging) return;
+    setDragging(false);
+    save(width);
+  };
   return (
     <div
       role="separator"
@@ -35,6 +41,10 @@ export function ColumnResizer({
         className,
       )}
       onPointerDown={(event) => {
+        // Solo el botón principal: el clic derecho abre el menú y nunca suelta el arrastre.
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        // Sin esto, arrastrar selecciona el texto de las columnas.
+        event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         setDragging(true);
       }}
@@ -43,10 +53,9 @@ export function ColumnResizer({
         const box = container.current?.getBoundingClientRect();
         if (box?.width) set(((event.clientX - box.left) / box.width) * 100);
       }}
-      onPointerUp={() => {
-        setDragging(false);
-        save(width);
-      }}
+      onPointerUp={finishDrag}
+      onPointerCancel={finishDrag}
+      onLostPointerCapture={finishDrag}
       onKeyDown={(event) => {
         const next =
           event.key === 'ArrowLeft'
@@ -61,7 +70,7 @@ export function ColumnResizer({
         if (next === undefined) return;
         event.preventDefault();
         set(next);
-        save(Math.min(max, Math.max(min, next)));
+        save(next);
       }}
     >
       <span

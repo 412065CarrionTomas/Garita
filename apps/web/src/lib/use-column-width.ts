@@ -8,15 +8,16 @@ export function useColumnWidth(storageKey: string, initial: number, min: number,
   const clamp = (value: number) => Math.min(max, Math.max(min, value));
   const [width, setWidth] = useState(() => {
     try {
-      const saved = Number(localStorage.getItem(storageKey));
-      return saved ? clamp(saved) : initial;
+      const raw = localStorage.getItem(storageKey);
+      const saved = raw ? Number(raw) : NaN;
+      return Number.isFinite(saved) ? clamp(saved) : initial;
     } catch {
       return initial;
     }
   });
   const save = (value: number) => {
     try {
-      localStorage.setItem(storageKey, String(Math.round(value)));
+      localStorage.setItem(storageKey, String(Math.round(clamp(value))));
     } catch {
       /* Sin almacenamiento: el ancho vale solo para esta visita. */
     }
