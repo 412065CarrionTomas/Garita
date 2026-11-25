@@ -28,6 +28,7 @@ import { OrderList } from './order-list';
 import { RouteEditor, type RouteSelection, type RouteTool } from './route-editor';
 import {
   GUIDE_STEP_METERS,
+  canJoinAt,
   failureMessages,
   formatMeters,
   legMeters,
@@ -603,26 +604,24 @@ export function RoundEditor({
                 onRemoveGuide={removeGuide}
               />
             ) : (
-              <>
-                <OrderList
-                  selected={selected}
-                  outside={outside}
-                  visible={matches}
-                  nameOf={nameOf}
-                  route={route}
-                  meters={meters}
-                  parts={parts}
-                  stale={stale}
-                  sharedIds={sharedIds}
-                  focusId={current?.kind === 'point' ? current.id : null}
-                  onFocus={(id) => {
-                    select({ kind: 'point', id });
-                  }}
-                  onMove={moveTo}
-                  onRemove={removePoint}
-                  onAdd={addPoint}
-                />
-              </>
+              <OrderList
+                selected={selected}
+                outside={outside}
+                visible={matches}
+                nameOf={nameOf}
+                route={route}
+                meters={meters}
+                parts={parts}
+                stale={stale}
+                sharedIds={sharedIds}
+                focusId={current?.kind === 'point' ? current.id : null}
+                onFocus={(id) => {
+                  select({ kind: 'point', id });
+                }}
+                onMove={moveTo}
+                onRemove={removePoint}
+                onAdd={addPoint}
+              />
             )}
           </div>
         </aside>
@@ -723,10 +722,11 @@ export function RoundEditor({
               onSetMode={(l, s, mode: RouteMode) => {
                 const next = routeEdits.setMode(route, l, s, mode);
                 editRoute(next);
-                // Si se unió con la parte anterior (mismo modo), la parte elegida es esa.
-                const joined =
-                  (next.legs[l]?.sections.length ?? 0) < (route.legs[l]?.sections.length ?? 0);
-                const joinedBack = joined && route.legs[l]?.sections[s - 1]?.mode === mode;
+                // Si se unió con la parte anterior (mismo modo y entra en el tope), la elegida es esa.
+                const joinedBack =
+                  s > 0 &&
+                  route.legs[l]?.sections[s - 1]?.mode === mode &&
+                  canJoinAt(route, l, s - 1, true);
                 select({ kind: 'part', l, s: joinedBack ? s - 1 : s });
               }}
               onSplit={split}

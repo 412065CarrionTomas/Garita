@@ -136,6 +136,17 @@ describe('routeEdits', () => {
     expect(routeEdits.setMode(split, 0, 1, 'streets')).toEqual(guided);
   });
 
+  it('al quitar un cambio de modo de un tramo de tres partes no deja otro corte con el mismo modo', () => {
+    // Por calles [p1] · p2 · trazo libre [] · p3 · por calles []
+    const three = routeEdits.splitAtVia(routeEdits.splitAtVia(guided, 0, 0, 1), 0, 1, 0);
+    expect(three.legs[0]?.waypoints).toEqual([p2, p3]);
+    expect(routeEdits.mergeAtWaypoint(three, 0, 0)).toEqual(guided);
+    expect(routeEdits.removeWaypoint(three, 0, 0).legs[0]).toEqual({
+      waypoints: [],
+      sections: [{ mode: 'streets', via: [p1, p3] }],
+    });
+  });
+
   it('inserta el punto de guía según dónde se tocó a lo largo de la línea', () => {
     const line = [A, p1, p2, p3, B];
     expect(viaInsertIndex([p1, p2, p3], line, [0.0065, 0.0011])).toBe(2);

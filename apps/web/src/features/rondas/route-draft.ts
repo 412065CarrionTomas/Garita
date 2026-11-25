@@ -209,14 +209,15 @@ export const routeEdits = {
       const after = leg.sections[k + 1];
       const at = leg.waypoints[k];
       if (!before || !after || !at || !viaFit(before, after, true)) return leg;
-      return {
+      // La parte unida puede quedar con el mismo modo que la siguiente: también se unen.
+      return joinSameMode({
         waypoints: leg.waypoints.filter((_, i) => i !== k),
         sections: [
           ...leg.sections.slice(0, k),
           { mode: before.mode, via: [...before.via, at, ...after.via] },
           ...leg.sections.slice(k + 2),
         ],
-      };
+      });
     }),
   /** Eliminar un cambio de modo: sus dos partes se unen sin ese punto y conservan los de guía. */
   removeWaypoint: (route: RouteInput, l: number, k: number) =>
@@ -224,14 +225,14 @@ export const routeEdits = {
       const before = leg.sections[k];
       const after = leg.sections[k + 1];
       if (!before || !after || !viaFit(before, after, false)) return leg;
-      return {
+      return joinSameMode({
         waypoints: leg.waypoints.filter((_, i) => i !== k),
         sections: [
           ...leg.sections.slice(0, k),
           { mode: before.mode, via: [...before.via, ...after.via] },
           ...leg.sections.slice(k + 2),
         ],
-      };
+      });
     }),
   moveWaypoint: (route: RouteInput, l: number, k: number, at: LngLat) =>
     updateLeg(route, l, (leg) => ({ ...leg, waypoints: replaceAt(leg.waypoints, k, at) })),
