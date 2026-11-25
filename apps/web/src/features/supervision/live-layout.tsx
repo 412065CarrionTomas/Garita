@@ -14,7 +14,7 @@ export function LiveLayout({
   labelledBy: string;
 }) {
   return (
-    <div className="-mx-5 -my-6 grid sm:-mx-6 lg:-mx-7 min-[1180px]:h-[calc(100svh-52px)] min-[1180px]:grid-cols-[clamp(640px,28vw,900px)_minmax(0,1fr)]">
+    <div className="-mx-3 -my-2 grid min-[1180px]:h-[calc(100dvh-52px)] min-[1180px]:grid-cols-[clamp(640px,28vw,900px)_minmax(0,1fr)]">
       <section
         aria-labelledby={labelledBy}
         className="flex min-h-0 min-w-0 flex-col border-r border-input bg-card"

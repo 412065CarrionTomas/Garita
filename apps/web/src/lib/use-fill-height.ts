@@ -10,17 +10,21 @@ export function useFillHeight<T extends HTMLElement>(gap = 8, min = 320) {
   const [height, setHeight] = useState<number>();
   useLayoutEffect(() => {
     if (!element) return;
+    const scroller = element.closest('main');
     const update = () => {
       // Oculto (por ejemplo, en una pestaña inactiva) no tiene posición: se mide al aparecer.
       if (element.getClientRects().length === 0) return;
-      const top = element.getBoundingClientRect().top + window.scrollY;
+      // Dentro del panel scrollea `main`, no la ventana: la posición se mide contra su scroll.
+      const top = element.getBoundingClientRect().top + (scroller?.scrollTop ?? window.scrollY);
       setHeight(Math.max(min, window.innerHeight - top - gap));
     };
     update();
     window.addEventListener('resize', update);
     // Lo de arriba puede crecer o achicarse (pestañas, avisos): se vuelve a medir con la página.
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
-    observer?.observe(document.body);
+    // `main` tiene alto fijo: lo que cambia es su contenido.
+    for (const child of scroller ? Array.from(scroller.children) : [document.body])
+      observer?.observe(child);
     // Al mostrarse su pestaña el elemento pasa de 0 a su tamaño, aunque la página no cambie.
     observer?.observe(element);
     return () => {

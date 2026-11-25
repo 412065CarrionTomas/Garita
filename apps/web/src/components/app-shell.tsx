@@ -352,15 +352,19 @@ export function AppShell({
   const close = () => {
     setOpen(false);
   };
+  // La página nunca scrollea entera: el header queda fijo y scrollea solo el contenido.
+  // `relative` en ambos: sin él, lo `absolute` de adentro (como `sr-only`) se ubica contra la
+  // página y la estira, y vuelve el scroll de la ventana. overflow-x: la grilla del resumen
+  // saca su separación por la derecha.
   return (
-    <div className="flex min-h-svh flex-col">
+    <div className="relative flex h-dvh flex-col overflow-hidden">
       <a
         href="#contenido"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:border-2 focus:border-primary focus:bg-card focus:px-3 focus:py-2 focus:text-sm"
       >
         Saltar al contenido
       </a>
-      <header className="sticky top-0 z-20 flex h-[52px] items-center gap-4 bg-bar px-5 text-bar-foreground">
+      <header className="relative z-20 flex h-[52px] shrink-0 items-center gap-4 bg-bar px-5 text-bar-foreground">
         <Brand to={homePath} />
         <div className="hidden h-full shrink-0 xl:block">
           <Tabs sections={sections} />
@@ -418,7 +422,10 @@ export function AppShell({
           </Sheet>
         </div>
       </header>
-      <main id="contenido" className="w-full flex-1 space-y-4 px-3 py-2">
+      <main
+        id="contenido"
+        className="relative min-h-0 w-full flex-1 space-y-4 overflow-x-hidden overflow-y-auto px-3 py-2"
+      >
         {children}
       </main>
     </div>
