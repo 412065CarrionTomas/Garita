@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { EllipsisVertical } from 'lucide-react';
 import {
   DropdownMenu,
@@ -50,9 +50,18 @@ export function RowMenu({
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const dragged = useRef(false);
+  // El timer que limpia `dragged` tras soltar: se cancela si empieza otro arrastre o se desmonta,
+  // así uno viejo no borra la marca de un arrastre nuevo.
+  const clearTimer = useRef<number | undefined>(undefined);
+  const stopClearTimer = () => {
+    window.clearTimeout(clearTimer.current);
+    clearTimer.current = undefined;
+  };
+  useEffect(() => stopClearTimer, []);
   const pointer = usePointerDrag({
     holdMs: HOLD_TO_DRAG_MS,
     onStart: () => {
+      stopClearTimer();
       dragged.current = true;
       const row = button.current?.closest('[data-sortable-row]');
       const height = row?.getBoundingClientRect().height ?? 0;
@@ -63,11 +72,13 @@ export function RowMenu({
     onEnd: () => {
       drag?.onEnd();
       // Solo se absorbe el click sintético que sigue al pointerup; si no llega, no queda pegado.
-      setTimeout(() => {
+      stopClearTimer();
+      clearTimer.current = window.setTimeout(() => {
         dragged.current = false;
       }, 0);
     },
     onCancel: () => {
+      stopClearTimer();
       dragged.current = false;
       drag?.onCancel();
     },
