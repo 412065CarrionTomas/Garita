@@ -46,6 +46,8 @@ export function PanicBanner({
       document.removeEventListener('pointerdown', unlock);
       document.removeEventListener('keydown', unlock);
     };
+    // Dos gestos seguidos pueden resolver resume() a la vez: solo el primero hace sonar.
+    let unlocked = false;
     function unlock() {
       try {
         context.current ??= new AudioContext();
@@ -58,7 +60,8 @@ export function PanicBanner({
       audio
         .resume()
         .then(() => {
-          if (audio.state !== 'running') return;
+          if (unlocked || audio.state !== 'running') return;
+          unlocked = true;
           // Ya habilitado: no hace falta escuchar más gestos, y si hay alerta suena ya.
           stop();
           if (activeRef.current) beep(audio);
