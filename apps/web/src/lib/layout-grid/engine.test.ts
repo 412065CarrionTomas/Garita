@@ -3,6 +3,7 @@ import {
   adminSummaryCatalog,
   defineViewCatalog,
   validateLayout,
+  viewLayoutSchema,
   type LayoutItem,
 } from '@garita/shared';
 import {
@@ -196,6 +197,48 @@ describe('visibilidad, presentación y ajustes', () => {
   });
 });
 
+describe('tope de filas', () => {
+  // c queda en la última fila admitida: cualquier cosa que lo empuje lo pasaría del tope.
+  const nearLimit = (): readonly LayoutItem[] =>
+    start().map((item) =>
+      item.id === 'c' ? { ...item, y: 2000 } : item.id === 'd' ? { ...item, y: 1990 } : item,
+    );
+
+  it('en un gesto, el bloque se queda en el último paso válido en vez de volver al inicio', () => {
+    const before = nearLimit();
+    const step = moveItem(catalog, before, 'd', { x: 0, y: 1995 });
+    expect(at(step).d).toEqual([0, 1995, 2, 1]);
+    // Bajar d a la fila de c empujaría a c más allá del tope: se queda en el paso anterior.
+    expect(moveItem(catalog, before, 'd', { x: 0, y: 2000 }, step)).toBe(step);
+    // Desde la fila 1995, agrandar d a 6 de alto pisaría a c y lo pasaría del tope.
+    const grown = resizeItem(catalog, step, 'd', { w: 2, h: 2 });
+    expect(at(grown).d).toEqual([0, 1995, 2, 2]);
+    expect(resizeItem(catalog, step, 'd', { w: 4, h: 6 }, grown)).toBe(grown);
+  });
+
+  it('un paso de teclado contra el borde conserva la referencia del borrador', () => {
+    const items = start();
+    const moved = stepItem(catalog, items, 'a', 'left');
+    expect(moved).toBe(items);
+    const base = start();
+    expect(stepItem(catalog, items, 'a', 'left', base)).toBe(items);
+  });
+
+  it('mostrar un bloque que empujaría a otro más allá del tope lo pone en el primer hueco', () => {
+    // a, oculto, pisa a d (en la fila 2000): mostrarlo ahí empujaría a d más allá del tope.
+    const items = start().map((item) =>
+      item.id === 'd'
+        ? { ...item, y: 2000 }
+        : item.id === 'a'
+          ? { ...item, hidden: true, y: 1999 }
+          : item,
+    );
+    const shown = setHidden(items, 'a', false);
+    expect(shown.find((item) => item.id === 'a')).toMatchObject({ hidden: false, x: 0, y: 0 });
+    expect(overlappingIds(shown)).toEqual([]);
+  });
+});
+
 describe('scaleLayout', () => {
   it('apila en orden de lectura con una sola columna', () => {
     const stacked = scaleLayout(start(), 4, 1);
@@ -215,6 +258,18 @@ describe('scaleLayout', () => {
       d: [0, 4, 1, 1],
     });
     expect(scaleLayout(start(), 4, 4)).toEqual(start());
+  });
+
+  it('dos bloques contiguos siguen contiguos al escalar anchos impares', () => {
+    const base = adminSummaryCatalog.defaultLayout.items.slice(0, 2);
+    const [a, b] = base;
+    if (!a || !b) throw new Error('faltan bloques');
+    const pair = [
+      { ...a, x: 0, y: 0, w: 49, hidden: false },
+      { ...b, x: 49, y: 0, w: 47, hidden: false },
+    ];
+    const [left, right] = scaleLayout(pair, 96, 48);
+    expect([left?.w, right?.x, right?.w, right?.y]).toEqual([25, 25, 23, 0]);
   });
 });
 
@@ -259,7 +314,7 @@ describe('propiedades del motor sobre el catálogo real', () => {
         if (action === 'move')
           items = moveItem(adminSummaryCatalog, items, id, {
             x: Math.floor(next() * 100) - 2,
-            y: Math.floor(next() * 300) - 2,
+            y: Math.floor(next() * 2200) - 2,
           });
         else if (action === 'resize')
           items = resizeItem(adminSummaryCatalog, items, id, {
@@ -275,11 +330,10 @@ describe('propiedades del motor sobre el catálogo real', () => {
             adminSummaryCatalog.widgets[id as keyof typeof adminSummaryCatalog.widgets];
           items = setPresentation(adminSummaryCatalog, items, id, pick(presentations));
         } else items = setHidden(items, id, next() < 0.5);
-        const issues = validateLayout(adminSummaryCatalog, {
-          version: adminSummaryCatalog.version,
-          items: [...items],
-        });
+        const layout = { version: adminSummaryCatalog.version, items: [...items] };
+        const issues = validateLayout(adminSummaryCatalog, layout);
         expect({ step, action, id, issues }).toEqual({ step, action, id, issues: [] });
+        expect(viewLayoutSchema.safeParse(layout).success).toBe(true);
       }
     },
   );

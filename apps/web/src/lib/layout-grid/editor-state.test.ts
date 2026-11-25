@@ -90,6 +90,18 @@ it('durante un gesto, los bloques empujados vuelven si el que se mueve se aleja'
   expect(pos(back, 'compliance')).toEqual(pos(editing(), 'compliance'));
 });
 
+it('con teclado, retroceder en la misma toma devuelve a los empujados a su lugar', () => {
+  const pushed = run(
+    editing(),
+    { type: 'gestureStart' },
+    { type: 'step', id: 'shiftsToday', direction: 'left' },
+  );
+  expect(pos(pushed, 'compliance')?.[1]).toBeGreaterThan(54);
+  const back = run(pushed, { type: 'step', id: 'shiftsToday', direction: 'right' });
+  expect(pos(back, 'compliance')).toEqual(pos(editing(), 'compliance'));
+  expect(pos(back, 'shiftsToday')).toEqual(pos(editing(), 'shiftsToday'));
+});
+
 it('restablecer vuelve al diseño por defecto y también se deshace', () => {
   const moved = run(editing(), { type: 'resize', id: 'compliance', size: { w: 96, h: 72 } });
   expect(pos(moved, 'compliance')).toEqual([0, 54, 96, 72]);

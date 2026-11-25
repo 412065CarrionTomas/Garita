@@ -17,7 +17,8 @@ export interface DragDelta {
 }
 
 export interface PointerDragOptions {
-  onStart: () => void;
+  /** Devolver false rechaza el arrastre (p. ej. hay otro gesto en curso): no se muestra ni captura. */
+  onStart: () => unknown;
   onMove: (delta: DragDelta) => void;
   onEnd: () => void;
   onCancel: () => void;
@@ -78,9 +79,12 @@ export function usePointerDrag(options: PointerDragOptions): {
         const current = session.current;
         // Sin sesión (se canceló) o ya activo: nada que hacer.
         if (current?.active !== false) return;
+        if (latest.current.onStart() === false) {
+          finish('cancel');
+          return;
+        }
         current.active = true;
         setDragging(true);
-        latest.current.onStart();
       };
       const onMove = (move: globalThis.PointerEvent) => {
         const current = session.current;

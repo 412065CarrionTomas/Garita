@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { UserRole } from '../roles';
-import { gridHeight, readingOrder, rectsOverlap, resolveCollisions } from './grid';
+import { compactInOrder, gridHeight, readingOrder, rectsOverlap, resolveCollisions } from './grid';
 import type { FavoriteEntityType, ViewKey } from './keys';
-import { layoutItemSchema, type LayoutItem, type ViewLayout } from './layout';
+import { LAYOUT_LIMITS, layoutItemSchema, type LayoutItem, type ViewLayout } from './layout';
 
 export interface WidgetSize {
   w: number;
@@ -131,6 +131,12 @@ export function validateLayout(catalog: ViewCatalog, layout: ViewLayout): Layout
         itemId: item.id,
         message: `${widget.title} se sale de las ${catalog.columns} columnas.`,
       });
+    if (item.y > LAYOUT_LIMITS.maxRows)
+      issues.push({
+        code: 'out_of_bounds',
+        itemId: item.id,
+        message: `${widget.title} queda debajo de la fila ${LAYOUT_LIMITS.maxRows}.`,
+      });
     const { max } = widget.size;
     const min = widgetMinSize(widget, item.presentation);
     if (item.w < min.w || item.w > max.w || item.h < min.h || item.h > max.h)
@@ -188,6 +194,8 @@ function normalizeItem(
     w,
     h: clamp(item.h, min.h, max.h),
     x: clamp(item.x, 0, catalog.columns - w),
+    // Una migración defectuosa no puede dejar filas negativas, que la API rechaza.
+    y: Math.max(0, item.y),
     presentation,
     settings: settings.success ? settings.data : defaultSettings(widget),
   };
@@ -217,14 +225,14 @@ function migrate(catalog: ViewCatalog, version: number, items: LayoutItem[]): La
  */
 export function reconcileLayout(catalog: ViewCatalog, stored: unknown): ViewLayout {
   const parsed = storedLayoutShape.safeParse(stored);
-  if (!parsed.success)
-    return {
-      version: catalog.version,
-      items: catalog.defaultLayout.items.map((item) => ({
-        ...item,
-        settings: { ...item.settings },
-      })),
-    };
+  const fallback = (): ViewLayout => ({
+    version: catalog.version,
+    items: catalog.defaultLayout.items.map((item) => ({
+      ...item,
+      settings: { ...item.settings },
+    })),
+  });
+  if (!parsed.success) return fallback();
   const storedItems = parsed.data.items.flatMap((raw) => {
     const item = layoutItemSchema.safeParse(raw);
     return item.success ? [item.data] : [];
@@ -237,19 +245,40 @@ export function reconcileLayout(catalog: ViewCatalog, stored: unknown): ViewLayo
     seen.add(item.id);
     items.push(normalizeItem(catalog, widget, item));
   }
+  const defaults = new Map(catalog.defaultLayout.items.map((item) => [item.id, item]));
   for (const [id, widget] of Object.entries(catalog.widgets)) {
     if (seen.has(id)) continue;
+    // Un bloque nuevo arranca como lo declara el diseño por defecto (tamaño, presentación, si
+    // está oculto), debajo de todo para no pisar a nadie.
+    const preset = defaults.get(id);
     items.push({
       id,
-      x: 0,
-      y: gridHeight(items.filter((item) => !item.hidden)),
+      x: preset?.x ?? 0,
       ...widget.size.default,
       hidden: false,
       presentation: widget.presentations[0],
-      settings: defaultSettings(widget),
+      ...preset,
+      settings: preset ? { ...preset.settings } : defaultSettings(widget),
+      y: gridHeight(items.filter((item) => !item.hidden)),
     });
   }
-  return { version: catalog.version, items: settleLayoutItems(items) };
+  // Un oculto fuera de rango vuelve a su fila del diseño por defecto: no ocupa lugar, así que no
+  // pisa a nadie, y al mostrarlo aparece cerca de los demás en vez de miles de filas más abajo.
+  const settled = settleLayoutItems(items).map((item) =>
+    item.hidden && item.y > LAYOUT_LIMITS.maxRows
+      ? { ...item, y: defaults.get(item.id)?.y ?? 0 }
+      : item,
+  );
+  if (!exceedsRows(settled)) return { version: catalog.version, items: settled };
+  // Pasó el tope de filas (migraciones, cascadas): se sacan los huecos y, si no alcanza, el de defecto.
+  const visible = readingOrder(settled).filter((index) => !settled[index]?.hidden);
+  const compacted = compactInOrder(settled, visible);
+  return exceedsRows(compacted) ? fallback() : { version: catalog.version, items: compacted };
+}
+
+/** Algún bloque empieza más abajo de lo que admite `viewLayoutSchema`. */
+export function exceedsRows(items: readonly LayoutItem[]): boolean {
+  return items.some((item) => item.y > LAYOUT_LIMITS.maxRows);
 }
 
 /**

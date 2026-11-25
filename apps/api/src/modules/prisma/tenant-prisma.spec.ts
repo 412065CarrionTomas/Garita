@@ -472,6 +472,33 @@ describe('aislamiento del portal por cliente', () => {
       where: { AND: [{}, { userId: user.userId }] },
     });
   });
+  it('el portal lee y escribe solo su propio diseño y sus fijados', () => {
+    for (const model of ['UserViewPreference', 'UserFavorite']) {
+      expect(addClientFilter(model, { where: { viewKey: 'v' } }, user, 'findMany')).toEqual({
+        where: { viewKey: 'v', AND: [{ viewKey: 'v' }, { userId: user.userId }] },
+      });
+      expect(() =>
+        addClientFilter(model, { data: [{ userId: 'other-user' }] }, user, 'createMany'),
+      ).toThrow();
+      // Actualizar sin userId en data vale: el where lo acota al usuario.
+      const data = { layout: {} };
+      expect(addClientFilter(model, { where: {}, data }, user, 'updateManyAndReturn')).toEqual({
+        data,
+        where: { AND: [{}, { userId: user.userId }] },
+      });
+      expect(() =>
+        addClientFilter(
+          model,
+          { where: {}, data: { userId: 'other-user' } },
+          user,
+          'updateManyAndReturn',
+        ),
+      ).toThrow();
+      expect(() =>
+        addClientFilter(model, { where: {}, data: { user: { connect: {} } } }, user, 'updateMany'),
+      ).toThrow();
+    }
+  });
   it('conserva el filtro tenant y exige predio y cliente activos aunque se intente otro filtro', () => {
     expect(
       addClientFilter(

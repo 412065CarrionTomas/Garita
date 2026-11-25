@@ -22,9 +22,8 @@ const savedAt = new Date('2026-11-23T10:00:00.000Z');
 function setup() {
   const delegate = {
     findFirst: jest.fn().mockResolvedValue(null),
-    findFirstOrThrow: jest.fn().mockResolvedValue({ updatedAt: savedAt }),
     create: jest.fn().mockResolvedValue({ updatedAt: savedAt }),
-    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    updateManyAndReturn: jest.fn().mockResolvedValue([{ updatedAt: savedAt }]),
     deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
   };
   const service = new ViewPreferencesService({
@@ -107,7 +106,7 @@ describe('ViewPreferencesService', () => {
       { layout: layout(), baseUpdatedAt: savedAt.toISOString() },
       admin,
     );
-    expect(delegate.updateMany).toHaveBeenCalledWith(
+    expect(delegate.updateManyAndReturn).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { userId: 'me', viewKey: 'admin-summary', updatedAt: savedAt },
       }),
@@ -116,7 +115,7 @@ describe('ViewPreferencesService', () => {
 
   it('responde 409 si otra pestaña guardó antes', async () => {
     const { delegate, service } = setup();
-    delegate.updateMany.mockResolvedValue({ count: 0 });
+    delegate.updateManyAndReturn.mockResolvedValue([]);
     const stale = service.put(
       adminSummaryCatalog,
       { layout: layout(), baseUpdatedAt: savedAt.toISOString() },
@@ -144,5 +143,53 @@ describe('ViewPreferencesService', () => {
     expect(delegate.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'me', viewKey: 'admin-summary' },
     });
+  });
+
+  it('restablecer con fecha base da 409 si otra pestaña guardó después', async () => {
+    const { delegate, service } = setup();
+    delegate.deleteMany.mockResolvedValue({ count: 0 });
+    delegate.findFirst.mockResolvedValue({ updatedAt: new Date('2026-11-23T11:00:00.000Z') });
+    await expect(service.reset(adminSummaryCatalog, admin, savedAt.toISOString())).rejects.toThrow(
+      ConflictException,
+    );
+    delegate.findFirst.mockResolvedValue(null);
+    await expect(
+      service.reset(adminSummaryCatalog, admin, savedAt.toISOString()),
+    ).resolves.toBeUndefined();
+  });
+
+  it('guarda solo los ajustes que declara cada bloque, al crear y al actualizar', async () => {
+    const { delegate, service } = setup();
+    const dirty = layout();
+    const first = dirty.items[0];
+    if (!first) throw new Error('sin bloques');
+    first.settings = { ...first.settings, intruso: 'x'.repeat(100) };
+    const firstArg = (mock: jest.Mock): unknown => (mock.mock.calls as unknown[][])[0]?.[0];
+    const storedSettings = (call: unknown) =>
+      (call as { data: { layout: { items: { settings: object }[] } } }).data.layout.items[0]
+        ?.settings;
+    const created = await service.put(
+      adminSummaryCatalog,
+      { layout: structuredClone(dirty), baseUpdatedAt: null },
+      admin,
+    );
+    expect(created.layout?.items[0]?.settings).not.toHaveProperty('intruso');
+    expect(storedSettings(firstArg(delegate.create))).not.toHaveProperty('intruso');
+    await service.put(
+      adminSummaryCatalog,
+      { layout: structuredClone(dirty), baseUpdatedAt: savedAt.toISOString() },
+      admin,
+    );
+    expect(storedSettings(firstArg(delegate.updateManyAndReturn))).not.toHaveProperty('intruso');
+  });
+
+  it('restablecer con base nula da 409 solo si otra pestaña ya guardó un diseño', async () => {
+    const { delegate, service } = setup();
+    await expect(service.reset(adminSummaryCatalog, admin, null)).resolves.toBeUndefined();
+    expect(delegate.deleteMany).not.toHaveBeenCalled();
+    delegate.findFirst.mockResolvedValue({ updatedAt: savedAt });
+    await expect(service.reset(adminSummaryCatalog, admin, null)).rejects.toThrow(
+      ConflictException,
+    );
   });
 });

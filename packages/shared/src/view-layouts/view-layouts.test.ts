@@ -15,6 +15,7 @@ import {
   widgetMinSize,
   viewCatalogs,
   viewPreferenceInputSchema,
+  viewLayoutSchema,
   type ViewLayout,
 } from './index';
 
@@ -177,6 +178,54 @@ describe('reconcileLayout', () => {
     expect(item(result, 'compliance')).toMatchObject({ x: 0, w: 96, presentation: 'line' });
     expect(item(result, 'sites').settings).toEqual({ sort: 'worst', limit: '5' });
     expect(item(result, 'attention')).toMatchObject({ hidden: false, presentation: 'table' });
+  });
+
+  it('agrega los bloques nuevos con la visibilidad del diseño por defecto', () => {
+    const stored = {
+      version: adminSummaryCatalog.version,
+      items: adminSummaryCatalog.defaultLayout.items.filter((entry) => entry.id !== 'siteDays'),
+    };
+    expect(item(reconcileLayout(adminSummaryCatalog, stored), 'siteDays').hidden).toBe(true);
+  });
+
+  it('lleva a los ocultos que una migración dejó fuera de rango a su fila por defecto', () => {
+    const widget = {
+      ...adminSummaryCatalog.widgets.account,
+      size: { min: { w: 1, h: 1 }, max: { w: 24, h: 24 }, default: { w: 1, h: 1 } },
+    };
+    const catalog = defineViewCatalog({
+      key: 'admin-summary',
+      version: 2,
+      columns: 24,
+      roles: ['admin'],
+      favoriteTypes: [],
+      widgets: { a: widget, b: widget },
+      defaultLayout: [
+        { id: 'a', x: 0, y: 0 },
+        { id: 'b', x: 0, y: 1, hidden: true },
+      ],
+      // Una grilla diez veces más fina: lo que estaba en la fila 300 pasa a la 3000.
+      migrations: { 2: (items) => items.map((entry) => ({ ...entry, y: entry.y * 10 })) },
+    });
+    const stored = {
+      version: 1,
+      items: [
+        { id: 'a', x: 0, y: 0, w: 1, h: 1, hidden: false, presentation: 'strip', settings: {} },
+        { id: 'b', x: 0, y: 300, w: 1, h: 1, hidden: true, presentation: 'strip', settings: {} },
+      ],
+    };
+    const result = reconcileLayout(catalog, stored);
+    expect(item(result, 'b')).toMatchObject({ hidden: true, y: 1 });
+    expect(viewLayoutSchema.safeParse(result).success).toBe(true);
+  });
+
+  it('nunca deja bloques por debajo del tope de filas', () => {
+    const stored = edited((items) => {
+      for (const entry of items) entry.y += 1990;
+    });
+    const result = reconcileLayout(adminSummaryCatalog, stored);
+    expect(validateLayout(adminSummaryCatalog, result)).toEqual([]);
+    expect(viewLayoutSchema.safeParse(result).success).toBe(true);
   });
 
   it('respeta los huecos: no sube a nadie y deja quietos a los ocultos', () => {

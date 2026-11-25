@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useReducer, type Dispatch } from 'react';
+import { useCallback, useMemo, useReducer, useRef, useState, type Dispatch } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   reconcileLayout,
   viewPreferenceInputSchema,
   viewPreferenceResponseSchema,
   VIEW_PREFERENCE_CONFLICT_CODE,
+  VIEW_PREFERENCE_NO_BASE,
   type LayoutItem,
   type ViewCatalog,
   type ViewPreferenceResponse,
@@ -33,11 +34,18 @@ export interface ViewLayoutEditor {
   dirty: boolean;
   canUndo: boolean;
   start: () => void;
+  /** Sale de la edición descartando el borrador y los avisos de guardado. */
+  cancel: () => void;
   save: () => void;
   saving: boolean;
+  /** Falló el guardado (solo mientras se edita). */
   saveFailed: boolean;
-  /** Otro dispositivo o pestaña guardó mientras se editaba. */
+  /** Otro dispositivo o pestaña guardó mientras se editaba (solo mientras se edita). */
   conflict: boolean;
+  /** Resolviendo un conflicto (se está trayendo el diseño guardado). */
+  resolving: boolean;
+  /** No se pudo traer el diseño guardado para resolver el conflicto. */
+  resolveFailed: boolean;
   /** Conflicto: conservar el borrador para guardarlo encima de lo nuevo. */
   keepMine: () => Promise<void>;
   /** Conflicto: descartar el borrador y ver lo que guardó el otro. */
@@ -78,7 +86,10 @@ export function useViewLayoutEditor(catalog: ViewCatalog): ViewLayoutEditor {
       base: string | null;
     }): Promise<ViewPreferenceResponse> => {
       if (sameLayout(items, catalog.defaultLayout.items)) {
-        await apiDelete(path, z.undefined());
+        // Con la fecha base (o "null" si no había nada guardado), la API responde 409 si otra
+        // pestaña guardó mientras tanto, igual que en el PUT.
+        const query = base ? encodeURIComponent(base) : VIEW_PREFERENCE_NO_BASE;
+        await apiDelete(`${path}?baseUpdatedAt=${query}`, z.undefined());
         return { layout: null, updatedAt: null };
       }
       return apiPut(
@@ -106,35 +117,74 @@ export function useViewLayoutEditor(catalog: ViewCatalog): ViewLayoutEditor {
   }, [catalog, path, queryClient, queryKey]);
 
   const { reset: resetMutation, mutate } = mutation;
-  const conflict = isConflict(mutation.error);
+  const editing = state.mode === 'edit';
+  const [resolving, setResolving] = useState(false);
+  const [resolveFailed, setResolveFailed] = useState(false);
+  // Cambia al empezar o terminar una edición: una resolución que vuelve tarde no toca otra sesión.
+  const session = useRef(0);
 
+  /** Empieza una sesión nueva sin restos de la anterior (errores, conflicto, resolución). */
+  const clearSession = () => {
+    session.current += 1;
+    resetMutation();
+    setResolving(false);
+    setResolveFailed(false);
+  };
+
+  /** Trae lo guardado y aplica la elección; si falla, el conflicto sigue a la vista con su aviso. */
+  const resolve = async (apply: (latest: readonly LayoutItem[]) => void) => {
+    const mine = session.current;
+    setResolving(true);
+    setResolveFailed(false);
+    try {
+      const latest = await fetchLatest();
+      if (session.current !== mine) return;
+      apply(latest);
+      resetMutation();
+    } catch {
+      if (session.current === mine) setResolveFailed(true);
+    } finally {
+      if (session.current === mine) setResolving(false);
+    }
+  };
+
+  const conflict = editing && isConflict(mutation.error);
   return {
     catalog,
     state,
     dispatch,
-    items: state.mode === 'edit' ? state.draft : saved,
+    items: editing ? state.draft : saved,
     loadFailed: failed,
-    editing: state.mode === 'edit',
+    editing,
     dirty,
     canUndo: canUndo(state),
     start: () => {
-      if (saved) dispatch({ type: 'start', items: saved });
+      // Sin el diseño guardado no hay fecha base: guardar daría un 409 engañoso.
+      if (!saved || failed) return;
+      clearSession();
+      dispatch({ type: 'start', items: saved });
+    },
+    cancel: () => {
+      clearSession();
+      dispatch({ type: 'cancel' });
     },
     save: () => {
-      if (state.mode === 'edit') mutate({ items: state.draft, base: updatedAt });
+      if (!editing || resolving) return;
+      setResolveFailed(false);
+      mutate({ items: state.draft, base: updatedAt });
     },
     saving: mutation.isPending,
-    saveFailed: mutation.isError && !conflict,
+    saveFailed: editing && mutation.isError && !conflict,
     conflict,
-    keepMine: async () => {
-      const latest = await fetchLatest();
-      dispatch({ type: 'rebase', items: latest });
-      resetMutation();
-    },
-    takeTheirs: async () => {
-      await fetchLatest();
-      dispatch({ type: 'cancel' });
-      resetMutation();
-    },
+    resolving,
+    resolveFailed: editing && resolveFailed,
+    keepMine: () =>
+      resolve((latest) => {
+        dispatch({ type: 'rebase', items: latest });
+      }),
+    takeTheirs: () =>
+      resolve(() => {
+        dispatch({ type: 'cancel' });
+      }),
   };
 }

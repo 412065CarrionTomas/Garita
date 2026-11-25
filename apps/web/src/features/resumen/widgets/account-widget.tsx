@@ -10,6 +10,8 @@ const STATUS: Record<AccountStatus, { label: string; variant: StampVariant; chec
   suspended: { label: 'Suspendida', variant: 'fail' },
 };
 
+const remainingDays = (days: number) => (days === 1 ? 'Queda 1 día' : `Quedan ${days} días`);
+
 export function AccountWidget() {
   const account = useAccountState(true);
   const link = { to: '/suscripcion', label: 'Suscripción' };
@@ -36,13 +38,13 @@ export function AccountWidget() {
         {status === 'trial' && trialDaysLeft !== null && (
           <div className="flex items-center gap-2">
             <dt className="t-label text-muted-foreground">Prueba</dt>
-            <dd className="t-numeral">Quedan {trialDaysLeft} días</dd>
+            <dd className="t-numeral">{remainingDays(trialDaysLeft)}</dd>
           </div>
         )}
         {status === 'grace' && graceDaysLeft !== null && (
           <div className="flex items-center gap-2">
             <dt className="t-label text-muted-foreground">Gracia</dt>
-            <dd className="t-numeral">Quedan {graceDaysLeft} días</dd>
+            <dd className="t-numeral">{remainingDays(graceDaysLeft)}</dd>
           </div>
         )}
         <div className="flex flex-wrap items-center gap-3">
@@ -61,7 +63,7 @@ export function AccountWidget() {
             </span>
             {free <= 2 && (
               <Stamp variant={free === 0 ? 'fail' : 'late'}>
-                {free === 0 ? 'Sin lugares' : `Quedan ${free}`}
+                {free === 0 ? 'Sin lugares' : free === 1 ? 'Queda 1' : `Quedan ${free}`}
               </Stamp>
             )}
           </dd>

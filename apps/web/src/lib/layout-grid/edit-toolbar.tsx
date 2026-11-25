@@ -29,11 +29,18 @@ export function EditToolbar({
   children?: ReactNode;
 }) {
   const { editing, dirty, saving, dispatch } = editor;
+  // Mientras guarda o trae el diseño de otra pestaña, nada cambia el borrador.
+  const busy = saving || editor.resolving;
   // Ctrl+Z (Cmd+Z) deshace mientras se edita, salvo que el foco esté en un campo de texto.
   useEffect(() => {
-    if (!editing) return;
+    if (!editing || busy) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey)
+      if (
+        event.key.toLowerCase() !== 'z' ||
+        !(event.ctrlKey || event.metaKey) ||
+        event.shiftKey ||
+        event.altKey
+      )
         return;
       const target = event.target;
       if (
@@ -48,16 +55,16 @@ export function EditToolbar({
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [editing, dispatch]);
+  }, [editing, busy, dispatch]);
   if (!editing)
     return editable && editor.items ? (
-      <Button variant="outline" onClick={editor.start}>
+      <Button variant="outline" disabled={editor.loadFailed} onClick={editor.start}>
         <Pencil aria-hidden="true" />
         Editar diseño
       </Button>
     ) : null;
   const cancel = () => {
-    editor.dispatch({ type: 'cancel' });
+    editor.cancel();
   };
   return (
     <div
@@ -68,7 +75,7 @@ export function EditToolbar({
       {children}
       <Button
         variant="outline"
-        disabled={!editor.canUndo || saving}
+        disabled={!editor.canUndo || busy}
         onClick={() => {
           editor.dispatch({ type: 'undo' });
         }}
@@ -78,7 +85,7 @@ export function EditToolbar({
       </Button>
       <Button
         variant="outline"
-        disabled={saving}
+        disabled={busy}
         onClick={() => {
           editor.dispatch({ type: 'reset' });
         }}
@@ -89,7 +96,7 @@ export function EditToolbar({
       {dirty ? (
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button variant="outline" disabled={saving}>
+            <Button variant="outline" disabled={busy}>
               Cancelar
             </Button>
           </AlertDialogTrigger>
@@ -111,11 +118,11 @@ export function EditToolbar({
           </AlertDialogContent>
         </AlertDialog>
       ) : (
-        <Button variant="outline" disabled={saving} onClick={cancel}>
+        <Button variant="outline" disabled={busy} onClick={cancel}>
           Cancelar
         </Button>
       )}
-      <Button disabled={!dirty || saving} onClick={editor.save}>
+      <Button disabled={!dirty || busy} onClick={editor.save}>
         {saving ? 'Guardando…' : 'Guardar diseño'}
       </Button>
     </div>

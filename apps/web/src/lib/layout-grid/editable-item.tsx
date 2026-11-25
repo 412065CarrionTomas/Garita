@@ -49,6 +49,7 @@ export function EditableItem({
   dispatch,
   announce,
   instructionsId,
+  gestureLock,
   children,
 }: {
   item: LayoutItem;
@@ -61,21 +62,27 @@ export function EditableItem({
   announce: (message: string) => void;
   /** Id del texto con las instrucciones de teclado, para `aria-describedby`. */
   instructionsId: string;
+  /** Un gesto a la vez en toda la grilla: `acquire` da false si otro bloque tiene uno en curso. */
+  gestureLock: { acquire: (owner: string) => boolean; release: (owner: string) => void };
   children: ReactNode;
 }) {
   // El gesto vive en una ref para los manejadores y en estado para dibujar la vista previa.
   const origin = useRef<DragPreview | null>(null);
   const [preview, setPreview] = useState<DragPreview | null>(null);
-  const busy = useRef(false);
   const current = useRef(item);
   useEffect(() => {
     current.current = item;
   });
 
+  /** Toma el gesto de la grilla para este bloque; false si otro bloque tiene uno en curso. */
+  const takeGesture = () => gestureLock.acquire(item.id);
+  const freeGesture = () => {
+    gestureLock.release(item.id);
+  };
+
   const beginPointer = (kind: DragPreview['kind']) => {
     const grid = gridRef.current;
-    if (!grid || busy.current) return;
-    busy.current = true;
+    if (!grid || !takeGesture()) return false;
     origin.current = {
       kind,
       start: item,
@@ -84,6 +91,7 @@ export function EditableItem({
     };
     setPreview(origin.current);
     dispatch({ type: 'gestureStart' });
+    return true;
   };
   const trackPointer = (delta: DragPreview['delta']) => {
     const start = origin.current;
@@ -96,7 +104,7 @@ export function EditableItem({
     if (!origin.current) return;
     origin.current = null;
     setPreview(null);
-    busy.current = false;
+    freeGesture();
     dispatch({ type: 'gestureEnd' });
     announce(`${title}: ${describePlacement(current.current)}.`);
   };
@@ -104,14 +112,12 @@ export function EditableItem({
     if (!origin.current) return;
     origin.current = null;
     setPreview(null);
-    busy.current = false;
+    freeGesture();
     dispatch({ type: 'gestureCancel' });
     announce(`Se canceló el cambio de ${title}.`);
   };
   const pointerMove = usePointerDrag({
-    onStart: () => {
-      beginPointer('move');
-    },
+    onStart: () => beginPointer('move'),
     onMove: (delta) => {
       const step = trackPointer(delta);
       if (!step) return;
@@ -125,9 +131,7 @@ export function EditableItem({
     onCancel: cancelPointer,
   });
   const pointerResize = usePointerDrag({
-    onStart: () => {
-      beginPointer('resize');
-    },
+    onStart: () => beginPointer('resize'),
     onMove: (delta) => {
       const step = trackPointer(delta);
       if (!step) return;
@@ -143,8 +147,7 @@ export function EditableItem({
 
   const keyboard = (kind: 'move' | 'resize') => ({
     onGrab: () => {
-      if (busy.current) return false;
-      busy.current = true;
+      if (!takeGesture()) return false;
       dispatch({ type: 'gestureStart' });
       announce(
         kind === 'move'
@@ -157,12 +160,12 @@ export function EditableItem({
       dispatch({ type: kind === 'move' ? 'step' : 'stepSize', id: item.id, direction });
     },
     onDrop: () => {
-      busy.current = false;
+      freeGesture();
       dispatch({ type: 'gestureEnd' });
       announce(`${title} quedó en ${describePlacement(current.current)}.`);
     },
     onCancel: () => {
-      busy.current = false;
+      freeGesture();
       dispatch({ type: 'gestureCancel' });
       announce(`Se canceló el cambio de ${title}.`);
     },

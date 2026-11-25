@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { Pin } from 'lucide-react';
-import { MAX_FAVORITES, type ComplianceReport, type FavoriteEntityType } from '@garita/shared';
+import {
+  MAX_FAVORITES,
+  type ComplianceReport,
+  type FavoriteEntityType,
+  type ViewKey,
+} from '@garita/shared';
 import { Stamp } from '@/components/stamp';
 import { Button } from '@/components/ui/button';
 import {
@@ -157,6 +162,7 @@ function FavoritesNotice({ favorites }: { favorites: FavoritesState }) {
  */
 export function ComplianceRanking({
   title,
+  view,
   entityType,
   rows,
   query,
@@ -166,6 +172,8 @@ export function ComplianceRanking({
   link,
 }: {
   title: string;
+  /** Pantalla donde se guardan los fijados. */
+  view: ViewKey;
   entityType: FavoriteEntityType;
   /** undefined mientras carga o si falló. */
   rows: readonly RankingRow[] | undefined;
@@ -175,7 +183,7 @@ export function ComplianceRanking({
   nouns: RankingNouns;
   link: { to: string; label: string };
 }) {
-  const favorites = useFavorites('admin-summary', entityType);
+  const favorites = useFavorites(view, entityType);
   const [sessionOrder, setSessionOrder] = useState<readonly string[]>([]);
   const { announce, region } = useAnnouncer(`Cambios en la lista de ${nouns.plural}`);
 
@@ -224,7 +232,7 @@ export function ComplianceRanking({
       {
         key: 'pin-top',
         label: favorites.full ? `Fijar arriba (máximo ${MAX_FAVORITES})` : 'Fijar arriba de todo',
-        disabled: favorites.full,
+        disabled: favorites.full || !favorites.ready,
         onSelect: () => {
           favorites.update(
             pin(favorites.ids, id, 'top', MAX_FAVORITES),
@@ -235,7 +243,7 @@ export function ComplianceRanking({
       {
         key: 'pin-bottom',
         label: 'Fijar al final de los fijados',
-        disabled: favorites.full,
+        disabled: favorites.full || !favorites.ready,
         onSelect: () => {
           favorites.update(
             pin(favorites.ids, id, 'bottom', MAX_FAVORITES),

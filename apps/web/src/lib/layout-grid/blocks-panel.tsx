@@ -114,12 +114,12 @@ export function BlocksPanel({
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="outline" disabled={editor.saving}>
+        <Button variant="outline" disabled={editor.saving || editor.resolving}>
           <LayoutPanelLeft aria-hidden="true" />
           Bloques
           {hidden > 0 && (
             <span className="t-stamp border-[1.5px] border-dashed border-current px-1.5">
-              {hidden} ocultos
+              {hidden} {hidden === 1 ? 'oculto' : 'ocultos'}
             </span>
           )}
         </Button>

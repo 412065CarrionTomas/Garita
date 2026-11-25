@@ -4,10 +4,12 @@ import {
   validateLayout,
   VIEW_PREFERENCE_CONFLICT_CODE,
   type ViewCatalog,
+  type ViewLayout,
   type ViewPreferenceInput,
   type ViewPreferenceResponse,
 } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
+import { isPrismaError } from '../../common/prisma-errors';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -43,7 +45,15 @@ export class ViewPreferencesService {
   ): Promise<ViewPreferenceResponse> {
     const issues = validateLayout(catalog, input.layout);
     if (issues.length) throw new BadRequestException({ message: 'Diseño inválido', issues });
-    const layout = input.layout as unknown as Prisma.InputJsonValue;
+    // Se guardan los ajustes ya parseados por cada bloque: descarta claves que el bloque no declara.
+    const sanitized: ViewLayout = {
+      ...input.layout,
+      items: input.layout.items.map((item) => ({
+        ...item,
+        settings: catalog.widgets[item.id]?.settings.parse(item.settings) ?? {},
+      })),
+    };
+    const layout = sanitized as unknown as Prisma.InputJsonValue;
     const where = { userId: user.userId, viewKey: catalog.key };
     if (input.baseUpdatedAt === null) {
       try {
@@ -51,29 +61,47 @@ export class ViewPreferencesService {
           data: { ...where, companyId: user.companyId, version: catalog.version, layout },
           select: { updatedAt: true },
         });
-        return { layout: input.layout, updatedAt: row.updatedAt.toISOString() };
+        return { layout: sanitized, updatedAt: row.updatedAt.toISOString() };
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
-          throw conflict();
+        if (isPrismaError(error, 'P2002')) throw conflict();
         throw error;
       }
     }
-    const { count } = await this.prisma.tenantPrisma.userViewPreference.updateMany({
+    // Escribe y lee en una sola consulta: un DELETE concurrente no puede colarse entre ambas.
+    const [row] = await this.prisma.tenantPrisma.userViewPreference.updateManyAndReturn({
       where: { ...where, updatedAt: new Date(input.baseUpdatedAt) },
       data: { version: catalog.version, layout },
+      select: { updatedAt: true },
     });
-    if (count === 0) throw conflict();
-    const row = await this.prisma.tenantPrisma.userViewPreference.findFirstOrThrow({
+    if (!row) throw conflict();
+    return { layout: sanitized, updatedAt: row.updatedAt.toISOString() };
+  }
+
+  /**
+   * Restablecer: sin fila, la pantalla vuelve al diseño por defecto. Con `baseUpdatedAt` (como en
+   * el PUT) solo borra si nadie guardó desde entonces; `null` exige que no haya nada guardado. Si
+   * otra pestaña ya lo borró, el resultado es el mismo y no es conflicto.
+   */
+  async reset(
+    catalog: ViewCatalog,
+    user: AuthenticatedUser,
+    baseUpdatedAt?: string | null,
+  ): Promise<void> {
+    const where = { userId: user.userId, viewKey: catalog.key };
+    if (baseUpdatedAt === undefined) {
+      await this.prisma.tenantPrisma.userViewPreference.deleteMany({ where });
+      return;
+    }
+    if (baseUpdatedAt !== null) {
+      const { count } = await this.prisma.tenantPrisma.userViewPreference.deleteMany({
+        where: { ...where, updatedAt: new Date(baseUpdatedAt) },
+      });
+      if (count > 0) return;
+    }
+    const remaining = await this.prisma.tenantPrisma.userViewPreference.findFirst({
       where,
       select: { updatedAt: true },
     });
-    return { layout: input.layout, updatedAt: row.updatedAt.toISOString() };
-  }
-
-  /** Restablecer: sin fila, la pantalla vuelve al diseño por defecto. */
-  async reset(catalog: ViewCatalog, user: AuthenticatedUser): Promise<void> {
-    await this.prisma.tenantPrisma.userViewPreference.deleteMany({
-      where: { userId: user.userId, viewKey: catalog.key },
-    });
+    if (remaining) throw conflict();
   }
 }

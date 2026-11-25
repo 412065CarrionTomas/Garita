@@ -97,3 +97,19 @@ it('anuncia en una región en vivo y repite mensajes iguales', async () => {
   expect(region).toHaveTextContent('');
   expect(await screen.findByText('Movido')).toBe(region);
 });
+
+it('desmontarse con algo tomado cancela una sola vez', async () => {
+  const mocks = {
+    onGrab: jest.fn(() => true),
+    onStep: jest.fn(),
+    onDrop: jest.fn(),
+    onCancel: jest.fn(),
+  };
+  const { unmount } = render(<Handle {...mocks} />);
+  const user = userEvent.setup();
+  screen.getByRole('button', { name: 'Asa' }).focus();
+  await user.keyboard('{Enter}');
+  unmount();
+  expect(mocks.onCancel).toHaveBeenCalledTimes(1);
+  expect(mocks.onDrop).not.toHaveBeenCalled();
+});

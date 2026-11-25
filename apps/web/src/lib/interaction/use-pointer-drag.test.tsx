@@ -92,3 +92,14 @@ describe('mantener apretado', () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 });
+
+it('si onStart rechaza el arrastre no se muestra ni avisa el final', () => {
+  const { handle, onMove, onEnd, onCancel } = setup({ onStart: jest.fn(() => false) });
+  down(handle);
+  expect(handle).toHaveTextContent('quieto');
+  move(handle, 40, 25);
+  fireEvent.pointerUp(handle, { pointerId: 1 });
+  expect(onMove).not.toHaveBeenCalled();
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(onCancel).not.toHaveBeenCalled();
+});

@@ -48,6 +48,21 @@ export function LayoutGrid({
 }) {
   const { columns, editable } = useGridColumns(catalog.columns);
   const gridRef = useRef<HTMLDivElement>(null);
+  // Un gesto a la vez en toda la grilla, con el bloque dueño anotado: solo él puede liberarlo.
+  const gestureOwner = useRef<string | null>(null);
+  const gestureLock = useMemo(
+    () => ({
+      acquire: (owner: string) => {
+        if (gestureOwner.current !== null) return false;
+        gestureOwner.current = owner;
+        return true;
+      },
+      release: (owner: string) => {
+        if (gestureOwner.current === owner) gestureOwner.current = null;
+      },
+    }),
+    [],
+  );
   const instructionsId = useId();
   const { announce, region } = useAnnouncer('Cambios del diseño');
   const editing = edit !== undefined && editable;
@@ -113,6 +128,7 @@ export function LayoutGrid({
                 dispatch={edit.dispatch}
                 announce={announce}
                 instructionsId={instructionsId}
+                gestureLock={gestureLock}
               >
                 {renderItem(item)}
               </EditableItem>

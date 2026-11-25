@@ -16,6 +16,7 @@ export function GuardsWidget({ item }: WidgetProps) {
   return (
     <ComplianceRanking
       title={sort === 'worst' ? 'Vigiladores · peor cumplimiento primero' : 'Vigiladores'}
+      view={adminSummaryCatalog.key}
       entityType="guard"
       rows={report.data?.byGuard.map((guard) => ({
         id: guard.id ?? UNASSIGNED_ID,
