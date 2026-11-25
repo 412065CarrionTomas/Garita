@@ -11,6 +11,7 @@ export function SitesWidget({ item }: WidgetProps) {
   return (
     <ComplianceRanking
       title={sort === 'worst' ? 'Predios · peor cumplimiento primero' : 'Predios'}
+      view={adminSummaryCatalog.key}
       entityType="site"
       rows={report.data?.bySite.map((site) => ({ ...site, pinnable: true }))}
       query={report}

@@ -60,8 +60,17 @@ export function RowMenu({
       drag?.onStart(height > 0 ? height : FALLBACK_ROW_HEIGHT);
     },
     onMove: ({ dy }) => drag?.onMove(dy),
-    onEnd: () => drag?.onEnd(),
-    onCancel: () => drag?.onCancel(),
+    onEnd: () => {
+      drag?.onEnd();
+      // Solo se absorbe el click sintético que sigue al pointerup; si no llega, no queda pegado.
+      setTimeout(() => {
+        dragged.current = false;
+      }, 0);
+    },
+    onCancel: () => {
+      dragged.current = false;
+      drag?.onCancel();
+    },
   });
   const visibleGroups = groups.filter((group) => group.actions.length > 0);
   if (visibleGroups.length === 0) return null;

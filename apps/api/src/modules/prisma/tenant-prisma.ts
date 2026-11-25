@@ -201,6 +201,12 @@ export function applySiteAssignmentFilter(
   return { ...filtered, where: { ...where, ...(filtered.where as object) } };
 }
 
+const CLIENT_OWN_ROW_MODELS: readonly string[] = [
+  'ReportExport',
+  'UserViewPreference',
+  'UserFavorite',
+];
+
 export function addClientFilter(
   model: string,
   args: unknown,
@@ -217,12 +223,13 @@ export function addClientFilter(
       throw new ForbiddenException('El cliente no puede modificar su registro');
     return { ...args, where: { ...where, AND: [where, { id: user.clientId, status: 'active' }] } };
   }
-  if (model === 'ReportExport') {
+  // Filas propias del usuario: exportaciones, diseño de pantallas y fijados.
+  if (CLIENT_OWN_ROW_MODELS.includes(model)) {
     const writes = [args.data, args.create, args.update].filter((value) => value !== undefined);
     for (const write of writes) {
       for (const row of Array.isArray(write) ? write : [write]) {
         if (!isRecord(row) || row.userId !== user.userId || Object.hasOwn(row, 'user'))
-          throw new ForbiddenException('Solo se registran exportaciones del usuario autenticado');
+          throw new ForbiddenException('Solo se registran datos del usuario autenticado');
       }
     }
     // create/createMany no aceptan where; las escrituras ya verificaron el propietario.

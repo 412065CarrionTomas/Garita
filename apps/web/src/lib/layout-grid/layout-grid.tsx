@@ -48,6 +48,20 @@ export function LayoutGrid({
 }) {
   const { columns, editable } = useGridColumns(catalog.columns);
   const gridRef = useRef<HTMLDivElement>(null);
+  const gestureBusy = useRef(false);
+  const gestureLock = useMemo(
+    () => ({
+      acquire: () => {
+        if (gestureBusy.current) return false;
+        gestureBusy.current = true;
+        return true;
+      },
+      release: () => {
+        gestureBusy.current = false;
+      },
+    }),
+    [],
+  );
   const instructionsId = useId();
   const { announce, region } = useAnnouncer('Cambios del diseño');
   const editing = edit !== undefined && editable;
@@ -113,6 +127,7 @@ export function LayoutGrid({
                 dispatch={edit.dispatch}
                 announce={announce}
                 instructionsId={instructionsId}
+                gestureLock={gestureLock}
               >
                 {renderItem(item)}
               </EditableItem>

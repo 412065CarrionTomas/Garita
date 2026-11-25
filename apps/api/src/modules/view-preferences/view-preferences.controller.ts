@@ -7,9 +7,11 @@ import {
   HttpCode,
   Param,
   Put,
+  Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { VIEW_KEYS, viewPreferenceInputSchema } from '@garita/shared';
+import { z } from 'zod';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { viewCatalogFor } from './view-access';
@@ -42,8 +44,18 @@ export class ViewPreferencesController {
 
   @Delete()
   @HttpCode(204)
-  @ApiOperation({ summary: 'Restablece la pantalla al diseño por defecto' })
-  async reset(@Param('vista') vista: string, @CurrentUser() user: AuthenticatedUser) {
-    await this.preferences.reset(viewCatalogFor(vista, user), user);
+  @ApiOperation({
+    summary: 'Restablece la pantalla al diseño por defecto; 409 si cambió desde baseUpdatedAt',
+  })
+  @ApiQuery({ name: 'baseUpdatedAt', required: false })
+  async reset(
+    @Param('vista') vista: string,
+    @Query('baseUpdatedAt') rawBase: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const catalog = viewCatalogFor(vista, user);
+    const base = z.iso.datetime().optional().safeParse(rawBase);
+    if (!base.success) throw new BadRequestException(base.error.issues);
+    await this.preferences.reset(catalog, user, base.data);
   }
 }

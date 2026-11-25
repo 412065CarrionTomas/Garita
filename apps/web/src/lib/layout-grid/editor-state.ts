@@ -93,9 +93,15 @@ export function createEditorReducer(catalog: ViewCatalog) {
       case 'resize':
         return commit(state, resizeItem(catalog, state.gesture ?? draft, action.id, action.size));
       case 'step':
-        return commit(state, stepItem(catalog, draft, action.id, action.direction));
+        return commit(
+          state,
+          stepItem(catalog, draft, action.id, action.direction, state.gesture ?? draft),
+        );
       case 'stepSize':
-        return commit(state, stepSize(catalog, draft, action.id, action.direction));
+        return commit(
+          state,
+          stepSize(catalog, draft, action.id, action.direction, state.gesture ?? draft),
+        );
       case 'hidden':
         return commit(state, setHidden(draft, action.id, action.hidden));
       case 'presentation':

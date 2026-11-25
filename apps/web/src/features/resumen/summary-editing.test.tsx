@@ -122,8 +122,9 @@ it('guardar el diseño por defecto borra la preferencia', async () => {
   await user.click(screen.getByRole('button', { name: 'Restablecer diseño' }));
   await user.click(screen.getByRole('button', { name: 'Guardar diseño' }));
   await waitFor(() => {
+    // Lleva la fecha base: si otra pestaña guardó mientras tanto, la API responde 409.
     expect(apiDelete).toHaveBeenCalledWith(
-      '/mis-preferencias/vistas/admin-summary',
+      expect.stringMatching(/^\/mis-preferencias\/vistas\/admin-summary\?baseUpdatedAt=2026/),
       expect.anything(),
     );
   });

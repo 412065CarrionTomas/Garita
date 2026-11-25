@@ -3,6 +3,7 @@ import {
   adminSummaryCatalog,
   defineViewCatalog,
   validateLayout,
+  viewLayoutSchema,
   type LayoutItem,
 } from '@garita/shared';
 import {
@@ -216,6 +217,18 @@ describe('scaleLayout', () => {
     });
     expect(scaleLayout(start(), 4, 4)).toEqual(start());
   });
+
+  it('dos bloques contiguos siguen contiguos al escalar anchos impares', () => {
+    const base = adminSummaryCatalog.defaultLayout.items.slice(0, 2);
+    const [a, b] = base;
+    if (!a || !b) throw new Error('faltan bloques');
+    const pair = [
+      { ...a, x: 0, y: 0, w: 49, hidden: false },
+      { ...b, x: 49, y: 0, w: 47, hidden: false },
+    ];
+    const [left, right] = scaleLayout(pair, 96, 48);
+    expect([left?.w, right?.x, right?.w, right?.y]).toEqual([25, 25, 23, 0]);
+  });
 });
 
 describe('sameLayout', () => {
@@ -259,7 +272,7 @@ describe('propiedades del motor sobre el catálogo real', () => {
         if (action === 'move')
           items = moveItem(adminSummaryCatalog, items, id, {
             x: Math.floor(next() * 100) - 2,
-            y: Math.floor(next() * 300) - 2,
+            y: Math.floor(next() * 2200) - 2,
           });
         else if (action === 'resize')
           items = resizeItem(adminSummaryCatalog, items, id, {
@@ -275,11 +288,10 @@ describe('propiedades del motor sobre el catálogo real', () => {
             adminSummaryCatalog.widgets[id as keyof typeof adminSummaryCatalog.widgets];
           items = setPresentation(adminSummaryCatalog, items, id, pick(presentations));
         } else items = setHidden(items, id, next() < 0.5);
-        const issues = validateLayout(adminSummaryCatalog, {
-          version: adminSummaryCatalog.version,
-          items: [...items],
-        });
+        const layout = { version: adminSummaryCatalog.version, items: [...items] };
+        const issues = validateLayout(adminSummaryCatalog, layout);
         expect({ step, action, id, issues }).toEqual({ step, action, id, issues: [] });
+        expect(viewLayoutSchema.safeParse(layout).success).toBe(true);
       }
     },
   );

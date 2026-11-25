@@ -50,12 +50,16 @@ export function complianceOwner(window: ComplianceWindow): ComplianceGuard | nul
   return window.assignments.find((assignment) => assignment.id === id)?.guard ?? null;
 }
 export function localReportDay(instant: string | Date, timezone: string): string {
+  return reportDayFormatter(timezone).format(new Date(instant));
+}
+/** Formatea instantes como día local `YYYY-MM-DD`; crearlo una vez por cálculo, no por ventana. */
+function reportDayFormatter(timezone: string): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date(instant));
+  });
 }
 function addWindow(totals: ComplianceTotals, window: ComplianceWindow) {
   switch (window.status) {
@@ -90,12 +94,7 @@ export function computeCompliance(
     string | null,
     { id: string | null; name: string; deactivated: boolean; totals: ComplianceTotals }
   >();
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
+  const formatter = reportDayFormatter(timezone);
   for (const window of windows) {
     if (
       window.shiftStatus === 'cancelled' ||
@@ -171,6 +170,7 @@ export function computeSiteDayGrid(
     string,
     { id: string; name: string; byDay: Map<string, ComplianceTotals> }
   >();
+  const formatter = reportDayFormatter(timezone);
   for (const window of windows) {
     if (
       window.shiftStatus === 'cancelled' ||
@@ -178,7 +178,7 @@ export function computeSiteDayGrid(
       ['pending', 'in_progress', 'late'].includes(window.status)
     )
       continue;
-    const day = localReportDay(window.startsAt, timezone);
+    const day = formatter.format(new Date(window.startsAt));
     const site = sites.get(window.site.id) ?? {
       ...window.site,
       byDay: new Map<string, ComplianceTotals>(),

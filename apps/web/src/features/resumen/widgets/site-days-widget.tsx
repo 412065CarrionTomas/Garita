@@ -1,5 +1,6 @@
 import { adminSummaryCatalog, type SiteDayGrid, type SiteDayStatus } from '@garita/shared';
 import { Stamp } from '@/components/stamp';
+import { FAILURE_HATCH } from '@/features/reportes/charts/chart-theme';
 import { cn } from '@/lib/utils';
 import { useSiteDayGrid } from '../queries';
 import { WidgetEmpty, WidgetFrame, WidgetStatus } from '../widget-frame';
@@ -24,7 +25,6 @@ const STATUS_CLASS: Record<SiteDayStatus, string> = {
   pending: 'border-dashed border-muted-foreground',
   none: 'border-border',
 };
-const FAILURE_HATCH = 'repeating-linear-gradient(45deg, var(--danger) 0 3px, transparent 3px 7px)';
 
 const dayNumber = (day: string) => String(Number(day.slice(8, 10)));
 const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;

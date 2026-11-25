@@ -63,6 +63,20 @@ describe('FavoritesService', () => {
     });
   });
 
+  it('vaciar la lista no llama a createMany', async () => {
+    const { favorites, service } = setup([]);
+    await service.put(adminSummaryCatalog, 'site', [], admin);
+    expect(favorites.deleteMany).toHaveBeenCalled();
+    expect(favorites.createMany).not.toHaveBeenCalled();
+  });
+
+  it('reintenta si otra escritura concurrente del mismo ámbito chocó', async () => {
+    const { favorites, service } = setup(['a']);
+    favorites.createMany.mockRejectedValueOnce({ code: 'P2034' });
+    await service.put(adminSummaryCatalog, 'site', ['a'], admin);
+    expect(favorites.createMany).toHaveBeenCalledTimes(2);
+  });
+
   it('no deja fijar lo que el usuario no puede ver', async () => {
     const { favorites, service } = setup(['a']);
     await expect(service.put(adminSummaryCatalog, 'site', ['a', 'ajeno'], admin)).rejects.toThrow(

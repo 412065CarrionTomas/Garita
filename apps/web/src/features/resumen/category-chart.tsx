@@ -8,7 +8,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { FailurePattern, chartColors, tooltipProps } from '@/features/reportes/charts/chart-theme';
+import {
+  FAILURE_HATCH,
+  FailurePattern,
+  chartColors,
+  tooltipProps,
+} from '@/features/reportes/charts/chart-theme';
 import { toneFill } from '@/features/reportes/charts/compliance-tone';
 import { cn } from '@/lib/utils';
 import type { CategoryPresentation, CategoryRow } from './summary-rows';
@@ -87,8 +92,7 @@ export function CategoryChart({
                   style={{
                     width: `${(row.value / max) * 100}%`,
                     ...(row.tone === 'failure' && {
-                      background:
-                        'repeating-linear-gradient(45deg, var(--danger) 0 3px, transparent 3px 7px)',
+                      background: FAILURE_HATCH,
                     }),
                   }}
                 />
@@ -132,7 +136,7 @@ export function CategoryChart({
                     row.tone === 'failure' ? 'border-danger' : 'border-foreground',
                   )}
                   style={{
-                    background: row.tone === 'failure' ? undefined : fill(row),
+                    background: row.tone === 'failure' ? FAILURE_HATCH : fill(row),
                     opacity: row.tone === 'failure' ? undefined : opacity(row, index),
                   }}
                 />

@@ -20,7 +20,7 @@ Todo está pensado para reutilizarse en otras pantallas: el contrato vive en `@g
 
 ## Contrato compartido (`packages/shared/src/view-layouts/`)
 
-- `layout.ts`: `viewLayoutSchema`. Un diseño es `{ version, items }`, y cada ítem `{ id, x, y, w, h, hidden, presentation, settings }` en celdas (columna y fila desde 0). Como mucho 50 bloques y 400 filas.
+- `layout.ts`: `viewLayoutSchema`. Un diseño es `{ version, items }`, y cada ítem `{ id, x, y, w, h, hidden, presentation, settings }` en celdas (columna y fila desde 0). Como mucho 50 bloques y 2000 filas.
 - `grid.ts`: geometría pura (`rectsOverlap`, `readingOrder`, `resolveCollisions` para bajar lo justo sin subir a nadie, `compactInOrder` para la vista apilada, `scaleRects`).
 - `catalog.ts`:
   - `defineViewCatalog` declara una pantalla: columnas, roles, tipos de favoritos y, para cada bloque, tamaños mínimo/máximo/por defecto (con `minByPresentation` para las presentaciones que necesitan otro mínimo; `widgetMinSize` lo resuelve), presentaciones (la primera es la de defecto) y ajustes (`z.object` con todos sus campos con valor por defecto). Falla al cargar si el catálogo es incoherente.
@@ -43,7 +43,7 @@ Cuando cambia un catálogo (bloques, tamaños o ajustes), se incrementa su `vers
 | -------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`    | `/mis-preferencias/vistas/:vista` | Diseño propio reconciliado, o `{ layout: null }` si usa el de defecto.                                                                                     |
 | `PUT`    | `/mis-preferencias/vistas/:vista` | Valida contra el catálogo (400 con `issues`). Control optimista con `baseUpdatedAt`: si otro guardó después, **409** con `code: view_preference_conflict`. |
-| `DELETE` | `/mis-preferencias/vistas/:vista` | Vuelve al diseño por defecto (204).                                                                                                                        |
+| `DELETE` | `/mis-preferencias/vistas/:vista` | Vuelve al diseño por defecto (204). Con `?baseUpdatedAt=` responde **409** si otro guardó después.                                                         |
 | `GET`    | `/mis-favoritos/:vista/:tipo`     | Ids fijados en orden; omite los desactivados o que el usuario ya no puede ver.                                                                             |
 | `PUT`    | `/mis-favoritos/:vista/:tipo`     | Reemplaza la lista completa. 400 si algún id no existe o no es visible para el usuario.                                                                    |
 | `GET`    | `/reportes/rondas/casilleros`     | Cumplimiento de cada predio día por día para el bloque Casilleros. Período local `[desde, hasta)` de hasta 31 días (400 si es más largo).                  |

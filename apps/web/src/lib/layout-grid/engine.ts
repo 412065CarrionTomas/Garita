@@ -1,5 +1,7 @@
 import {
   compactInOrder,
+  exceedsRows,
+  LAYOUT_LIMITS,
   readingOrder,
   rectsOverlap,
   settleLayoutItems,
@@ -48,9 +50,17 @@ function indexOf(items: readonly LayoutItem[], id: string): number {
   return items.findIndex((item) => item.id === id);
 }
 
-/** Deja el bloque `index` donde está y baja lo justo a los que pisa (ver `settleLayoutItems`). */
-function relocate(items: readonly LayoutItem[], index: number): LayoutItem[] {
-  return settleLayoutItems(items, index);
+/**
+ * Pone `item` en `index`, lo deja donde está y baja lo justo a los que pisa (ver
+ * `settleLayoutItems`). Si la cascada pasa el tope de filas que admite la API, no hace nada.
+ */
+function relocate(
+  items: readonly LayoutItem[],
+  index: number,
+  item: LayoutItem,
+): readonly LayoutItem[] {
+  const next = settleLayoutItems(replaceAt(items, index, item), index);
+  return exceedsRows(next) ? items : next;
 }
 
 function replaceAt(items: readonly LayoutItem[], index: number, item: LayoutItem): LayoutItem[] {
@@ -88,7 +98,10 @@ function sameSettings(a: Record<string, unknown>, b: Record<string, unknown>): b
 }
 
 /** Devuelve `next` salvo que sea igual a `items`: así una acción sin efecto conserva la referencia. */
-function keepIfSame(items: readonly LayoutItem[], next: LayoutItem[]): readonly LayoutItem[] {
+function keepIfSame(
+  items: readonly LayoutItem[],
+  next: readonly LayoutItem[],
+): readonly LayoutItem[] {
   return sameLayout(items, next) ? items : next;
 }
 
@@ -105,9 +118,9 @@ export function moveItem(
   const moved = {
     ...item,
     x: clamp(Math.round(to.x), 0, catalog.columns - item.w),
-    y: Math.max(0, Math.round(to.y)),
+    y: clamp(Math.round(to.y), 0, LAYOUT_LIMITS.maxRows),
   };
-  return keepIfSame(items, relocate(replaceAt(items, index, moved), index));
+  return keepIfSame(items, relocate(items, index, moved));
 }
 
 /**
@@ -131,22 +144,27 @@ export function resizeItem(
     w: clamp(Math.round(to.w), min.w, Math.min(max.w, catalog.columns - item.x)),
     h: clamp(Math.round(to.h), min.h, max.h),
   };
-  return keepIfSame(items, relocate(replaceAt(items, index, resized), index));
+  return keepIfSame(items, relocate(items, index, resized));
 }
 
-/** Un paso de teclado: mueve el bloque `keyboardStep` en esa dirección; los que pisa bajan. */
+/**
+ * Un paso de teclado: mueve el bloque `keyboardStep` en esa dirección; los que pisa bajan. El
+ * destino sale de `items` y se aplica sobre `base` (el diseño de antes del gesto, si lo hay): así
+ * los empujados vuelven a su lugar si el bloque retrocede, como con el puntero.
+ */
 export function stepItem(
   catalog: ViewCatalog,
   items: readonly LayoutItem[],
   id: string,
   direction: Direction,
+  base: readonly LayoutItem[] = items,
 ): readonly LayoutItem[] {
   const item = items[indexOf(items, id)];
   if (!item || item.hidden) return items;
   const step = keyboardStep(catalog);
   const dx = direction === 'left' ? -step.columns : direction === 'right' ? step.columns : 0;
   const dy = direction === 'up' ? -step.rows : direction === 'down' ? step.rows : 0;
-  return moveItem(catalog, items, id, { x: item.x + dx, y: item.y + dy });
+  return moveItem(catalog, base, id, { x: item.x + dx, y: item.y + dy });
 }
 
 /** Un paso de teclado de tamaño: derecha e izquierda cambian el ancho; abajo y arriba, el alto. */
@@ -155,13 +173,14 @@ export function stepSize(
   items: readonly LayoutItem[],
   id: string,
   direction: Direction,
+  base: readonly LayoutItem[] = items,
 ): readonly LayoutItem[] {
   const item = items[indexOf(items, id)];
   if (!item) return items;
   const step = keyboardStep(catalog);
   const sign = direction === 'right' || direction === 'down' ? 1 : -1;
   const horizontal = direction === 'left' || direction === 'right';
-  return resizeItem(catalog, items, id, {
+  return resizeItem(catalog, base, id, {
     w: item.w + (horizontal ? sign * step.columns : 0),
     h: item.h + (horizontal ? 0 : sign * step.rows),
   });
@@ -179,8 +198,9 @@ export function setHidden(
   const index = indexOf(items, id);
   const item = items[index];
   if (!item || item.hidden === hidden) return items;
-  const next = replaceAt(items, index, { ...item, hidden });
-  return hidden ? next : relocate(next, index);
+  return hidden
+    ? replaceAt(items, index, { ...item, hidden })
+    : relocate(items, index, { ...item, hidden });
 }
 
 /**
@@ -207,8 +227,7 @@ export function setPresentation(
     h: Math.max(item.h, min.h),
     x: Math.min(item.x, catalog.columns - w),
   };
-  const next = replaceAt(items, index, grown);
-  return item.hidden ? next : relocate(next, index);
+  return item.hidden ? replaceAt(items, index, grown) : relocate(items, index, grown);
 }
 
 /** Combina ajustes nuevos con los actuales; ignora el cambio si el resultado no es válido. */
@@ -239,9 +258,11 @@ export function scaleLayout(
   if (toColumns >= fromColumns) return [...items];
   const ratio = toColumns / fromColumns;
   const order = readingOrder(items).filter((index) => !items[index]?.hidden);
+  // Se escalan los bordes, no el ancho: dos bloques contiguos siguen contiguos (49+47 → 25+23).
   const scaled = items.map((item) => {
-    const w = clamp(Math.round(item.w * ratio), 1, toColumns);
-    return { ...item, w, x: clamp(Math.round(item.x * ratio), 0, toColumns - w) };
+    const x = clamp(Math.round(item.x * ratio), 0, toColumns - 1);
+    const right = clamp(Math.round((item.x + item.w) * ratio), x + 1, toColumns);
+    return { ...item, x, w: right - x };
   });
   // Escalar puede superponer bloques que estaban lado a lado: el orden de lectura los resuelve.
   return compactInOrder(scaled, order);

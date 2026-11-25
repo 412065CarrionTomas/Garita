@@ -119,7 +119,7 @@ export function BlocksPanel({
           Bloques
           {hidden > 0 && (
             <span className="t-stamp border-[1.5px] border-dashed border-current px-1.5">
-              {hidden} ocultos
+              {hidden} {hidden === 1 ? 'oculto' : 'ocultos'}
             </span>
           )}
         </Button>

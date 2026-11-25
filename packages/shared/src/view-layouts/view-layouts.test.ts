@@ -15,6 +15,7 @@ import {
   widgetMinSize,
   viewCatalogs,
   viewPreferenceInputSchema,
+  viewLayoutSchema,
   type ViewLayout,
 } from './index';
 
@@ -177,6 +178,23 @@ describe('reconcileLayout', () => {
     expect(item(result, 'compliance')).toMatchObject({ x: 0, w: 96, presentation: 'line' });
     expect(item(result, 'sites').settings).toEqual({ sort: 'worst', limit: '5' });
     expect(item(result, 'attention')).toMatchObject({ hidden: false, presentation: 'table' });
+  });
+
+  it('agrega los bloques nuevos con la visibilidad del diseño por defecto', () => {
+    const stored = {
+      version: adminSummaryCatalog.version,
+      items: adminSummaryCatalog.defaultLayout.items.filter((entry) => entry.id !== 'siteDays'),
+    };
+    expect(item(reconcileLayout(adminSummaryCatalog, stored), 'siteDays').hidden).toBe(true);
+  });
+
+  it('nunca deja bloques por debajo del tope de filas', () => {
+    const stored = edited((items) => {
+      for (const entry of items) entry.y += 1990;
+    });
+    const result = reconcileLayout(adminSummaryCatalog, stored);
+    expect(validateLayout(adminSummaryCatalog, result)).toEqual([]);
+    expect(viewLayoutSchema.safeParse(result).success).toBe(true);
   });
 
   it('respeta los huecos: no sube a nadie y deja quietos a los ocultos', () => {

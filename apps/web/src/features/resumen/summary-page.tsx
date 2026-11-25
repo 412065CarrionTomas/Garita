@@ -63,23 +63,31 @@ export function SummaryPage() {
             : 'Ampliá la ventana (1024 px o más) para seguir moviendo bloques. Podés guardar o cancelar igual.'}
         </Alert>
       )}
-      {editor.conflict && (
+      {editor.editing && editor.conflict && (
         <Alert variant="destructive" role="alert" className="space-y-3">
           <p>
             Tu diseño cambió desde otra pestaña o dispositivo mientras lo editabas. ¿Cuál querés
             conservar?
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => void editor.keepMine()}>
+            <Button
+              variant="outline"
+              disabled={editor.resolving}
+              onClick={() => void editor.keepMine()}
+            >
               Seguir con mis cambios
             </Button>
-            <Button variant="outline" onClick={() => void editor.takeTheirs()}>
+            <Button
+              variant="outline"
+              disabled={editor.resolving}
+              onClick={() => void editor.takeTheirs()}
+            >
               Ver el diseño guardado
             </Button>
           </div>
         </Alert>
       )}
-      {editor.saveFailed && (
+      {editor.editing && editor.saveFailed && (
         <Alert variant="destructive" role="alert">
           No pudimos guardar el diseño. Revisá la conexión e intentá de nuevo; tus cambios siguen
           acá.

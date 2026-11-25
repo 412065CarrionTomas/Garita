@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  FAILURE_HATCH,
   FailurePattern,
   axisProps,
   barProps,
@@ -192,8 +193,7 @@ function StateBar({ totals }: { totals: ComplianceReport['totals'] }) {
               style={{
                 width: `${(part.value / totals.evaluated) * 100}%`,
                 ...(part.hatch && {
-                  background:
-                    'repeating-linear-gradient(45deg, var(--danger) 0 3px, transparent 3px 7px)',
+                  background: FAILURE_HATCH,
                 }),
               }}
             />

@@ -49,6 +49,7 @@ export function EditableItem({
   dispatch,
   announce,
   instructionsId,
+  gestureLock,
   children,
 }: {
   item: LayoutItem;
@@ -61,12 +62,13 @@ export function EditableItem({
   announce: (message: string) => void;
   /** Id del texto con las instrucciones de teclado, para `aria-describedby`. */
   instructionsId: string;
+  /** Un gesto a la vez en toda la grilla: `acquire` da false si otro bloque tiene uno en curso. */
+  gestureLock: { acquire: () => boolean; release: () => void };
   children: ReactNode;
 }) {
   // El gesto vive en una ref para los manejadores y en estado para dibujar la vista previa.
   const origin = useRef<DragPreview | null>(null);
   const [preview, setPreview] = useState<DragPreview | null>(null);
-  const busy = useRef(false);
   const current = useRef(item);
   useEffect(() => {
     current.current = item;
@@ -74,8 +76,7 @@ export function EditableItem({
 
   const beginPointer = (kind: DragPreview['kind']) => {
     const grid = gridRef.current;
-    if (!grid || busy.current) return;
-    busy.current = true;
+    if (!grid || !gestureLock.acquire()) return;
     origin.current = {
       kind,
       start: item,
@@ -96,7 +97,7 @@ export function EditableItem({
     if (!origin.current) return;
     origin.current = null;
     setPreview(null);
-    busy.current = false;
+    gestureLock.release();
     dispatch({ type: 'gestureEnd' });
     announce(`${title}: ${describePlacement(current.current)}.`);
   };
@@ -104,7 +105,7 @@ export function EditableItem({
     if (!origin.current) return;
     origin.current = null;
     setPreview(null);
-    busy.current = false;
+    gestureLock.release();
     dispatch({ type: 'gestureCancel' });
     announce(`Se canceló el cambio de ${title}.`);
   };
@@ -143,8 +144,7 @@ export function EditableItem({
 
   const keyboard = (kind: 'move' | 'resize') => ({
     onGrab: () => {
-      if (busy.current) return false;
-      busy.current = true;
+      if (!gestureLock.acquire()) return false;
       dispatch({ type: 'gestureStart' });
       announce(
         kind === 'move'
@@ -157,12 +157,12 @@ export function EditableItem({
       dispatch({ type: kind === 'move' ? 'step' : 'stepSize', id: item.id, direction });
     },
     onDrop: () => {
-      busy.current = false;
+      gestureLock.release();
       dispatch({ type: 'gestureEnd' });
       announce(`${title} quedó en ${describePlacement(current.current)}.`);
     },
     onCancel: () => {
-      busy.current = false;
+      gestureLock.release();
       dispatch({ type: 'gestureCancel' });
       announce(`Se canceló el cambio de ${title}.`);
     },

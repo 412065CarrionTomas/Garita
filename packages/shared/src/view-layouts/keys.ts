@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** Pantallas personalizables. Cada una tiene su catálogo en `catalogs.ts`. */
+/** Pantallas personalizables. Cada una tiene su catálogo en `index.ts`. */
 export const VIEW_KEYS = ['admin-summary'] as const;
 export const viewKeySchema = z.enum(VIEW_KEYS);
 export type ViewKey = z.infer<typeof viewKeySchema>;

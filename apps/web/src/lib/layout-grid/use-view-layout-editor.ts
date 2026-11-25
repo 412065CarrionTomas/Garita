@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, type Dispatch } from 'react';
+import { useCallback, useMemo, useReducer, useState, type Dispatch } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   reconcileLayout,
@@ -38,6 +38,8 @@ export interface ViewLayoutEditor {
   saveFailed: boolean;
   /** Otro dispositivo o pestaña guardó mientras se editaba. */
   conflict: boolean;
+  /** Resolviendo un conflicto (se está trayendo el diseño guardado). */
+  resolving: boolean;
   /** Conflicto: conservar el borrador para guardarlo encima de lo nuevo. */
   keepMine: () => Promise<void>;
   /** Conflicto: descartar el borrador y ver lo que guardó el otro. */
@@ -78,7 +80,11 @@ export function useViewLayoutEditor(catalog: ViewCatalog): ViewLayoutEditor {
       base: string | null;
     }): Promise<ViewPreferenceResponse> => {
       if (sameLayout(items, catalog.defaultLayout.items)) {
-        await apiDelete(path, z.undefined());
+        // Con la fecha base, la API responde 409 si otra pestaña guardó mientras tanto.
+        await apiDelete(
+          base ? `${path}?baseUpdatedAt=${encodeURIComponent(base)}` : path,
+          z.undefined(),
+        );
         return { layout: null, updatedAt: null };
       }
       return apiPut(
@@ -107,6 +113,22 @@ export function useViewLayoutEditor(catalog: ViewCatalog): ViewLayoutEditor {
 
   const { reset: resetMutation, mutate } = mutation;
   const conflict = isConflict(mutation.error);
+  const [resolving, setResolving] = useState(false);
+  const [resolveFailed, setResolveFailed] = useState(false);
+
+  /** Trae lo guardado y aplica la elección; si falla, el conflicto sigue a la vista con su aviso. */
+  const resolve = async (apply: (latest: readonly LayoutItem[]) => void) => {
+    setResolving(true);
+    setResolveFailed(false);
+    try {
+      apply(await fetchLatest());
+      resetMutation();
+    } catch {
+      setResolveFailed(true);
+    } finally {
+      setResolving(false);
+    }
+  };
 
   return {
     catalog,
@@ -118,23 +140,26 @@ export function useViewLayoutEditor(catalog: ViewCatalog): ViewLayoutEditor {
     dirty,
     canUndo: canUndo(state),
     start: () => {
-      if (saved) dispatch({ type: 'start', items: saved });
+      // Sin el diseño guardado no hay fecha base: guardar daría un 409 engañoso.
+      if (!saved || failed) return;
+      resetMutation();
+      setResolveFailed(false);
+      dispatch({ type: 'start', items: saved });
     },
     save: () => {
       if (state.mode === 'edit') mutate({ items: state.draft, base: updatedAt });
     },
     saving: mutation.isPending,
-    saveFailed: mutation.isError && !conflict,
+    saveFailed: (mutation.isError && !conflict) || resolveFailed,
     conflict,
-    keepMine: async () => {
-      const latest = await fetchLatest();
-      dispatch({ type: 'rebase', items: latest });
-      resetMutation();
-    },
-    takeTheirs: async () => {
-      await fetchLatest();
-      dispatch({ type: 'cancel' });
-      resetMutation();
-    },
+    resolving,
+    keepMine: () =>
+      resolve((latest) => {
+        dispatch({ type: 'rebase', items: latest });
+      }),
+    takeTheirs: () =>
+      resolve(() => {
+        dispatch({ type: 'cancel' });
+      }),
   };
 }

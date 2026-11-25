@@ -4,6 +4,13 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { FAVORITE_VISIBILITY_PORT, type FavoriteVisibilityPort } from './favorites-visibility.port';
 
+const MAX_ATTEMPTS = 3;
+
+function isWriteConflict(error: unknown) {
+  const code = typeof error === 'object' && error && 'code' in error ? error.code : undefined;
+  return code === 'P2034' || code === 'P2002';
+}
+
 /** Entidades fijadas arriba de las listas de una pantalla, en el orden que eligió el usuario. */
 @Injectable()
 export class FavoritesService {
@@ -41,17 +48,27 @@ export class FavoritesService {
     if (ids.some((id) => !visible.has(id)))
       throw new BadRequestException('Hay elementos que no existen o que no podés ver.');
     const scope = { userId: user.userId, viewKey: catalog.key, entityType: type };
-    await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await tx.userFavorite.deleteMany({ where: scope });
-      await tx.userFavorite.createMany({
-        data: ids.map((entityId, position) => ({
-          ...scope,
-          companyId: user.companyId,
-          entityId,
-          position,
-        })),
-      });
-    });
+    const data = ids.map((entityId, position) => ({
+      ...scope,
+      companyId: user.companyId,
+      entityId,
+      position,
+    }));
+    // Serializable: dos reemplazos concurrentes del mismo ámbito chocarían (P2002) o mezclarían listas.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.prisma.tenantPrisma.$transaction(
+          async (tx) => {
+            await tx.userFavorite.deleteMany({ where: scope });
+            if (data.length > 0) await tx.userFavorite.createMany({ data });
+          },
+          { isolationLevel: 'Serializable' },
+        );
+        break;
+      } catch (error) {
+        if (attempt >= MAX_ATTEMPTS || !isWriteConflict(error)) throw error;
+      }
+    }
     return { ids: [...ids] };
   }
 

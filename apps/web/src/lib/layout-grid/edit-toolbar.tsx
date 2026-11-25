@@ -31,9 +31,14 @@ export function EditToolbar({
   const { editing, dirty, saving, dispatch } = editor;
   // Ctrl+Z (Cmd+Z) deshace mientras se edita, salvo que el foco esté en un campo de texto.
   useEffect(() => {
-    if (!editing) return;
+    if (!editing || saving) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey)
+      if (
+        event.key.toLowerCase() !== 'z' ||
+        !(event.ctrlKey || event.metaKey) ||
+        event.shiftKey ||
+        event.altKey
+      )
         return;
       const target = event.target;
       if (
@@ -48,10 +53,10 @@ export function EditToolbar({
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [editing, dispatch]);
+  }, [editing, saving, dispatch]);
   if (!editing)
     return editable && editor.items ? (
-      <Button variant="outline" onClick={editor.start}>
+      <Button variant="outline" disabled={editor.loadFailed} onClick={editor.start}>
         <Pencil aria-hidden="true" />
         Editar diseño
       </Button>
