@@ -5,13 +5,13 @@ packages:
 # Versiones compartidas entre los paquetes del monorepo (se referencian con "catalog:").
 catalog:
   '@eslint/js': ^10.0.1
-  '@types/node': ^24.19.1
+  '@types/node': ^24.19.2
   eslint: ^10.12.0
   eslint-config-prettier: ^10.1.8
-  globals: ^17.13.0
+  globals: ^17.14.0
   jest: ^30.5.2
   typescript: ~6.0.3
-  typescript-eslint: ^8.72.0
+  typescript-eslint: ^8.73.0
   zod: ^4.6.7
 
 # Dependencias autorizadas a ejecutar scripts de instalación.
