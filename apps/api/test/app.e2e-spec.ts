@@ -3724,7 +3724,8 @@ describe('Aplicación (e2e)', () => {
       const ctr = Buffer.alloc(2);
       ctr.writeUInt16LE(counter + 1);
       const response =
-        counter === 6
+        // write_ndef (0) es plano y key_0 (6) cierra la sesión: ambas responden 9100 sin MAC.
+        counter === 0 || counter === 6
           ? '9100'
           : Buffer.concat([
               truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),
@@ -4048,7 +4049,8 @@ describe('Aplicación (e2e)', () => {
       const ctr = Buffer.alloc(2);
       ctr.writeUInt16LE(counter + 1);
       const response =
-        counter === 6
+        // write_ndef (0) es plano y key_0 (6) cierra la sesión: ambas responden 9100 sin MAC.
+        counter === 0 || counter === 6
           ? '9100'
           : Buffer.concat([
               truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),
