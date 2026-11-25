@@ -54,6 +54,7 @@ export const shiftDetailSchema = z.object({
     closeReason: z.string().nullable(),
     closedBy: z.string().nullable(),
   }),
+  syncStatus: syncStatusSchema.nullable(),
   phoneWithoutNfc: z.boolean(),
   assignments: z.array(
     z.object({
@@ -176,6 +177,15 @@ export function time(value: string) {
     hourCycle: 'h23',
   }).format(new Date(value));
 }
+/** Demora legible entre dos instantes, ej. "12 min" o "1 h 05 min"; null si no hay demora. */
+export function delay(from: string, to: Date) {
+  const minutes = Math.floor((to.getTime() - new Date(from).getTime()) / 60_000);
+  // `!(> 0)` también descarta NaN: una fecha inválida no muestra «NaN min».
+  if (!(minutes > 0)) return null;
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours} h ${String(minutes % 60).padStart(2, '0')} min` : `${minutes} min`;
+}
+
 export function syncLabel(value: ShiftRow['syncStatus']) {
   if (!value) return null;
   switch (value.status) {

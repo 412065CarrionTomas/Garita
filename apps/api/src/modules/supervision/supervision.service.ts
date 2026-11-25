@@ -33,9 +33,21 @@ export class SupervisionService {
       day: '2-digit',
     }).format(now);
     const serviceDate = new Date(`${input.fecha ?? localToday}T00:00:00.000Z`);
+    // Default "today" view keeps overnight shifts started before midnight visible while they still
+    // matter: running, or still inside their scheduled hours (closed early and now uncovered, or
+    // never started / without a guard).
+    const dateWhere = input.fecha
+      ? { serviceDate }
+      : {
+          OR: [
+            { serviceDate },
+            { status: 'in_progress' as const },
+            { startsAt: { lte: now }, endsAt: { gt: now } },
+          ],
+        };
     const shifts = await this.prisma.tenantPrisma.shift.findMany({
       where: {
-        ...(user.suspension ? {} : { serviceDate }),
+        ...(user.suspension ? {} : dateWhere),
         ...suspendedVisibleShiftWhere(user),
         ...(input.predio ? { siteId: input.predio } : {}),
       },
@@ -120,6 +132,7 @@ export class SupervisionService {
           },
         },
         events: { orderBy: { occurredAt: 'asc' } },
+        syncState: true,
         rounds: {
           include: {
             round: {
@@ -250,6 +263,27 @@ export class SupervisionService {
         closeReason: shift.closeReason,
         closedBy: shift.closedBy,
       },
+      // Mismo cálculo que la lista: el cierre cuenta solo si es de la asignación vigente.
+      syncStatus: shift.startedAt
+        ? computeSyncStatus({
+            now: this.clock.now(),
+            lastContactAt: shift.syncState?.lastContactAt ?? null,
+            pendingCount: shift.syncState?.lastPendingCount ?? 0,
+            syncedUntil: shift.syncState?.syncedUntil ?? null,
+            scheduledEndAt: shift.endsAt,
+            syncDeadlineAt: shift.syncDeadlineAt,
+            withoutSignal: shift.connectivityType === 'without_signal',
+            closed:
+              shift.status === 'closed' ||
+              shift.events.some(
+                (event) =>
+                  (event.type === 'close' || event.type === 'admin_close') &&
+                  event.assignmentId ===
+                    shift.assignments.find((assignment) => assignment.isCurrent)?.id,
+              ),
+            closedWithoutData: Boolean(shift.closedWithoutDataAt),
+          })
+        : null,
       phoneWithoutNfc: records.phoneWithoutNfc,
       assignments: shift.assignments,
       rounds: shift.rounds.map((round) => ({ id: round.roundId, name: round.round.name })),

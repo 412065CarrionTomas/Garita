@@ -11,19 +11,22 @@ import { WindowBar } from '@/components/window-bar';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 import {
+  delay,
   foja,
   isCompleteWindow,
   shiftDetailSchema,
   shiftLabels,
   shiftTones,
+  syncLabel,
   time,
   windowBoxStatus,
 } from './contracts';
 import type { Severity, ShiftDetail } from './contracts';
 import {
   AssignmentsSection,
-  CoverageSection,
+  CoverageNote,
   RecordsSection,
   RejectedSection,
   RouteSection,
@@ -39,17 +42,25 @@ import { useSiteCoordinates } from './use-site-coordinates';
 const BACK = (
   <Link
     to="/supervision"
-    className="inline-flex min-h-9 items-center px-1 text-sm font-semibold underline underline-offset-4"
+    className="inline-flex min-h-6 items-center text-sm font-semibold text-muted-foreground hover:text-foreground hover:underline underline-offset-4"
   >
     ← Rondas
   </Link>
 );
 
-function Meta({ label, children }: { label: string; children: ReactNode }) {
+function Meta({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <div>
+    <div className={className}>
       <dt className="t-label text-muted-foreground">{label}</dt>
-      <dd className="text-sm font-semibold tabular-nums">{children}</dd>
+      <dd className="mt-0.5 text-base font-semibold tabular-nums">{children}</dd>
     </div>
   );
 }
@@ -64,11 +75,23 @@ function Foja({ detail, noticePending }: { detail: ShiftDetail; noticePending: b
   const { path, rows, done } = useMemo(() => foja(detail), [detail]);
   const windows = [...detail.windows].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   const completeWindows = windows.filter((w) => isCompleteWindow(w.status)).length;
+  const guard = detail.assignments.find((a) => a.isCurrent)?.guard;
   const currentWindow =
     windows.find((w) => w.status === 'in_progress' || w.status === 'late') ??
     windows.find((w) => w.status === 'pending');
-  const guard = detail.assignments.find((a) => a.isCurrent)?.guard;
-  const roundName = detail.rounds[0]?.name;
+  // Inicio real contra programado: es lo primero que el supervisor quiere saber del turno.
+  const { startedAt } = detail.actual;
+  const startLate = startedAt
+    ? delay(detail.scheduled.startsAt, new Date(startedAt))
+    : detail.status === 'scheduled'
+      ? delay(detail.scheduled.startsAt, new Date())
+      : null;
+  // Sin texto si todavía no le toca empezar: el sello "No iniciado" ya lo dice.
+  const start = startedAt
+    ? `inició ${time(startedAt)}${startLate ? `, ${startLate} tarde` : ''}`
+    : startLate
+      ? `sin iniciar, ${startLate} tarde`
+      : null;
 
   const siteAt = coordinates.get(detail.site.id);
   const mapPoints = detail.points.map((point, index) => ({
@@ -81,14 +104,9 @@ function Foja({ detail, noticePending }: { detail: ShiftDetail; noticePending: b
 
   const panel = (
     <>
-      <div className="flex items-center gap-3.5 border-b border-border px-5 py-2">
-        {BACK}
-        <p className="t-label ml-auto text-muted-foreground">
-          Foja de ronda{roundName ? ` ${roundName}` : ''} · turno {time(detail.scheduled.startsAt)}
-        </p>
-      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="px-5 pt-4">
+        <div className="px-5 pt-3">
+          {BACK}
           <PageHeader
             id="detail-title"
             title={detail.site.name}
@@ -99,58 +117,87 @@ function Foja({ detail, noticePending }: { detail: ShiftDetail; noticePending: b
             }
           />
         </div>
-        {/* TODO(foja): "Última sincronización" no viene en el detalle (sí en la lista, como syncStatus). */}
-        <dl className="flex flex-wrap gap-x-6 gap-y-1 px-5 pt-3 pb-3.5">
+        {/* Una fila: cada dato con su acción al lado (reasignar junto al vigilador, cerrar sin datos junto a la señal). */}
+        <dl className="flex flex-wrap items-start gap-x-8 gap-y-3 px-5 pt-3 pb-4">
           <Meta label="Vigilador">
-            {guard ? `${guard.firstName} ${guard.lastName}` : 'Sin vigilador'}
+            <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              {guard ? `${guard.firstName} ${guard.lastName}` : 'Sin vigilador'}
+              {detail.canCover && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setReassignOpen(true);
+                  }}
+                >
+                  {detail.status === 'uncovered' ? 'Cubrir el resto' : 'Reasignar'}
+                </Button>
+              )}
+            </span>
           </Meta>
-          <Meta label="Ventana actual">
-            {currentWindow
-              ? `${time(currentWindow.startsAt)}–${time(currentWindow.endsAt)}`
-              : 'Sin ventana en curso'}
+          <Meta label="Horario">
+            {time(detail.scheduled.startsAt)}–{time(detail.scheduled.endsAt)}
+            {start && (
+              <span
+                className={cn('font-normal', startLate ? 'text-warning' : 'text-muted-foreground')}
+              >
+                {' · '}
+                {start}
+              </span>
+            )}
+          </Meta>
+          <Meta
+            label="Señal"
+            className={cn(
+              (detail.syncStatus?.status === 'sin_contacto' ||
+                detail.syncStatus?.status === 'sin_sincronizar') &&
+                'text-warning',
+            )}
+          >
+            <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              {syncLabel(detail.syncStatus) ??
+                (detail.site.connectivityType === 'without_signal'
+                  ? 'Predio sin señal'
+                  : 'Predio con señal')}
+              {noticePending && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setCloseWithoutDataOpen(true);
+                  }}
+                >
+                  Cerrar sin datos
+                </Button>
+              )}
+            </span>
           </Meta>
           <Meta label="Puntos">
             {done} de {detail.points.length}
           </Meta>
+          {windows.length > 0 && (
+            <Meta label="Ventana actual">
+              <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                {currentWindow
+                  ? `${time(currentWindow.startsAt)}–${time(currentWindow.endsAt)}`
+                  : 'Sin ventana en curso'}
+                <WindowBar windows={windows.map((w) => ({ status: windowBoxStatus[w.status] }))} />
+                <span className="font-normal text-muted-foreground">
+                  {completeWindows}/{windows.length}
+                </span>
+              </span>
+            </Meta>
+          )}
         </dl>
-        <div className="px-5 pb-1.5">
+        <CoverageNote detail={detail} />
+        <div className="px-5 pb-3">
           <PointPath points={path} selectedId={selectedPointId} onSelect={setSelectedPointId} />
         </div>
-        <div className="flex items-center gap-3.5 px-5 pb-3 text-sm text-muted-foreground">
-          <WindowBar windows={windows.map((w) => ({ status: windowBoxStatus[w.status] }))} />
-          <span>
-            {completeWindows} de {windows.length} ventanas completas
-          </span>
-        </div>
-        {(noticePending || detail.canCover) && (
-          <div className="flex flex-wrap gap-2 border-t border-border px-5 py-2.5">
-            {noticePending && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setCloseWithoutDataOpen(true);
-                }}
-              >
-                Cerrar sin datos
-              </Button>
-            )}
-            {detail.canCover && (
-              <Button
-                onClick={() => {
-                  setReassignOpen(true);
-                }}
-              >
-                {detail.status === 'uncovered' ? 'Cubrir el resto' : 'Reasignar'}
-              </Button>
-            )}
-          </div>
-        )}
         {/* TODO(foja): "Llamar" / "Enviar SMS" necesita el teléfono del vigilador, que el detalle no trae. */}
-        <div className="flex h-96 flex-col px-5">
+        <div className="flex max-h-96 flex-col px-5">
           <PointTable rows={rows} selectedId={selectedPointId} onSelect={setSelectedPointId} />
         </div>
-        <div className="space-y-6 px-5 py-6">
-          <CoverageSection detail={detail} />
+        <div className="border-b border-border px-5 pt-4">
           <AssignmentsSection detail={detail} />
           <WindowsSection detail={detail} />
           <RouteSection detail={detail} />
@@ -238,7 +285,7 @@ export function ShiftDetailPage() {
         map={<LiveMap sites={[]} />}
         panel={
           <>
-            <div className="border-b border-border px-5 py-2">{BACK}</div>
+            <div className="px-5 pt-3">{BACK}</div>
             {isError ? (
               <Alert variant="destructive" role="alert" className="m-5 w-auto">
                 No pudimos cargar el turno.{' '}

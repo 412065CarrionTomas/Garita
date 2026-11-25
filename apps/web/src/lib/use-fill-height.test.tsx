@@ -33,3 +33,33 @@ it('mide el elemento cuando su pestaña se muestra, aunque la página no cambie 
   expect(element).not.toHaveAttribute('data-height', 'none');
   rects.mockRestore();
 });
+
+it('vuelve a medir cuando aparece un aviso nuevo arriba dentro de main', async () => {
+  window.ResizeObserver = jest.fn(() => ({
+    observe: jest.fn(),
+    unobserve: jest.fn(),
+    disconnect: jest.fn(),
+  }));
+  const rects = jest
+    .spyOn(HTMLElement.prototype, 'getClientRects')
+    .mockImplementation(() => [{}] as unknown as DOMRectList);
+  let top = 100;
+  const box = jest
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(() => ({ top }) as DOMRect);
+  const main = document.createElement('main');
+  document.body.append(main);
+  const { getByTestId } = render(<Filler />, { container: main });
+  const element = getByTestId('fill');
+  const before = Number(element.getAttribute('data-height'));
+  // Un banner entra a `main` y empuja el elemento 60 px.
+  top = 160;
+  await act(async () => {
+    main.prepend(document.createElement('div'));
+    await Promise.resolve();
+  });
+  expect(Number(element.getAttribute('data-height'))).toBe(before - 60);
+  rects.mockRestore();
+  box.mockRestore();
+  main.remove();
+});

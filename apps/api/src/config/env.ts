@@ -50,7 +50,7 @@ export const envSchema = z
     MERCADOPAGO_ACCESS_TOKEN: z.string().min(1).optional(),
     MERCADOPAGO_WEBHOOK_SECRET: z.string().min(1).optional(),
     ORS_API_KEY: z.string().min(1).optional(),
-    ORS_URL: z.url({ protocol: /^https?$/ }).default('https://api.openrouteservice.org'),
+    ORS_URL: z.url({ protocol: /^https?$/ }).default('https://api.heigit.org/openrouteservice'),
   })
   .superRefine((env, context) => {
     if (env.SMS_PROVIDER === 'http') {

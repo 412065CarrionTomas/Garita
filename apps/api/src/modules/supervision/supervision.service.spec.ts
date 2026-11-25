@@ -130,3 +130,67 @@ it('devuelve el recorrido de la versión del turno, no el de la versión actual'
     { roundId: 'broken', roundName: 'Rota', checkpointIds: ['d'], route: null },
   ]);
 });
+
+it('includes the synchronization status in the detail, ignoring closures of replaced assignments', async () => {
+  const lastContactAt = new Date(now.getTime() - 60 * 60_000);
+  const shift = {
+    id: 'shift',
+    status: 'in_progress',
+    startsAt: now,
+    endsAt: new Date(now.getTime() + 60 * 60_000),
+    startedAt: now,
+    connectivityType: 'with_signal',
+    syncDeadlineAt: null,
+    closedWithoutDataAt: null,
+    syncState: { lastContactAt, lastPendingCount: 2, syncedUntil: null },
+    assignments: [
+      { id: 'old', isCurrent: false, guard: null },
+      { id: 'current', isCurrent: true, guard: null },
+    ],
+    events: [{ type: 'close', assignmentId: 'old' }],
+    rounds: [],
+    roundWindowStates: [],
+    checkpointRecords: [],
+    invalidScanAttempts: [],
+  };
+  const service = new SupervisionService(
+    {
+      tenantPrisma: { shift: { findFirst: jest.fn().mockResolvedValue(shift) } },
+    } as unknown as PrismaService,
+    { getShiftRecords: jest.fn().mockResolvedValue({ records: [] }) } as unknown as MarcasService,
+    { now: () => now },
+  );
+  const detail = await service.detail('shift', user, {});
+  expect(detail.syncStatus).toEqual({
+    status: 'sin_contacto',
+    since: lastContactAt,
+    pendingCount: 2,
+  });
+});
+
+it('keeps overnight shifts still running or inside their hours in the default today view, but not for an explicit date', async () => {
+  const findMany = jest.fn<Promise<unknown[]>, [{ where: unknown }]>().mockResolvedValue([]);
+  const whereOf = (call: number) => findMany.mock.calls[call]?.[0].where;
+  const service = new SupervisionService(
+    {
+      tenantPrisma: {
+        company: { findUniqueOrThrow: jest.fn().mockResolvedValue({ timezone: 'UTC' }) },
+        shift: { findMany },
+      },
+    } as unknown as PrismaService,
+    {} as MarcasService,
+    { now: () => now },
+  );
+  const serviceDate = new Date('2026-11-01T00:00:00.000Z');
+  await service.list({}, user);
+  expect(whereOf(0)).toMatchObject({
+    OR: [
+      { serviceDate },
+      { status: 'in_progress' },
+      { startsAt: { lte: now }, endsAt: { gt: now } },
+    ],
+  });
+  await service.list({ fecha: '2026-11-01' }, user);
+  expect(whereOf(1)).toMatchObject({ serviceDate });
+  expect(whereOf(1)).not.toHaveProperty('OR');
+});
