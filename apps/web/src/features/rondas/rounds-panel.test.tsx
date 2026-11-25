@@ -38,6 +38,11 @@ async function openNew() {
 }
 
 describe('RoundsPanel', () => {
+  // Las llamadas de un test no cuentan en el siguiente, aunque un expect falle a mitad.
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('elige la ronda del mapa y la da de baja desde su menú con confirmación', async () => {
     const version = (ids: string[]) => ({
       frequencyMinutes: 120,
@@ -88,8 +93,6 @@ describe('RoundsPanel', () => {
       expect.anything(),
       expect.anything(),
     );
-    // El archivo no limpia los mocks entre tests: esta baja no debe contar en los siguientes.
-    jest.mocked(apiPost).mockClear();
   });
 
   it.each(['light', 'dark'])('conserva el editor y los tokens en tema %s', async (theme) => {
@@ -434,6 +437,52 @@ describe('RoundsPanel', () => {
       );
     });
     expect(apiPatch).not.toHaveBeenCalled();
-    jest.mocked(apiPost).mockClear();
+  });
+
+  it('al duplicar omite los puntos dados de baja y avisa cuáles', async () => {
+    const rounds = [
+      {
+        id: 'r-old',
+        name: 'Vieja',
+        status: 'inactive',
+        currentVersion: {
+          frequencyMinutes: 120,
+          windowStartLocal: '22:00',
+          windowEndLocal: '06:00',
+          graceMinutes: 15,
+          route: null,
+          checkpoints: [
+            { position: 0, checkpoint: { id: 'p1', name: 'Portón' } },
+            { position: 1, checkpoint: { id: 'gone', name: 'Garita vieja' } },
+            { position: 2, checkpoint: { id: 'p2', name: 'Depósito' } },
+          ],
+        },
+      },
+    ];
+    jest
+      .mocked(useAuth)
+      .mockReturnValue({ user: { role: 'admin' }, loading: false } as ReturnType<typeof useAuth>);
+    jest
+      .mocked(apiGet)
+      .mockImplementation((path: string) =>
+        Promise.resolve((path.includes('puntos') ? points : rounds) as never),
+      );
+    renderWithQueryClient(<RoundsPanel site={site} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Acciones de Vieja' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Duplicar' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'No se copiaron puntos dados de baja: Garita vieja.',
+    );
+    expect(screen.getByRole('list', { name: 'Orden de puntos' }).children).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(
+        '/predios/site-1/rondas',
+        expect.objectContaining({ checkpointIds: ['p1', 'p2'] }),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
   });
 });

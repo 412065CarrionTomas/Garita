@@ -44,6 +44,8 @@ export interface RouteEditorProps {
   numbered?: ReadonlySet<string>;
   /** Sin esto el mapa es de solo lectura. */
   onRouteChange?: (route: RouteInput) => void;
+  /** Identidad de lo que se muestra (la ronda de la vista previa): al cambiar, se vuelve a encuadrar. */
+  scope?: string;
 }
 
 const HIT = 'route-hit';
@@ -56,11 +58,14 @@ function FitPoints({
   points,
   line,
   refit = false,
+  scope,
 }: {
   points: RouteEditorPoint[];
   line: LngLat[];
   /** Vista previa: vuelve a encuadrar si el mapa cambia de tamaño, hasta que alguien lo mueva. */
   refit?: boolean;
+  /** Qué se muestra (la ronda elegida): al cambiar se encuadra aunque los puntos sean los mismos. */
+  scope?: string;
 }) {
   const { current: map } = useMap();
   const key = points.map((p) => p.id).join('|');
@@ -82,25 +87,30 @@ function FitPoints({
     fit();
     if (!refit) return;
     // El alto llega después (se mide la ventana): se vuelve a encuadrar mientras nadie mueva el mapa.
-    const container = map.getContainer();
     const observer =
       typeof ResizeObserver === 'undefined'
         ? undefined
         : new ResizeObserver(() => {
             fit();
           });
-    observer?.observe(container);
-    const stop = () => observer?.disconnect();
-    container.addEventListener('pointerdown', stop, { once: true });
-    container.addEventListener('wheel', stop, { once: true });
+    observer?.observe(map.getContainer());
+    // Solo un arrastre o zoom de la persona lo corta (`originalEvent`): el propio encuadre no, y
+    // tocar la leyenda o Mapa/Satélite, que viven dentro del contenedor, tampoco.
+    const stop = (event: { originalEvent?: unknown }) => {
+      if (event.originalEvent) observer?.disconnect();
+    };
+    map.on('dragstart', stop);
+    map.on('zoomstart', stop);
+    map.on('rotatestart', stop);
     return () => {
       observer?.disconnect();
-      container.removeEventListener('pointerdown', stop);
-      container.removeEventListener('wheel', stop);
+      map.off('dragstart', stop);
+      map.off('zoomstart', stop);
+      map.off('rotatestart', stop);
     };
-    // Solo al cambiar qué puntos hay: reordenar o mover un punto no debe mover la cámara.
+    // Solo al cambiar qué puntos hay (o qué ronda): reordenar o mover un punto no mueve la cámara.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, key.split('|').sort().join('|')]);
+  }, [map, key.split('|').sort().join('|'), scope]);
   return null;
 }
 
@@ -169,6 +179,7 @@ export function RouteEditorView({
   onPointClick,
   onAddVia,
   onRouteChange,
+  scope,
 }: RouteEditorProps) {
   const dark = useDark();
   const [overLine, setOverLine] = useState(false);
@@ -233,6 +244,7 @@ export function RouteEditorView({
     >
       <FitPoints
         refit={!interactive}
+        scope={scope}
         points={inRoute.length ? inRoute : points}
         line={display.legs.flatMap((leg) => leg.sections.flatMap((section) => section.geometry))}
       />

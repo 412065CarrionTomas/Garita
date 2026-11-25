@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError, apiPatch, apiPost } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
+import { useFloatingNotice } from '@/lib/use-floating-notice';
 import { EditorHelp } from './editor-help';
 import { LegsList } from './legs-list';
 import { OrderList } from './order-list';
@@ -68,7 +69,7 @@ export interface EditorRound {
     windowEndLocal: string;
     graceMinutes: number;
     route?: unknown;
-    checkpoints: { checkpoint: { id: string } }[];
+    checkpoints: { checkpoint: { id: string; name: string } }[];
   } | null;
 }
 
@@ -121,17 +122,31 @@ export function RoundEditor({
   // La ronda que se modifica: al duplicar no hay ninguna, se crea otra.
   const editing = copy ? undefined : round;
   const initialName = round ? (copy ? `Copia de ${round.name}`.slice(0, 100) : round.name) : '';
-  const initialIds = version?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [];
+  const versionIds = version?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [];
+  // Al duplicar se omiten los puntos dados de baja después: `points` solo trae los activos y la
+  // API rechaza una ronda nueva con un punto inactivo.
+  const omitted = copy
+    ? (version?.checkpoints ?? []).filter(({ checkpoint }) =>
+        points.every((p) => p.id !== checkpoint.id),
+      )
+    : [];
+  const initialIds = omitted.length
+    ? versionIds.filter((id) => points.some((p) => p.id === id))
+    : versionIds;
   const [name, setName] = useState(initialName);
   const [frequency, setFrequency] = useState(version?.frequencyMinutes ?? 120);
   const [start, setStart] = useState(version?.windowStartLocal ?? '22:00');
   const [end, setEnd] = useState(version?.windowEndLocal ?? '06:00');
   const [grace, setGrace] = useState(version?.graceMinutes ?? 15);
   const [selected, setSelected] = useState(initialIds);
-  const [draft, setDraft] = useState<RouteDraft>(() => ({
-    ids: initialIds,
-    route: storedRouteInput(version?.route) ?? defaultRouteInput(initialIds.length),
-  }));
+  const [draft, setDraft] = useState<RouteDraft>(() => {
+    const saved = storedRouteInput(version?.route) ?? defaultRouteInput(versionIds.length);
+    // Sin los omitidos, el recorrido conserva solo los tramos que no los tocaban.
+    return {
+      ids: initialIds,
+      route: omitted.length ? reconcileRoute({ ids: versionIds, route: saved }, initialIds) : saved,
+    };
+  });
   const [past, setPast] = useState<Snapshot[]>([]);
   const [tool, setTool] = useState<RouteTool>('select');
   const [selection, setSelection] = useState<RouteSelection | null>(null);
@@ -142,7 +157,7 @@ export function RoundEditor({
   // Lo que ya se sabe de cada parte por calles: arranca con lo guardado.
   const [memo, setMemo] = useState<SectionMemo>(() => {
     const saved = storedRoute(version?.route);
-    if (!saved) return new Map();
+    if (!saved || omitted.length) return new Map();
     const at = initialIds.flatMap((id) => {
       const point = points.find((p) => p.id === id);
       return point?.latitude !== undefined && point.longitude !== undefined
@@ -157,11 +172,17 @@ export function RoundEditor({
   const [filter, setFilter] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [message, setMessage] = useState('');
-  // Aviso flotante; `id` nuevo en cada aviso para que el plazo de 10 s vuelva a empezar.
-  const [notice, setNotice] = useState<{ text: string; tone: 'info' | 'danger'; id: number }>();
-  const notify = (text: string, tone: 'info' | 'danger' = 'info') => {
-    setNotice((prev) => ({ text, tone, id: (prev?.id ?? 0) + 1 }));
-  };
+  const {
+    notice,
+    notify,
+    close: closeNotice,
+  } = useFloatingNotice(
+    omitted.length
+      ? {
+          text: `No se copiaron puntos dados de baja: ${omitted.map(({ checkpoint }) => checkpoint.name).join(', ')}.`,
+        }
+      : undefined,
+  );
   const [routeFailures, setRouteFailures] = useState<RouteFailure[]>();
   const { busy, run } = useBusy();
   const sectionRef = useRef<HTMLElement>(null);
@@ -421,8 +442,12 @@ export function RoundEditor({
   };
 
   const fieldError = (field: string, id: string) =>
-    fieldErrors[field]?.map((error) => (
-      <p className="text-sm text-danger" id={id} key={error}>
+    fieldErrors[field]?.map((error, i) => (
+      <p
+        className="text-sm text-danger"
+        id={i === 0 ? id : undefined}
+        key={`${String(i)}-${error}`}
+      >
         {error}
       </p>
     ));
@@ -439,7 +464,7 @@ export function RoundEditor({
     <section
       ref={sectionRef}
       aria-labelledby="round-editor-title"
-      className="flex h-[calc(100dvh-4.5rem)] min-h-[36rem] scroll-mt-16 flex-col overflow-hidden rounded-md border border-border bg-card"
+      className="flex h-[calc(100dvh-4.5rem)] min-h-[36rem] scroll-mt-2 flex-col overflow-hidden rounded-md border border-border bg-card"
     >
       <form
         id="round-form"
@@ -503,8 +528,8 @@ export function RoundEditor({
           className="m-3 mb-0"
         >
           {message && <p>{message}</p>}
-          {(errorCount > 1 ? Object.values(fieldErrors).flat() : looseErrors).map((error) => (
-            <p key={error}>{error}</p>
+          {(errorCount > 1 ? Object.values(fieldErrors).flat() : looseErrors).map((error, i) => (
+            <p key={`${String(i)}-${error}`}>{error}</p>
           ))}
         </Alert>
       )}
@@ -772,9 +797,7 @@ export function RoundEditor({
           key={notice.id}
           text={notice.text}
           tone={notice.tone}
-          onClose={() => {
-            setNotice(undefined);
-          }}
+          onClose={closeNotice}
         />
       )}
     </section>

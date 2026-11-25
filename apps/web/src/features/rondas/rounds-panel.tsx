@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { defaultRouteInput, previewWindows, roundRouteSchema, type LngLat } from '@garita/shared';
 import { Copy, EllipsisVertical, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useRef, useState, type CSSProperties } from 'react';
 import { z } from 'zod';
 import { ColumnResizer } from '@/components/column-resizer';
 import { EmptyState } from '@/components/empty-state';
@@ -28,6 +28,7 @@ import { useAuth } from '../auth/auth-context';
 import { cn } from '@/lib/utils';
 import { useColumnWidth } from '@/lib/use-column-width';
 import { useFillHeight } from '@/lib/use-fill-height';
+import { useFloatingNotice } from '@/lib/use-floating-notice';
 import { RoundEditor } from './round-editor';
 import { RouteEditor } from './route-editor';
 import {
@@ -95,13 +96,17 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
   const sectionRef = useRef<HTMLElement>(null);
   const listColumn = useColumnWidth('garita.rondas.ancho-lista', 50, 25, 75);
   const [confirmId, setConfirmId] = useState<string>();
-  // Aviso flotante; `id` nuevo en cada aviso para que el plazo vuelva a empezar.
-  const [notice, setNotice] = useState<{ text: string; tone: 'info' | 'danger'; id: number }>();
-  const notify = (text: string, tone: 'info' | 'danger' = 'info') => {
-    setNotice((prev) => ({ text, tone, id: (prev?.id ?? 0) + 1 }));
-  };
+  const { notice, notify, close: closeNotice } = useFloatingNotice();
   const [previewId, setPreviewId] = useState<string>();
   const [measureFill, fillHeight] = useFillHeight<HTMLElement>();
+  // Estable: un ref nuevo en cada render volvería a medir en cada movimiento del separador.
+  const setSection = useCallback(
+    (element: HTMLElement | null) => {
+      sectionRef.current = element;
+      measureFill(element);
+    },
+    [measureFill],
+  );
 
   if (editingId !== undefined) {
     const round = rounds.data?.find((item) => item.id === editingId);
@@ -163,10 +168,7 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
 
   return (
     <section
-      ref={(element) => {
-        sectionRef.current = element;
-        measureFill(element);
-      }}
+      ref={setSection}
       aria-labelledby={`rounds-${site.id}`}
       // En pantalla ancha el panel ocupa justo hasta el borde de abajo: scrollea la lista, no la página.
       style={
@@ -344,6 +346,7 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
           {located.length > 0 &&
             (previewStored !== null || previewCoords.length === previewIds.length) && (
               <RouteEditor
+                scope={preview?.id}
                 points={located}
                 selected={previewIds}
                 route={previewRoute}
@@ -390,9 +393,7 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
           key={notice.id}
           text={notice.text}
           tone={notice.tone}
-          onClose={() => {
-            setNotice(undefined);
-          }}
+          onClose={closeNotice}
         />
       )}
     </section>
