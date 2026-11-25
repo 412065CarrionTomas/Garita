@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { z } from 'zod';
 
 /**
@@ -24,4 +25,20 @@ if (!result.success) {
   throw new Error(`Variables de entorno inválidas:\n${z.prettifyError(result.error)}`);
 }
 
-export const env = result.data;
+/**
+ * En desarrollo, una API en localhost se busca en el host por el que el celular
+ * llegó a Metro: por USB (adb reverse) sigue siendo localhost; por Wi-Fi o
+ * hotspot pasa a ser la IP de la PC. Cualquier otra URL se respeta tal cual.
+ */
+export function resolveApiUrl(configured: string, metroHostUri: string | undefined) {
+  const metroHost = metroHostUri?.split(':')[0];
+  if (!metroHost) return configured;
+  return configured.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/, `$1${metroHost}`);
+}
+
+export const env = {
+  ...result.data,
+  EXPO_PUBLIC_API_URL: __DEV__
+    ? resolveApiUrl(result.data.EXPO_PUBLIC_API_URL, Constants.expoConfig?.hostUri)
+    : result.data.EXPO_PUBLIC_API_URL,
+};
