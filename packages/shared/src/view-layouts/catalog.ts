@@ -194,6 +194,8 @@ function normalizeItem(
     w,
     h: clamp(item.h, min.h, max.h),
     x: clamp(item.x, 0, catalog.columns - w),
+    // Una migración defectuosa no puede dejar filas negativas, que la API rechaza.
+    y: Math.max(0, item.y),
     presentation,
     settings: settings.success ? settings.data : defaultSettings(widget),
   };
@@ -243,22 +245,29 @@ export function reconcileLayout(catalog: ViewCatalog, stored: unknown): ViewLayo
     seen.add(item.id);
     items.push(normalizeItem(catalog, widget, item));
   }
+  const defaults = new Map(catalog.defaultLayout.items.map((item) => [item.id, item]));
   for (const [id, widget] of Object.entries(catalog.widgets)) {
     if (seen.has(id)) continue;
+    // Un bloque nuevo arranca como lo declara el diseño por defecto (tamaño, presentación, si
+    // está oculto), debajo de todo para no pisar a nadie.
+    const preset = defaults.get(id);
     items.push({
       id,
-      x: 0,
-      y: gridHeight(items.filter((item) => !item.hidden)),
+      x: preset?.x ?? 0,
       ...widget.size.default,
-      // Un bloque nuevo arranca como lo declara el diseño por defecto (p. ej. oculto).
-      hidden: catalog.defaultLayout.items.find((item) => item.id === id)?.hidden ?? false,
+      hidden: false,
       presentation: widget.presentations[0],
-      settings: defaultSettings(widget),
+      ...preset,
+      settings: preset ? { ...preset.settings } : defaultSettings(widget),
+      y: gridHeight(items.filter((item) => !item.hidden)),
     });
   }
-  // Los ocultos no ocupan lugar: acotarlos no pisa a nadie.
+  // Un oculto fuera de rango vuelve a su fila del diseño por defecto: no ocupa lugar, así que no
+  // pisa a nadie, y al mostrarlo aparece cerca de los demás en vez de miles de filas más abajo.
   const settled = settleLayoutItems(items).map((item) =>
-    item.hidden ? { ...item, y: Math.min(item.y, LAYOUT_LIMITS.maxRows) } : item,
+    item.hidden && item.y > LAYOUT_LIMITS.maxRows
+      ? { ...item, y: defaults.get(item.id)?.y ?? 0 }
+      : item,
   );
   if (!exceedsRows(settled)) return { version: catalog.version, items: settled };
   // Pasó el tope de filas (migraciones, cascadas): se sacan los huecos y, si no alcanza, el de defecto.
