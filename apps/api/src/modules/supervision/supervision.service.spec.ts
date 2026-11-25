@@ -169,7 +169,8 @@ it('includes the synchronization status in the detail, ignoring closures of repl
 });
 
 it('keeps in-progress overnight shifts in the default today view, but not for an explicit date', async () => {
-  const findMany = jest.fn().mockResolvedValue([]);
+  const findMany = jest.fn<Promise<unknown[]>, [{ where: unknown }]>().mockResolvedValue([]);
+  const whereOf = (call: number) => findMany.mock.calls[call]?.[0].where;
   const service = new SupervisionService(
     {
       tenantPrisma: {
@@ -182,10 +183,10 @@ it('keeps in-progress overnight shifts in the default today view, but not for an
   );
   const serviceDate = new Date('2026-11-01T00:00:00.000Z');
   await service.list({}, user);
-  expect(findMany.mock.calls[0][0].where).toMatchObject({
+  expect(whereOf(0)).toMatchObject({
     OR: [{ serviceDate }, { status: 'in_progress' }],
   });
   await service.list({ fecha: '2026-11-01' }, user);
-  expect(findMany.mock.calls[1][0].where).toMatchObject({ serviceDate });
-  expect(findMany.mock.calls[1][0].where).not.toHaveProperty('OR');
+  expect(whereOf(1)).toMatchObject({ serviceDate });
+  expect(whereOf(1)).not.toHaveProperty('OR');
 });
