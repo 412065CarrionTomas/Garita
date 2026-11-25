@@ -54,3 +54,14 @@ it('avisa cuando no se puede descargar el estilo del mapa', async () => {
   renderWithQueryClient(<LiveMapView sites={[]} />);
   expect(await screen.findByText('No se pudo cargar el mapa', {}, { timeout: 5000 })).toBeVisible();
 });
+
+it('cambia a la vista satelital y recuerda la elección', async () => {
+  renderWithQueryClient(<LiveMapView sites={[]} />);
+  const satellite = await screen.findByRole('button', { name: 'Satélite' });
+  expect(satellite).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(satellite);
+  expect(satellite).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Mapa' })).toHaveAttribute('aria-pressed', 'false');
+  expect(localStorage.getItem('garita.map.satellite')).toBe('on');
+  localStorage.clear();
+});

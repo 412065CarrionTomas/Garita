@@ -8,6 +8,7 @@ export * from './nfc-tags';
 export * from './nfc-secure';
 export * from './rounds/windows';
 export * from './rounds/schemas';
+export * from './rounds/route';
 export * from './shifts/windows';
 export * from './shifts/schemas';
 export * from './shifts/reassignment';

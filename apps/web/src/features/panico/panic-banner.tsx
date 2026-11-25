@@ -1,18 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router';
 import { Siren } from 'lucide-react';
 import { Alert } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
 import type { z } from 'zod';
 import type { panicAlertSummarySchema } from '@garita/shared';
 
-const soundKey = 'garita-panic-sound';
-function rememberedSound() {
-  try {
-    return localStorage.getItem(soundKey) === 'enabled';
-  } catch {
-    return false;
-  }
+/** Un pitido de medio segundo, si el navegador ya habilitó el audio. */
+function beep(audio: AudioContext | null) {
+  if (audio?.state !== 'running') return;
+  const oscillator = audio.createOscillator();
+  const gain = audio.createGain();
+  oscillator.connect(gain);
+  gain.connect(audio.destination);
+  oscillator.frequency.value = 880;
+  gain.gain.setValueAtTime(0.12, audio.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.5);
+  oscillator.start();
+  oscillator.stop(audio.currentTime + 0.5);
 }
 
 export function PanicBanner({
@@ -23,80 +27,60 @@ export function PanicBanner({
   count: number;
 }) {
   const context = useRef<AudioContext | null>(null);
-  const [enabled, setEnabled] = useState(rememberedSound);
-  const [blocked, setBlocked] = useState(false);
-  const [error, setError] = useState('');
   const active = count > 0;
+  const activeRef = useRef(active);
   useEffect(() => {
-    if (!enabled || !active) return;
-    let audio: AudioContext;
-    try {
-      audio = context.current ?? new AudioContext();
-      context.current = audio;
-    } catch {
-      return;
-    }
-    const tone = () => {
-      if (audio.state !== 'running') {
-        setBlocked(true);
-        return;
-      }
-      const oscillator = audio.createOscillator();
-      const gain = audio.createGain();
-      oscillator.connect(gain);
-      gain.connect(audio.destination);
-      oscillator.frequency.value = 880;
-      gain.gain.setValueAtTime(0.12, audio.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.5);
-      oscillator.start();
-      oscillator.stop(audio.currentTime + 0.5);
-    };
-    tone();
-    const timer = window.setInterval(tone, 4000);
+    activeRef.current = active;
+    if (!active) return;
+    beep(context.current);
+    const timer = window.setInterval(() => {
+      beep(context.current);
+    }, 4000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [enabled, active]);
-  useEffect(
-    () => () => {
+  }, [active]);
+  // El navegador solo deja sonar después de un gesto: el primer clic o tecla en la app habilita el audio.
+  useEffect(() => {
+    const stop = () => {
+      document.removeEventListener('pointerdown', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+    // Dos gestos seguidos pueden resolver resume() a la vez: solo el primero hace sonar.
+    let unlocked = false;
+    function unlock() {
+      try {
+        context.current ??= new AudioContext();
+      } catch {
+        // Sin audio en este navegador: queda el aviso visual.
+        stop();
+        return;
+      }
+      const audio = context.current;
+      audio
+        .resume()
+        .then(() => {
+          if (unlocked || audio.state !== 'running') return;
+          unlocked = true;
+          // Ya habilitado: no hace falta escuchar más gestos, y si hay alerta suena ya.
+          stop();
+          if (activeRef.current) beep(audio);
+        })
+        // Algunos gestos (como Tab o Escape) no cuentan: se espera el próximo.
+        .catch(() => undefined);
+    }
+    document.addEventListener('pointerdown', unlock);
+    document.addEventListener('keydown', unlock);
+    return () => {
+      stop();
       const audio = context.current;
       context.current = null;
-      void audio?.close();
-    },
-    [],
-  );
-
-  const enable = async () => {
-    try {
-      context.current ??= new AudioContext();
-      await context.current.resume();
-      if (context.current.state !== 'running') throw new Error('Audio bloqueado');
-      try {
-        localStorage.setItem(soundKey, 'enabled');
-      } catch {
-        /* The current session can still use sound. */
-      }
-      setEnabled(true);
-      setBlocked(false);
-      setError('');
-    } catch {
-      setError('No se pudo activar el sonido. Revisá los permisos del navegador.');
-    }
-  };
+      audio?.close().catch(() => undefined);
+    };
+  }, []);
   const first = alerts[0];
   return (
     <>
-      {(!enabled || blocked) && (
-        <Button
-          variant="outline"
-          onClick={() => {
-            void enable();
-          }}
-        >
-          Activar sonido de alertas
-        </Button>
-      )}
-      {error && <Alert variant="destructive">{error}</Alert>}
       {active && (
         <Alert role="alert" aria-live="assertive" aria-atomic="true" variant="destructive">
           <Siren aria-hidden="true" />

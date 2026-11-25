@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
-import { ApiError, apiGet, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { CheckpointsPanel } from './checkpoints-panel';
 
@@ -10,7 +10,9 @@ jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
 // Mapa caído: el formulario muestra la carga manual de coordenadas.
 jest.mock('@/features/mapa/site-location-map', () => ({
   SiteMapLocation: ({ unavailable }: { unavailable: ReactNode }) => unavailable,
-  ClientSitesMap: () => null,
+  // Muestra los N° del mapa: en el modo edición se pueden tocar igual que los de la tabla.
+  ClientSitesMap: ({ sites }: { sites: { id: string; label?: ReactNode }[] }) =>
+    sites.map((point) => <span key={point.id}>{point.label}</span>),
 }));
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn(() => Promise.resolve([])),
@@ -60,10 +62,11 @@ describe('CheckpointsPanel', () => {
         </div>,
       );
       expect(screen.queryByLabelText('Nombre del punto')).not.toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+      await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
       expect(screen.getByLabelText('Nombre del punto')).toBeInTheDocument();
+      // El panel va sobre la hoja de la pestaña: sin fondo propio, con el texto del token.
       expect(container.querySelector('[data-slot=card]')).toHaveClass(
-        'bg-card',
+        'bg-transparent',
         'text-card-foreground',
       );
       expect(container.innerHTML).not.toMatch(
@@ -76,7 +79,7 @@ describe('CheckpointsPanel', () => {
     setRole('admin');
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+    await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
     await user.type(await screen.findByLabelText('Nombre del punto'), 'Portón');
     fireEvent.change(screen.getByLabelText('Radio de tolerancia (m)'), { target: { value: '5' } });
     const form = screen.getByRole('button', { name: 'Crear punto' }).closest('form');
@@ -94,7 +97,7 @@ describe('CheckpointsPanel', () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+    await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
     await user.type(await screen.findByLabelText('Nombre del punto'), 'Torre');
     fireEvent.change(await screen.findByLabelText('Latitud'), { target: { value: '-34' } });
     fireEvent.change(screen.getByLabelText('Longitud'), { target: { value: '-58' } });
@@ -132,7 +135,8 @@ describe('CheckpointsPanel', () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
+    await user.click(await screen.findByRole('button', { name: 'Más acciones de Portón' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Dar de baja' }));
     await user.click(screen.getByRole('button', { name: 'Confirmar baja' }));
     expect(
       await screen.findByText('No se puede dar de baja: está incluida en Perimetral.'),
@@ -159,7 +163,8 @@ describe('CheckpointsPanel', () => {
     window.confirm = confirmSpy;
     const user = userEvent.setup();
     renderWithQueryClient(<CheckpointsPanel site={site} />);
-    await user.click(await screen.findByRole('button', { name: 'Regenerar QR' }));
+    await user.click(await screen.findByRole('button', { name: 'Más acciones de Portón' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Regenerar QR' }));
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('dejará de ser válido'));
     expect(apiPost).not.toHaveBeenCalled();
   });
@@ -175,7 +180,7 @@ describe('CheckpointsPanel', () => {
   });
 });
 
-it('no ofrece imprimir una lista vacia y limpia el alta al guardar', async () => {
+it('no ofrece imprimir una lista vacia y cierra el alta al guardar', async () => {
   setRole('admin');
   jest.mocked(apiGet).mockResolvedValue([] as never);
   const user = userEvent.setup();
@@ -186,14 +191,16 @@ it('no ofrece imprimir una lista vacia y limpia el alta al guardar', async () =>
   expect(
     screen.queryByRole('button', { name: 'Descargar stickers de todos' }),
   ).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+  await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
   await user.type(await screen.findByLabelText('Nombre del punto'), 'Nuevo punto');
   await user.click(screen.getByRole('button', { name: 'Crear punto' }));
   await screen.findByText('Punto guardado.');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
   expect(screen.getByLabelText('Nombre del punto')).toHaveValue('');
   expect(screen.getByLabelText('Radio de tolerancia (m)')).toHaveValue(30);
 });
-it('cancelar edicion limpia todos los campos y regenerar QR refresca puntos', async () => {
+it('cancelar la edición cierra el modal y deja el alta vacía y regenerar QR refresca puntos', async () => {
   setRole('admin');
   jest.mocked(apiGet).mockResolvedValue([
     {
@@ -211,14 +218,94 @@ it('cancelar edicion limpia todos los campos y regenerar QR refresca puntos', as
   ] as never);
   const user = userEvent.setup();
   renderWithQueryClient(<CheckpointsPanel site={site} />);
-  await user.click(await screen.findByRole('button', { name: 'Editar' }));
-  await user.click(screen.getByRole('button', { name: 'Cancelar edición' }));
+  await user.click(await screen.findByRole('button', { name: 'Más acciones de Porton' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+  expect(screen.getByRole('dialog', { name: 'Editar punto' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Agregar punto' }));
+  expect(screen.getByRole('dialog', { name: 'Nuevo punto' })).toBeInTheDocument();
   expect(screen.getByLabelText('Nombre del punto')).toHaveValue('');
   expect(screen.getByLabelText('Radio de tolerancia (m)')).toHaveValue(30);
-  expect(screen.getByLabelText('Ubicación del sticker (opcional)')).toHaveValue('');
+  expect(screen.getByLabelText('Descripción de ubicación del sticker (opcional)')).toHaveValue('');
   expect(screen.getByLabelText('Punto interior')).not.toBeChecked();
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   const reads = jest.mocked(apiGet).mock.calls.length;
-  await user.click(screen.getByRole('button', { name: 'Regenerar QR' }));
+  await user.click(screen.getByRole('button', { name: 'Más acciones de Porton' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Regenerar QR' }));
   await screen.findByText('QR regenerado. Imprimí un sticker nuevo.');
   expect(jest.mocked(apiGet).mock.calls.length).toBeGreaterThan(reads);
+});
+
+it('renumera en el modo edición y guarda todo junto recién con Guardar', async () => {
+  setRole('admin');
+  const point = (id: string, name: string) => ({
+    id,
+    siteId: site.id,
+    name,
+    latitude: -34.6,
+    longitude: -58.4,
+    toleranceRadiusMeters: 30,
+    stickerLocation: null,
+    isIndoor: false,
+    qrVersion: 1,
+    status: 'active',
+  });
+  jest
+    .mocked(apiGet)
+    .mockResolvedValue([point('a', 'Alfa'), point('b', 'Beta'), point('c', 'Gama')]);
+  const actions = document.createElement('div');
+  document.body.append(actions);
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={site} actions={actions} />);
+  await user.click(await screen.findByRole('button', { name: 'Mantené un pin para editar' }));
+  // El de la tabla (el otro es el del mapa): se abre un solo campo y no se cierra solo.
+  const [inTable] = screen.getAllByRole('button', { name: 'Cambiar el número de Gama (ahora 3)' });
+  if (!inTable) throw new Error('Falta el N° de Gama');
+  await user.click(inTable);
+  expect(screen.getAllByLabelText('Nuevo número de Gama')).toHaveLength(1);
+  await user.clear(screen.getByLabelText('Nuevo número de Gama'));
+  await user.type(screen.getByLabelText('Nuevo número de Gama'), '1{Enter}');
+  expect(apiPatch).not.toHaveBeenCalled();
+  expect(screen.getAllByRole('row').map((row) => row.textContent)).toEqual([
+    expect.stringContaining('Punto') as unknown,
+    expect.stringMatching(/^1Gama/) as unknown,
+    expect.stringMatching(/^2Alfa/) as unknown,
+    expect.stringMatching(/^3Beta/) as unknown,
+  ]);
+  await user.click(screen.getByRole('button', { name: 'Guardar' }));
+  expect(apiPatch).toHaveBeenCalledWith(
+    '/predios/site-1/puntos/orden',
+    {
+      puntos: ['c', 'a', 'b'].map((id) => ({ id, latitude: -34.6, longitude: -58.4 })),
+      confirmFarLocation: false,
+    },
+    expect.anything(),
+    expect.anything(),
+  );
+  actions.remove();
+});
+
+it('en un predio inactivo solo deja descargar el sticker', async () => {
+  setRole('admin');
+  jest.mocked(apiGet).mockResolvedValue([
+    {
+      id: 'a',
+      siteId: site.id,
+      name: 'Alfa',
+      latitude: -34.6,
+      longitude: -58.4,
+      toleranceRadiusMeters: 30,
+      stickerLocation: null,
+      isIndoor: false,
+      qrVersion: 1,
+      status: 'active',
+    },
+  ]);
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={{ ...site, status: 'inactive' as const }} />);
+  await user.click(await screen.findByRole('button', { name: 'Más acciones de Alfa' }));
+  expect(await screen.findByRole('menuitem', { name: 'Descargar sticker' })).toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: 'Editar' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: 'Dar de baja' })).not.toBeInTheDocument();
 });

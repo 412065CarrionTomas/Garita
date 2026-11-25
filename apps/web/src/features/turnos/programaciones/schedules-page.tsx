@@ -36,7 +36,10 @@ import {
 const sitesSchema = z.array(
   z.object({ id: z.string(), name: z.string(), company: z.object({ timezone: z.string() }) }),
 );
-const roundsSchema = z.array(z.object({ id: z.string(), name: z.string(), status: z.string() }));
+// looseObject: comparte la caché ['rondas', predio] con Predios → Rondas, que necesita el resto.
+const roundsSchema = z.array(
+  z.looseObject({ id: z.string(), name: z.string(), status: z.string() }),
+);
 const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const emptyForm: ShiftScheduleInput = {
   siteId: '',

@@ -72,13 +72,8 @@ export function SiteConnectivityForm({
   const marginErrorId = `connectivity-margin-error-${siteId}`;
 
   return (
-    <form
-      noValidate
-      onSubmit={submit}
-      aria-label="Conectividad"
-      className="space-y-4 border-t pt-4"
-    >
-      <h3 className="text-lg font-semibold">Conectividad</h3>
+    <form noValidate onSubmit={submit} aria-label="Conectividad" className="space-y-4">
+      <h3 className="font-cond text-lg font-semibold tracking-wider uppercase">Conectividad</h3>
       <p className="text-sm text-muted-foreground">
         Los cambios se aplican a los turnos que no empezaron. Los turnos en curso conservan su
         configuración.

@@ -74,3 +74,59 @@ it('lists current round points before start and ignores invalidated/out-of-windo
     { id: 'outside', registered: false },
   ]);
 });
+
+it('devuelve el recorrido de la versión del turno, no el de la versión actual', async () => {
+  const leg = (x: number) => ({
+    from: [x, 0] as [number, number],
+    to: [x + 1, 0] as [number, number],
+    waypoints: [],
+    sections: [
+      {
+        mode: 'streets' as const,
+        via: [],
+        geometry: [
+          [x, 0],
+          [x + 1, 0],
+        ],
+        fallback: false,
+      },
+    ],
+  });
+  const shiftRoute = { v: 1, closed: false, legs: [leg(0)] };
+  const version = (route: unknown, ids: string[]) => ({
+    route,
+    checkpoints: ids.map((id) => ({ checkpoint: { id, name: id, latitude: 0, longitude: 0 } })),
+  });
+  const shift = {
+    id: 'shift',
+    status: 'scheduled',
+    startsAt: now,
+    endsAt: now,
+    assignments: [],
+    rounds: [
+      {
+        roundId: 'old',
+        roundVersion: version(shiftRoute, ['a', 'b']),
+        round: { name: 'Vieja', currentVersion: version({ v: 1, closed: true, legs: [] }, ['a']) },
+      },
+      { roundId: 'legacy', roundVersion: version(null, ['c']), round: { name: 'Previa' } },
+      { roundId: 'broken', roundVersion: version({ v: 9 }, ['d']), round: { name: 'Rota' } },
+    ],
+    roundWindowStates: [],
+    checkpointRecords: [],
+    invalidScanAttempts: [],
+  };
+  const service = new SupervisionService(
+    {
+      tenantPrisma: { shift: { findFirst: jest.fn().mockResolvedValue(shift) } },
+    } as unknown as PrismaService,
+    { getShiftRecords: jest.fn().mockResolvedValue({ records: [] }) } as unknown as MarcasService,
+    { now: () => now },
+  );
+  const detail = await service.detail('shift', user, {});
+  expect(detail.routes).toEqual([
+    { roundId: 'old', roundName: 'Vieja', checkpointIds: ['a', 'b'], route: shiftRoute },
+    { roundId: 'legacy', roundName: 'Previa', checkpointIds: ['c'], route: null },
+    { roundId: 'broken', roundName: 'Rota', checkpointIds: ['d'], route: null },
+  ]);
+});

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { env } from '@/config/env';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { parsePhoton, type AddressSuggestion } from './photon';
@@ -54,8 +54,10 @@ export function AddressSearch({
   return (
     <div className="relative grid gap-2">
       <Label htmlFor={`${id}-input`}>Buscar dirección</Label>
-      <Input
+      {/* Se agranda a mano como un área de texto; un texto largo no la estira solo. */}
+      <Textarea
         id={`${id}-input`}
+        rows={1}
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={expanded}
@@ -96,7 +98,7 @@ export function AddressSearch({
             choose(suggestion);
           }
         }}
-        className="w-full"
+        className="h-10 min-h-10 w-full resize-y field-sizing-fixed"
       />
       {expanded && (
         <ul
