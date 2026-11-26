@@ -19,6 +19,7 @@ import {
 import {
   guardShiftsQuerySchema,
   reassignShiftRequestSchema,
+  shiftBoardQuerySchema,
   shiftListQuerySchema,
   shiftReplacementsQuerySchema,
   shiftInputSchema,
@@ -51,6 +52,20 @@ export class ShiftsController {
     const parsed = shiftListQuerySchema.safeParse(query);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
     return this.shifts.list(parsed.data);
+  }
+
+  @Get('turnos/planilla')
+  @Roles('admin', 'supervisor')
+  @ApiOperation({
+    summary: 'Planilla semanal de turnos: predios por día, con el resumen de huecos',
+  })
+  @ApiQuery({ name: 'semana', required: false, type: String, format: 'date' })
+  @ApiQuery({ name: 'predio', required: false, type: String })
+  @ApiQuery({ name: 'vigilador', required: false, type: String })
+  board(@Query() query: unknown, @CurrentUser() user: AuthenticatedUser) {
+    const parsed = shiftBoardQuerySchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+    return this.shifts.board(parsed.data, user);
   }
 
   @Get('turnos/:id')

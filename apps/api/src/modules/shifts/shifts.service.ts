@@ -16,6 +16,9 @@ import {
   previousAssignmentResult,
   GUARD_SHIFTS_PAGE_SIZE,
   SHIFT_LIST_STATES,
+  weekDays,
+  type ShiftBoard,
+  type ShiftBoardQuery,
   type ShiftListQuery,
   type GuardShiftsPage,
   type GuardShiftsQuery,
@@ -101,6 +104,79 @@ export class ShiftsService {
       this.prisma.tenantPrisma.shift.count({ where }),
     ]);
     return { items, total };
+  }
+
+  /** Planilla semanal: predios × días (lunes a domingo), cada turno en el día en que empieza. */
+  async board(query: ShiftBoardQuery, user: AuthenticatedUser): Promise<ShiftBoard> {
+    if (query.predio) await this.resources.findOwnedOrThrow('Site', query.predio);
+    if (query.vigilador) await this.assertGuard(query.vigilador);
+    const { timezone } = await this.prisma.tenantPrisma.company.findUniqueOrThrow({
+      where: { id: user.companyId },
+      select: { timezone: true },
+    });
+    const today = localDate(this.clock.now(), timezone);
+    const days = weekDays(query.semana ?? today);
+    const [shifts, sites] = await Promise.all([
+      this.prisma.tenantPrisma.shift.findMany({
+        where: {
+          serviceDate: {
+            gte: new Date(`${days[0]}T00:00:00.000Z`),
+            lte: new Date(`${days[6]}T00:00:00.000Z`),
+          },
+          ...(query.predio ? { siteId: query.predio } : {}),
+          ...(query.vigilador
+            ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
+            : {}),
+          NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
+        },
+        include: this.shiftInclude(),
+        orderBy: { startsAt: 'asc' },
+      }),
+      // Con filtro de vigilador solo interesan los predios donde trabaja; sin él, también los vacíos.
+      query.vigilador
+        ? Promise.resolve([])
+        : this.prisma.tenantPrisma.site.findMany({
+            where: { status: 'active', ...(query.predio ? { id: query.predio } : {}) },
+            select: { id: true, name: true },
+          }),
+    ]);
+    const rows = new Map<string, ShiftBoard['sites'][number]>();
+    const row = (id: string, name: string) => {
+      let found = rows.get(id);
+      if (!found) {
+        found = { id, name, days: days.map(() => []) };
+        rows.set(id, found);
+      }
+      return found;
+    };
+    for (const site of sites) row(site.id, site.name);
+    const summary = { total: 0, unassigned: 0, noShow: 0, uncovered: 0 };
+    for (const shift of shifts) {
+      const dayIndex = days.indexOf(shift.serviceDate.toISOString().slice(0, 10));
+      if (dayIndex < 0) continue;
+      const guard = shift.assignments[0]?.guard ?? null;
+      row(shift.siteId, shift.site.name).days[dayIndex]?.push({
+        id: shift.id,
+        status: shift.status,
+        startsAt: shift.startsAt.toISOString(),
+        endsAt: shift.endsAt.toISOString(),
+        guard: guard ? { id: guard.id, name: `${guard.firstName} ${guard.lastName}`.trim() } : null,
+        origin: !shift.scheduleId ? 'manual' : shift.individuallyModified ? 'modified' : 'schedule',
+        rounds: shift.rounds.map((item) => item.round.name),
+      });
+      if (shift.status.startsWith('cancelled')) continue;
+      summary.total += 1;
+      if (shift.status === 'unassigned') summary.unassigned += 1;
+      if (shift.status === 'no_show') summary.noShow += 1;
+      if (shift.status === 'uncovered') summary.uncovered += 1;
+    }
+    return {
+      timezone,
+      today,
+      days,
+      sites: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name, 'es')),
+      summary,
+    };
   }
 
   async get(id: string, user: AuthenticatedUser) {

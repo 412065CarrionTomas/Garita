@@ -251,3 +251,83 @@ describe('guard shifts in a date range', () => {
     expect(page.items.map((s) => s.id)).toEqual(['night']);
   });
 });
+
+describe('weekly shift board', () => {
+  const shift = (overrides: Record<string, unknown>) => ({
+    id: 'night',
+    siteId: 'site-b',
+    site: { name: 'Barrio' },
+    status: 'scheduled',
+    startsAt: new Date('2026-11-24T01:00:00Z'),
+    endsAt: new Date('2026-11-24T09:00:00Z'),
+    serviceDate: new Date('2026-11-23T00:00:00Z'),
+    scheduleId: 'schedule',
+    individuallyModified: false,
+    assignments: [{ guard: { id: 'g1', firstName: 'Valentina', lastName: 'Castro' } }],
+    rounds: [{ round: { name: 'Perimetral' } }],
+    ...overrides,
+  });
+  const findMany = jest.fn().mockResolvedValue([
+    shift({}),
+    shift({
+      id: 'gap',
+      status: 'unassigned',
+      serviceDate: new Date('2026-11-29T00:00:00Z'),
+      scheduleId: null,
+      assignments: [],
+    }),
+  ]);
+  const service = new ShiftsService(
+    {
+      tenantPrisma: {
+        company: {
+          findUniqueOrThrow: jest.fn().mockResolvedValue({
+            timezone: 'America/Argentina/Buenos_Aires',
+          }),
+        },
+        shift: { findMany },
+        site: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 'site-b', name: 'Barrio' },
+            { id: 'site-a', name: 'Acopio' },
+          ]),
+        },
+      },
+    } as unknown as PrismaService,
+    {} as TenantResourceService,
+    // Jueves 26/11 a las 02:00 en Buenos Aires.
+    { now: () => new Date('2026-11-26T05:00:00Z') },
+    { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
+    { resolve: jest.fn(), raise: jest.fn() },
+    { emitToSite: jest.fn() },
+  );
+  const user = { userId: 'u', companyId: 'company', role: 'admin', status: 'active' } as const;
+
+  it('places a night shift on its start day, keeps empty sites and counts gaps', async () => {
+    const board = await service.board({}, user);
+    expect(board.today).toBe('2026-11-26');
+    expect(board.days[0]).toBe('2026-11-23');
+    expect(board.sites.map((site) => site.name)).toEqual(['Acopio', 'Barrio']);
+    const barrio = board.sites[1]!;
+    expect(barrio.days[0]).toEqual([
+      expect.objectContaining({
+        id: 'night',
+        origin: 'schedule',
+        guard: { id: 'g1', name: 'Valentina Castro' },
+        rounds: ['Perimetral'],
+      }),
+    ]);
+    expect(barrio.days[6]).toEqual([
+      expect.objectContaining({ id: 'gap', origin: 'manual', guard: null }),
+    ]);
+    expect(board.summary).toEqual({ total: 2, unassigned: 1, noShow: 0, uncovered: 0 });
+    expect(findMany.mock.lastCall?.[0]).toMatchObject({
+      where: {
+        serviceDate: {
+          gte: new Date('2026-11-23T00:00:00.000Z'),
+          lte: new Date('2026-11-29T00:00:00.000Z'),
+        },
+      },
+    });
+  });
+});
