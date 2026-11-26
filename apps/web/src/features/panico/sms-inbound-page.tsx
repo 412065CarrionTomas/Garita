@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { Search } from 'lucide-react';
 import { smsInboundListSchema } from '@garita/shared';
-import { DataTable } from '@/components/data-table';
+import { DataTable, type DataSort } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
@@ -33,13 +33,19 @@ export function SmsInboundPage() {
   const [estado, setEstado] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // Orden elegido en el encabezado; sin elegir, lo más nuevo primero.
+  const [sort, setSort] = useState<DataSort>(null);
   // Busca solo cuando se deja de tipear, sin botón de buscar.
   const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
   const params = new URLSearchParams({ pagina: String(page), porPagina: String(pageSize) });
   if (estado) params.set('estado', estado);
   if (search) params.set('buscar', search);
+  if (sort) {
+    params.set('orden', sort.id);
+    params.set('sentido', sort.dir);
+  }
   const list = useQuery({
-    queryKey: ['sms-recibidos', estado, search, page, pageSize],
+    queryKey: ['sms-recibidos', estado, search, sort, page, pageSize],
     queryFn: () => apiGet(`/sms-recibidos?${params.toString()}`, smsInboundListSchema),
     // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
     placeholderData: keepPreviousData,
@@ -139,12 +145,17 @@ export function SmsInboundPage() {
             <div className="overflow-x-auto border-[1.5px] border-input">
               <DataTable
                 label="SMS recibidos"
-                sortable={false}
+                sort={sort}
+                onSortChange={(next) => {
+                  setSort(next);
+                  setPage(1);
+                }}
                 rows={list.data.items}
                 getRowId={(sms) => sms.id}
                 columns={[
                   {
-                    id: 'received',
+                    id: 'recibido',
+                    value: (sms) => sms.receivedAt,
                     header: 'Recibido',
                     width: 168,
                     cell: (sms) => (
@@ -162,7 +173,8 @@ export function SmsInboundPage() {
                     ),
                   },
                   {
-                    id: 'origin',
+                    id: 'origen',
+                    value: (sms) => sms.fromNormalized,
                     header: 'Origen',
                     width: 240,
                     cell: (sms) => (
@@ -184,7 +196,8 @@ export function SmsInboundPage() {
                     cell: (sms) => sms.text,
                   },
                   {
-                    id: 'result',
+                    id: 'estado',
+                    value: (sms) => sms.result,
                     header: 'Estado',
                     width: 160,
                     cell: (sms) => (

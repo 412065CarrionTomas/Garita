@@ -82,4 +82,12 @@ it('muestra remitente, horas y enlace de la alerta asociada', async () => {
     'href',
     '/alertas-panico/alert',
   );
+  // El encabezado ordena toda la lista en la API, no solo la página visible.
+  await userEvent.click(screen.getByRole('button', { name: /Origen/ }));
+  await waitFor(() => {
+    expect(apiGet).toHaveBeenLastCalledWith(
+      '/sms-recibidos?pagina=1&porPagina=20&orden=origen&sentido=asc',
+      expect.anything(),
+    );
+  });
 });

@@ -29,7 +29,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-import { DataTable } from '@/components/data-table';
+import { DataTable, type DataSort } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import {
@@ -73,18 +73,22 @@ export function ClientsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [status, setStatus] = useState('');
-  const [order, setOrder] = useState('nombre');
+  // Orden elegido en el encabezado; sin elegir, el de la API por defecto.
+  const [sort, setSort] = useState<DataSort>(null);
   // Busca solo cuando se deja de tipear, sin botón de buscar.
   const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
   const params = new URLSearchParams({
     pagina: String(page),
     porPagina: String(pageSize),
-    orden: order,
   });
   if (status) params.set('estado', status);
   if (search) params.set('buscar', search);
+  if (sort) {
+    params.set('orden', sort.id);
+    params.set('sentido', sort.dir);
+  }
   const clients = useQuery({
-    queryKey: ['clientes', 'listado', status, search, order, page, pageSize],
+    queryKey: ['clientes', 'listado', status, search, sort, page, pageSize],
     queryFn: () => apiGet(`/clientes?${params.toString()}`, clientsPageSchema),
     // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
     placeholderData: keepPreviousData,
@@ -212,34 +216,6 @@ export function ClientsPage() {
         </DialogContent>
       </Dialog>
       {actionError && <Alert variant="destructive">{actionError}</Alert>}
-      {clients.data && (
-        <div role="group" aria-label="Resumen de clientes" className="flex flex-wrap gap-2">
-          {SUMMARY.map(({ value, label }) => {
-            const pressed = status === value;
-            return (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={pressed}
-                onClick={() => {
-                  changeStatus(pressed ? '' : value);
-                }}
-                className={cn(
-                  'flex min-h-9 items-baseline gap-2 rounded-md border-[1.5px] px-3 py-1.5 text-sm transition-colors',
-                  pressed
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-input bg-card hover:bg-muted',
-                )}
-              >
-                <span className="text-base font-semibold tabular-nums">
-                  {clients.data.resumen[value]}
-                </span>
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:w-80">
           <Search
@@ -268,18 +244,34 @@ export function ClientsPage() {
           <NativeSelectOption value="active">Activo</NativeSelectOption>
           <NativeSelectOption value="inactive">Inactivo</NativeSelectOption>
         </NativeSelect>
-        <NativeSelect
-          aria-label="Ordenar por"
-          value={order}
-          onChange={(event) => {
-            setOrder(event.target.value);
-            setPage(1);
-          }}
-        >
-          <NativeSelectOption value="nombre">Nombre (A–Z)</NativeSelectOption>
-          <NativeSelectOption value="recientes">Más recientes</NativeSelectOption>
-          <NativeSelectOption value="predios">Más predios</NativeSelectOption>
-        </NativeSelect>
+        {clients.data && (
+          <div role="group" aria-label="Resumen de clientes" className="flex flex-wrap gap-2">
+            {SUMMARY.map(({ value, label }) => {
+              const pressed = status === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={pressed}
+                  onClick={() => {
+                    changeStatus(pressed ? '' : value);
+                  }}
+                  className={cn(
+                    'flex min-h-9 items-baseline gap-2 rounded-md border-[1.5px] px-3 py-1.5 text-sm transition-colors',
+                    pressed
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-input bg-card hover:bg-muted',
+                  )}
+                >
+                  <span className="text-base font-semibold tabular-nums">
+                    {clients.data.resumen[value]}
+                  </span>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       {clients.isPending ? (
         <div role="status" className="space-y-3">
@@ -296,12 +288,17 @@ export function ClientsPage() {
             <div className="overflow-x-auto border-[1.5px] border-input">
               <DataTable
                 label="Clientes"
-                sortable={false}
+                sort={sort}
+                onSortChange={(next) => {
+                  setSort(next);
+                  setPage(1);
+                }}
                 rows={clients.data.items}
                 getRowId={(client) => client.id}
                 columns={[
                   {
-                    id: 'name',
+                    id: 'nombre',
+                    value: (client) => client.name,
                     header: 'Cliente',
                     cell: (client) => (
                       <>
@@ -318,7 +315,8 @@ export function ClientsPage() {
                     ),
                   },
                   {
-                    id: 'contact',
+                    id: 'contacto',
+                    value: (client) => client.contactName,
                     header: 'Contacto',
                     cell: (client) => (
                       <>
@@ -330,7 +328,8 @@ export function ClientsPage() {
                     ),
                   },
                   {
-                    id: 'phone',
+                    id: 'telefono',
+                    value: (client) => client.phone,
                     header: 'Teléfono',
                     width: 176,
                     cell: (client) => (
@@ -343,7 +342,8 @@ export function ClientsPage() {
                     ),
                   },
                   {
-                    id: 'sites',
+                    id: 'predios',
+                    value: (client) => client._count.sites,
                     header: 'Predios',
                     width: 112,
                     align: 'right',
@@ -358,7 +358,8 @@ export function ClientsPage() {
                     ),
                   },
                   {
-                    id: 'status',
+                    id: 'estado',
+                    value: (client) => client.status,
                     header: 'Estado',
                     width: 128,
                     cell: (client) => (

@@ -18,7 +18,7 @@ import { useBusy } from '@/lib/use-busy';
 import { useDebouncedSearch } from '@/lib/use-debounced-search';
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
-import { DataTable } from '@/components/data-table';
+import { DataTable, type DataSort } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import { SegmentedFilter } from '@/components/segmented-filter';
@@ -100,7 +100,8 @@ export function PersonalPage() {
   const [pageSize, setPageSize] = useState(20);
   // Busca solo cuando se deja de tipear, sin botón de buscar.
   const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
-  const [order, setOrder] = useState('recientes');
+  // Orden elegido en el encabezado; sin elegir, el de la API por defecto.
+  const [sort, setSort] = useState<DataSort>(null);
   const [creating, setCreating] = useState(false);
   const { busy, run } = useBusy();
   const [editing, setEditing] = useState<Person | null>(null);
@@ -154,13 +155,16 @@ export function PersonalPage() {
   const params = new URLSearchParams({
     pagina: String(page),
     porPagina: String(pageSize),
-    orden: order,
   });
   if (role) params.set('rol', role);
   if (status) params.set('estado', status);
   if (search) params.set('buscar', search);
+  if (sort) {
+    params.set('orden', sort.id);
+    params.set('sentido', sort.dir);
+  }
   const result = useQuery({
-    queryKey: ['personal', role, status, search, order, page, pageSize],
+    queryKey: ['personal', role, status, search, sort, page, pageSize],
     queryFn: () => apiGet(`/usuarios?${params.toString()}`, usersPageSchema),
     // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
     placeholderData: keepPreviousData,
@@ -357,37 +361,6 @@ export function PersonalPage() {
           )
         }
       />
-      {result.data && (
-        <div role="group" aria-label="Resumen del personal" className="flex flex-wrap gap-2">
-          {SUMMARY.map(({ value, label }) => {
-            const count = result.data.resumen[value];
-            const pressed = status === value;
-            return (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={pressed}
-                onClick={() => {
-                  changeStatus(pressed ? '' : value);
-                }}
-                className={cn(
-                  'flex min-h-9 items-baseline gap-2 rounded-md border-[1.5px] px-3 py-1.5 text-sm transition-colors',
-                  pressed
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-input bg-card hover:bg-muted',
-                  !pressed &&
-                    value === 'invitation_failed' &&
-                    count > 0 &&
-                    'border-danger text-danger',
-                )}
-              >
-                <span className="text-base font-semibold tabular-nums">{count}</span>
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:w-72">
           <Search
@@ -427,18 +400,37 @@ export function PersonalPage() {
           <NativeSelectOption value="invitation_failed">Envío fallido</NativeSelectOption>
           <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
         </NativeSelect>
-        <NativeSelect
-          aria-label="Ordenar por"
-          value={order}
-          onChange={(event) => {
-            setOrder(event.target.value);
-            setPage(1);
-          }}
-        >
-          <NativeSelectOption value="recientes">Más recientes</NativeSelectOption>
-          <NativeSelectOption value="nombre">Nombre (A–Z)</NativeSelectOption>
-          <NativeSelectOption value="estado">Estado</NativeSelectOption>
-        </NativeSelect>
+        {result.data && (
+          <div role="group" aria-label="Resumen del personal" className="flex flex-wrap gap-2">
+            {SUMMARY.map(({ value, label }) => {
+              const count = result.data.resumen[value];
+              const pressed = status === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={pressed}
+                  onClick={() => {
+                    changeStatus(pressed ? '' : value);
+                  }}
+                  className={cn(
+                    'flex min-h-9 items-baseline gap-2 rounded-md border-[1.5px] px-3 py-1.5 text-sm transition-colors',
+                    pressed
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-input bg-card hover:bg-muted',
+                    !pressed &&
+                      value === 'invitation_failed' &&
+                      count > 0 &&
+                      'border-danger text-danger',
+                  )}
+                >
+                  <span className="text-base font-semibold tabular-nums">{count}</span>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="space-y-4">
@@ -578,12 +570,17 @@ export function PersonalPage() {
             <div className="overflow-x-auto border-[1.5px] border-input">
               <DataTable
                 label="Personal"
-                sortable={false}
+                sort={sort}
+                onSortChange={(next) => {
+                  setSort(next);
+                  setPage(1);
+                }}
                 rows={result.data.items}
                 getRowId={(p) => p.id}
                 columns={[
                   {
-                    id: 'name',
+                    id: 'nombre',
+                    value: (p) => `${p.firstName} ${p.lastName}`,
                     header: 'Nombre',
                     cell: (p) => (
                       <>
@@ -597,7 +594,8 @@ export function PersonalPage() {
                     ),
                   },
                   {
-                    id: 'phone',
+                    id: 'telefono',
+                    value: (p) => p.phone,
                     header: 'Teléfono',
                     width: 176,
                     cell: (p) =>
@@ -613,20 +611,23 @@ export function PersonalPage() {
                       ),
                   },
                   {
-                    id: 'employeeNumber',
+                    id: 'legajo',
+                    value: (p) => p.employeeNumber,
                     header: 'Legajo',
                     width: 112,
                     className: 'tabular-nums',
                     cell: (p) => p.employeeNumber ?? '—',
                   },
                   {
-                    id: 'role',
+                    id: 'rol',
+                    value: (p) => p.role,
                     header: 'Rol',
                     width: 128,
                     cell: (p) => (p.role === 'guard' ? 'Vigilador' : 'Supervisor'),
                   },
                   {
-                    id: 'status',
+                    id: 'estado',
+                    value: (p) => p.status,
                     header: 'Estado',
                     width: 176,
                     cell: (p) => (
