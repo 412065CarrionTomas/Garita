@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
@@ -22,12 +22,28 @@ export default function PermissionsScreen() {
   const router = useRouter();
   const [state, setState] = useState<FieldPermissionState | null>(null);
   const [loading, setLoading] = useState(false);
+  // Si llega con los permisos ya dados (p. ej. solo apagó la ubicación), lo muestra de entrada.
+  // Sin permisos todavía no avisa nada: el aviso aparece recién al pedirlos.
+  useEffect(() => {
+    let mounted = true;
+    void checkFieldPermissions()
+      .then((current) => {
+        if (mounted && current !== 'location_denied') setState(current);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, []);
   const run = async (action: () => Promise<FieldPermissionState>) => {
     setLoading(true);
     try {
       const next = await action();
       setState(next);
       return next;
+    } catch {
+      // Un error de la API nativa deja la pantalla como estaba para reintentar.
+      return null;
     } finally {
       setLoading(false);
     }

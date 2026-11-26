@@ -9,7 +9,11 @@ jest.mock('@/features/permisos/permissions', () => ({
   checkFieldPermissions: jest.fn(),
 }));
 describe('permissions setup screen', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Al entrar por primera vez todavía no hay permisos.
+    jest.mocked(Permissions.checkFieldPermissions).mockResolvedValue('location_denied');
+  });
 
   it('explains location and camera, then requests permissions accessibly', async () => {
     jest.mocked(Permissions.requestFieldPermissions).mockResolvedValue('ok');
@@ -30,15 +34,23 @@ describe('permissions setup screen', () => {
     ).toBe(true);
   });
 
+  it('arriving with permissions given but location off, shows Siguiente right away', async () => {
+    jest.mocked(Permissions.checkFieldPermissions).mockResolvedValue('location_services_off');
+    const screen = await render(<PermissionsScreen />);
+    expect(await screen.findByText(/Activá la ubicación del celular/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Siguiente: ir a mis turnos' })).toBeTruthy();
+  });
+
   it('lets the guard continue after turning on location services without asking again', async () => {
     jest.mocked(Permissions.requestFieldPermissions).mockResolvedValue('location_services_off');
     jest
       .mocked(Permissions.checkFieldPermissions)
+      .mockResolvedValueOnce('location_denied')
       .mockResolvedValueOnce('location_services_off')
       .mockResolvedValueOnce('ok');
     const user = userEvent.setup();
     const screen = await render(<PermissionsScreen />);
-    await user.press(screen.getByRole('button', { name: 'Permitir ubicación precisa' }));
+    await user.press(await screen.findByRole('button', { name: 'Permitir ubicación precisa' }));
     expect(await screen.findByText(/Activá la ubicación del celular/)).toBeTruthy();
     expect(screen.getAllByText('Permitida')).toHaveLength(2);
 
