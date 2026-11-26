@@ -286,12 +286,12 @@ it('filtra el historial por predio y estado', async () => {
       <PanicListPage />
     </MemoryRouter>,
   );
-  await screen.findByText('Depósito Ruta 9 · Pedro Díaz');
-  fireEvent.change(screen.getByLabelText('Predio'), { target: { value: 'site' } });
-  fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'confirmed' } });
+  await screen.findByText('Pedro Díaz');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Predio' }), { target: { value: 'site' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmadas' }));
   await waitFor(() => {
     expect(apiGet).toHaveBeenCalledWith(
-      '/alertas-panico?pagina=1&estado=confirmed&predio=site',
+      '/alertas-panico?pagina=1&porPagina=10&estado=confirmed&predio=site',
       expect.anything(),
     );
   });

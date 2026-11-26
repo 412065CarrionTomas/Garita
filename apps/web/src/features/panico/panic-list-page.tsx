@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { z } from 'zod';
+import { DataTable } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
+import { Pagination } from '@/components/pagination';
 import { EmptyState } from '@/components/empty-state';
+import { SegmentedFilter } from '@/components/segmented-filter';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -14,9 +17,54 @@ import { apiGet } from '@/lib/api-client';
 import { panicListSchema, panicStatuses } from './queries';
 import { SmsBadges } from './sms-badges';
 
+type Status = keyof typeof panicStatuses | '';
+type PanicAlert = z.infer<typeof panicListSchema>['items'][number];
+
+const STATUS_OPTIONS: { value: Status; label: string }[] = [
+  { value: '', label: 'Todas' },
+  { value: 'active', label: 'Activas' },
+  { value: 'confirmed', label: 'Confirmadas' },
+  { value: 'resolved', label: 'Resueltas' },
+];
+// Primero lo que hay que atender: al ordenar por estado, las activas quedan arriba.
+const STATUS_ORDER = { active: 0, confirmed: 1, resolved: 2 } as const;
+
+const fullDate = (iso: string) => new Date(iso).toLocaleString('es-AR');
+/** "24/11 11:45"; con año solo si no es el actual. La fecha completa queda en el `title`. */
+function shortDate(iso: string) {
+  const date = new Date(iso);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    ...(sameYear ? {} : { year: 'numeric' }),
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+}
+/** Cuánto tardó en llegar: por SMS puede ser bastante más que por la app. */
+function delay(alert: PanicAlert) {
+  const seconds = Math.max(
+    0,
+    Math.round((Date.parse(alert.receivedAt) - Date.parse(alert.triggeredAt)) / 1000),
+  );
+  return seconds < 60
+    ? `${String(seconds)} s`
+    : `${String(Math.floor(seconds / 60))} min ${String(seconds % 60)} s`;
+}
+
 export function PanicListPage() {
-  const [filters, setFilters] = useState({ estado: '', predio: '', pagina: 1 });
-  const params = new URLSearchParams({ pagina: String(filters.pagina) });
+  const [filters, setFilters] = useState<{
+    estado: Status;
+    predio: string;
+    pagina: number;
+    porPagina: number;
+  }>({ estado: '', predio: '', pagina: 1, porPagina: 10 });
+  const params = new URLSearchParams({
+    pagina: String(filters.pagina),
+    porPagina: String(filters.porPagina),
+  });
   if (filters.estado) params.set('estado', filters.estado);
   if (filters.predio) params.set('predio', filters.predio);
   const list = useQuery({
@@ -28,32 +76,35 @@ export function PanicListPage() {
     queryKey: ['sites'],
     queryFn: () => apiGet('/predios', z.array(z.object({ id: z.string(), name: z.string() }))),
   });
+  const active = list.data?.activeCount ?? 0;
+
   return (
-    <section className="space-y-6" aria-label="Alertas de pánico">
+    <section className="space-y-4" aria-label="Alertas de pánico">
       <PageHeader
         title="Alertas de pánico"
         description="Recibí, confirmá y resolvé las emergencias de tus predios"
       />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="panic-status">Estado</Label>
-          <NativeSelect
-            className="w-full"
-            id="panic-status"
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div className="space-y-1.5">
+          <span className="t-label block text-foreground" aria-hidden="true">
+            Estado
+          </span>
+          <SegmentedFilter
+            ariaLabel="Estado"
+            options={STATUS_OPTIONS.map((option) =>
+              // Las activas sin atender se cuentan siempre, filtre lo que filtre.
+              option.value === 'active' && active > 0
+                ? { ...option, label: `Activas (${String(active)})` }
+                : option,
+            )}
             value={filters.estado}
-            onChange={(event) => {
-              setFilters((old) => ({ ...old, estado: event.target.value, pagina: 1 }));
+            onChange={(estado) => {
+              setFilters((old) => ({ ...old, estado, pagina: 1 }));
             }}
-          >
-            <NativeSelectOption value="">Todos</NativeSelectOption>
-            {Object.entries(panicStatuses).map(([value, label]) => (
-              <NativeSelectOption key={value} value={value}>
-                {label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+            className="[&>button]:h-10"
+          />
         </div>
-        <div>
+        <div className="w-full space-y-1.5 sm:w-72">
           <Label htmlFor="panic-site">Predio</Label>
           <NativeSelect
             className="w-full"
@@ -76,7 +127,7 @@ export function PanicListPage() {
         <div role="status" className="space-y-2">
           <span className="sr-only">Cargando alertas…</span>
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-16 w-full" />
+            <Skeleton key={i} className="h-10 w-full" />
           ))}
         </div>
       ) : list.isError ? (
@@ -86,23 +137,25 @@ export function PanicListPage() {
             Reintentar
           </Button>
         </Alert>
+      ) : list.data.items.length === 0 ? (
+        <EmptyState title="No hay alertas para estos filtros" />
       ) : (
         <>
-          {list.data.items.length ? (
-            <ul className="divide-y divide-border border-[1.5px] border-input">
-              {list.data.items.map((alert) => (
-                <li
-                  key={alert.id}
-                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
-                >
-                  <div className="space-y-1">
-                    <p className="font-semibold">
-                      {alert.site.name} · {alert.guard.name}
-                    </p>
-                    <p className="text-sm text-muted-foreground tabular-nums">
-                      Enviada: {new Date(alert.triggeredAt).toLocaleString('es-AR')} · Recibida:{' '}
-                      {new Date(alert.receivedAt).toLocaleString('es-AR')}
-                    </p>
+          <div className="border-[1.5px] border-input">
+            <DataTable
+              label="Alertas de pánico"
+              rows={list.data.items}
+              getRowId={(alert) => alert.id}
+              // Las activas se distinguen también por su sello, no solo por el fondo.
+              rowClassName={(alert) => (alert.status === 'active' ? 'bg-danger-soft' : undefined)}
+              columns={[
+                {
+                  id: 'status',
+                  header: 'Estado',
+                  type: 'number',
+                  width: 144,
+                  value: (alert) => STATUS_ORDER[alert.status],
+                  cell: (alert) => (
                     <StatusBadge
                       tone={
                         alert.status === 'active'
@@ -114,41 +167,100 @@ export function PanicListPage() {
                     >
                       {panicStatuses[alert.status]}
                     </StatusBadge>
-                    <SmsBadges {...alert} />
-                  </div>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link to={`/alertas-panico/${alert.id}`}>Ver alerta</Link>
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyState title="No hay alertas para estos filtros" />
-          )}
-          <nav aria-label="Páginas de alertas" className="flex flex-wrap items-center gap-3">
-            <Button
-              variant="outline"
-              disabled={filters.pagina <= 1}
-              onClick={() => {
-                setFilters((old) => ({ ...old, pagina: old.pagina - 1 }));
-              }}
-            >
-              Anterior
-            </Button>
-            <span>
-              Página {filters.pagina} de{' '}
-              {Math.max(1, Math.ceil(list.data.total / list.data.pageSize))}
-            </span>
-            <Button
-              variant="outline"
-              disabled={filters.pagina * list.data.pageSize >= list.data.total}
-              onClick={() => {
-                setFilters((old) => ({ ...old, pagina: old.pagina + 1 }));
-              }}
-            >
-              Siguiente
-            </Button>
-          </nav>
+                  ),
+                },
+                {
+                  id: 'triggered',
+                  header: 'Enviada',
+                  type: 'date',
+                  width: 128,
+                  value: (alert) => new Date(alert.triggeredAt),
+                  cell: (alert) => (
+                    <time
+                      dateTime={alert.triggeredAt}
+                      title={fullDate(alert.triggeredAt)}
+                      className="tabular-nums"
+                    >
+                      {shortDate(alert.triggeredAt)}
+                    </time>
+                  ),
+                },
+                {
+                  id: 'site',
+                  header: 'Predio',
+                  value: (alert) => alert.site.name,
+                  cell: (alert) => (
+                    <Link
+                      to={`/alertas-panico/${alert.id}`}
+                      className="font-semibold underline-offset-4 hover:underline"
+                    >
+                      {alert.site.name}
+                    </Link>
+                  ),
+                },
+                { id: 'guard', header: 'Vigilador', value: (alert) => alert.guard.name },
+                {
+                  id: 'delay',
+                  header: 'Llegó en',
+                  type: 'number',
+                  align: 'right',
+                  width: 112,
+                  value: (alert) => Date.parse(alert.receivedAt) - Date.parse(alert.triggeredAt),
+                  cell: (alert) => (
+                    <span
+                      title={`Recibida: ${fullDate(alert.receivedAt)}`}
+                      className="tabular-nums"
+                    >
+                      {delay(alert)}
+                    </span>
+                  ),
+                },
+                {
+                  id: 'channel',
+                  header: 'Canal',
+                  width: 280,
+                  value: (alert) => (alert.channel === 'sms' ? 'SMS' : 'App'),
+                  cell: (alert) =>
+                    alert.channel === 'sms' || !alert.authenticated || alert.phoneMismatch ? (
+                      <span className="flex gap-1">
+                        <SmsBadges {...alert} />
+                      </span>
+                    ) : (
+                      'App'
+                    ),
+                },
+                {
+                  id: 'open',
+                  header: 'Ver alerta',
+                  hideHeader: true,
+                  width: 112,
+                  cell: (alert) => (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link
+                        to={`/alertas-panico/${alert.id}`}
+                        aria-label={`Ver alerta de ${alert.site.name}, ${shortDate(alert.triggeredAt)}`}
+                      >
+                        Ver alerta
+                      </Link>
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          </div>
+          <Pagination
+            page={filters.pagina}
+            pageSize={filters.porPagina}
+            total={list.data.total}
+            shown={list.data.items.length}
+            label="alertas"
+            onPage={(pagina) => {
+              setFilters((old) => ({ ...old, pagina }));
+            }}
+            onPageSize={(porPagina) => {
+              setFilters((old) => ({ ...old, porPagina, pagina: 1 }));
+            }}
+          />
         </>
       )}
     </section>

@@ -63,6 +63,7 @@ export const panicAlertsQuerySchema = z
     estado: z.enum(PANIC_STATUSES).optional(),
     predio: z.string().min(1).max(100).optional(),
     pagina: z.coerce.number().int().min(1).max(100000).default(1),
+    porPagina: z.coerce.number().int().min(1).max(50).default(25),
   })
   .strict();
 
