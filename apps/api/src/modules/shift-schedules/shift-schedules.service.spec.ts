@@ -45,12 +45,23 @@ describe('schedule list', () => {
     { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
   );
 
+  it('skips the shift counts when nothing matches', async () => {
+    findMany.mockResolvedValueOnce([]);
+    groupBy.mockClear();
+    await expect(service.list({ q: 'nadie' })).resolves.toEqual({ items: [], expiring: 3 });
+    expect(groupBy).not.toHaveBeenCalled();
+  });
+
   it('filters expiring schedules and adds names, days to end and shift counts', async () => {
     const result = await service.list({ estado: 'por_vencer' });
     expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
-        status: 'active',
-        endDate: { gte: new Date('2026-11-26'), lte: new Date('2026-12-10') },
+        AND: [
+          {
+            status: 'active',
+            endDate: { gte: new Date('2026-11-26'), lte: new Date('2026-12-10') },
+          },
+        ],
       },
     });
     expect(result).toEqual({

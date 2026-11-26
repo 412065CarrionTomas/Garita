@@ -54,7 +54,7 @@ export class ShiftSchedulesService {
       },
       cancelada: { status: 'cancelled' },
     };
-    const search = { contains: query.q, mode: 'insensitive' as const };
+    const words = query.q?.split(/\s+/).filter(Boolean) ?? [];
     const scope: Prisma.ShiftScheduleWhereInput = {
       ...(query.predio ? { siteId: query.predio } : {}),
       ...(query.vigilador ? { guardId: query.vigilador } : {}),
@@ -63,20 +63,20 @@ export class ShiftSchedulesService {
       this.prisma.tenantPrisma.shiftSchedule.findMany({
         where: {
           ...scope,
-          ...byState[query.estado ?? 'vigente'],
-          ...(query.q
-            ? {
-                AND: [
-                  {
-                    OR: [
-                      { site: { name: search } },
-                      { guard: { firstName: search } },
-                      { guard: { lastName: search } },
-                    ],
-                  },
+          AND: [
+            byState[query.estado ?? 'vigente'],
+            // Cada palabra tiene que aparecer en el predio, el nombre o el apellido del vigilador.
+            ...words.map((word) => {
+              const search = { contains: word, mode: 'insensitive' as const };
+              return {
+                OR: [
+                  { site: { name: search } },
+                  { guard: { firstName: search } },
+                  { guard: { lastName: search } },
                 ],
-              }
-            : {}),
+              };
+            }),
+          ],
         },
         include: {
           site: { select: { name: true } },
@@ -87,6 +87,7 @@ export class ShiftSchedulesService {
       }),
       this.prisma.tenantPrisma.shiftSchedule.count({ where: { ...scope, ...byState.por_vencer } }),
     ]);
+    if (!schedules.length) return { items: [], expiring };
     const ids = schedules.map((schedule) => schedule.id);
     const roundIds = [...new Set(schedules.flatMap((schedule) => schedule.roundIds))];
     const live = {

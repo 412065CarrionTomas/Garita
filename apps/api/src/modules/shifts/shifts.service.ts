@@ -20,6 +20,7 @@ import {
   type ShiftBoard,
   type ShiftBoardQuery,
   type ShiftListQuery,
+  type ShiftListState,
   type GuardShiftsPage,
   type GuardShiftsQuery,
   type ReassignShiftRequest,
@@ -42,6 +43,51 @@ const DONE_WINDOW = new Set(['complete', 'complete_late']);
 /** Motivo de los turnos reemplazados al modificar una programación (HU-32): no se listan. */
 export const SCHEDULE_REGENERATION_REASON = 'Regeneración de programación';
 
+/** Motivo de cierre por baja del predio: ese cierre anticipado no deja un hueco que cubrir. */
+const SITE_REMOVAL_REASON = 'baja del predio';
+
+/**
+ * Excluye los turnos reemplazados al regenerar una programación. Se escribe con OR explícito:
+ * un NOT sobre `cancellationReason` (nullable) dejaría afuera también los cancelados sin motivo.
+ */
+const notRegenerated: Prisma.ShiftWhereInput = {
+  OR: [
+    { status: { not: 'cancelled' } },
+    { cancellationReason: null },
+    { cancellationReason: { not: SCHEDULE_REGENERATION_REASON } },
+  ],
+};
+
+/** Cerrado antes de hora y todavía en su franja: "sin cobertura", aunque en la tabla diga closed. */
+function uncoveredWhere(now: Date): Prisma.ShiftWhereInput {
+  return {
+    status: 'closed',
+    closedEarly: true,
+    endsAt: { gt: now },
+    OR: [{ closeReason: null }, { closeReason: { not: SITE_REMOVAL_REASON } }],
+  };
+}
+
+/** Estado que ve el supervisor: deriva "sin cobertura" igual que En vivo y `reassign`. */
+export function effectiveShiftStatus(
+  shift: { status: string; closedEarly?: boolean; closeReason?: string | null; endsAt: Date },
+  now: Date,
+): string {
+  return shift.status === 'closed' &&
+    shift.closedEarly &&
+    shift.closeReason !== SITE_REMOVAL_REASON &&
+    now < shift.endsAt
+    ? 'uncovered'
+    : shift.status;
+}
+
+function stateWhere(state: ShiftListState, now: Date): Prisma.ShiftWhereInput {
+  const statuses = { status: { in: [...SHIFT_LIST_STATES[state]] } };
+  if (state === 'problema') return { OR: [statuses, uncoveredWhere(now)] };
+  if (state === 'finalizado') return { AND: [statuses, { NOT: uncoveredWhere(now) }] };
+  return statuses;
+}
+
 @Injectable()
 export class ShiftsService {
   private readonly logger = new Logger(ShiftsService.name);
@@ -57,16 +103,20 @@ export class ShiftsService {
   async list(query: ShiftListQuery) {
     if (query.predio) await this.resources.findOwnedOrThrow('Site', query.predio);
     if (query.vigilador) await this.assertGuard(query.vigilador);
-    const search = { contains: query.q, mode: 'insensitive' as const };
+    const now = this.clock.now();
+    const words = query.q?.split(/\s+/).filter(Boolean) ?? [];
     const where: Prisma.ShiftWhereInput = {
-      ...(query.predio ? { siteId: query.predio } : {}),
-      ...(query.vigilador
-        ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
-        : {}),
-      NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
-      ...(query.estado ? { status: { in: [...SHIFT_LIST_STATES[query.estado]] } } : {}),
-      ...(query.q
-        ? {
+      AND: [
+        ...(query.predio ? [{ siteId: query.predio }] : []),
+        ...(query.vigilador
+          ? [{ assignments: { some: { guardId: query.vigilador, isCurrent: true } } }]
+          : []),
+        notRegenerated,
+        ...(query.estado ? [stateWhere(query.estado, now)] : []),
+        // Cada palabra tiene que aparecer en el predio, el nombre o el apellido del vigilador.
+        ...words.map((word) => {
+          const search = { contains: word, mode: 'insensitive' as const };
+          return {
             OR: [
               { site: { name: search } },
               {
@@ -78,16 +128,19 @@ export class ShiftsService {
                 },
               },
             ],
-          }
-        : {}),
-      ...(query.desde || query.hasta
-        ? {
-            startsAt: {
-              ...(query.desde ? { gte: new Date(query.desde) } : {}),
-              ...(query.hasta ? { lte: new Date(query.hasta) } : {}),
-            },
-          }
-        : {}),
+          };
+        }),
+        ...(query.desde || query.hasta
+          ? [
+              {
+                startsAt: {
+                  ...(query.desde ? { gte: new Date(query.desde) } : {}),
+                  ...(query.hasta ? { lte: new Date(query.hasta) } : {}),
+                },
+              },
+            ]
+          : []),
+      ],
     };
     const [field, dir] = query.orden.split(':') as ['inicio' | 'predio', 'asc' | 'desc'];
     const [items, total] = await Promise.all([
@@ -103,7 +156,10 @@ export class ShiftsService {
       }),
       this.prisma.tenantPrisma.shift.count({ where }),
     ]);
-    return { items, total };
+    return {
+      items: items.map((item) => ({ ...item, status: effectiveShiftStatus(item, now) })),
+      total,
+    };
   }
 
   /** Planilla semanal: predios × días (lunes a domingo), cada turno en el día en que empieza. */
@@ -114,22 +170,45 @@ export class ShiftsService {
       where: { id: user.companyId },
       select: { timezone: true },
     });
-    const today = localDate(this.clock.now(), timezone);
+    const now = this.clock.now();
+    const today = localDate(now, timezone);
     const days = weekDays(query.semana ?? today);
     const [shifts, sites] = await Promise.all([
       this.prisma.tenantPrisma.shift.findMany({
         where: {
-          serviceDate: {
-            gte: new Date(`${days[0]}T00:00:00.000Z`),
-            lte: new Date(`${days[6]}T00:00:00.000Z`),
-          },
-          ...(query.predio ? { siteId: query.predio } : {}),
-          ...(query.vigilador
-            ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
-            : {}),
-          NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
+          AND: [
+            {
+              serviceDate: {
+                gte: new Date(`${days[0]}T00:00:00.000Z`),
+                lte: new Date(`${days[6]}T00:00:00.000Z`),
+              },
+            },
+            ...(query.predio ? [{ siteId: query.predio }] : []),
+            ...(query.vigilador
+              ? [{ assignments: { some: { guardId: query.vigilador, isCurrent: true } } }]
+              : []),
+            notRegenerated,
+          ],
         },
-        include: this.shiftInclude(),
+        // Solo lo que muestra la planilla: sin la versión de las rondas ni su recorrido.
+        select: {
+          id: true,
+          siteId: true,
+          status: true,
+          startsAt: true,
+          endsAt: true,
+          serviceDate: true,
+          scheduleId: true,
+          individuallyModified: true,
+          closedEarly: true,
+          closeReason: true,
+          site: { select: { name: true, connectivityType: true, minutesToSignal: true } },
+          assignments: {
+            where: { isCurrent: true },
+            select: { guard: { select: { id: true, firstName: true, lastName: true } } },
+          },
+          rounds: { select: { round: { select: { name: true } } } },
+        },
         orderBy: { startsAt: 'asc' },
       }),
       // Con filtro de vigilador solo interesan los predios donde trabaja; sin él, también los vacíos.
@@ -150,29 +229,32 @@ export class ShiftsService {
       return found;
     };
     for (const site of sites) row(site.id, site.name);
-    const now = this.clock.now();
     const summary = { total: 0, sites: 0, toAssign: 0, toCover: 0, noShows: 0 };
     const busySites = new Set<string>();
     for (const shift of shifts) {
       const dayIndex = days.indexOf(shift.serviceDate.toISOString().slice(0, 10));
       if (dayIndex < 0) continue;
       const guard = shift.assignments[0]?.guard ?? null;
+      const status = effectiveShiftStatus(shift, now);
       row(shift.siteId, shift.site.name).days[dayIndex]?.push({
         id: shift.id,
-        status: shift.status,
+        status,
         startsAt: shift.startsAt.toISOString(),
         endsAt: shift.endsAt.toISOString(),
         guard: guard ? { id: guard.id, name: `${guard.firstName} ${guard.lastName}`.trim() } : null,
         origin: !shift.scheduleId ? 'manual' : shift.individuallyModified ? 'modified' : 'schedule',
         rounds: shift.rounds.map((item) => item.round.name),
+        minutesToSignal:
+          shift.site.connectivityType === 'without_signal' ? shift.site.minutesToSignal : null,
       });
-      if (shift.status.startsWith('cancelled')) continue;
+      if (status.startsWith('cancelled')) continue;
       summary.total += 1;
       busySites.add(shift.siteId);
-      const gap = ['unassigned', 'no_show', 'uncovered'].includes(shift.status);
-      if (shift.status === 'unassigned' && shift.startsAt > now) summary.toAssign += 1;
-      else if (gap && shift.startsAt <= now && shift.endsAt > now) summary.toCover += 1;
-      if (shift.status === 'no_show') summary.noShows += 1;
+      // Mismas condiciones que acepta `reassign`: sin vigilador o sin cobertura, antes del fin.
+      const open = shift.endsAt > now;
+      if (status === 'unassigned' && open && shift.startsAt > now) summary.toAssign += 1;
+      else if ((status === 'unassigned' || status === 'uncovered') && open) summary.toCover += 1;
+      if (status === 'no_show') summary.noShows += 1;
     }
     summary.sites = busySites.size;
     return {

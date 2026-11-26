@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { scheduleDateOffset } from './schedules';
 
 const isoDate = z.iso.date();
 
@@ -11,11 +12,7 @@ export function weekStart(date: string): string {
 }
 
 /** Suma días a una fecha de calendario (YYYY-MM-DD). */
-export function addDays(date: string, days: number): string {
-  const day = new Date(`${date}T00:00:00Z`);
-  day.setUTCDate(day.getUTCDate() + days);
-  return day.toISOString().slice(0, 10);
-}
+export const addDays = scheduleDateOffset;
 
 /** Los 7 días (lunes a domingo) de la semana que contiene la fecha. */
 export function weekDays(date: string): string[] {
@@ -39,6 +36,8 @@ export const shiftBoardCellSchema = z.object({
   /** manual: cargado a mano · schedule: generado · modified: generado y editado después. */
   origin: z.enum(['manual', 'schedule', 'modified']),
   rounds: z.array(z.string()),
+  /** Minutos que tarda en tener señal un predio sin cobertura; null si tiene señal. */
+  minutesToSignal: z.number().nullable(),
 });
 export type ShiftBoardCell = z.infer<typeof shiftBoardCellSchema>;
 
