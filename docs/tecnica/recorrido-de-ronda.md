@@ -29,7 +29,7 @@ Módulo `apps/api/src/modules/routing/`:
   - Registra los errores sin coordenadas.
 - **Caché en Redis** (`RouteCache`): clave = hash del perfil y las coordenadas a 6 decimales, por 30 días. Las fallas no se guardan. Si Redis no está, sigue sin caché enseguida (sin cola de comandos ni reintentos).
 - **Sin `ORS_API_KEY`** se usa `NullRouting`: nada se calcula, con motivo `not_configured`. Los tests y el CI nunca llaman al servicio real.
-- **Perfil según `Site.maxSpeedProfile`:** `walking` → `foot-walking`, `bicycle` → `cycling-regular`, `vehicle` y `custom` → `driving-car`.
+- **Perfil según `RoundVersion.speedProfile`** (la velocidad propia de la ronda) **o, si está vacío, `Site.maxSpeedProfile`:** `walking` → `foot-walking`, `bicycle` → `cycling-regular`, `vehicle` y `custom` → `driving-car`.
 - **`RouteBuilder`** arma el recorrido completo:
   - Todas las secciones por calles van en una sola llamada al puerto.
   - Las secciones a mano son la polilínea de inicio, quiebres y fin.
