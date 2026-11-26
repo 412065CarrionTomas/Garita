@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { pageSizeSchema } from './pagination';
 
 /**
  * HU-37 contract: how an SMS received on the platform number was authenticated.
@@ -27,7 +28,9 @@ export type SmsWebhookBody = z.infer<typeof smsWebhookBodySchema>;
 export const smsInboundQuerySchema = z
   .object({
     estado: smsInboundAuthResultSchema.optional(),
+    buscar: z.string().trim().max(100).optional(),
     pagina: z.coerce.number().int().min(1).max(100000).default(1),
+    porPagina: pageSizeSchema,
   })
   .strict();
 export const smsInboundListSchema = z.object({
@@ -44,11 +47,15 @@ export const smsInboundListSchema = z.object({
       result: smsInboundAuthResultSchema,
       alertId: z.uuid().nullable(),
       shiftId: z.string().nullable(),
+      /** Quién lo mandó según el turno asociado; `null` si no se identificó. */
+      sender: z.object({ guardName: z.string().nullable(), siteName: z.string() }).nullable(),
     }),
   ),
   total: z.number().int(),
   page: z.number().int(),
   pageSize: z.number().int(),
+  /** Conteos por resultado con la búsqueda aplicada, sin el filtro de estado. */
+  resumen: z.object({ valid: z.number(), unverified: z.number(), unknown: z.number() }),
 });
 
 /**
