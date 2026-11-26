@@ -3,11 +3,19 @@ import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { space } from '@garita/tokens';
 import { SUSPENSION_MESSAGES } from '@garita/shared';
-import { Banner, Button, Loading, Segmented, Text, useTheme } from '@/ui';
+import { Banner, Loading, Segmented, Text, useTheme } from '@/ui';
 import { cachedNotice } from '@/lib/cached-get';
-import { RangeCalendar } from './range-calendar';
-import { isoDay, monthRange, splitByToday, totals, type DayRange } from './shift-range';
-import { formatDate, ShiftRow } from './shift-row';
+import { RangePicker } from './range-picker';
+import {
+  endDay,
+  isoDay,
+  monthRange,
+  splitByToday,
+  totals,
+  touches,
+  type DayRange,
+} from './shift-range';
+import { ShiftRow } from './shift-row';
 import { useGuardShifts } from './use-guard-shifts';
 
 type Preset = 'month' | 'next' | 'last';
@@ -32,18 +40,15 @@ export function ShiftsScreen() {
   const router = useRouter();
   const [range, setRange] = useState(() => presetRange('month'));
   const [preset, setPreset] = useState<Preset | null>('month');
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const [site, setSite] = useState(ALL);
   const { shifts, loading, error, savedAt, reload } = useGuardShifts(range);
 
   // Mientras llega el rango nuevo se ve solo lo que cae dentro de él.
-  const inRange = shifts.filter(
-    (s) => s.serviceDate >= range.desde && s.serviceDate <= range.hasta,
-  );
+  const inRange = shifts.filter((s) => touches(s, range));
   const sites = [...new Map(inRange.map((s) => [s.site.id, s.site.name])).entries()];
   const visible = site === ALL ? inRange : inRange.filter((s) => s.site.id === site);
   const sum = totals(visible);
-  const { upcoming, past } = splitByToday(visible, isoDay(new Date()));
+  const { upcoming, past } = splitByToday(visible, new Date());
   const sections = [
     { title: 'Próximos', data: upcoming },
     { title: 'Anteriores', data: past },
@@ -64,19 +69,11 @@ export function ShiftsScreen() {
         value={preset}
         onChange={(value) => choose(presetRange(value), value)}
       />
-      <Button
-        variant="outline"
-        label={`${formatDate(range.desde)} – ${formatDate(range.hasta)}`}
-        accessibilityLabel={`Rango del ${formatDate(range.desde)} al ${formatDate(range.hasta)}. ${calendarOpen ? 'Cerrar' : 'Abrir'} calendario`}
-        onPress={() => setCalendarOpen((open) => !open)}
+      <RangePicker
+        range={range}
+        marked={new Set(inRange.flatMap((s) => [s.serviceDate, endDay(s)]))}
+        onChange={(next) => choose(next, null)}
       />
-      {calendarOpen && (
-        <RangeCalendar
-          range={range}
-          marked={new Set(inRange.map((s) => s.serviceDate))}
-          onChange={(next) => choose(next, null)}
-        />
-      )}
       {sites.length > 1 && (
         <Segmented
           label="Predio"

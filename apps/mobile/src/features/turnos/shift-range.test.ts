@@ -1,5 +1,5 @@
 import type { GuardShift } from '@garita/shared';
-import { isoDay, monthRange, shiftStamp, splitByToday, totals } from './shift-range';
+import { isoDay, monthRange, shiftStamp, splitByToday, totals, touches } from './shift-range';
 
 const shift = (over: Partial<GuardShift>): GuardShift => ({
   id: 'id',
@@ -49,14 +49,33 @@ it('el sello dice si el turno cerrado se cumplió completo', () => {
   expect(shiftStamp(shift({ status: 'no_show' })).label).toBe('Ausente');
 });
 
-it('separa próximos de anteriores con el más reciente primero', () => {
+it('el nocturno cuenta en el día que empieza y en el que termina', () => {
+  const night = shift({
+    serviceDate: '2026-11-26',
+    startsAt: new Date(2026, 10, 26, 22).toISOString(),
+    endsAt: new Date(2026, 10, 27, 6).toISOString(),
+  });
+  const untilMidnight = shift({
+    serviceDate: '2026-11-26',
+    startsAt: new Date(2026, 10, 26, 16).toISOString(),
+    endsAt: new Date(2026, 10, 27, 0).toISOString(),
+  });
+  expect(touches(night, { desde: '2026-11-26', hasta: '2026-11-26' })).toBe(true);
+  expect(touches(night, { desde: '2026-11-27', hasta: '2026-11-27' })).toBe(true);
+  expect(touches(night, { desde: '2026-11-28', hasta: '2026-11-30' })).toBe(false);
+  expect(touches(untilMidnight, { desde: '2026-11-27', hasta: '2026-11-27' })).toBe(false);
+});
+
+it('separa por si ya terminó: el nocturno de anoche sigue entre los próximos hasta su fin', () => {
+  const now = new Date(2026, 10, 27, 3);
+  const at = (day: number, hour: number) => new Date(2026, 10, day, hour).toISOString();
   const list = [
-    shift({ id: 'a', serviceDate: '2026-11-20', status: 'closed' }),
-    shift({ id: 'b', serviceDate: '2026-11-24', status: 'closed' }),
-    shift({ id: 'c', serviceDate: '2026-11-25', status: 'in_progress' }),
-    shift({ id: 'd', serviceDate: '2026-11-26' }),
+    shift({ id: 'a', status: 'closed', startsAt: at(24, 22), endsAt: at(25, 6) }),
+    shift({ id: 'b', status: 'closed', startsAt: at(25, 22), endsAt: at(26, 6) }),
+    shift({ id: 'c', startsAt: at(26, 22), endsAt: at(27, 6) }),
+    shift({ id: 'd', startsAt: at(27, 22), endsAt: at(28, 6) }),
   ];
-  const { upcoming, past } = splitByToday(list, '2026-11-26');
+  const { upcoming, past } = splitByToday(list, now);
   expect(upcoming.map((s) => s.id)).toEqual(['c', 'd']);
   expect(past.map((s) => s.id)).toEqual(['b', 'a']);
 });

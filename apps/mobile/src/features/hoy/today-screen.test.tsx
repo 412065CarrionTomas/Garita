@@ -64,3 +64,21 @@ it('con turno en curso lo pone primero y lleva a la ronda', async () => {
   await userEvent.setup().press(screen.getByRole('button', { name: 'Ir a la ronda' }));
   expect(mockPush).toHaveBeenCalledWith('/turno/a');
 });
+
+it('el nocturno de anoche que sigue vigente aparece en Hoy', async () => {
+  jest.useFakeTimers({ advanceTimers: true, now: new Date(2026, 10, 27, 3) });
+  try {
+    respond([
+      {
+        ...shift('n', new Date(2026, 10, 26, 22).toISOString()),
+        endsAt: new Date(2026, 10, 27, 6).toISOString(),
+      },
+      shift('b', new Date(2026, 10, 29, 22).toISOString()),
+    ]);
+    await render(<TodayScreen />);
+    expect(await screen.findByText('Predio n')).toBeOnTheScreen();
+    expect(screen.queryByText('Próximo turno')).toBeNull();
+  } finally {
+    jest.useRealTimers();
+  }
+});

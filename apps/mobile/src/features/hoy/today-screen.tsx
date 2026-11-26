@@ -52,7 +52,13 @@ export function TodayScreen() {
   const today = isoDay(now);
   const shifts = data ?? [];
   const startOf = (shift: Upcoming) => new Date(shift.assignments[0]?.startsAt ?? shift.startsAt);
-  const todays = shifts.filter((s) => s.status === 'in_progress' || isoDay(startOf(s)) === today);
+  // Hoy también incluye el nocturno de anoche que todavía no terminó.
+  const todays = shifts.filter(
+    (s) =>
+      s.status === 'in_progress' ||
+      isoDay(startOf(s)) === today ||
+      (isoDay(new Date(s.endsAt)) === today && new Date(s.endsAt) > now),
+  );
   const next = todays.length ? null : shifts.find((s) => startOf(s) > now);
   return (
     <ScrollView

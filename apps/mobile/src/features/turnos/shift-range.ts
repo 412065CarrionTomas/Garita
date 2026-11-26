@@ -58,11 +58,21 @@ export function shiftStamp(shift: GuardShift): { label: string; tone: Tone } {
   }
 }
 
-/** Separa en próximos (desde hoy, ascendente) y anteriores (el más reciente primero). */
-export function splitByToday(shifts: GuardShift[], today: string) {
+/** Día en que termina (el del instante anterior al fin: un fin a las 00:00 no toca ese día). */
+export const endDay = (shift: GuardShift) => isoDay(new Date(Date.parse(shift.endsAt) - 1));
+
+/** Un turno nocturno toca dos días: el que empieza y el que termina. */
+export const touches = (shift: GuardShift, { desde, hasta }: DayRange) =>
+  shift.serviceDate <= hasta && endDay(shift) >= desde;
+
+/** Separa en próximos (sin terminar, ascendente) y anteriores (el más reciente primero). */
+export function splitByToday(shifts: GuardShift[], now: Date) {
   const upcoming: GuardShift[] = [];
   const past: GuardShift[] = [];
   for (const shift of shifts)
-    (shift.serviceDate >= today || shift.status === 'in_progress' ? upcoming : past).push(shift);
+    (shift.status === 'in_progress' || Date.parse(shift.endsAt) > now.getTime()
+      ? upcoming
+      : past
+    ).push(shift);
   return { upcoming, past: past.reverse() };
 }

@@ -31,6 +31,8 @@ const done: GuardShift = {
   id: 'done',
   status: 'closed',
   serviceDate: yesterday,
+  startsAt: `${yesterday}T10:00:00.000Z`,
+  endsAt: `${yesterday}T18:00:00.000Z`,
   startedAt: `${yesterday}T10:00:00.000Z`,
   closedAt: `${yesterday}T18:00:00.000Z`,
   site: { id: 'b', name: 'Depósito Sur', timezone: 'UTC' },
@@ -95,4 +97,15 @@ it('sin señal vuelve a mostrar el último rango cargado', async () => {
   await render(<ShiftsScreen />);
   expect(await screen.findByText(/Sin conexión. Mostrando lo guardado/)).toBeOnTheScreen();
   expect(screen.getByText('Parque Ferreyra')).toBeOnTheScreen();
+});
+
+it('cada campo abre su calendario, resalta hoy y pide el rango nuevo', async () => {
+  jest.mocked(apiGet).mockResolvedValue({ items: [], nextCursor: null });
+  await render(<ShiftsScreen />);
+  const user = userEvent.setup();
+  await user.press(await screen.findByRole('button', { name: /^Hasta:/ }));
+  expect(screen.getByRole('button', { name: /, hoy$/ })).toBeOnTheScreen();
+  await user.press(screen.getByRole('button', { name: /, hoy$/ }));
+  expect(screen.queryByRole('button', { name: /, hoy$/ })).toBeNull();
+  expect(jest.mocked(apiGet).mock.lastCall?.[0]).toContain(`hasta=${today}`);
 });
