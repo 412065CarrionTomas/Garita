@@ -29,23 +29,25 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
-import { cn } from '@/lib/utils';
 import { loadAvailableGuards } from '../personal/available-guards';
 import { ReassignDialog } from '../supervision/reassign-dialog';
 import { ShiftEditor, type ShiftEditorTarget } from './shift-form-dialog';
 import {
+  BOARD_FOCUS,
   calendarDate,
+  type BoardFocus,
   isCancelled,
   isFinished,
   LIST_SORT_IDS,
   shiftPageSchema,
   sitesSchema,
 } from './shift-utils';
+import { CoverageStrip } from './coverage-strip';
 import { ShiftsBoard } from './shifts-board';
 import { ShiftsList } from './shifts-list';
 
 type View = 'planilla' | 'lista';
-const FILTER_KEYS = ['predio', 'vigilador', 'estado', 'q', 'desde', 'hasta'] as const;
+const FILTER_KEYS = ['predio', 'vigilador', 'estado', 'foco', 'q', 'desde', 'hasta'] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 const STATE_LABELS: Record<ShiftListState, string> = {
   programado: 'Programados',
@@ -211,6 +213,13 @@ export function ShiftsPage() {
     { day: 'numeric', month: 'short', year: 'numeric' },
   )}`;
   const summary = board.data?.summary;
+  const focus = value('foco') in BOARD_FOCUS ? (value('foco') as BoardFocus) : null;
+  const boardFilter =
+    focus || estado
+      ? (cell: ShiftBoardCell) =>
+          (!focus || BOARD_FOCUS[focus](cell, now)) &&
+          (!estado || (SHIFT_LIST_STATES[estado] as readonly string[]).includes(cell.status))
+      : undefined;
   const hasFilters = FILTER_KEYS.some((key: FilterKey) => value(key));
   const selectClass = 'w-full sm:w-auto sm:max-w-56';
 
@@ -382,32 +391,16 @@ export function ShiftsPage() {
             Limpiar filtros
           </Button>
         )}
-        {view === 'planilla' && summary && (
-          <button
-            type="button"
-            aria-pressed={estado === 'problema'}
-            onClick={() => {
-              update({ estado: estado === 'problema' ? null : 'problema' });
-            }}
-            className={cn(
-              'min-h-9 rounded-md border-[1.5px] px-3 text-sm font-semibold tabular-nums lg:ml-auto',
-              estado === 'problema'
-                ? 'border-primary bg-primary text-primary-foreground'
-                : summary.unassigned + summary.noShow + summary.uncovered > 0
-                  ? 'border-warning bg-warning-soft text-warning'
-                  : 'border-input',
-            )}
-          >
-            {summary.unassigned + summary.noShow + summary.uncovered} huecos de {summary.total}{' '}
-            turnos
-            <span className="font-normal">
-              {' '}
-              · {summary.unassigned} sin vigilador · {summary.noShow} no presentados ·{' '}
-              {summary.uncovered} sin cobertura
-            </span>
-          </button>
-        )}
       </div>
+      {view === 'planilla' && summary && (
+        <CoverageStrip
+          summary={summary}
+          focus={focus}
+          onFocus={(next) => {
+            update({ foco: next === focus ? null : next });
+          }}
+        />
+      )}
       {message && (
         <p role="status" className="text-sm font-semibold">
           {message}
@@ -426,9 +419,13 @@ export function ShiftsPage() {
         ) : (
           <ShiftsBoard
             board={board.data}
-            statuses={estado ? SHIFT_LIST_STATES[estado] : undefined}
+            now={now}
+            filter={boardFilter}
             onOpen={openCell}
-            onCover={coverShift}
+            onAction={(cell, action) => {
+              if (action === 'assign') setEditor({ shiftId: cell.id });
+              else coverShift(cell);
+            }}
             onAdd={(siteId, date) => {
               setEditor({ siteId, date });
             }}

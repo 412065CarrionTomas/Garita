@@ -1,6 +1,5 @@
 import type { ShiftBoard, ShiftBoardCell } from '@garita/shared';
 import { Plus, Repeat } from 'lucide-react';
-import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -9,30 +8,32 @@ import {
   SHIFT_STATES,
   calendarDate,
   formatShiftTime,
+  gapAction,
   isCancelled,
 } from './shift-utils';
 
 /**
- * Planilla semanal: predios en filas, lunes a domingo en columnas. Cada turno muestra quién lo
- * cubre y en qué horario; los huecos (sin vigilador, no presentado, sin cobertura) se marcan con
- * borde, fondo y texto, y ofrecen cubrirlos ahí mismo.
+ * Planilla semanal: predios en filas, lunes a domingo en columnas. Los turnos van como texto; solo
+ * los huecos llevan marca y, si todavía se puede, la acción para resolverlos.
  */
 export function ShiftsBoard({
   board,
-  statuses,
+  now,
+  filter,
   onOpen,
-  onCover,
+  onAction,
   onAdd,
 }: {
   board: ShiftBoard;
-  /** Si viene, solo se muestran los turnos en estos estados (y los predios que tengan alguno). */
-  statuses?: readonly string[];
+  now: number;
+  /** Si viene, solo se muestran los turnos que cumplen (y los predios que tengan alguno). */
+  filter?: (cell: ShiftBoardCell) => boolean;
   onOpen: (cell: ShiftBoardCell) => void;
-  onCover: (cell: ShiftBoardCell) => void;
+  onAction: (cell: ShiftBoardCell, action: 'assign' | 'cover') => void;
   onAdd: (siteId: string, date: string) => void;
 }) {
-  const visible = (cell: ShiftBoardCell) => !statuses || statuses.includes(cell.status);
-  const sites = statuses
+  const visible = (cell: ShiftBoardCell) => !filter || filter(cell);
+  const sites = filter
     ? board.sites.filter((site) => site.days.some((day) => day.some(visible)))
     : board.sites;
   return (
@@ -47,8 +48,8 @@ export function ShiftsBoard({
             <col key={day} />
           ))}
         </colgroup>
-        <thead>
-          <tr className="border-b-[1.5px] border-input bg-muted">
+        <thead className="bg-muted">
+          <tr className="border-b border-border">
             <th scope="col" className="px-3 py-2 text-left text-sm font-semibold">
               Predio
             </th>
@@ -60,16 +61,20 @@ export function ShiftsBoard({
                   scope="col"
                   aria-current={today ? 'date' : undefined}
                   className={cn(
-                    'border-l border-input px-2 py-2 text-left',
-                    today && 'bg-primary text-primary-foreground',
+                    'border-l border-border px-3 py-2 text-left text-sm',
+                    today ? 'font-bold' : 'font-semibold',
+                    day < board.today && 'text-muted-foreground',
                   )}
                 >
-                  <span className="block text-sm font-semibold capitalize">
-                    {calendarDate(day, { weekday: 'long' })}
+                  <span
+                    className={cn(
+                      'capitalize',
+                      today && 'border-b-2 border-primary pb-0.5 text-foreground',
+                    )}
+                  >
+                    {calendarDate(day, { weekday: 'short', day: 'numeric' })}
                   </span>
-                  <span className="t-numeral block text-lg leading-tight">
-                    {calendarDate(day, { day: 'numeric', month: 'short' })}
-                  </span>
+                  {today && <span className="sr-only"> (hoy)</span>}
                 </th>
               );
             })}
@@ -77,7 +82,7 @@ export function ShiftsBoard({
         </thead>
         <tbody>
           {sites.map((site) => (
-            <tr key={site.id} className="border-b border-input align-top last:border-b-0">
+            <tr key={site.id} className="border-b border-border align-top last:border-b-0">
               <th scope="row" className="px-3 py-2 text-left text-base font-semibold">
                 {site.name}
               </th>
@@ -88,39 +93,37 @@ export function ShiftsBoard({
                   <td
                     key={day}
                     className={cn(
-                      'group border-l border-input p-1.5',
+                      'group border-l border-border p-1',
                       day === board.today && 'bg-primary/5',
+                      day < board.today && 'text-muted-foreground',
                     )}
                   >
-                    <ul className="space-y-1.5">
+                    <ul className="space-y-1">
                       {shown.map((cell) => (
                         <li key={cell.id}>
                           <BoardShift
                             cell={cell}
                             timezone={board.timezone}
+                            now={now}
                             onOpen={onOpen}
-                            onCover={onCover}
+                            onAction={onAction}
                           />
                         </li>
                       ))}
                     </ul>
-                    {day >= board.today && !statuses && (
+                    {day >= board.today && !filter && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className={cn(
-                          'mt-1 w-full justify-center text-muted-foreground',
-                          shown.length > 0 &&
-                            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-                        )}
+                        className="w-full text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                         aria-label={`Agregar turno en ${site.name} el ${calendarDate(day, { weekday: 'long', day: 'numeric', month: 'long' })}`}
                         onClick={() => {
                           onAdd(site.id, day);
                         }}
                       >
                         <Plus aria-hidden="true" className="size-4" />
-                        {shown.length === 0 && 'Agregar'}
+                        Agregar
                       </Button>
                     )}
                   </td>
@@ -137,35 +140,46 @@ export function ShiftsBoard({
 function BoardShift({
   cell,
   timezone,
+  now,
   onOpen,
-  onCover,
+  onAction,
 }: {
   cell: ShiftBoardCell;
   timezone: string;
+  now: number;
   onOpen: (cell: ShiftBoardCell) => void;
-  onCover: (cell: ShiftBoardCell) => void;
+  onAction: (cell: ShiftBoardCell, action: 'assign' | 'cover') => void;
 }) {
   const problem = PROBLEM_STATUSES.has(cell.status);
   const cancelled = isCancelled(cell.status);
-  const state = SHIFT_STATES[cell.status];
+  const action = gapAction(cell, now);
+  const live = cell.status === 'in_progress';
   const time = `${formatShiftTime(cell.startsAt, timezone)}–${formatShiftTime(cell.endsAt, timezone)}`;
   return (
     <div
       className={cn(
-        'rounded-sm border-[1.5px] border-input bg-background',
-        problem && 'border-warning bg-warning-soft',
-        cancelled && 'border-dashed text-muted-foreground',
+        'rounded-sm',
+        // Solo el hueco que todavía se puede resolver se marca fuerte; el pasado queda como dato.
+        action && 'border-l-4 border-warning bg-warning-soft',
+        problem && !action && 'border-l-4 border-border',
+        live && 'border-l-4 border-success',
       )}
     >
       <button
         type="button"
-        className="block w-full px-2 py-1.5 text-left hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
+        className="block w-full rounded-sm px-2 py-1 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
         title={cell.rounds.join(', ')}
         onClick={() => {
           onOpen(cell);
         }}
       >
-        <span className={cn('block truncate text-sm font-semibold', cancelled && 'line-through')}>
+        <span
+          className={cn(
+            'block truncate text-sm font-semibold',
+            cancelled && 'line-through',
+            !cell.guard && 'italic',
+          )}
+        >
           {cell.guard?.name ?? 'Sin vigilador'}
         </span>
         <span className="flex items-center gap-1 text-sm tabular-nums">
@@ -178,22 +192,29 @@ function BoardShift({
             />
           )}
         </span>
+        {(problem || live || cancelled) && (
+          <span
+            className={cn(
+              'block text-sm font-semibold',
+              action ? 'text-warning' : live ? 'text-success' : 'text-muted-foreground',
+            )}
+          >
+            {SHIFT_STATES[cell.status]?.label}
+          </span>
+        )}
       </button>
-      {(cell.status !== 'scheduled' || problem) && (
-        <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
-          {state && <StatusBadge tone={state.tone}>{state.label}</StatusBadge>}
-          {problem && (
-            <Button
-              type="button"
-              size="sm"
-              className="ml-auto h-7 px-2"
-              onClick={() => {
-                onCover(cell);
-              }}
-            >
-              Cubrir
-            </Button>
-          )}
+      {action && (
+        <div className="px-2 pb-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={() => {
+              onAction(cell, action);
+            }}
+          >
+            {action === 'assign' ? 'Asignar' : 'Cubrir'}
+          </Button>
         </div>
       )}
     </div>

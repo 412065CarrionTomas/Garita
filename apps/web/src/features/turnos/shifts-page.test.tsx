@@ -51,7 +51,7 @@ const boardWith = (cells: ReturnType<typeof cell>[][] = days.map(() => [])) => (
   today: '2030-10-14',
   days,
   sites: [{ id: 'site-1', name: 'Predio A', days: cells }],
-  summary: { total: 0, unassigned: 0, noShow: 0, uncovered: 0 },
+  summary: { total: 0, sites: 0, toAssign: 0, toCover: 0, noShows: 0 },
 });
 const listRow = (overrides: Record<string, unknown> = {}) => ({
   id: 'shift-1',
@@ -144,15 +144,15 @@ describe('<ShiftsPage /> planilla', () => {
     expect(
       within(monday).getByRole('img', { name: 'Generado por una programación' }),
     ).toBeVisible();
-    expect(within(grid).getByRole('columnheader', { current: 'date' })).toHaveTextContent('lunes');
+    expect(within(grid).getByRole('columnheader', { current: 'date' })).toHaveTextContent(/lun/);
   });
 
-  it('marca el hueco y lo cubre editando el turno si todavía no empezó', async () => {
+  it('marca el hueco próximo y lo asigna editando el turno', async () => {
     const gap = cell({ id: 'gap', status: 'unassigned', guard: null, origin: 'manual' });
     mockQueries({
       board: {
         ...boardWith(days.map((_, i) => (i === 1 ? [gap] : []))),
-        summary: { total: 1, unassigned: 1, noShow: 0, uncovered: 0 },
+        summary: { total: 1, sites: 1, toAssign: 1, toCover: 0, noShows: 0 },
       },
       detail: listRow({ id: 'gap', status: 'unassigned', assignments: [] }),
     });
@@ -160,10 +160,46 @@ describe('<ShiftsPage /> planilla', () => {
     renderPage();
     const grid = await screen.findByRole('table', { name: 'Planilla semanal' });
     expect(within(grid).getAllByText('Sin vigilador')).not.toHaveLength(0);
-    expect(screen.getByRole('button', { name: /1 huecos de 1 turnos/ })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Cubrir' }));
+    await user.click(within(grid).getByRole('button', { name: 'Asignar' }));
     expect(await screen.findByRole('dialog', { name: 'Editar turno' })).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledWith('/turnos/gap', expect.anything());
+  });
+
+  it('un hueco que ya terminó queda como dato, sin acción', async () => {
+    const past = cell({
+      id: 'past',
+      status: 'no_show',
+      startsAt: '2020-10-14T23:00:00.000Z',
+      endsAt: '2020-10-15T07:00:00.000Z',
+    });
+    mockQueries({ board: boardWith(days.map((_, i) => (i === 0 ? [past] : []))) });
+    renderPage();
+    const grid = await screen.findByRole('table', { name: 'Planilla semanal' });
+    expect(within(grid).getByText('No presentado')).toBeInTheDocument();
+    expect(within(grid).queryByRole('button', { name: 'Cubrir' })).not.toBeInTheDocument();
+    expect(within(grid).queryByRole('button', { name: 'Asignar' })).not.toBeInTheDocument();
+  });
+
+  it('las cifras de cobertura filtran la planilla y guardan el foco en la URL', async () => {
+    const gap = cell({ id: 'gap', status: 'unassigned', guard: null, origin: 'manual' });
+    mockQueries({
+      board: {
+        ...boardWith(days.map((_, i) => (i === 0 ? [cell()] : i === 1 ? [gap] : []))),
+        summary: { total: 2, sites: 1, toAssign: 1, toCover: 0, noShows: 0 },
+      },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    const grid = await screen.findByRole('table', { name: 'Planilla semanal' });
+    expect(within(grid).getByText('Pedro Díaz')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Para asignar: 1/ }));
+    expect(window.location.search).toContain('foco=asignar');
+    expect(screen.getByRole('button', { name: /Para asignar: 1/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(grid).queryByText('Pedro Díaz')).not.toBeInTheDocument();
+    expect(within(grid).getByRole('button', { name: 'Asignar' })).toBeInTheDocument();
   });
 
   it('agrega un turno en una celda vacía con predio y día ya elegidos', async () => {

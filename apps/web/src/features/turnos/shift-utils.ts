@@ -135,3 +135,27 @@ export function timeToMinutes(value: string): number {
   const [hour, minute] = value.split(':').map(Number);
   return (hour ?? 0) * 60 + (minute ?? 0);
 }
+
+/**
+ * Qué se puede hacer con un hueco: asignar uno que todavía no empezó, o cubrir uno que está en
+ * hora. Uno que ya terminó es historia y no ofrece acción.
+ */
+export function gapAction(
+  shift: { status: string; startsAt: string; endsAt: string },
+  now: number,
+): 'assign' | 'cover' | null {
+  if (!PROBLEM_STATUSES.has(shift.status)) return null;
+  if (Date.parse(shift.endsAt) <= now) return null;
+  if (Date.parse(shift.startsAt) > now) return shift.status === 'unassigned' ? 'assign' : null;
+  return 'cover';
+}
+
+/** Focos de la planilla que se eligen desde la franja de cifras. */
+export const BOARD_FOCUS = {
+  asignar: (shift: { status: string; startsAt: string; endsAt: string }, now: number) =>
+    gapAction(shift, now) === 'assign',
+  cubrir: (shift: { status: string; startsAt: string; endsAt: string }, now: number) =>
+    gapAction(shift, now) === 'cover',
+  ausencias: (shift: { status: string }) => shift.status === 'no_show',
+} as const;
+export type BoardFocus = keyof typeof BOARD_FOCUS;
