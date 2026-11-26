@@ -4,6 +4,7 @@ import {
   normalizeArPhone,
   sameArPhone,
   localDateTimeToUtc,
+  searchTerms,
   type SmsInboundAuthResult,
   type SmsWebhookBody,
   type smsInboundQuerySchema,
@@ -166,11 +167,12 @@ export class SmsInboundService {
   async list(query: z.infer<typeof smsInboundQuerySchema>) {
     const db = this.prisma.tenantPrisma;
     // Cada palabra tiene que aparecer en el número o en el texto.
-    const terms = (query.buscar ?? '').split(/\s+/).filter(Boolean);
+    const terms = searchTerms(query.buscar);
     const base = {
       AND: terms.map((term) => ({
         OR: [
-          { fromOriginal: { contains: term } },
+          { fromOriginal: { contains: term, mode: 'insensitive' as const } },
+          { fromNormalized: { contains: term } },
           { text: { contains: term, mode: 'insensitive' as const } },
         ],
       })),
@@ -178,28 +180,41 @@ export class SmsInboundService {
     const where = { ...base, result: query.estado };
     const count = (result: SmsInboundAuthResult) =>
       db.smsInbound.count({ where: { ...base, result } });
-    const [rows, total, valid, unverified, unknown] = await Promise.all([
+    const [rows, valid, unverified, unknown] = await Promise.all([
       db.smsInbound.findMany({
         where,
         orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
         skip: (query.pagina - 1) * query.porPagina,
         take: query.porPagina,
+        include: {
+          alert: {
+            select: {
+              site: { select: { name: true } },
+              guard: { select: { firstName: true, lastName: true } },
+            },
+          },
+        },
       }),
-      db.smsInbound.count({ where }),
       count('valid'),
       count('unverified'),
       count('unknown'),
     ]);
-    const shiftIds = [...new Set(rows.flatMap((row) => (row.shiftId ? [row.shiftId] : [])))];
+    const resumen = { valid, unverified, unknown };
+    const total = query.estado ? resumen[query.estado] : valid + unverified + unknown;
+    // Sin alerta no hay vigilador autenticado: se deduce de las asignaciones del turno.
+    const shiftIds = [
+      ...new Set(rows.flatMap((row) => (row.shiftId && !row.alert ? [row.shiftId] : []))),
+    ];
     const shifts = shiftIds.length
       ? await db.shift.findMany({
           where: { id: { in: shiftIds } },
           select: {
             id: true,
             site: { select: { name: true } },
+            // Incluye las reemplazadas (active: false) para no atribuirle el SMS al relevo.
             assignments: {
-              where: { active: true },
-              select: { guardId: true, startsAt: true, endsAt: true, isCurrent: true },
+              select: { guardId: true, createdAt: true },
+              orderBy: { createdAt: 'asc' },
             },
           },
         })
@@ -217,20 +232,24 @@ export class SmsInboundService {
       : [];
     const guardName = new Map(guards.map((g) => [g.id, `${g.firstName} ${g.lastName}`]));
     const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
-    const senderOf = (shiftId: string | null, receivedAt: Date) => {
-      const shift = shiftId ? shiftById.get(shiftId) : undefined;
+    const senderOf = (row: (typeof rows)[number]) => {
+      if (row.alert)
+        return {
+          guardName: `${row.alert.guard.firstName} ${row.alert.guard.lastName}`,
+          siteName: row.alert.site.name,
+        };
+      const shift = row.shiftId ? shiftById.get(row.shiftId) : undefined;
       if (!shift) return null;
-      // El vigilador asignado cuando llegó el SMS; si no se encuentra, el asignado actual.
+      // Un relevo crea una asignación nueva: vale la última creada antes de que llegue el SMS.
       const assignment =
-        shift.assignments.find((a) => a.startsAt <= receivedAt && receivedAt < a.endsAt) ??
-        shift.assignments.find((a) => a.isCurrent);
+        shift.assignments.findLast((a) => a.createdAt <= row.receivedAt) ?? shift.assignments[0];
       return {
         guardName: (assignment?.guardId && guardName.get(assignment.guardId)) ?? null,
         siteName: shift.site.name,
       };
     };
     return {
-      resumen: { valid, unverified, unknown },
+      resumen,
       items: rows.map((row) => ({
         id: row.id,
         provider: row.provider,
@@ -243,7 +262,7 @@ export class SmsInboundService {
         result: row.result,
         alertId: row.alertId,
         shiftId: row.shiftId,
-        sender: senderOf(row.shiftId, row.receivedAt),
+        sender: senderOf(row),
       })),
       total,
       page: query.pagina,

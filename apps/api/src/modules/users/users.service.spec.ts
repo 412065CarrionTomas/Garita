@@ -59,7 +59,7 @@ describe('UsersService invitation lifecycle', () => {
   });
 
   it('busca cada palabra en nombre, correo o legajo y filtra envíos fallidos', async () => {
-    db.user.count.mockResolvedValue(7);
+    for (const n of [7, 4, 2, 1, 1]) db.user.count.mockResolvedValueOnce(n);
     db.user.findMany.mockResolvedValue([]);
     const page = await service.list({
       buscar: ' bruno  paz ',
@@ -84,7 +84,11 @@ describe('UsersService invitation lifecycle', () => {
     });
     expect(args).toMatchObject({ skip: 5, take: 5 });
     expect(args.orderBy[0]).toEqual({ firstName: 'asc' });
-    expect(page).toMatchObject({ total: 7, paginas: 2, resumen: { active: 7, deactivated: 7 } });
+    expect(page).toMatchObject({
+      total: 7,
+      paginas: 2,
+      resumen: { active: 4, invitation_pending: 2, invitation_failed: 1, deactivated: 1 },
+    });
   });
 
   it('counts only future scheduled shifts assigned to the owned guard', async () => {

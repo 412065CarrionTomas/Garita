@@ -24,6 +24,7 @@ import {
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import {
+  PAGE_SIZES,
   SMS_INBOUND_AUTH_RESULTS,
   smsInboundQuerySchema,
   smsWebhookBodySchema,
@@ -116,7 +117,7 @@ export class SmsInboundController {
   @ApiQuery({ name: 'estado', enum: SMS_INBOUND_AUTH_RESULTS, required: false })
   @ApiQuery({ name: 'buscar', type: String, required: false })
   @ApiQuery({ name: 'pagina', type: Number, required: false })
-  @ApiQuery({ name: 'porPagina', enum: [3, 5, 10, 20, 50], required: false })
+  @ApiQuery({ name: 'porPagina', enum: [...PAGE_SIZES], required: false })
   @ApiResponse({
     status: 200,
     description: 'items, total, page, pageSize y resumen por estado; 20 por página por defecto',

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
+import { searchTerms } from '@garita/shared';
 import {
   IN_PROGRESS_SHIFT_CLOSURE_PORT,
   WEEKLY_SCHEDULE_TERMINATION_PORT,
@@ -45,7 +46,7 @@ export class SitesService {
   ) {
     const supervisor = user?.role === 'supervisor';
     // Cada palabra tiene que aparecer en algún campo: "ferreyra peralta" encuentra al cliente.
-    const terms = (query.buscar ?? '').split(/\s+/).filter(Boolean);
+    const terms = searchTerms(query.buscar);
     const base = {
       AND: terms.map((term) => ({
         OR: (['name', 'contactName', 'email', 'taxId'] as const).map((field) => ({
@@ -57,13 +58,16 @@ export class SitesService {
     // Al supervisor no se lo ordena por el total de predios: delataría los que no supervisa.
     const orderBy =
       query.orden === 'recientes'
-        ? [{ createdAt: 'desc' as const }]
+        ? [{ createdAt: 'desc' as const }, { id: 'asc' as const }]
         : query.orden === 'predios' && !supervisor
-          ? [{ sites: { _count: 'desc' as const } }, { name: 'asc' as const }]
-          : [{ name: 'asc' as const }];
+          ? [
+              { sites: { _count: 'desc' as const } },
+              { name: 'asc' as const },
+              { id: 'asc' as const },
+            ]
+          : [{ name: 'asc' as const }, { id: 'asc' as const }];
     const client = this.prisma.tenantPrisma.client;
-    const [total, items, active, inactive] = await Promise.all([
-      client.count({ where }),
+    const [items, active, inactive] = await Promise.all([
       client.findMany({
         where,
         orderBy,
@@ -83,6 +87,12 @@ export class SitesService {
       client.count({ where: { ...base, status: 'active' } }),
       client.count({ where: { ...base, status: 'inactive' } }),
     ]);
+    const total =
+      query.estado === 'active'
+        ? active
+        : query.estado === 'inactive'
+          ? inactive
+          : active + inactive;
     return {
       items,
       pagina: query.pagina,

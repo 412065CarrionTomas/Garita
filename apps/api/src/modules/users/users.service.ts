@@ -11,7 +11,7 @@ import {
 import { Prisma } from '../../generated/prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import type { CreateClientUserRequest, CreateUserRequest, UpdateUserRequest } from '@garita/shared';
-import { LEGAL_VERSION } from '@garita/shared';
+import { LEGAL_VERSION, searchTerms } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { FIREBASE_IDENTITY_PROVIDER } from '../auth/auth.types';
@@ -54,7 +54,7 @@ export class UsersService {
       in: ['supervisor', 'guard'],
     };
     // Cada palabra tiene que aparecer en algún campo: "bruno paz" encuentra a Bruno Paz.
-    const terms = (query.buscar ?? '').split(/\s+/).filter(Boolean);
+    const terms = searchTerms(query.buscar);
     const base = {
       role: roleFilter,
       AND: terms.map((term) => ({
@@ -71,13 +71,18 @@ export class UsersService {
       query.estado === 'invitation_failed'
         ? { ...base, ...failed }
         : { ...base, status: query.estado };
-    const byName = [{ firstName: 'asc' as const }, { lastName: 'asc' as const }];
+    // El id desempata: con OFFSET, un orden con empates puede repetir o saltear filas entre páginas.
+    const byName = [
+      { firstName: 'asc' as const },
+      { lastName: 'asc' as const },
+      { id: 'asc' as const },
+    ];
     const orderBy =
       query.orden === 'nombre'
         ? byName
         : query.orden === 'estado'
           ? [{ status: 'asc' as const }, ...byName]
-          : [{ createdAt: 'desc' as const }];
+          : [{ createdAt: 'desc' as const }, { id: 'asc' as const }];
     const count = (extra: object) =>
       this.prisma.tenantPrisma.user.count({ where: { ...base, ...extra } });
     const [total, users, active, pending, invitationFailed, deactivated] = await Promise.all([
@@ -87,7 +92,10 @@ export class UsersService {
         orderBy,
         skip: (query.pagina - 1) * query.porPagina,
         take: query.porPagina,
-        include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+        // Misma invitación que mira el filtro de envío fallido: las reemplazadas no cuentan.
+        include: {
+          invitations: { where: { replacedAt: null }, orderBy: { createdAt: 'desc' }, take: 1 },
+        },
       }),
       count({ status: 'active' }),
       count({ status: 'invitation_pending' }),

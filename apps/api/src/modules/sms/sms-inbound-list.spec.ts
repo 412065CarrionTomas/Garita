@@ -14,6 +14,7 @@ const row = (id: string, shiftId: string | null, receivedAt: string) => ({
   gatewayReceivedAt: at(receivedAt),
   result: 'valid',
   alertId: null,
+  alert: null as null | object,
   shiftId,
 });
 
@@ -33,25 +34,22 @@ describe('SmsInboundService.list', () => {
     db.smsInbound.findMany.mockResolvedValue([
       row('a', 'shift-1', '2026-11-20T10:00:00Z'),
       row('b', null, '2026-11-20T11:00:00Z'),
+      {
+        ...row('c', 'shift-1', '2026-11-20T13:00:00Z'),
+        alertId: 'alert',
+        alert: { site: { name: 'Predio Norte' }, guard: { firstName: 'Ana', lastName: 'Gómez' } },
+      },
     ]);
-    db.smsInbound.count.mockResolvedValue(4);
+    // Conteos por estado: valid, unverified, unknown.
+    for (const n of [4, 2, 1]) db.smsInbound.count.mockResolvedValueOnce(n);
     db.shift.findMany.mockResolvedValue([
       {
         id: 'shift-1',
         site: { name: 'Predio Norte' },
         assignments: [
-          {
-            guardId: 'g-old',
-            startsAt: at('2026-11-20T08:00:00Z'),
-            endsAt: at('2026-11-20T12:00:00Z'),
-            isCurrent: false,
-          },
-          {
-            guardId: 'g-new',
-            startsAt: at('2026-11-20T12:00:00Z'),
-            endsAt: at('2026-11-20T20:00:00Z'),
-            isCurrent: true,
-          },
+          // El relevo crea una asignación nueva; la anterior queda inactiva con el mismo fin.
+          { guardId: 'g-old', createdAt: at('2026-11-20T08:00:00Z') },
+          { guardId: 'g-new', createdAt: at('2026-11-20T12:00:00Z') },
         ],
       },
     ]);
@@ -66,15 +64,23 @@ describe('SmsInboundService.list', () => {
       take: number;
     };
     expect(args.where.AND).toHaveLength(2);
+    // El turno se busca solo para el SMS sin alerta, y con todas sus asignaciones.
+    const shiftArgs = (db.shift.findMany.mock.calls as unknown[][])[0]?.[0] as {
+      where: unknown;
+      select: { assignments: { where?: unknown } };
+    };
+    expect(shiftArgs.where).toEqual({ id: { in: ['shift-1'] } });
+    expect(shiftArgs.select.assignments.where).toBeUndefined();
     expect(args).toMatchObject({ skip: 5, take: 5 });
     expect(page.items.map((item) => item.sender)).toEqual([
       { guardName: 'Bruno Paz', siteName: 'Predio Norte' },
       null,
+      { guardName: 'Ana Gómez', siteName: 'Predio Norte' },
     ]);
     expect(page).toMatchObject({
       pageSize: 5,
-      total: 4,
-      resumen: { valid: 4, unverified: 4, unknown: 4 },
+      total: 7,
+      resumen: { valid: 4, unverified: 2, unknown: 1 },
     });
   });
 });

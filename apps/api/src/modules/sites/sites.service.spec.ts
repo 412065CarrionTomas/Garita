@@ -84,6 +84,7 @@ function setup() {
 describe('SitesService audit regressions', () => {
   it('pagina clientes buscando cada palabra y no ordena por predios al supervisor', async () => {
     const { service, db } = setup();
+    db.client.count.mockResolvedValueOnce(4).mockResolvedValueOnce(3);
     const page = await service.listClients(
       { buscar: ' ferreyra  peralta ', orden: 'predios', pagina: 2, porPagina: 5 },
       { role: 'supervisor', userId: 'sup' } as never,
@@ -98,9 +99,9 @@ describe('SitesService audit regressions', () => {
     expect(args.where.AND[1]?.OR).toContainEqual({
       contactName: { contains: 'peralta', mode: 'insensitive' },
     });
-    expect(args.orderBy).toEqual([{ name: 'asc' }]);
+    expect(args.orderBy).toEqual([{ name: 'asc' }, { id: 'asc' }]);
     expect(args).toMatchObject({ skip: 5, take: 5 });
-    expect(page).toMatchObject({ total: 7, paginas: 2, resumen: { active: 7, inactive: 7 } });
+    expect(page).toMatchObject({ total: 7, paginas: 2, resumen: { active: 4, inactive: 3 } });
   });
 
   it('impacto y cancelacion incluyen no iniciados vencidos y uncovered, y todos los in_progress', async () => {
