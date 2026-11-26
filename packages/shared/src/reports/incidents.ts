@@ -213,7 +213,8 @@ export function computeIncidentReport(
   for (const row of rows) {
     const at = row.trustedAt ?? row.occurredAtDevice;
     const weekday = byWeekdayTimeBand[incidentWeekday(at, timezone)];
-    if (weekday) weekday[incidentTimeBand(at, timezone) / 2]++;
+    const slot = incidentTimeBand(at, timezone) / 2;
+    if (weekday) weekday[slot] = (weekday[slot] ?? 0) + 1;
     const severity = bySeverity.find((group) => group.id === row.severity);
     if (severity) severity.value++;
     const type = byType.find((group) => group.id === row.type);
