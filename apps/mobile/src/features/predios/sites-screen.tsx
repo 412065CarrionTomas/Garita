@@ -4,6 +4,7 @@ import { space } from '@garita/tokens';
 import { SUSPENSION_MESSAGES, guardSitesSchema, type GuardSite } from '@garita/shared';
 import { Banner, Button, Card, ListItem, Loading, Text, useTheme } from '@/ui';
 import { cachedNotice, useCachedGet } from '@/lib/cached-get';
+import { directionsUrl } from '@/lib/maps';
 
 const nextFormat = new Intl.DateTimeFormat('es-AR', {
   weekday: 'short',
@@ -13,10 +14,6 @@ const nextFormat = new Intl.DateTimeFormat('es-AR', {
   minute: '2-digit',
   hourCycle: 'h23',
 });
-
-/** Abre la app de mapas con el recorrido hasta el predio. */
-export const directionsUrl = ({ latitude, longitude }: Pick<GuardSite, 'latitude' | 'longitude'>) =>
-  `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
 
 /** Predios del vigilador: cómo llegar, cómo entrar, qué recorrer y quién supervisa. */
 export function SitesScreen() {
