@@ -270,8 +270,17 @@ describe('weekly shift board', () => {
   const findMany = jest.fn().mockResolvedValue([
     shift({}),
     shift({
+      id: 'live',
+      status: 'no_show',
+      startsAt: new Date('2026-11-26T04:00:00Z'),
+      endsAt: new Date('2026-11-26T12:00:00Z'),
+      serviceDate: new Date('2026-11-26T00:00:00Z'),
+    }),
+    shift({
       id: 'gap',
       status: 'unassigned',
+      startsAt: new Date('2026-11-30T01:00:00Z'),
+      endsAt: new Date('2026-11-30T09:00:00Z'),
       serviceDate: new Date('2026-11-29T00:00:00Z'),
       scheduleId: null,
       assignments: [],
@@ -303,7 +312,7 @@ describe('weekly shift board', () => {
   );
   const user = { userId: 'u', companyId: 'company', role: 'admin', status: 'active' } as const;
 
-  it('places a night shift on its start day, keeps empty sites and counts gaps', async () => {
+  it('places a night shift on its start day, keeps empty sites and splits gaps by action', async () => {
     const board = await service.board({}, user);
     expect(board.today).toBe('2026-11-26');
     expect(board.days[0]).toBe('2026-11-23');
@@ -321,7 +330,7 @@ describe('weekly shift board', () => {
     expect(barrio.days[6]).toEqual([
       expect.objectContaining({ id: 'gap', origin: 'manual', guard: null }),
     ]);
-    expect(board.summary).toEqual({ total: 2, unassigned: 1, noShow: 0, uncovered: 0 });
+    expect(board.summary).toEqual({ total: 3, sites: 1, toAssign: 1, toCover: 1, noShows: 1 });
     expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
         serviceDate: {

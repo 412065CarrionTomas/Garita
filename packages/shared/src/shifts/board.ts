@@ -55,10 +55,16 @@ export const shiftBoardSchema = z.object({
     }),
   ),
   summary: z.object({
+    /** Turnos no cancelados de la semana. */
     total: z.number(),
-    unassigned: z.number(),
-    noShow: z.number(),
-    uncovered: z.number(),
+    /** Predios con al menos un turno en la semana. */
+    sites: z.number(),
+    /** Sin vigilador y todavía no empezaron: hay que asignarlos. */
+    toAssign: z.number(),
+    /** Ya empezaron, siguen en hora y nadie los cubre: hay que cubrirlos ahora. */
+    toCover: z.number(),
+    /** No presentados de la semana, terminados o no: el dato, sin acción. */
+    noShows: z.number(),
   }),
 });
 export type ShiftBoard = z.infer<typeof shiftBoardSchema>;

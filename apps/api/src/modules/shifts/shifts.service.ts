@@ -150,7 +150,9 @@ export class ShiftsService {
       return found;
     };
     for (const site of sites) row(site.id, site.name);
-    const summary = { total: 0, unassigned: 0, noShow: 0, uncovered: 0 };
+    const now = this.clock.now();
+    const summary = { total: 0, sites: 0, toAssign: 0, toCover: 0, noShows: 0 };
+    const busySites = new Set<string>();
     for (const shift of shifts) {
       const dayIndex = days.indexOf(shift.serviceDate.toISOString().slice(0, 10));
       if (dayIndex < 0) continue;
@@ -166,10 +168,13 @@ export class ShiftsService {
       });
       if (shift.status.startsWith('cancelled')) continue;
       summary.total += 1;
-      if (shift.status === 'unassigned') summary.unassigned += 1;
-      if (shift.status === 'no_show') summary.noShow += 1;
-      if (shift.status === 'uncovered') summary.uncovered += 1;
+      busySites.add(shift.siteId);
+      const gap = ['unassigned', 'no_show', 'uncovered'].includes(shift.status);
+      if (shift.status === 'unassigned' && shift.startsAt > now) summary.toAssign += 1;
+      else if (gap && shift.startsAt <= now && shift.endsAt > now) summary.toCover += 1;
+      if (shift.status === 'no_show') summary.noShows += 1;
     }
+    summary.sites = busySites.size;
     return {
       timezone,
       today,
