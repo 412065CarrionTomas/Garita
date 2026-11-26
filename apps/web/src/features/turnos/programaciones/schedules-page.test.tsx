@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
-import { SchedulePreviewTable, WeekdaySelector } from './schedule-form-sheet';
+import { SchedulePreviewTable, WeekdaySelector } from './schedule-form-dialog';
 import { ScheduleResult, SchedulesPage } from './schedules-page';
 
 jest.mock('@/lib/api-client', () => ({
@@ -160,7 +160,7 @@ it('filtra por vencer desde el resumen y guarda el filtro en la URL', async () =
   });
 });
 
-it('abre el panel, previsualiza, invalida la vista al cambiar datos y confirma', async () => {
+it('abre el modal, previsualiza, invalida la vista al cambiar datos y confirma', async () => {
   jest.mocked(apiPost).mockResolvedValue({
     ...preview,
     shifts: preview.shifts.map((shift) => ({ ...shift, conflicts: [] })),

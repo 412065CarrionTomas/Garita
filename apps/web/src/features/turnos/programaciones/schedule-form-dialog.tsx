@@ -17,13 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { loadAvailableGuards } from '../../personal/available-guards';
 import { WEEKDAYS, WEEK_ORDER, crossesMidnight, dateTime, shortDate } from './schedule-format';
@@ -61,7 +55,7 @@ export function WeekdaySelector({
         {WEEK_ORDER.map((day) => (
           <Label
             key={day}
-            className="flex min-h-11 cursor-pointer flex-col items-center justify-center gap-1 rounded-md border-[1.5px] border-input px-1 py-1.5 text-sm font-semibold has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary has-[[data-state=checked]]:text-primary-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2"
+            className="relative flex min-h-11 cursor-pointer items-center justify-center rounded-md border-[1.5px] border-input px-1 py-1.5 text-sm font-semibold has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary has-[[data-state=checked]]:text-primary-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2"
           >
             <Checkbox
               aria-label={WEEKDAYS[day]?.long}
@@ -94,7 +88,7 @@ export function SchedulePreviewTable({
   const conflicts = preview.shifts.filter((shift) => shift.conflicts.length);
   const tz = preview.timezone;
   return (
-    <section aria-label="Vista previa" className="space-y-3 border-t-[1.5px] border-input pt-4">
+    <section aria-label="Vista previa" className="space-y-3">
       <h3 className="text-base font-semibold">Vista previa</h3>
       <p role="status" className="text-base">
         <b className="tabular-nums">{preview.shifts.length - conflicts.length}</b> turnos a generar
@@ -163,8 +157,11 @@ export function SchedulePreviewTable({
   );
 }
 
-/** Alta y modificación en un panel lateral: la tabla queda a la vista para comparar. */
-export function ScheduleFormSheet({
+/**
+ * Alta y modificación en un modal grande, como el de predios y puntos: los datos a la izquierda y
+ * la vista previa a la derecha, para revisar los turnos sin perder el formulario de vista.
+ */
+export function ScheduleFormDialog({
   open,
   editing,
   onClose,
@@ -176,13 +173,16 @@ export function ScheduleFormSheet({
   onSaved: (result: ScheduleOperation) => void;
 }) {
   return (
-    <Sheet
+    <Dialog
       open={open}
       onOpenChange={(value) => {
         if (!value) onClose();
       }}
     >
-      <SheetContent className="w-full gap-0 p-0 data-[side=right]:sm:max-w-xl">
+      <DialogContent
+        aria-describedby="schedule-form-description"
+        className="w-[calc(100%-2rem)] max-w-6xl"
+      >
         {open && (
           <ScheduleForm
             key={editing?.id ?? 'new'}
@@ -191,8 +191,8 @@ export function ScheduleFormSheet({
             onSaved={onSaved}
           />
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -285,7 +285,7 @@ function ScheduleForm({
 
   return (
     <form
-      className="flex h-full min-h-0 flex-col"
+      className="space-y-5"
       onSubmit={(event) => {
         event.preventDefault();
         setError('');
@@ -300,182 +300,197 @@ function ScheduleForm({
         preview.mutate(parsed.data);
       }}
     >
-      <SheetHeader className="border-b-[1.5px] border-input p-5 pr-12">
-        <SheetTitle className="text-2xl">
+      <div className="space-y-1">
+        <DialogTitle className="text-lg font-semibold">
           {editing ? 'Modificar programación' : 'Nueva programación'}
-        </SheetTitle>
-        <SheetDescription className="text-base">
+        </DialogTitle>
+        <DialogDescription id="schedule-form-description">
           Una guardia semanal en el horario de la empresa. Feriados y esquemas rotativos se cargan
           como turnos sueltos.
-        </SheetDescription>
-      </SheetHeader>
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 text-base">
-        {(sites.isError || guards.isError || rounds.isError) && (
-          <Alert>
-            No se pudieron cargar las opciones del formulario.{' '}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                void sites.refetch();
-                void guards.refetch();
-                if (form.siteId) void rounds.refetch();
-              }}
-            >
-              Reintentar opciones
-            </Button>
-          </Alert>
-        )}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="schedule-site">Predio</Label>
-            <NativeSelect
-              id="schedule-site"
-              className="w-full"
-              required
-              value={form.siteId}
-              onChange={(event) => {
-                set({ siteId: event.target.value, roundIds: [] });
-              }}
-            >
-              <NativeSelectOption value="">Elegí un predio</NativeSelectOption>
-              {sites.data?.map((site) => (
-                <NativeSelectOption key={site.id} value={site.id}>
-                  {site.name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="schedule-guard">Vigilador</Label>
-            <NativeSelect
-              id="schedule-guard"
-              className="w-full"
-              required
-              value={form.guardId}
-              onChange={(event) => {
-                set({ guardId: event.target.value });
-              }}
-            >
-              <NativeSelectOption value="">Elegí un vigilador</NativeSelectOption>
-              {guards.data?.items.map((guard) => (
-                <NativeSelectOption key={guard.id} value={guard.id}>
-                  {guard.firstName} {guard.lastName}
-                  {guard.status === 'invitation_pending' ? ' (invitación pendiente)' : ''}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-        </div>
-        <WeekdaySelector
-          value={form.weekdays}
-          onChange={(weekdays) => {
-            set({ weekdays });
-          }}
-        />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="schedule-startTime">Hora de inicio</Label>
-            <Input
-              id="schedule-startTime"
-              type="time"
-              required
-              value={form.startTime}
-              onChange={(event) => {
-                set({ startTime: event.target.value });
-              }}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="schedule-endTime">Hora de fin</Label>
-            <Input
-              id="schedule-endTime"
-              type="time"
-              required
-              value={form.endTime}
-              aria-describedby="schedule-time-hint"
-              onChange={(event) => {
-                set({ endTime: event.target.value });
-              }}
-            />
-          </div>
-          <p id="schedule-time-hint" className="text-sm text-muted-foreground sm:col-span-2">
-            {crossesMidnight(form.startTime, form.endTime)
-              ? 'Termina al día siguiente.'
-              : 'Termina el mismo día.'}
-          </p>
-          <div className="space-y-1.5">
-            <Label htmlFor="schedule-startDate">Desde</Label>
-            <Input
-              id="schedule-startDate"
-              type="date"
-              required
-              value={form.startDate}
-              onChange={(event) => {
-                set({ startDate: event.target.value });
-              }}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="schedule-endDate">Hasta (incluido)</Label>
-            <Input
-              id="schedule-endDate"
-              type="date"
-              required
-              value={form.endDate}
-              aria-describedby="schedule-period-hint"
-              onChange={(event) => {
-                set({ endDate: event.target.value });
-              }}
-            />
-          </div>
-          <p id="schedule-period-hint" className="text-sm text-muted-foreground sm:col-span-2">
-            Hasta tres meses por período; después se puede extender.
-          </p>
-        </div>
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-semibold">Rondas (al menos una)</legend>
-          {!form.siteId ? (
-            <p className="text-sm text-muted-foreground">Elegí un predio para ver sus rondas.</p>
-          ) : rounds.isSuccess && activeRounds.length === 0 ? (
-            <Alert role="status" className="border-warning bg-warning-soft text-warning">
-              Este predio no tiene rondas activas.
+        </DialogDescription>
+      </div>
+      <div className="grid gap-6 text-base lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-5">
+          {(sites.isError || guards.isError || rounds.isError) && (
+            <Alert>
+              No se pudieron cargar las opciones del formulario.{' '}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  void sites.refetch();
+                  void guards.refetch();
+                  if (form.siteId) void rounds.refetch();
+                }}
+              >
+                Reintentar opciones
+              </Button>
             </Alert>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {activeRounds.map((round) => (
-                <Label key={round.id} className="min-h-10 gap-2 text-base font-normal">
-                  <Checkbox
-                    name="roundIds"
-                    aria-label={round.name}
-                    checked={form.roundIds.includes(round.id)}
-                    onCheckedChange={(checked) => {
-                      set({
-                        roundIds: checked
-                          ? [...form.roundIds, round.id]
-                          : form.roundIds.filter((id) => id !== round.id),
-                      });
-                    }}
-                  />
-                  {round.name}
-                </Label>
-              ))}
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-site">Predio</Label>
+              <NativeSelect
+                id="schedule-site"
+                className="w-full"
+                required
+                value={form.siteId}
+                onChange={(event) => {
+                  set({ siteId: event.target.value, roundIds: [] });
+                }}
+              >
+                <NativeSelectOption value="">Elegí un predio</NativeSelectOption>
+                {sites.data?.map((site) => (
+                  <NativeSelectOption key={site.id} value={site.id}>
+                    {site.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-guard">Vigilador</Label>
+              <NativeSelect
+                id="schedule-guard"
+                className="w-full"
+                required
+                value={form.guardId}
+                onChange={(event) => {
+                  set({ guardId: event.target.value });
+                }}
+              >
+                <NativeSelectOption value="">Elegí un vigilador</NativeSelectOption>
+                {guards.data?.items.map((guard) => (
+                  <NativeSelectOption key={guard.id} value={guard.id}>
+                    {guard.firstName} {guard.lastName}
+                    {guard.status === 'invitation_pending' ? ' (invitación pendiente)' : ''}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+          </div>
+          <WeekdaySelector
+            value={form.weekdays}
+            onChange={(weekdays) => {
+              set({ weekdays });
+            }}
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-startTime">Hora de inicio</Label>
+              <Input
+                id="schedule-startTime"
+                type="time"
+                required
+                value={form.startTime}
+                onChange={(event) => {
+                  set({ startTime: event.target.value });
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-endTime">Hora de fin</Label>
+              <Input
+                id="schedule-endTime"
+                type="time"
+                required
+                value={form.endTime}
+                aria-describedby="schedule-time-hint"
+                onChange={(event) => {
+                  set({ endTime: event.target.value });
+                }}
+              />
+            </div>
+            <p id="schedule-time-hint" className="text-sm text-muted-foreground sm:col-span-2">
+              {crossesMidnight(form.startTime, form.endTime)
+                ? 'Termina al día siguiente.'
+                : 'Termina el mismo día.'}
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-startDate">Desde</Label>
+              <Input
+                id="schedule-startDate"
+                type="date"
+                required
+                value={form.startDate}
+                onChange={(event) => {
+                  set({ startDate: event.target.value });
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="schedule-endDate">Hasta (incluido)</Label>
+              <Input
+                id="schedule-endDate"
+                type="date"
+                required
+                value={form.endDate}
+                aria-describedby="schedule-period-hint"
+                onChange={(event) => {
+                  set({ endDate: event.target.value });
+                }}
+              />
+            </div>
+            <p id="schedule-period-hint" className="text-sm text-muted-foreground sm:col-span-2">
+              Hasta tres meses por período; después se puede extender.
+            </p>
+          </div>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-semibold">Rondas (al menos una)</legend>
+            {!form.siteId ? (
+              <p className="text-sm text-muted-foreground">Elegí un predio para ver sus rondas.</p>
+            ) : rounds.isSuccess && activeRounds.length === 0 ? (
+              <Alert role="status" className="border-warning bg-warning-soft text-warning">
+                Este predio no tiene rondas activas.
+              </Alert>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {activeRounds.map((round) => (
+                  <Label key={round.id} className="min-h-10 gap-2 text-base font-normal">
+                    <Checkbox
+                      name="roundIds"
+                      aria-label={round.name}
+                      checked={form.roundIds.includes(round.id)}
+                      onCheckedChange={(checked) => {
+                        set({
+                          roundIds: checked
+                            ? [...form.roundIds, round.id]
+                            : form.roundIds.filter((id) => id !== round.id),
+                        });
+                      }}
+                    />
+                    {round.name}
+                  </Label>
+                ))}
+              </div>
+            )}
+          </fieldset>
+          {error && (
+            <div
+              ref={errorRef}
+              role="alert"
+              tabIndex={-1}
+              className="rounded-md border border-danger bg-danger-soft p-4 text-danger"
+            >
+              {error}
             </div>
           )}
-        </fieldset>
-        {error && (
-          <div
-            ref={errorRef}
-            role="alert"
-            tabIndex={-1}
-            className="rounded-md border border-danger bg-danger-soft p-4 text-danger"
-          >
-            {error}
-          </div>
-        )}
-        {current && <SchedulePreviewTable preview={current} roundNames={roundNames} />}
+        </div>
+        {/* La vista previa ocupa la columna derecha; hasta pedirla, explica qué va a mostrar. */}
+        <div className="min-w-0">
+          {current ? (
+            <SchedulePreviewTable preview={current} roundNames={roundNames} />
+          ) : (
+            <div className="flex h-full min-h-48 flex-col justify-center gap-1 rounded-md border-[1.5px] border-dashed border-input p-5 text-muted-foreground">
+              <p className="text-base font-semibold text-foreground">Vista previa</p>
+              <p>
+                Completá los datos y tocá Previsualizar: vas a ver cuántos turnos se generan, si
+                alguno choca con otro del vigilador y qué ventanas quedan sin cubrir.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
-      <footer className="flex flex-wrap justify-end gap-2 border-t-[1.5px] border-input p-4">
+      <footer className="flex flex-wrap justify-end gap-2 border-t-[1.5px] border-input pt-4">
         <Button type="button" variant="outline" onClick={onClose}>
           Cerrar
         </Button>

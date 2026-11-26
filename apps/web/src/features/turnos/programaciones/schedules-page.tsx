@@ -32,7 +32,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { loadAvailableGuards } from '../../personal/available-guards';
-import { ScheduleFormSheet } from './schedule-form-sheet';
+import { ScheduleFormDialog } from './schedule-form-dialog';
 import { WEEKDAYS, WEEK_ORDER, crossesMidnight, periodLabel, shortDate } from './schedule-format';
 
 const sitesSchema = z.array(z.looseObject({ id: z.string(), name: z.string() }));
@@ -152,7 +152,7 @@ export function SchedulesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
-  const [sheet, setSheet] = useState<{ editing: Schedule | null } | null>(null);
+  const [formTarget, setFormTarget] = useState<{ editing: Schedule | null } | null>(null);
   const [action, setAction] = useState<{ schedule: Schedule; kind: 'extend' | 'cancel' } | null>(
     null,
   );
@@ -212,7 +212,7 @@ export function SchedulesPage() {
           <Button
             onClick={() => {
               setResult(null);
-              setSheet({ editing: null });
+              setFormTarget({ editing: null });
             }}
           >
             Nueva programación
@@ -436,7 +436,7 @@ export function SchedulesPage() {
                         <DropdownMenuItem
                           onSelect={() => {
                             setResult(null);
-                            setSheet({ editing: row });
+                            setFormTarget({ editing: row });
                           }}
                         >
                           Modificar
@@ -468,14 +468,14 @@ export function SchedulesPage() {
           />
         </div>
       )}
-      <ScheduleFormSheet
-        open={sheet !== null}
-        editing={sheet?.editing ?? null}
+      <ScheduleFormDialog
+        open={formTarget !== null}
+        editing={formTarget?.editing ?? null}
         onClose={() => {
-          setSheet(null);
+          setFormTarget(null);
         }}
         onSaved={(operation) => {
-          setSheet(null);
+          setFormTarget(null);
           void refresh(operation);
         }}
       />
