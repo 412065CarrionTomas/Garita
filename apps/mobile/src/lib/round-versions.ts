@@ -96,15 +96,20 @@ export async function getRoundVersions(
     const batch = load(owner, toLoad);
     for (const id of toLoad) {
       // Si la red falla, lo que salió del disco igual sirve.
-      const pending = batch.then(
-        () => memory.get(id),
-        (cause: unknown) => {
-          if (memory.has(id)) return memory.get(id);
-          throw cause;
-        },
-      );
+      // Si cambió el usuario en el medio, no se devuelve lo que haya cargado el otro.
+      const mine = () => (uid() === owner ? memory.get(id) : undefined);
+      const pending = batch.then(mine, (cause: unknown) => {
+        const own = mine();
+        if (own) return own;
+        throw cause;
+      });
       inFlight.set(id, pending);
-      void pending.finally(() => inFlight.delete(id)).catch(() => undefined);
+      // Solo borra su propia entrada: otro usuario pudo haber pedido el mismo id entretanto.
+      void pending
+        .finally(() => {
+          if (inFlight.get(id) === pending) inFlight.delete(id);
+        })
+        .catch(() => undefined);
     }
   }
   const results = await Promise.allSettled(
