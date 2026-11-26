@@ -85,7 +85,7 @@ function useAttentionRows(): AttentionRow[] {
           ? `El más antiguo desde ${clock(p.incidents.oldestAt)}`
           : 'Ninguno pendiente'
         : unknown(pending.isError),
-      to: '/incidentes/cola',
+      to: '/incidentes?vista=por-clasificar',
       action: 'Clasificar',
     },
     {

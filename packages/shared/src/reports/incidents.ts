@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { INCIDENT_TYPES, INCIDENT_TYPE_LABELS } from '../incidents';
+import {
+  INCIDENT_SEVERITIES,
+  INCIDENT_SEVERITY_LABELS,
+  INCIDENT_TYPES,
+  INCIDENT_TYPE_LABELS,
+  type IncidentFollowUpStatus,
+  type IncidentSeverity,
+} from '../incidents';
 import { reportQuerySchema } from './schemas';
 
 export const incidentReportQuerySchema = z
@@ -18,6 +25,10 @@ export const incidentReportQuerySchema = z
 export const incidentReportDetailQuerySchema = incidentReportQuerySchema.safeExtend({
   tipo: z.enum(INCIDENT_TYPES).optional(),
   franja: z.coerce.number().int().min(0).max(22).multipleOf(2).optional(),
+  /** Día de la semana en la zona de la empresa: 0 = lunes … 6 = domingo. */
+  dia: z.coerce.number().int().min(0).max(6).optional(),
+  gravedad: z.enum(INCIDENT_SEVERITIES).optional(),
+  seguimiento: z.literal('open').optional(),
   clasificacion: z.enum(['pending', 'client_visible', 'internal']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
@@ -42,6 +53,29 @@ export const incidentReportResponseSchema = z.object({
   byTimeBand: z.array(group),
   bySite: z.array(group),
   byClassification: z.array(group),
+  bySeverity: z.array(group),
+  /** 7 días (lunes primero) × 12 franjas de 2 h. */
+  byWeekdayTimeBand: z.array(z.array(count).length(12)).length(7),
+  highSeverity: count,
+  /** Total real; `openFollowUps` se acota a 50 filas. */
+  openFollowUpsTotal: count,
+  previous: z.object({
+    desde: z.iso.date(),
+    hasta: z.iso.date(),
+    total: count,
+    highSeverity: count,
+  }),
+  openFollowUps: z.array(
+    z.object({
+      id: z.string(),
+      type: z.enum(INCIDENT_TYPES),
+      site: named,
+      severity: z.enum(INCIDENT_SEVERITIES).nullable(),
+      openedAt: z.iso.datetime(),
+      ageMs: z.number().nonnegative(),
+      lastAction: z.string().nullable(),
+    }),
+  ),
   pending: z.object({
     count,
     oldestAt: z.iso.datetime().nullable(),
@@ -62,7 +96,13 @@ const times = z.object({
   classification: responseTimeSummarySchema,
 });
 const timedGroup = named.extend({ times });
-const responseBase = z.object({ ...period, totals: times, bySite: z.array(timedGroup) });
+const responseBase = z.object({
+  ...period,
+  totals: times,
+  /** Mismos totales en el período anterior de igual duración. */
+  previousTotals: times,
+  bySite: z.array(timedGroup),
+});
 export const responseTimesReportSchema = z.union([
   responseBase.extend({ bySupervisor: z.array(timedGroup) }).strict(),
   responseBase.extend({ own: timedGroup }).strict(),
@@ -73,6 +113,10 @@ export const panicReportResponseSchema = z.object({
   byOutcome: z.array(group),
   byChannel: z.array(group),
   falseAlarmProportion: z.number().min(0).max(1).nullable(),
+  previous: z.object({
+    total: count,
+    falseAlarmProportion: z.number().min(0).max(1).nullable(),
+  }),
 });
 const detailBase = { total: count, page: count, pageSize: count };
 export const incidentReportDetailResponseSchema = z.object({
@@ -83,6 +127,8 @@ export const incidentReportDetailResponseSchema = z.object({
       site: named,
       type: z.enum(INCIDENT_TYPES),
       classificationStatus: z.enum(['pending', 'client_visible', 'internal']),
+      severity: z.enum(INCIDENT_SEVERITIES).nullable(),
+      followUpStatus: z.enum(['none', 'open', 'closed']),
       occurredAt: z.iso.datetime(),
     }),
   ),
@@ -109,22 +155,46 @@ type Instant = string | Date;
 interface IncidentSource {
   type: (typeof INCIDENT_TYPES)[number];
   classificationStatus: 'pending' | 'client_visible' | 'internal';
+  severity?: IncidentSeverity | null;
+  followUpStatus?: IncidentFollowUpStatus;
   site: Named;
   trustedAt: Instant | null;
   occurredAtDevice: Instant;
   receivedAt: Instant;
 }
 
+// Crear un Intl.DateTimeFormat es caro: uno por zona y uso, reutilizado en todo el reporte.
+const formatters = new Map<string, Intl.DateTimeFormat>();
+function formatter(kind: 'hour' | 'weekday', timeZone: string) {
+  const key = `${kind}|${timeZone}`;
+  let format = formatters.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(
+      'en-GB',
+      kind === 'hour'
+        ? { timeZone, hour: '2-digit', hourCycle: 'h23' }
+        : { timeZone, weekday: 'short' },
+    );
+    formatters.set(key, format);
+  }
+  return format;
+}
+
 export function incidentTimeBand(at: Instant, timezone: string): number {
-  const hour = Number(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone: timezone,
-      hour: '2-digit',
-      hourCycle: 'h23',
-    }).format(new Date(at)),
-  );
+  const hour = Number(formatter('hour', timezone).format(new Date(at)));
   return Math.floor(hour / 2) * 2;
 }
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** Día de la semana en la zona dada: 0 = lunes … 6 = domingo. */
+export function incidentWeekday(at: Instant, timezone: string): number {
+  return WEEKDAYS.indexOf(formatter('weekday', timezone).format(new Date(at)));
+}
+/** Día de la semana de una fecha local `AAAA-MM-DD`: 0 = lunes … 6 = domingo. */
+export function localDateWeekday(date: string): number {
+  return (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7;
+}
+export const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] as const;
+
 export function computeIncidentReport(
   rows: readonly IncidentSource[],
   timezone: string,
@@ -141,14 +211,26 @@ export function computeIncidentReport(
     { id: 'internal', name: 'Internos', value: 0 },
     { id: 'pending', name: 'Pendientes de clasificar', value: 0 },
   ];
+  const bySeverity = [...INCIDENT_SEVERITIES].reverse().map((id) => ({
+    id,
+    name: INCIDENT_SEVERITY_LABELS[id],
+    value: 0,
+  }));
+  const byWeekdayTimeBand = Array.from({ length: 7 }, () => Array<number>(12).fill(0));
   const sites = new Map<string, Named & { value: number }>();
   let oldest: number | null = null;
   let pending = 0;
   for (const row of rows) {
+    const at = row.trustedAt ?? row.occurredAtDevice;
+    const weekday = byWeekdayTimeBand[incidentWeekday(at, timezone)];
+    const slot = incidentTimeBand(at, timezone) / 2;
+    if (weekday) weekday[slot] = (weekday[slot] ?? 0) + 1;
+    const timeBand = byTimeBand[slot];
+    if (timeBand) timeBand.value++;
+    const severity = bySeverity.find((group) => group.id === row.severity);
+    if (severity) severity.value++;
     const type = byType.find((group) => group.id === row.type);
     if (type) type.value++;
-    const band = byTimeBand[incidentTimeBand(row.trustedAt ?? row.occurredAtDevice, timezone) / 2];
-    if (band) band.value++;
     const classification = byClassification.find((group) => group.id === row.classificationStatus);
     if (classification) classification.value++;
     const site = sites.get(row.site.id) ?? { ...row.site, value: 0 };
@@ -163,8 +245,11 @@ export function computeIncidentReport(
     total: rows.length,
     byType,
     byTimeBand,
-    bySite: [...sites.values()],
+    bySite: [...sites.values()].sort((a, b) => b.value - a.value),
     byClassification,
+    bySeverity,
+    byWeekdayTimeBand,
+    highSeverity: bySeverity.find((group) => group.id === 'high')?.value ?? 0,
     pending: {
       count: pending,
       oldestAt: oldest === null ? null : new Date(oldest).toISOString(),

@@ -21,8 +21,8 @@ import { SitesPage } from '../predios/sites-page';
 import { ShiftsPanel } from '../turnos/shifts-panel';
 import { SchedulesPage } from '../turnos/programaciones/schedules-page';
 import {
-  IncidentsListPage,
-  IncidentsQueuePage,
+  IncidentsPage,
+  IncidentsQueueRedirect,
   IncidentDetailPage,
   useIncidentPendingCount,
 } from '../incidentes/incidents-page';
@@ -92,13 +92,12 @@ function staffSections(admin: boolean, counts: PendingCounts): NavSection[] {
       ],
     },
     {
-      // Todo lo de incidentes vive en un solo lugar: el listado, la cola y su reporte.
+      // Bandeja y archivo comparten pantalla; el reporte analiza el período.
       title: 'Incidentes',
       children: [
-        { path: '/incidentes', title: 'Listado' },
         {
-          path: '/incidentes/cola',
-          title: 'Por clasificar',
+          path: '/incidentes',
+          title: 'Bandeja y archivo',
           count: counts.incidents,
           tone: 'warning',
         },
@@ -390,7 +389,7 @@ export function AppRoutes() {
           path="/incidentes/cola"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <IncidentsQueuePage />
+              <IncidentsQueueRedirect />
             </Protected>
           }
         />
@@ -398,7 +397,7 @@ export function AppRoutes() {
           path="/incidentes"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <IncidentsListPage />
+              <IncidentsPage />
             </Protected>
           }
         />

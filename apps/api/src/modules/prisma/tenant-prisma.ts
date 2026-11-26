@@ -26,6 +26,7 @@ export const COMPANY_ID_MODELS = [
   'SmsInbound',
   'PanicSmsDelivery',
   'IncidentClassification',
+  'IncidentFollowUpAction',
   'ShiftCredential',
   'SyncBatch',
   'ConnectionNotice',
@@ -142,6 +143,8 @@ export function addSiteAssignmentFilter(
   if (model === 'PanicSmsDelivery')
     return { ...args, where: { AND: [where, { alert: { site: assignment } }] } };
   if (model === 'IncidentClassification')
+    return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
+  if (model === 'IncidentFollowUpAction')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
   if (model === 'IncidentPhotoAuthorization')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
