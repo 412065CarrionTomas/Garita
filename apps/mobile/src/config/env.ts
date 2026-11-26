@@ -11,6 +11,8 @@ const envSchema = z.object({
   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: z.string().min(1),
   EXPO_PUBLIC_FIREBASE_PROJECT_ID: z.string().min(1),
   EXPO_PUBLIC_FIREBASE_APP_ID: z.string().min(1),
+  /** Estilo del mapa, el mismo que el panel web (OpenFreeMap, sin clave). */
+  EXPO_PUBLIC_MAP_STYLE_URL: z.url().default('https://tiles.openfreemap.org/styles/positron'),
 });
 
 const result = envSchema.safeParse({
@@ -19,6 +21,7 @@ const result = envSchema.safeParse({
   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
   EXPO_PUBLIC_FIREBASE_PROJECT_ID: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
   EXPO_PUBLIC_FIREBASE_APP_ID: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  EXPO_PUBLIC_MAP_STYLE_URL: process.env.EXPO_PUBLIC_MAP_STYLE_URL,
 });
 
 if (!result.success) {

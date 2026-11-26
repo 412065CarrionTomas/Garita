@@ -1,0 +1,59 @@
+import type { GuardRoundVersion } from '@garita/shared';
+import { boundsOf, routeGeoJson } from './route-geojson';
+
+const version: GuardRoundVersion = {
+  id: 'v1',
+  roundId: 'r1',
+  name: 'Perimetral',
+  frequencyMinutes: 60,
+  windowStartLocal: '22:00',
+  windowEndLocal: '06:00',
+  checkpoints: [
+    { id: 'a', name: 'Portón', latitude: -31.4, longitude: -64.2, isIndoor: false },
+    { id: 'b', name: 'Galpón', latitude: -31.5, longitude: -64.1, isIndoor: true },
+  ],
+  route: null,
+};
+
+it('sin recorrido guardado une los puntos en orden y los numera con su estado', () => {
+  const { line, points, bounds } = routeGeoJson(version, (id) => (id === 'a' ? 'done' : 'next'));
+  expect(line.features).toHaveLength(1);
+  expect(line.features[0]?.geometry.coordinates).toEqual([
+    [-64.2, -31.4],
+    [-64.1, -31.5],
+  ]);
+  expect(points.features.map((f) => f.properties)).toEqual([
+    { label: '1', state: 'done' },
+    { label: '2', state: 'next' },
+  ]);
+  expect(bounds).toEqual([-64.2, -31.5, -64.1, -31.4]);
+});
+
+it('con recorrido dibuja cada sección por calles y encuadra también sus desvíos', () => {
+  const geometry: [number, number][] = [
+    [-64.2, -31.4],
+    [-64.3, -31.45],
+    [-64.1, -31.5],
+  ];
+  const { line, bounds } = routeGeoJson({
+    ...version,
+    route: {
+      v: 1,
+      closed: false,
+      legs: [
+        {
+          from: [-64.2, -31.4],
+          to: [-64.1, -31.5],
+          waypoints: [],
+          sections: [{ mode: 'streets', via: [], geometry, fallback: false }],
+        },
+      ],
+    },
+  });
+  expect(line.features[0]?.geometry.coordinates).toEqual(geometry);
+  expect(bounds).toEqual([-64.3, -31.5, -64.1, -31.4]);
+});
+
+it('sin coordenadas no hay encuadre', () => {
+  expect(boundsOf([])).toBeNull();
+});

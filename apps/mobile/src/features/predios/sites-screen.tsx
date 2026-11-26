@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { FlatList, Linking, RefreshControl, StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { space } from '@garita/tokens';
 import { SUSPENSION_MESSAGES, guardSitesSchema, type GuardSite } from '@garita/shared';
 import { Banner, Button, Card, ListItem, Loading, Text, useTheme } from '@/ui';
@@ -79,6 +80,7 @@ export function SitesScreen() {
 }
 
 function SiteDetail({ site, onClose }: { site: GuardSite; onClose: () => void }) {
+  const router = useRouter();
   return (
     <Card style={styles.detail}>
       <Text variant="heading">{site.name}</Text>
@@ -89,13 +91,23 @@ function SiteDetail({ site, onClose }: { site: GuardSite; onClose: () => void })
         onPress={() => void Linking.openURL(directionsUrl(site))}
       />
       <Field label="Acceso" value={site.accessInstructions ?? 'Sin indicaciones de acceso.'} />
-      <Field
-        label="Rondas"
-        value={
-          site.rounds.map((r) => `${r.name} (${r.checkpoints} puntos)`).join('\n') ||
-          'Sin rondas activas.'
-        }
-      />
+      <Text variant="label" color="mutedForeground">
+        Rondas
+      </Text>
+      {site.rounds.length === 0 && <Text>Sin rondas activas.</Text>}
+      {site.rounds.map(({ name, checkpoints, versionId }) =>
+        versionId ? (
+          <Button
+            key={versionId}
+            variant="outline"
+            label={`${name} (${checkpoints} puntos)`}
+            accessibilityHint="Abre el recorrido en el mapa"
+            onPress={() => router.push({ pathname: '/ronda/[versionId]', params: { versionId } })}
+          />
+        ) : (
+          <Text key={name}>{`${name} (${checkpoints} puntos)`}</Text>
+        ),
+      )}
       <Field
         label="Supervisión"
         value={site.supervisors.join(', ') || 'Sin supervisor asignado.'}
