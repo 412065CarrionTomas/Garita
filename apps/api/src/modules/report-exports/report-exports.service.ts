@@ -483,7 +483,10 @@ export class ReportExportsService {
         ]),
       },
       {
-        title: `Seguimiento abierto hoy (${String(report.openFollowUpsTotal)})`,
+        title:
+          report.openFollowUpsTotal > report.openFollowUps.length
+            ? `Seguimiento abierto hoy: los ${String(report.openFollowUps.length)} más prioritarios de ${String(report.openFollowUpsTotal)}`
+            : `Seguimiento abierto hoy (${String(report.openFollowUpsTotal)})`,
         columns: ['Predio', 'Tipo', 'Gravedad', 'Abierto desde', 'Última acción'],
         rows: report.openFollowUps.map((row) => [
           row.site.name,
