@@ -29,6 +29,9 @@ export const smsInboundQuerySchema = z
   .object({
     estado: smsInboundAuthResultSchema.optional(),
     buscar: z.string().trim().max(100).optional(),
+    orden: z.enum(['recibido', 'origen', 'estado']).default('recibido'),
+    // Sin elegir, lo más nuevo primero.
+    sentido: z.enum(['asc', 'desc']).default('desc'),
     pagina: pageNumberSchema,
     porPagina: pageSizeSchema,
   })

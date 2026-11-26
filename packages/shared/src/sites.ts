@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { speedProfileSchema } from './marcas/types';
-import { pageNumberSchema, pageSizeSchema } from './pagination';
+import { pageNumberSchema, pageSizeSchema, sortDirectionSchema } from './pagination';
 
 export const recordStatusSchema = z.enum(['active', 'inactive']);
 export const clientInputSchema = z.object({
@@ -19,7 +19,10 @@ export const clientListQuerySchema = z.object({
     recordStatusSchema.optional(),
   ),
   buscar: z.string().trim().max(100).optional(),
-  orden: z.enum(['nombre', 'recientes', 'predios']).default('nombre'),
+  orden: z
+    .enum(['nombre', 'recientes', 'contacto', 'telefono', 'predios', 'estado'])
+    .default('nombre'),
+  sentido: sortDirectionSchema,
   pagina: pageNumberSchema,
   porPagina: pageSizeSchema,
 });

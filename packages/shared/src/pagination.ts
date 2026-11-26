@@ -13,3 +13,6 @@ export const pageNumberSchema = z.coerce.number().int().min(1).max(100000).defau
 /** Hasta 8 palabras de búsqueda: cada una suma un filtro por campo a la consulta. */
 export const searchTerms = (buscar?: string) =>
   (buscar ?? '').split(/\s+/).filter(Boolean).slice(0, 8);
+
+/** Sentido del orden elegido en el encabezado de una columna. */
+export const sortDirectionSchema = z.enum(['asc', 'desc']).default('asc');
