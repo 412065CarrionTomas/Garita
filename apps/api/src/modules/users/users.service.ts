@@ -26,6 +26,13 @@ import type { WeeklyScheduleDerivationPort } from './weekly-schedule-derivation.
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 import { ACCOUNT_STATE_PORT, type AccountStatePort } from '../../common/ports/account-state.port';
 
+/** La invitación vigente: una reemplazada (p. ej. al desactivar) ya no cuenta como envío fallido. */
+const CURRENT_INVITATION = {
+  where: { replacedAt: null },
+  orderBy: { createdAt: 'desc' as const },
+  take: 1,
+};
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -85,34 +92,33 @@ export class UsersService {
           : [{ createdAt: 'desc' as const }, { id: 'asc' as const }];
     const count = (extra: object) =>
       this.prisma.tenantPrisma.user.count({ where: { ...base, ...extra } });
-    const [total, users, active, pending, invitationFailed, deactivated] = await Promise.all([
-      this.prisma.tenantPrisma.user.count({ where }),
+    const [users, active, pending, invitationFailed, deactivated] = await Promise.all([
       this.prisma.tenantPrisma.user.findMany({
         where,
         orderBy,
         skip: (query.pagina - 1) * query.porPagina,
         take: query.porPagina,
-        // Misma invitación que mira el filtro de envío fallido: las reemplazadas no cuentan.
-        include: {
-          invitations: { where: { replacedAt: null }, orderBy: { createdAt: 'desc' }, take: 1 },
-        },
+        include: { invitations: CURRENT_INVITATION },
       }),
       count({ status: 'active' }),
       count({ status: 'invitation_pending' }),
       count(failed),
       count({ status: 'deactivated' }),
     ]);
+    const resumen = {
+      active,
+      invitation_pending: pending,
+      invitation_failed: invitationFailed,
+      deactivated,
+    };
+    // Los de envío fallido ya cuentan como invitación pendiente.
+    const total = query.estado ? resumen[query.estado] : active + pending + deactivated;
     return {
       items: users.map((user) => this.present(user)),
       pagina: query.pagina,
       total,
       paginas: Math.ceil(total / query.porPagina),
-      resumen: {
-        active,
-        invitation_pending: pending,
-        invitation_failed: invitationFailed,
-        deactivated,
-      },
+      resumen,
     };
   }
 
@@ -120,7 +126,7 @@ export class UsersService {
     await this.getUser(id);
     const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({
       where: { id },
-      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      include: { invitations: CURRENT_INVITATION },
     });
     return this.present(user);
   }
@@ -130,7 +136,7 @@ export class UsersService {
     const users = await this.prisma.tenantPrisma.user.findMany({
       where: { clientId, role: 'client' },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      include: { invitations: CURRENT_INVITATION },
     });
     return users.map((user) => this.present(user));
   }
@@ -207,7 +213,7 @@ export class UsersService {
               },
             },
           },
-          include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+          include: { invitations: CURRENT_INVITATION },
         });
       })
       .catch(async (error: unknown) => {

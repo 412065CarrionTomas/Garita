@@ -214,7 +214,7 @@ export class SmsInboundService {
             // Incluye las reemplazadas (active: false) para no atribuirle el SMS al relevo.
             assignments: {
               select: { guardId: true, createdAt: true },
-              orderBy: { createdAt: 'asc' },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             },
           },
         })
