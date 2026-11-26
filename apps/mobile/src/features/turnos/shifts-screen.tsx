@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { space } from '@garita/tokens';
-import { SUSPENSION_MESSAGES, type GuardShift } from '@garita/shared';
-import { Badge, Banner, Button, ListItem, Loading, Segmented, Text, useTheme } from '@/ui';
+import { SUSPENSION_MESSAGES } from '@garita/shared';
+import { Banner, Button, Loading, Segmented, Text, useTheme } from '@/ui';
 import { cachedNotice } from '@/lib/cached-get';
 import { RangeCalendar } from './range-calendar';
-import { isoDay, monthRange, shiftStamp, splitByToday, totals, type DayRange } from './shift-range';
+import { isoDay, monthRange, splitByToday, totals, type DayRange } from './shift-range';
+import { formatDate, ShiftRow } from './shift-row';
 import { useGuardShifts } from './use-guard-shifts';
 
 type Preset = 'month' | 'next' | 'last';
@@ -139,58 +140,7 @@ export function ShiftsScreen() {
   );
 }
 
-function ShiftRow({ shift, onOpen }: { shift: GuardShift; onOpen: (id: string) => void }) {
-  const stamp = shiftStamp(shift);
-  const s = shift.summary;
-  const opens = shift.status === 'scheduled' || shift.status === 'in_progress';
-  return (
-    <ListItem
-      title={`${formatDay(shift.serviceDate)} · ${formatTime(shift.startsAt, shift.site.timezone)}–${formatTime(shift.endsAt, shift.site.timezone)}`}
-      subtitle={shift.site.name}
-      detail={
-        s
-          ? `Ventanas ${s.windowsDone}/${s.windows} · Puntos ${s.recorded}/${s.expected}${s.incidents ? ` · ${s.incidents} ${s.incidents === 1 ? 'incidente' : 'incidentes'}` : ''}`
-          : `Rondas: ${shift.rounds.join(', ') || 'sin rondas'}`
-      }
-      trailing={
-        <Badge tone={stamp.tone} variant={opens ? 'dashed' : 'solid'} label={stamp.label} />
-      }
-      disabled={!opens}
-      accessibilityRole={opens ? 'button' : 'text'}
-      accessibilityHint={opens ? 'Abre el turno' : undefined}
-      onPress={opens ? () => onOpen(shift.id) : undefined}
-    />
-  );
-}
-
 const Gap = () => <View style={styles.gap} />;
-
-const dayFormat = new Intl.DateTimeFormat('es-AR', {
-  weekday: 'short',
-  day: 'numeric',
-  month: 'short',
-  timeZone: 'UTC',
-});
-const dateFormat = new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeZone: 'UTC' });
-const atNoon = (day: string) => new Date(`${day}T12:00:00Z`);
-const formatDay = (day: string) => dayFormat.format(atNoon(day));
-const formatDate = (day: string) => dateFormat.format(atNoon(day));
-
-// Un formateador por zona horaria: crearlos es caro en Hermes.
-const timeFormats = new Map<string, Intl.DateTimeFormat>();
-function formatTime(value: string, timeZone: string) {
-  let format = timeFormats.get(timeZone);
-  if (!format) {
-    format = new Intl.DateTimeFormat('es-AR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-      timeZone,
-    });
-    timeFormats.set(timeZone, format);
-  }
-  return format.format(new Date(value));
-}
 
 const styles = StyleSheet.create({
   header: { gap: space[4], paddingBottom: space[4] },
