@@ -18,14 +18,6 @@ type FollowUpKind = 'note' | 'close' | 'reopen';
 const OVERDUE_MS = 24 * 60 * 60_000;
 const RELATED_WINDOW_MS = 30 * 24 * 60 * 60_000;
 
-/** Clasificar solo abre seguimiento; cerrarlo o reabrirlo es una acción explícita. */
-export function followUpAfterDecision(
-  current: IncidentFollowUpStatus,
-  requiresFollowUp: boolean,
-): IncidentFollowUpStatus {
-  return requiresFollowUp && current === 'none' ? 'open' : current;
-}
-
 /** Estado requerido antes de cada acción y estado resultante. */
 export const FOLLOW_UP_TRANSITIONS: Record<
   FollowUpKind,
@@ -58,6 +50,9 @@ function personName(person: { firstName: string; lastName: string; status?: stri
 
 function sortOrder(orden?: string): Prisma.IncidentOrderByWithRelationInput[] {
   const [field, dir] = (orden ?? 'fecha:desc').split(':') as [string, 'asc' | 'desc'];
+  // shortcut: ordena por la hora del celular (la fecha mostrada es trustedAt ?? occurredAtDevice y
+  // suelen diferir en segundos); si hace falta exactitud, persistir la hora efectiva en una columna.
+  const byDate = { occurredAtDevice: dir };
   const primary: Prisma.IncidentOrderByWithRelationInput =
     field === 'tipo'
       ? { type: dir }
@@ -65,8 +60,10 @@ function sortOrder(orden?: string): Prisma.IncidentOrderByWithRelationInput[] {
         ? { site: { name: dir } }
         : field === 'gravedad'
           ? { severity: { sort: dir, nulls: 'last' } }
-          : { createdAt: dir };
-  return [primary, { createdAt: 'desc' }, { id: 'desc' }];
+          : byDate;
+  return field === 'fecha'
+    ? [byDate, { id: dir }]
+    : [primary, { occurredAtDevice: 'desc' }, { id: 'desc' }];
 }
 
 @Injectable()
@@ -154,12 +151,13 @@ export class IncidentClassificationService {
       and.push({
         OR: [{ trustedAt: dateRange }, { trustedAt: null, occurredAtDevice: dateRange }],
       });
-    if (filters.q)
+    // Cada palabra tiene que aparecer en la descripción, el nombre o el apellido ("Pedro Díaz").
+    for (const term of filters.q?.split(/\s+/).filter(Boolean) ?? [])
       and.push({
         OR: [
-          { description: { contains: filters.q, mode: 'insensitive' } },
-          { guard: { firstName: { contains: filters.q, mode: 'insensitive' } } },
-          { guard: { lastName: { contains: filters.q, mode: 'insensitive' } } },
+          { description: { contains: term, mode: 'insensitive' } },
+          { guard: { firstName: { contains: term, mode: 'insensitive' } } },
+          { guard: { lastName: { contains: term, mode: 'insensitive' } } },
         ],
       });
     const where: Prisma.IncidentWhereInput = {
@@ -223,16 +221,28 @@ export class IncidentClassificationService {
     });
     if (!incident) throw new NotFoundException('Incidente no encontrado');
     const occurredAt = incident.trustedAt ?? incident.occurredAtDevice;
-    const [lastRecord, related, timezone] = await Promise.all([
+    const at = (record: { trustedAt: Date | null; occurredAtDevice: Date }) =>
+      record.trustedAt ?? record.occurredAtDevice;
+    // Último punto válido antes del incidente, comparando la hora efectiva (confiable si la hay).
+    const lastValid = (
+      where: Prisma.CheckpointRecordWhereInput,
+      orderBy: Prisma.CheckpointRecordOrderByWithRelationInput,
+    ) =>
       this.prisma.tenantPrisma.checkpointRecord.findFirst({
-        where: { shiftId: incident.shiftId, occurredAtDevice: { lte: occurredAt } },
-        orderBy: { occurredAtDevice: 'desc' },
+        where: { shiftId: incident.shiftId, invalidatedAt: null, ...where },
+        orderBy,
         select: {
           occurredAtDevice: true,
           trustedAt: true,
           checkpoint: { select: { name: true } },
         },
-      }),
+      });
+    const [trustedRecord, deviceRecord, related, timezone] = await Promise.all([
+      lastValid({ trustedAt: { lte: occurredAt } }, { trustedAt: 'desc' }),
+      lastValid(
+        { trustedAt: null, occurredAtDevice: { lte: occurredAt } },
+        { occurredAtDevice: 'desc' },
+      ),
       this.prisma.tenantPrisma.incident.findMany({
         where: {
           ...this.activeAssignment(user),
@@ -246,6 +256,12 @@ export class IncidentClassificationService {
       }),
       this.companyTimezone(user),
     ]);
+    const lastRecord =
+      trustedRecord && deviceRecord
+        ? at(trustedRecord) >= at(deviceRecord)
+          ? trustedRecord
+          : deviceRecord
+        : (trustedRecord ?? deviceRecord);
     const timeline = [
       ...incident.classifications.map((decision) => ({
         kind: 'classification' as const,
@@ -280,7 +296,7 @@ export class IncidentClassificationService {
       site: incident.site,
       guardName: personName(incident.guard),
       location:
-        incident.latitude && incident.longitude
+        incident.latitude != null && incident.longitude != null
           ? {
               latitude: Number(incident.latitude),
               longitude: Number(incident.longitude),
@@ -299,10 +315,7 @@ export class IncidentClassificationService {
         endsAt: incident.shift.endsAt,
         roundName: incident.shift.rounds.map((r) => r.round.name).join(', ') || null,
         lastCheckpoint: lastRecord
-          ? {
-              name: lastRecord.checkpoint.name,
-              at: lastRecord.trustedAt ?? lastRecord.occurredAtDevice,
-            }
+          ? { name: lastRecord.checkpoint.name, at: at(lastRecord) }
           : null,
       },
       relatedIncidents: related.map((row) => ({
@@ -324,10 +337,9 @@ export class IncidentClassificationService {
   }
 
   async decide(id: string, user: AuthenticatedUser, input: Decision) {
-    const incident = await this.ownedIncident(id, user);
+    await this.ownedIncident(id, user);
     const decidedAt = this.clock.now();
-    const followUpStatus = followUpAfterDecision(incident.followUpStatus, input.requiresFollowUp);
-    await this.prisma.systemPrisma.$transaction(async (tx) => {
+    const followUpStatus = await this.prisma.systemPrisma.$transaction(async (tx) => {
       // Tenant ownership and active site assignment were checked above; this conditional update serializes concurrent decisions.
       const updated = await tx.incident.updateMany({
         where: {
@@ -335,11 +347,7 @@ export class IncidentClassificationService {
           companyId: user.companyId,
           classificationStatus: input.reason ? { not: 'pending' } : 'pending',
         },
-        data: {
-          classificationStatus: input.classification,
-          severity: input.severity,
-          followUpStatus,
-        },
+        data: { classificationStatus: input.classification, severity: input.severity },
       });
       if (updated.count !== 1)
         throw new ConflictException(
@@ -355,12 +363,29 @@ export class IncidentClassificationService {
           severity: input.severity,
           requiresFollowUp: input.requiresFollowUp,
           internalComment: input.internalComment,
-          clientNote: input.classification === 'client_visible' ? input.clientNote : null,
+          clientNote:
+            input.classification === 'client_visible'
+              ? input.clientNote?.trim()
+                ? input.clientNote
+                : null
+              : null,
           reason: input.reason,
           decidedById: user.userId,
           decidedAt,
         },
       });
+      // Solo abre un seguimiento que no existía, condicionado en la misma transacción: no pisa un
+      // cierre o una reapertura que llegue en paralelo.
+      if (input.requiresFollowUp)
+        await tx.incident.updateMany({
+          where: { id, companyId: user.companyId, followUpStatus: 'none' },
+          data: { followUpStatus: 'open' },
+        });
+      const current = await tx.incident.findUniqueOrThrow({
+        where: { id },
+        select: { followUpStatus: true },
+      });
+      return current.followUpStatus;
     });
     this.logger.log({
       event: 'incident.classified',

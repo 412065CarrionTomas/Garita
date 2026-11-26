@@ -1515,6 +1515,26 @@ describe('Aplicación (e2e)', () => {
       .set('Authorization', 'Bearer token-supervisor')
       .send({ text: 'Cerco reparado' })
       .expect(201);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/reabrir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Volvieron a forzar el cerco' })
+      .expect(201);
+    const followUpFiltered = await client
+      .get(`/api/v1/incidentes?gravedad=medium&seguimiento=open&orden=gravedad:desc&porPagina=100`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    expect(
+      z
+        .object({ items: z.array(z.looseObject({ id: z.string() })) })
+        .parse(followUpFiltered.body)
+        .items.some((row) => row.id === incident.id),
+    ).toBe(true);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/cerrar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Cerco reparado de nuevo' })
+      .expect(201);
     const detail = await client
       .get(`/api/v1/incidentes/${incident.id}`)
       .set('Authorization', 'Bearer token-supervisor')
@@ -1527,6 +1547,8 @@ describe('Aplicación (e2e)', () => {
       'classification',
       'classification',
       'note',
+      'close',
+      'reopen',
       'close',
     ]);
     const filtered = await client

@@ -22,6 +22,8 @@ import {
   portalIncidentsSchema,
   portalEmergenciesSchema,
   PORTAL_STATUS_LABELS,
+  INCIDENT_FOLLOW_UP_LABELS,
+  INCIDENT_SEVERITY_LABELS,
   INCIDENT_TYPE_LABELS,
   WEEKDAY_LABELS,
   type ReportQuery,
@@ -435,7 +437,7 @@ export class ReportExportsService {
           ['Total del período anterior', String(report.previous.total)],
           ['Gravedad alta', String(report.highSeverity)],
           ['Gravedad alta del período anterior', String(report.previous.highSeverity)],
-          ['Con seguimiento abierto hoy', String(report.openFollowUps.length)],
+          ['Con seguimiento abierto hoy', String(report.openFollowUpsTotal)],
         ],
       },
       countSection('Incidentes por tipo', report.byType),
@@ -468,7 +470,7 @@ export class ReportExportsService {
       },
       {
         title: 'Listado de incidentes del período',
-        columns: ['Predio', 'Tipo', 'Ocurrencia', 'Clasificación'],
+        columns: ['Predio', 'Tipo', 'Ocurrencia', 'Clasificación', 'Gravedad', 'Seguimiento'],
         rows: incidents.map((row) => [
           row.site.name,
           INCIDENT_TYPE_LABELS[row.type],
@@ -476,6 +478,19 @@ export class ReportExportsService {
           { pending: 'Pendiente', client_visible: 'Visible para el cliente', internal: 'Interno' }[
             row.classificationStatus
           ],
+          row.severity ? INCIDENT_SEVERITY_LABELS[row.severity] : 'Sin clasificar',
+          INCIDENT_FOLLOW_UP_LABELS[row.followUpStatus],
+        ]),
+      },
+      {
+        title: `Seguimiento abierto hoy (${String(report.openFollowUpsTotal)})`,
+        columns: ['Predio', 'Tipo', 'Gravedad', 'Abierto desde', 'Última acción'],
+        rows: report.openFollowUps.map((row) => [
+          row.site.name,
+          INCIDENT_TYPE_LABELS[row.type],
+          row.severity ? INCIDENT_SEVERITY_LABELS[row.severity] : 'Sin clasificar',
+          this.date(row.openedAt, report.timezone),
+          row.lastAction ?? 'Sin acciones',
         ]),
       },
       {

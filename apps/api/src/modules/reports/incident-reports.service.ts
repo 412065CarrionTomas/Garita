@@ -76,7 +76,8 @@ export class IncidentReportsService {
     return this.scopes.measured('incidents', input, user, async (scope) => {
       const db = this.prisma.tenantPrisma;
       const now = this.clock.now();
-      const [rows, previousRows, followUps] = await Promise.all([
+      const openFollowUp = { siteId: { in: scope.siteIds }, followUpStatus: 'open' as const };
+      const [rows, previousRows, followUps, openFollowUpsTotal] = await Promise.all([
         db.incident.findMany({
           where: this.incidentWhere(scope, input),
           select: {
@@ -96,7 +97,7 @@ export class IncidentReportsService {
         }),
         // El seguimiento abierto no depende del período: es trabajo pendiente hoy.
         db.incident.findMany({
-          where: { siteId: { in: scope.siteIds }, followUpStatus: 'open' },
+          where: openFollowUp,
           orderBy: [{ severity: { sort: 'desc', nulls: 'last' } }, { createdAt: 'asc' }],
           take: 50,
           select: {
@@ -114,6 +115,7 @@ export class IncidentReportsService {
             followUpActions: { orderBy: { createdAt: 'desc' }, take: 1, select: { text: true } },
           },
         }),
+        db.incident.count({ where: openFollowUp }),
       ]);
       return {
         desde: scope.desde,
@@ -126,6 +128,8 @@ export class IncidentReportsService {
           total: previousRows.length,
           highSeverity: previousRows.filter((row) => row.severity === 'high').length,
         },
+        // El listado se acota a 50; el total es el real.
+        openFollowUpsTotal,
         openFollowUps: followUps.map((row) => {
           const openedAt = row.classifications[0]?.decidedAt ?? row.createdAt;
           return {

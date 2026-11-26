@@ -47,6 +47,13 @@ export class IncidentReportsController {
   @ApiQuery({ name: 'tipo', required: false })
   @ApiQuery({ name: 'franja', required: false, description: 'Hora inicial par: 0, 2, …, 22' })
   @ApiQuery({
+    name: 'dia',
+    required: false,
+    description: 'Día de la semana: 0 = lunes … 6 = domingo',
+  })
+  @ApiQuery({ name: 'gravedad', required: false, enum: ['low', 'medium', 'high'] })
+  @ApiQuery({ name: 'seguimiento', required: false, enum: ['open'] })
+  @ApiQuery({
     name: 'clasificacion',
     required: false,
     enum: ['pending', 'client_visible', 'internal'],
