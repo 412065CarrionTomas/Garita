@@ -33,23 +33,63 @@ export class SitesService {
     @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly firebase: FirebaseIdentityProvider,
   ) {}
 
-  async listClients(status?: 'active' | 'inactive', page = 1, user?: AuthenticatedUser) {
-    return this.prisma.tenantPrisma.client.findMany({
-      where: status ? { status } : undefined,
-      orderBy: { name: 'asc' },
-      skip: (page - 1) * 50,
-      take: 50,
-      include: {
-        _count: {
-          select: {
-            sites:
-              user?.role === 'supervisor'
-                ? { where: { supervisors: { some: { userId: user.userId } } } }
-                : true,
+  async listClients(
+    query: {
+      estado?: 'active' | 'inactive';
+      buscar?: string;
+      orden: 'nombre' | 'recientes' | 'predios';
+      pagina: number;
+      porPagina: number;
+    },
+    user?: AuthenticatedUser,
+  ) {
+    const supervisor = user?.role === 'supervisor';
+    // Cada palabra tiene que aparecer en algún campo: "ferreyra peralta" encuentra al cliente.
+    const terms = (query.buscar ?? '').split(/\s+/).filter(Boolean);
+    const base = {
+      AND: terms.map((term) => ({
+        OR: (['name', 'contactName', 'email', 'taxId'] as const).map((field) => ({
+          [field]: { contains: term, mode: 'insensitive' as const },
+        })),
+      })),
+    };
+    const where = { ...base, status: query.estado };
+    // Al supervisor no se lo ordena por el total de predios: delataría los que no supervisa.
+    const orderBy =
+      query.orden === 'recientes'
+        ? [{ createdAt: 'desc' as const }]
+        : query.orden === 'predios' && !supervisor
+          ? [{ sites: { _count: 'desc' as const } }, { name: 'asc' as const }]
+          : [{ name: 'asc' as const }];
+    const client = this.prisma.tenantPrisma.client;
+    const [total, items, active, inactive] = await Promise.all([
+      client.count({ where }),
+      client.findMany({
+        where,
+        orderBy,
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
+        include: {
+          _count: {
+            select: {
+              sites:
+                user?.role === 'supervisor'
+                  ? { where: { supervisors: { some: { userId: user.userId } } } }
+                  : true,
+            },
           },
         },
-      },
-    });
+      }),
+      client.count({ where: { ...base, status: 'active' } }),
+      client.count({ where: { ...base, status: 'inactive' } }),
+    ]);
+    return {
+      items,
+      pagina: query.pagina,
+      total,
+      paginas: Math.ceil(total / query.porPagina),
+      resumen: { active, inactive },
+    };
   }
 
   async createClient(data: Prisma.ClientUncheckedCreateInput) {

@@ -2948,12 +2948,14 @@ describe('Aplicación (e2e)', () => {
 
   it('no expone el total de predios no asignados en el conteo del cliente al supervisor', async () => {
     const list = await request(app.getHttpServer())
-      .get('/api/v1/clientes')
+      .get('/api/v1/clientes?buscar=Cliente%20norte')
       .set('Authorization', 'Bearer token-supervisor')
       .expect(200);
     const clients = z
-      .array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) }))
-      .parse(list.body);
+      .object({
+        items: z.array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) })),
+      })
+      .parse(list.body).items;
     const northClient = await app.get(PrismaService).systemPrisma.client.findUniqueOrThrow({
       where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
     });

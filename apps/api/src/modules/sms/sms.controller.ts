@@ -114,10 +114,12 @@ export class SmsInboundController {
   @Get()
   @ApiOperation({ summary: 'Lista SMS de la empresa; excluye mensajes sin empresa' })
   @ApiQuery({ name: 'estado', enum: SMS_INBOUND_AUTH_RESULTS, required: false })
+  @ApiQuery({ name: 'buscar', type: String, required: false })
   @ApiQuery({ name: 'pagina', type: Number, required: false })
+  @ApiQuery({ name: 'porPagina', enum: [3, 5, 10, 20, 50], required: false })
   @ApiResponse({
     status: 200,
-    description: 'items, total, page y pageSize; 25 mensajes por página',
+    description: 'items, total, page, pageSize y resumen por estado; 20 por página por defecto',
   })
   @ApiResponse({ status: 401, description: 'Sin token' })
   @ApiResponse({ status: 403, description: 'Solo administrador' })

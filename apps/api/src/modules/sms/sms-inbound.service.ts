@@ -4,6 +4,7 @@ import {
   normalizeArPhone,
   sameArPhone,
   localDateTimeToUtc,
+  type SmsInboundAuthResult,
   type SmsWebhookBody,
   type smsInboundQuerySchema,
 } from '@garita/shared';
@@ -163,17 +164,73 @@ export class SmsInboundService {
   }
 
   async list(query: z.infer<typeof smsInboundQuerySchema>) {
-    const where = query.estado ? { result: query.estado } : {};
-    const [rows, total] = await Promise.all([
-      this.prisma.tenantPrisma.smsInbound.findMany({
+    const db = this.prisma.tenantPrisma;
+    // Cada palabra tiene que aparecer en el número o en el texto.
+    const terms = (query.buscar ?? '').split(/\s+/).filter(Boolean);
+    const base = {
+      AND: terms.map((term) => ({
+        OR: [
+          { fromOriginal: { contains: term } },
+          { text: { contains: term, mode: 'insensitive' as const } },
+        ],
+      })),
+    };
+    const where = { ...base, result: query.estado };
+    const count = (result: SmsInboundAuthResult) =>
+      db.smsInbound.count({ where: { ...base, result } });
+    const [rows, total, valid, unverified, unknown] = await Promise.all([
+      db.smsInbound.findMany({
         where,
         orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-        skip: (query.pagina - 1) * 25,
-        take: 25,
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
       }),
-      this.prisma.tenantPrisma.smsInbound.count({ where }),
+      db.smsInbound.count({ where }),
+      count('valid'),
+      count('unverified'),
+      count('unknown'),
     ]);
+    const shiftIds = [...new Set(rows.flatMap((row) => (row.shiftId ? [row.shiftId] : [])))];
+    const shifts = shiftIds.length
+      ? await db.shift.findMany({
+          where: { id: { in: shiftIds } },
+          select: {
+            id: true,
+            site: { select: { name: true } },
+            assignments: {
+              where: { active: true },
+              select: { guardId: true, startsAt: true, endsAt: true, isCurrent: true },
+            },
+          },
+        })
+      : [];
+    const guardIds = [
+      ...new Set(
+        shifts.flatMap((shift) => shift.assignments.flatMap((a) => (a.guardId ? [a.guardId] : []))),
+      ),
+    ];
+    const guards = guardIds.length
+      ? await db.user.findMany({
+          where: { id: { in: guardIds } },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : [];
+    const guardName = new Map(guards.map((g) => [g.id, `${g.firstName} ${g.lastName}`]));
+    const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
+    const senderOf = (shiftId: string | null, receivedAt: Date) => {
+      const shift = shiftId ? shiftById.get(shiftId) : undefined;
+      if (!shift) return null;
+      // El vigilador asignado cuando llegó el SMS; si no se encuentra, el asignado actual.
+      const assignment =
+        shift.assignments.find((a) => a.startsAt <= receivedAt && receivedAt < a.endsAt) ??
+        shift.assignments.find((a) => a.isCurrent);
+      return {
+        guardName: (assignment?.guardId && guardName.get(assignment.guardId)) ?? null,
+        siteName: shift.site.name,
+      };
+    };
     return {
+      resumen: { valid, unverified, unknown },
       items: rows.map((row) => ({
         id: row.id,
         provider: row.provider,
@@ -186,10 +243,11 @@ export class SmsInboundService {
         result: row.result,
         alertId: row.alertId,
         shiftId: row.shiftId,
+        sender: senderOf(row.shiftId, row.receivedAt),
       })),
       total,
       page: query.pagina,
-      pageSize: 25,
+      pageSize: query.porPagina,
     };
   }
 }

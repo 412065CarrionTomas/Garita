@@ -44,28 +44,67 @@ export class UsersService {
 
   async list(query: {
     rol?: 'supervisor' | 'guard';
-    estado?: 'invitation_pending' | 'active' | 'deactivated';
+    estado?: 'invitation_pending' | 'active' | 'deactivated' | 'invitation_failed';
+    buscar?: string;
+    orden?: 'recientes' | 'nombre' | 'estado';
     pagina: number;
+    porPagina: number;
   }) {
     const roleFilter: 'supervisor' | 'guard' | { in: ('supervisor' | 'guard')[] } = query.rol ?? {
       in: ['supervisor', 'guard'],
     };
-    const where = { role: roleFilter, status: query.estado };
-    const [total, users] = await Promise.all([
+    // Cada palabra tiene que aparecer en algún campo: "bruno paz" encuentra a Bruno Paz.
+    const terms = (query.buscar ?? '').split(/\s+/).filter(Boolean);
+    const base = {
+      role: roleFilter,
+      AND: terms.map((term) => ({
+        OR: (['firstName', 'lastName', 'email', 'employeeNumber'] as const).map((field) => ({
+          [field]: { contains: term, mode: 'insensitive' as const },
+        })),
+      })),
+    };
+    const failed = {
+      status: 'invitation_pending' as const,
+      invitations: { some: { sendStatus: 'failed' as const, usedAt: null, replacedAt: null } },
+    };
+    const where =
+      query.estado === 'invitation_failed'
+        ? { ...base, ...failed }
+        : { ...base, status: query.estado };
+    const byName = [{ firstName: 'asc' as const }, { lastName: 'asc' as const }];
+    const orderBy =
+      query.orden === 'nombre'
+        ? byName
+        : query.orden === 'estado'
+          ? [{ status: 'asc' as const }, ...byName]
+          : [{ createdAt: 'desc' as const }];
+    const count = (extra: object) =>
+      this.prisma.tenantPrisma.user.count({ where: { ...base, ...extra } });
+    const [total, users, active, pending, invitationFailed, deactivated] = await Promise.all([
       this.prisma.tenantPrisma.user.count({ where }),
       this.prisma.tenantPrisma.user.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
-        skip: (query.pagina - 1) * 20,
-        take: 20,
+        orderBy,
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
         include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
       }),
+      count({ status: 'active' }),
+      count({ status: 'invitation_pending' }),
+      count(failed),
+      count({ status: 'deactivated' }),
     ]);
     return {
       items: users.map((user) => this.present(user)),
       pagina: query.pagina,
       total,
-      paginas: Math.ceil(total / 20),
+      paginas: Math.ceil(total / query.porPagina),
+      resumen: {
+        active,
+        invitation_pending: pending,
+        invitation_failed: invitationFailed,
+        deactivated,
+      },
     };
   }
 

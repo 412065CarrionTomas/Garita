@@ -23,7 +23,12 @@ describe('UsersService invitation lifecycle', () => {
       findMany: jest.fn().mockResolvedValue([{ id: 'future' }]),
       count: jest.fn().mockResolvedValue(1),
     },
-    user: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
+    user: {
+      findUniqueOrThrow: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
     invitation: { count: jest.fn(), updateMany: jest.fn(), create: jest.fn() },
     client: { updateMany: jest.fn() },
   };
@@ -51,6 +56,35 @@ describe('UsersService invitation lifecycle', () => {
     );
     transaction.mockImplementation((run) => run(db));
     db.user.update.mockResolvedValue(user);
+  });
+
+  it('busca cada palabra en nombre, correo o legajo y filtra envíos fallidos', async () => {
+    db.user.count.mockResolvedValue(7);
+    db.user.findMany.mockResolvedValue([]);
+    const page = await service.list({
+      buscar: ' bruno  paz ',
+      estado: 'invitation_failed',
+      orden: 'nombre',
+      pagina: 2,
+      porPagina: 5,
+    });
+    const args = (db.user.findMany.mock.calls as unknown[][])[0]?.[0] as {
+      where: { AND: { OR: object[] }[]; status: string; invitations: object };
+      skip: number;
+      take: number;
+      orderBy: object[];
+    };
+    expect(args.where.AND).toHaveLength(2);
+    expect(args.where.AND[0]?.OR).toContainEqual({
+      employeeNumber: { contains: 'bruno', mode: 'insensitive' },
+    });
+    expect(args.where.status).toBe('invitation_pending');
+    expect(args.where.invitations).toEqual({
+      some: { sendStatus: 'failed', usedAt: null, replacedAt: null },
+    });
+    expect(args).toMatchObject({ skip: 5, take: 5 });
+    expect(args.orderBy[0]).toEqual({ firstName: 'asc' });
+    expect(page).toMatchObject({ total: 7, paginas: 2, resumen: { active: 7, deactivated: 7 } });
   });
 
   it('counts only future scheduled shifts assigned to the owned guard', async () => {
