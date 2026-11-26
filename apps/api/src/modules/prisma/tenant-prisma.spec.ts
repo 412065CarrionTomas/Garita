@@ -118,6 +118,24 @@ describe('registro del aislamiento tenant', () => {
     });
   });
 
+  it('limita la bitácora de seguimiento a los predios del supervisor', () => {
+    expect(COMPANY_ID_MODELS).toContain('IncidentFollowUpAction');
+    expect(
+      addSiteAssignmentFilter(
+        'IncidentFollowUpAction',
+        { where: { incidentId: 'i1' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { incidentId: 'i1' },
+          { incident: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+  });
+
   it('registra rondas y filtra sus lecturas por predios asignados', () => {
     expect(COMPANY_ID_MODELS).toContain('Round');
     expect(

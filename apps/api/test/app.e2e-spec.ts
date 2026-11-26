@@ -28,6 +28,8 @@ import {
   SOCKET_NAMESPACE,
   panicAlertStateResponseSchema,
   panicAlertDetailSchema,
+  incidentDetailSchema,
+  incidentQueueResponseSchema,
 } from '@garita/shared';
 import {
   Controller,
@@ -1439,7 +1441,7 @@ describe('Aplicación (e2e)', () => {
     expect(
       z
         .array(z.looseObject({ id: z.string() }))
-        .parse(queue.body)
+        .parse(z.object({ items: z.unknown() }).parse(queue.body).items)
         .some((row) => row.id === incident.id),
     ).toBe(true);
     const count = await client
@@ -1455,47 +1457,100 @@ describe('Aplicación (e2e)', () => {
     await client
       .post(`/api/v1/incidentes/${incident.id}/clasificar`)
       .set('Authorization', 'Bearer token-client')
-      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .send({
+        classification: 'internal',
+        severity: 'medium',
+        internalComment: 'Comentario interno',
+      })
       .expect(403);
     await client
       .post(`/api/v1/incidentes/${incident.id}/clasificar`)
       .set('Authorization', 'Bearer token-supervisor')
-      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .send({
+        classification: 'internal',
+        severity: 'high',
+        requiresFollowUp: true,
+        internalComment: 'Comentario interno',
+      })
       .expect(201);
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
-        .body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      ).items,
     ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: incident.id })]));
     await client
       .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
       .set('Authorization', 'Bearer token-supervisor')
-      .send({ classification: 'client_visible', internalComment: 'Segundo comentario', reason: '' })
+      .send({
+        classification: 'client_visible',
+        severity: 'high',
+        internalComment: 'Segundo comentario',
+        reason: '',
+      })
       .expect(400);
     await client
       .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
       .set('Authorization', 'Bearer token-supervisor')
       .send({
         classification: 'client_visible',
+        severity: 'medium',
         internalComment: 'Segundo comentario',
         clientNote: 'Nota pública',
         reason: 'El cliente pidió detalles',
       })
       .expect(201);
-    const detail = await client
-      .get(`/api/v1/incidentes/${incident.id}`)
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/reabrir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'No está cerrado' })
+      .expect(409);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/acciones`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Se avisó al encargado' })
+      .expect(201);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/cerrar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Cerco reparado' })
+      .expect(201);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/reabrir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Volvieron a forzar el cerco' })
+      .expect(201);
+    const followUpFiltered = await client
+      .get(`/api/v1/incidentes?gravedad=medium&seguimiento=open&orden=gravedad:desc&porPagina=100`)
       .set('Authorization', 'Bearer token-supervisor')
       .expect(200);
     expect(
       z
-        .object({
-          classificationStatus: z.literal('client_visible'),
-          classifications: z.array(
-            z.looseObject({ decidedById: z.string(), decidedAt: z.string() }),
-          ),
-        })
-        .loose()
-        .parse(detail.body).classifications,
-    ).toHaveLength(2);
+        .object({ items: z.array(z.looseObject({ id: z.string() })) })
+        .parse(followUpFiltered.body)
+        .items.some((row) => row.id === incident.id),
+    ).toBe(true);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/cerrar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Cerco reparado de nuevo' })
+      .expect(201);
+    const detail = await client
+      .get(`/api/v1/incidentes/${incident.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const parsedDetail = incidentDetailSchema.parse(detail.body);
+    expect(parsedDetail.classificationStatus).toBe('client_visible');
+    expect(parsedDetail.severity).toBe('medium');
+    expect(parsedDetail.followUpStatus).toBe('closed');
+    expect(parsedDetail.timeline.map((entry) => entry.kind)).toEqual([
+      'classification',
+      'classification',
+      'note',
+      'close',
+      'reopen',
+      'close',
+    ]);
     const filtered = await client
       .get(
         `/api/v1/incidentes?predio=${northAssignedSiteId}&tipo=intrusion&clasificacion=client_visible&desde=2020-10-20&hasta=2030-10-20&pagina=1`,
@@ -1546,11 +1601,15 @@ describe('Aplicación (e2e)', () => {
       },
     });
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-admin').expect(200)).body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-admin').expect(200)).body,
+      ).items,
     ).toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
-        .body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      ).items,
     ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
     await client
       .get(`/api/v1/incidentes/${fallbackIncident.id}`)

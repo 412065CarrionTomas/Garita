@@ -280,6 +280,18 @@ describe('HU-26 incidentes y respuesta por HTTP', () => {
     expect(detail.total).toBe(2);
     expect(detail.items).toHaveLength(1);
     expect(detail.items[0]?.classificationStatus).toBe('client_visible');
+    // La celda del mapa de calor (día × franja) suma lo mismo que su detalle.
+    const day = report.byWeekdayTimeBand.findIndex((bands) => (bands[1] ?? 0) > 0);
+    expect(day).toBeGreaterThanOrEqual(0);
+    const cell = incidentReportDetailResponseSchema.parse(
+      (
+        await get('incidentes/detalle', `&predio=${sites[0]}&dia=${String(day)}&franja=2`).expect(
+          200,
+        )
+      ).body,
+    );
+    expect(cell.total).toBe(report.byWeekdayTimeBand[day]?.[1]);
+    expect(report.previous.total).toBe(0);
   });
   it('CA2/CA3 usa envío, promedio/máximo, primera lectura y primera decisión', async () => {
     const report = responseTimesReportSchema.parse(

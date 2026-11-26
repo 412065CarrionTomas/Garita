@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import {
+  incidentFollowUpActionInputSchema,
   incidentClassificationSchema,
   incidentListQuerySchema,
   incidentReclassificationSchema,
@@ -17,6 +18,12 @@ function parseId(raw: string) {
   const parsed = incidentIdSchema.safeParse(raw);
   if (!parsed.success) throw new BadRequestException('Identificador de incidente no válido');
   return parsed.data;
+}
+
+function parseFollowUpText(raw: unknown) {
+  const parsed = incidentFollowUpActionInputSchema.safeParse(raw);
+  if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+  return parsed.data.text;
 }
 
 @ApiTags('Incidentes')
@@ -48,7 +55,12 @@ export class IncidentClassificationController {
   @ApiQuery({ name: 'hasta', required: false, type: String, format: 'date' })
   @ApiQuery({ name: 'tipo', required: false })
   @ApiQuery({ name: 'clasificacion', required: false })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'gravedad', required: false })
+  @ApiQuery({ name: 'seguimiento', required: false })
+  @ApiQuery({ name: 'orden', required: false })
   @ApiQuery({ name: 'pagina', required: false, type: Number })
+  @ApiQuery({ name: 'porPagina', required: false, type: Number })
   list(@Query() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = incidentListQuerySchema.safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
@@ -81,5 +93,35 @@ export class IncidentClassificationController {
     const parsed = incidentReclassificationSchema.safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
     return this.classification.decide(parseId(id), user, parsed.data);
+  }
+
+  @Post(':id/seguimiento/acciones')
+  @ApiOperation({ summary: 'Agrega una acción al seguimiento abierto' })
+  addFollowUpAction(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classification.followUp(parseId(id), user, 'note', parseFollowUpText(raw));
+  }
+
+  @Post(':id/seguimiento/cerrar')
+  @ApiOperation({ summary: 'Cierra el seguimiento con un texto de cierre' })
+  closeFollowUp(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classification.followUp(parseId(id), user, 'close', parseFollowUpText(raw));
+  }
+
+  @Post(':id/seguimiento/reabrir')
+  @ApiOperation({ summary: 'Reabre un seguimiento cerrado' })
+  reopenFollowUp(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classification.followUp(parseId(id), user, 'reopen', parseFollowUpText(raw));
   }
 }

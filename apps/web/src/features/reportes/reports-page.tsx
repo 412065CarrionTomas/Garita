@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   localReportDay,
@@ -23,8 +23,8 @@ import { ReportDetail } from './report-detail';
 import { ReportPending } from './report-pending';
 import { ExportPdfButton } from './export-pdf-button';
 import { Panel } from './panel';
+import { Kpi } from '@/components/kpi';
 import { Stamp } from '@/components/stamp';
-import { cn } from '@/lib/utils';
 
 type View = 'tabla' | 'grilla' | 'graficos';
 const VIEW_KEY = 'garita-cumplimiento-vista';
@@ -462,31 +462,3 @@ const viewTitles: Record<View, string> = {
   grilla: 'Ventanas por día',
   graficos: 'Gráficos',
 };
-
-/** Una cifra de la franja de indicadores: rótulo, número grande y una línea que lo explica. */
-function Kpi({
-  label,
-  value,
-  detail,
-  tone,
-  stamp,
-  className,
-}: {
-  label: string;
-  value: ReactNode;
-  detail: string;
-  tone?: string;
-  stamp?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn('flex flex-col gap-1 bg-card px-4 py-3', className)}>
-      <dt className="t-label text-muted-foreground">{label}</dt>
-      <dd className="flex flex-wrap items-center gap-2">
-        <span className={cn('t-numeral text-3xl leading-none', tone)}>{value}</span>
-        {stamp}
-      </dd>
-      <dd className="text-sm text-muted-foreground">{detail}</dd>
-    </div>
-  );
-}

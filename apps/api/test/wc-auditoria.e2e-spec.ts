@@ -235,7 +235,7 @@ describe('WC incident regressions (PostgreSQL, external storage mocked)', () => 
       await incident(new Date(end));
       await incident(new Date(start), new Date(end));
       const response = await context.run({ correlationId: 'wc', user: admin }, () =>
-        classification.list(admin, { desde: day, hasta: day, pagina: 1 }),
+        classification.list(admin, { desde: day, hasta: day, pagina: 1, porPagina: 25 }),
       );
       expect(response.items.map((item) => item.id).sort()).toEqual([first.id, last.id].sort());
       expect(response.total).toBe(2);

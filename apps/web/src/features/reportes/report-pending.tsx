@@ -1,10 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { reportPendingResponseSchema, reportPointsResponseSchema } from '@garita/shared';
+import {
+  reportPendingResponseSchema,
+  reportPointsResponseSchema,
+  responseTimesReportSchema,
+} from '@garita/shared';
 import { apiGet } from '@/lib/api-client';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { minutes } from './incidentes/format';
 import { Panel } from './panel';
 
 export function ReportPending({
@@ -30,6 +35,13 @@ export function ReportPending({
         reportPointsResponseSchema,
       ),
   });
+  // Rondas incumplidas: cuánto tarda un supervisor en ver el aviso (los incidentes van en su reporte).
+  const times = useQuery({
+    queryKey: ['reports', 'response-times', period, predio],
+    queryFn: () =>
+      apiGet(`/reportes/tiempos-de-respuesta?${period}&${siteQuery}`, responseTimesReportSchema),
+  });
+  const missed = times.data?.totals.missedRound;
   const date = (value: string | null) =>
     value
       ? new Date(value).toLocaleString('es-AR', { timeZone: timezone, hourCycle: 'h23' })
@@ -46,12 +58,16 @@ export function ReportPending({
           label: 'rondas en revisión',
           meta: age(pending.data.inReview.oldestAt),
         },
-        {
-          to: '/incidentes/cola',
-          count: pending.data.incidents.count,
-          label: 'incidentes pendientes de clasificar',
-          meta: age(pending.data.incidents.oldestAt),
-        },
+        ...(missed
+          ? [
+              {
+                to: '/avisos?tipo=round_missed',
+                count: missed.unanswered,
+                label: 'avisos de ronda incumplida sin ver en el período',
+                meta: `Tiempo hasta verlos: promedio ${minutes(missed.averageMs)}, máximo ${minutes(missed.maximumMs)}`,
+              },
+            ]
+          : []),
         {
           to: '/avisos?tipo=shift_unsynced',
           count: pending.data.unsynced.count,
@@ -70,8 +86,16 @@ export function ReportPending({
     <>
       <Panel title="Pendientes del supervisor" className="shrink-0">
         <p className="px-4 pt-3 text-muted-foreground">
-          Actuales del predio elegido; no dependen del período, cliente ni vigilador.
+          Actuales del predio elegido, salvo los avisos de ronda incumplida, que son del período.
         </p>
+        {times.isError && (
+          <Alert role="alert" className="m-4">
+            No pudimos cargar el tiempo de respuesta a rondas incumplidas.{' '}
+            <Button variant="outline" onClick={() => void times.refetch()}>
+              Reintentar
+            </Button>
+          </Alert>
+        )}
         {pending.isPending && (
           <p role="status" className="p-4">
             Cargando pendientes…
