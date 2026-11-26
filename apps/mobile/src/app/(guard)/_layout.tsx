@@ -105,7 +105,7 @@ export default function GuardLayout() {
   const scanning = pathname.includes('escaneo');
   return (
     <View style={{ flex: 1 }}>
-      {!scanning && <GuardHeader />}
+      {!scanning && <GuardHeader shiftId={savedShiftId} />}
       <View style={{ flex: 1 }}>
         <Stack screenOptions={screenOptions} />
       </View>

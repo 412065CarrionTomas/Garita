@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { space, touch } from '@garita/tokens';
 import { Badge, Icon, useTheme } from '@/ui';
 import { getSyncSnapshot, subscribeSyncState } from '@/lib/cola';
 import { GuardMenu } from './guard-menu';
 
-/** Cabecera fija del vigilador: abre el menú lateral y avisa si quedan registros sin enviar. */
-export function GuardHeader() {
+const TAB_ROOTS = ['/', '/turnos', '/predios'];
+
+/**
+ * Cabecera fija del vigilador: en los destinos de la barra abre el menú lateral y en las pantallas
+ * internas vuelve atrás. Avisa si quedan registros sin enviar.
+ */
+export function GuardHeader({ shiftId }: { shiftId: string | null }) {
   const { colors } = useTheme();
   const router = useRouter();
+  const pathname = usePathname();
+  const atRoot = TAB_ROOTS.includes(pathname) || pathname === `/turno/${shiftId}`;
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(0);
   useEffect(() => {
@@ -29,14 +36,25 @@ export function GuardHeader() {
   return (
     <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
       <View style={styles.row}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Abrir menú"
-          onPress={() => setOpen(true)}
-          style={styles.touch}
-        >
-          <Icon name="menu" size={24} />
-        </Pressable>
+        {atRoot ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Abrir menú"
+            onPress={() => setOpen(true)}
+            style={styles.touch}
+          >
+            <Icon name="menu" size={24} />
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Volver"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+            style={styles.touch}
+          >
+            <Icon name="back" size={24} />
+          </Pressable>
+        )}
         {pending > 0 && (
           <Pressable
             accessibilityRole="button"
