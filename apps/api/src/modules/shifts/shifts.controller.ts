@@ -17,6 +17,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import {
+  guardShiftsQuerySchema,
   reassignShiftRequestSchema,
   shiftReplacementsQuerySchema,
   shiftInputSchema,
@@ -173,6 +174,18 @@ export class ShiftsController {
   @ApiOperation({ summary: 'Lista los próximos 14 días del vigilador autenticado' })
   mine(@CurrentUser() user: AuthenticatedUser) {
     return this.shifts.mine(user);
+  }
+
+  @Get('mis-turnos/rango')
+  @Roles('guard')
+  @ApiOperation({ summary: 'Turnos del vigilador en un rango de fechas, pasados y futuros' })
+  @ApiQuery({ name: 'desde', example: '2026-11-01' })
+  @ApiQuery({ name: 'hasta', example: '2026-12-31' })
+  @ApiQuery({ name: 'cursor', required: false })
+  mineInRange(@CurrentUser() user: AuthenticatedUser, @Query() query: unknown) {
+    const parsed = guardShiftsQuerySchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+    return this.shifts.mineInRange(user, parsed.data);
   }
 
   @Get('usuarios/:id/turnos-futuros')

@@ -125,3 +125,77 @@ describe('audit shift list filters', () => {
     });
   });
 });
+
+describe('guard shifts in a date range', () => {
+  const findMany = jest.fn();
+  const service = new ShiftsService(
+    { tenantPrisma: { shift: { findMany } } } as unknown as PrismaService,
+    {} as TenantResourceService,
+    { now: () => new Date('2030-05-10T12:00:00Z') },
+    { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
+    { resolve: jest.fn(), raise: jest.fn() },
+    { emitToSite: jest.fn() },
+  );
+  const guard = { userId: 'guard', companyId: 'company', role: 'guard', status: 'active' } as const;
+  const row = (id: string, started: boolean) => ({
+    id,
+    status: started ? 'closed' : 'scheduled',
+    serviceDate: new Date('2030-05-09T00:00:00Z'),
+    startsAt: new Date('2030-05-09T22:00:00Z'),
+    endsAt: new Date('2030-05-10T06:00:00Z'),
+    startedAt: started ? new Date('2030-05-09T22:03:00Z') : null,
+    closedAt: started ? new Date('2030-05-10T06:01:00Z') : null,
+    site: { id: 'site', name: 'Predio', company: { timezone: 'America/Argentina/Cordoba' } },
+    rounds: [{ round: { name: 'Perimetral' } }],
+    assignments: [
+      { startsAt: new Date('2030-05-09T23:00:00Z'), endsAt: new Date('2030-05-10T06:00:00Z') },
+    ],
+    roundWindowStates: [
+      { status: 'complete', recordedCount: 4, expectedCount: 4 },
+      { status: 'complete_late', recordedCount: 3, expectedCount: 4 },
+      { status: 'not_done', recordedCount: 0, expectedCount: 4 },
+    ],
+    _count: { incidents: 2 },
+  });
+
+  it('filters by service date and own assignment, and summarizes only started shifts', async () => {
+    findMany.mockResolvedValueOnce([row('a', true), row('b', false)]);
+    const page = await service.mineInRange(guard, { desde: '2030-05-01', hasta: '2030-05-31' });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      where: {
+        serviceDate: { gte: new Date('2030-05-01'), lte: new Date('2030-05-31') },
+        assignments: { some: { guardId: 'guard', isCurrent: true, active: true } },
+      },
+      take: 51,
+    });
+    expect(page.nextCursor).toBeNull();
+    expect(page.items[0]).toEqual({
+      id: 'a',
+      status: 'closed',
+      serviceDate: '2030-05-09',
+      startsAt: '2030-05-09T23:00:00.000Z',
+      endsAt: '2030-05-10T06:00:00.000Z',
+      startedAt: '2030-05-09T22:03:00.000Z',
+      closedAt: '2030-05-10T06:01:00.000Z',
+      site: { id: 'site', name: 'Predio', timezone: 'America/Argentina/Cordoba' },
+      rounds: ['Perimetral'],
+      summary: { windows: 3, windowsDone: 2, recorded: 7, expected: 12, incidents: 2 },
+    });
+    expect(page.items[1]?.summary).toBeNull();
+  });
+
+  it('pages with a cursor after the last returned shift', async () => {
+    findMany.mockResolvedValueOnce(Array.from({ length: 51 }, (_, i) => row(`s${i}`, false)));
+    const page = await service.mineInRange(guard, {
+      desde: '2030-01-01',
+      hasta: '2030-12-31',
+      cursor: 'prev',
+    });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      cursor: { id: 'prev' },
+      skip: 1,
+    });
+    expect(page.items).toHaveLength(50);
+    expect(page.nextCursor).toBe('s49');
+  });
+});

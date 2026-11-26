@@ -14,6 +14,9 @@ import {
   windowsForShift,
   buildShiftNotification,
   previousAssignmentResult,
+  GUARD_SHIFTS_PAGE_SIZE,
+  type GuardShiftsPage,
+  type GuardShiftsQuery,
   type ReassignShiftRequest,
   type ShiftInput,
 } from '@garita/shared';
@@ -27,6 +30,9 @@ import { isShiftOverlapViolation } from './shift-overlap-error';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
 import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
+
+/** Ventanas de ronda que cuentan como cumplidas en el resumen del vigilador. */
+const DONE_WINDOW = new Set(['complete', 'complete_late']);
 
 interface ShiftListQuery {
   predio?: string;
@@ -541,6 +547,64 @@ export class ShiftsService {
       include: this.shiftInclude(),
       orderBy: { startsAt: 'asc' },
     });
+  }
+
+  /**
+   * Turnos del vigilador en un rango libre de fechas de servicio, pasados y futuros, paginados por
+   * cursor. Los iniciados traen el resumen de lo hecho en la misma consulta (sin N+1).
+   */
+  async mineInRange(user: AuthenticatedUser, query: GuardShiftsQuery): Promise<GuardShiftsPage> {
+    const mine = { guardId: user.userId, isCurrent: true, active: true };
+    const rows = await this.prisma.tenantPrisma.shift.findMany({
+      where: {
+        ...suspendedVisibleShiftWhere(user),
+        serviceDate: { gte: new Date(query.desde), lte: new Date(query.hasta) },
+        assignments: { some: mine },
+      },
+      select: {
+        id: true,
+        status: true,
+        serviceDate: true,
+        startsAt: true,
+        endsAt: true,
+        startedAt: true,
+        closedAt: true,
+        site: { select: { id: true, name: true, company: { select: { timezone: true } } } },
+        rounds: { select: { round: { select: { name: true } } } },
+        assignments: { where: mine, select: { startsAt: true, endsAt: true }, take: 1 },
+        roundWindowStates: {
+          select: { status: true, recordedCount: true, expectedCount: true },
+        },
+        _count: { select: { incidents: { where: { guardId: user.userId } } } },
+      },
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+      take: GUARD_SHIFTS_PAGE_SIZE + 1,
+      ...(query.cursor && { cursor: { id: query.cursor }, skip: 1 }),
+    });
+    const page = rows.slice(0, GUARD_SHIFTS_PAGE_SIZE);
+    return {
+      items: page.map(({ assignments, roundWindowStates: windows, _count, ...shift }) => ({
+        id: shift.id,
+        status: shift.status,
+        serviceDate: shift.serviceDate.toISOString().slice(0, 10),
+        startsAt: (assignments[0] ?? shift).startsAt.toISOString(),
+        endsAt: (assignments[0] ?? shift).endsAt.toISOString(),
+        startedAt: shift.startedAt?.toISOString() ?? null,
+        closedAt: shift.closedAt?.toISOString() ?? null,
+        site: { id: shift.site.id, name: shift.site.name, timezone: shift.site.company.timezone },
+        rounds: shift.rounds.map(({ round }) => round.name),
+        summary: shift.startedAt
+          ? {
+              windows: windows.length,
+              windowsDone: windows.filter((w) => DONE_WINDOW.has(w.status)).length,
+              recorded: windows.reduce((sum, w) => sum + w.recordedCount, 0),
+              expected: windows.reduce((sum, w) => sum + w.expectedCount, 0),
+              incidents: _count.incidents,
+            }
+          : null,
+      })),
+      nextCursor: rows.length > GUARD_SHIFTS_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
+    };
   }
 
   async futureForUser(id: string) {
