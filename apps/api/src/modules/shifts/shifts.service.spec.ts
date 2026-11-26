@@ -179,7 +179,7 @@ describe('guard shifts in a date range', () => {
       where: {
         serviceDate: { gte: new Date('2030-04-30'), lte: new Date('2030-05-31') },
         assignments: { some: { guardId: 'guard', isCurrent: true } },
-        NOT: { status: 'cancelled' },
+        NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
       },
       take: 51,
     });

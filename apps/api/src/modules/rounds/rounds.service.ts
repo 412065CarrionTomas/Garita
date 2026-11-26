@@ -62,7 +62,7 @@ export class RoundsService {
             {
               currentFor: {
                 status: 'active',
-                site: { shifts: { some: { assignments: own } } },
+                site: { status: 'active', shifts: { some: { assignments: own } } },
               },
             },
           ],

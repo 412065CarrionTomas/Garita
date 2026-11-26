@@ -42,7 +42,12 @@ describe('round versions for the guard', () => {
         OR: [
           { shifts: { some: { shift: { assignments: own } } } },
           { currentFor: { shifts: { some: { shift: { assignments: own } } } } },
-          { currentFor: { status: 'active', site: { shifts: { some: { assignments: own } } } } },
+          {
+            currentFor: {
+              status: 'active',
+              site: { status: 'active', shifts: { some: { assignments: own } } },
+            },
+          },
         ],
       },
     });
