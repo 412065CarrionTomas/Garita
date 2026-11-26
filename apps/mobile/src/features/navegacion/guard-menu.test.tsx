@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from '@/ui';
@@ -13,6 +13,10 @@ jest.mock('@/features/auth/auth-context', () => ({
   }),
 }));
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
+let mockPending = 0;
+jest.mock('@/lib/cola', () => ({
+  getSyncSnapshot: jest.fn(async () => ({ pendingCount: mockPending })),
+}));
 
 const renderMenu = (pendingCount: number, onClose = jest.fn()) =>
   render(
@@ -28,7 +32,10 @@ const renderMenu = (pendingCount: number, onClose = jest.fn()) =>
     </SafeAreaProvider>,
   );
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockPending = 0;
+});
 
 it('muestra la cuenta y cambia el tema con el interruptor sol | luna', async () => {
   await renderMenu(0);
@@ -48,16 +55,19 @@ it('cierra el menú y navega a envíos', async () => {
 
 it('cierra sesión directo si no hay pendientes', async () => {
   const alert = jest.spyOn(Alert, 'alert');
-  await renderMenu(0);
-  await fireEvent.press(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  const onClose = jest.fn();
+  await renderMenu(0, onClose);
+  await act(() => fireEvent.press(screen.getByRole('button', { name: 'Cerrar sesión' })));
+  expect(onClose).toHaveBeenCalled();
   expect(alert).not.toHaveBeenCalled();
   expect(mockLogout).toHaveBeenCalledTimes(1);
 });
 
-it('con pendientes pide confirmar y solo sale si confirma', async () => {
+it('cuenta los pendientes al tocar, aunque la cabecera diga cero, y solo sale si confirma', async () => {
   const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-  await renderMenu(3);
-  await fireEvent.press(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  mockPending = 3;
+  await renderMenu(0);
+  await act(() => fireEvent.press(screen.getByRole('button', { name: 'Cerrar sesión' })));
   expect(alert).toHaveBeenCalledWith(
     'Registros pendientes de envío',
     expect.stringContaining('Tenés 3 registros pendientes de envío.'),
@@ -67,4 +77,9 @@ it('con pendientes pide confirmar y solo sale si confirma', async () => {
   const buttons = alert.mock.calls[0]?.[2] ?? [];
   buttons.find((button) => button.text === 'Cerrar sesión')?.onPress?.();
   expect(mockLogout).toHaveBeenCalledTimes(1);
+});
+
+it('nombra un solo pendiente en singular', async () => {
+  await renderMenu(1);
+  expect(screen.getByText('1 pendiente')).toBeOnTheScreen();
 });

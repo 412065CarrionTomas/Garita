@@ -34,7 +34,11 @@ jest.mock('@/lib/db/database', () => ({
 }));
 jest.mock('@/features/navegacion/guard-header', () => ({ GuardHeader: () => null }));
 jest.mock('@/features/navegacion/guard-bar', () => ({
-  GuardBar: () => null,
+  GuardBar: ({ shiftId }: { shiftId: string | null }) => {
+    const React = jest.requireActual('react');
+    const { Text } = jest.requireActual('react-native');
+    return React.createElement(Text, null, `bar:${shiftId ?? 'none'}`);
+  },
   GUARD_BAR_HEIGHT: 64,
 }));
 jest.mock('@/features/panico/panic-overlay', () => ({
@@ -97,10 +101,12 @@ describe('guard permissions gate', () => {
     jest.mocked(checkFieldPermissions).mockResolvedValue('ok');
     let saved: { shift: { id: string } } | null = null;
     let closed = false;
-    let changed!: () => void;
+    // Como la base real: avisa a todos los suscriptos (pánico y turno guardado).
+    const listeners = new Set<() => void>();
+    const changed = () => listeners.forEach((listener) => listener());
     jest.mocked(subscribePanicChanges).mockImplementation((listener) => {
-      changed = listener;
-      return () => undefined;
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     });
     jest.mocked(createDefaultFieldRepository).mockResolvedValue({
       getShiftData: async () => saved,
@@ -134,5 +140,28 @@ describe('guard permissions gate', () => {
     await render(<GuardLayout />);
     await waitFor(() => expect(screen.getByText('GuardStack')).toBeOnTheScreen());
     expect(screen.queryByText('/turno/saved-shift')).toBeNull();
+  });
+
+  it('al iniciar el turno sin cambiar de ruta, la barra pasa a la Ronda', async () => {
+    const { usePathname } = jest.requireMock('expo-router') as { usePathname: jest.Mock };
+    usePathname.mockReturnValue('/turno/new');
+    jest.mocked(checkFieldPermissions).mockResolvedValue('ok');
+    const listeners = new Set<() => void>();
+    jest.mocked(subscribePanicChanges).mockImplementation((listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    let saved: { shift: { id: string } } | null = null;
+    jest
+      .mocked(createDefaultFieldRepository)
+      .mockResolvedValue({ getShiftData: async () => saved } as never);
+    await render(<GuardLayout />);
+    await waitFor(() => expect(screen.getByText('GuardStack')).toBeOnTheScreen());
+    expect(screen.getByText('bar:none')).toBeOnTheScreen();
+    await act(async () => {
+      saved = { shift: { id: 'new' } };
+      listeners.forEach((listener) => listener());
+    });
+    await waitFor(() => expect(screen.getByText('bar:new')).toBeOnTheScreen());
   });
 });

@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { space, touch } from '@garita/tokens';
 import { Badge, Icon, useTheme } from '@/ui';
 import { getSyncSnapshot, subscribeSyncState } from '@/lib/cola';
+import { subscribePanicChanges } from '@/lib/db/database';
 import { GuardMenu } from './guard-menu';
 
 const TAB_ROOTS = ['/', '/turnos', '/predios'];
@@ -17,7 +18,8 @@ export function GuardHeader({ shiftId }: { shiftId: string | null }) {
   const { colors } = useTheme();
   const router = useRouter();
   const pathname = usePathname();
-  const atRoot = TAB_ROOTS.includes(pathname) || pathname === `/turno/${shiftId}`;
+  const atRoot =
+    TAB_ROOTS.includes(pathname) || (Boolean(shiftId) && pathname === `/turno/${shiftId}`);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(0);
   useEffect(() => {
@@ -28,9 +30,12 @@ export function GuardHeader({ shiftId }: { shiftId: string | null }) {
       });
     refresh();
     const unsubscribe = subscribeSyncState(refresh);
+    // Cerrar el turno sin señal o encolar un pánico avisa por acá, no por la cola de envío.
+    const unsubscribePanic = subscribePanicChanges(refresh);
     return () => {
       mounted = false;
       unsubscribe();
+      unsubscribePanic();
     };
   }, []);
   return (
@@ -49,7 +54,11 @@ export function GuardHeader({ shiftId }: { shiftId: string | null }) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Volver"
-            onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+            onPress={() =>
+              router.canGoBack()
+                ? router.back()
+                : router.replace(shiftId ? `/turno/${shiftId}` : '/')
+            }
             style={styles.touch}
           >
             <Icon name="back" size={24} />
@@ -59,7 +68,9 @@ export function GuardHeader({ shiftId }: { shiftId: string | null }) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`${pending} registros por enviar. Ver envíos`}
-            onPress={() => router.push('/envio')}
+            onPress={() => {
+              if (pathname !== '/envio') router.push('/envio');
+            }}
             style={styles.touch}
           >
             <Badge tone="warning" variant="dashed" label={`${pending} por enviar`} />

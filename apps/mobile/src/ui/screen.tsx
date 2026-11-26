@@ -1,10 +1,19 @@
+import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { space } from '@garita/tokens';
 
 import { useTheme } from './theme';
+
+const EdgesContext = createContext<readonly Edge[] | undefined>(undefined);
+
+/**
+ * Bordes de zona segura que aplican las `Screen` de adentro. Un layout con cabecera y barra
+ * propias ya cubre arriba y abajo, y así no se duplica el margen.
+ */
+export const ScreenEdges = EdgesContext.Provider;
 
 /**
  * Base de toda pantalla: fondo del tema, zona segura y margen de 20 px. Con `scroll` el
@@ -20,8 +29,9 @@ export function Screen({
   style?: StyleProp<ViewStyle>;
 }) {
   const { colors } = useTheme();
+  const edges = useContext(EdgesContext);
   return (
-    <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={edges} style={[styles.fill, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         style={styles.fill}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

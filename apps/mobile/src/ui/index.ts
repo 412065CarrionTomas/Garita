@@ -11,7 +11,7 @@ export { ListItem } from './list-item';
 export { Loading } from './loading';
 export { PointWindowList } from './point-window-list';
 export type { PointItem, PointStatus } from './point-window-list';
-export { Screen } from './screen';
+export { Screen, ScreenEdges } from './screen';
 export { Segmented } from './segmented';
 export { Text } from './text';
 export type { TextProps, TextVariant } from './text';

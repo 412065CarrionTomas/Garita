@@ -1,6 +1,6 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { useStackOptions } from '@/ui';
+import { ScreenEdges, useStackOptions } from '@/ui';
 import { useAuth } from '@/features/auth/auth-context';
 import { checkFieldPermissions, type FieldPermissionState } from '@/features/permisos/permissions';
 import { initSyncService } from '@/lib/cola';
@@ -12,7 +12,7 @@ import {
   recordLockedPanicFailure,
   subscribeLockedPanicResponses,
 } from '@/features/panico/bloqueado/notification';
-import { PanicOverlay } from '@/features/panico/panic-overlay';
+import { PANIC_OVERLAY_SPACE, PanicOverlay } from '@/features/panico/panic-overlay';
 import { GUARD_BAR_HEIGHT, GuardBar } from '@/features/navegacion/guard-bar';
 import { GuardHeader } from '@/features/navegacion/guard-header';
 import { ACCEPT_LEGAL_PATH, useLegalGate } from '@/features/legal/legal-screens';
@@ -70,22 +70,27 @@ export default function GuardLayout() {
   useEffect(() => {
     if (permissionState !== 'ok') return;
     let mounted = true;
-    void createDefaultFieldRepository()
-      .then((repository) => repository.getShiftData())
-      .then((saved) => {
-        if (mounted) {
-          setSavedShiftId(saved?.shift.id ?? null);
-          setLocalCheckPath(pathname);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setSavedShiftId(null);
-          setLocalCheckPath(pathname);
-        }
-      });
+    const load = () =>
+      void createDefaultFieldRepository()
+        .then((repository) => repository.getShiftData())
+        .then((saved) => {
+          if (mounted) {
+            setSavedShiftId(saved?.shift.id ?? null);
+            setLocalCheckPath(pathname);
+          }
+        })
+        .catch(() => {
+          if (mounted) {
+            setSavedShiftId(null);
+            setLocalCheckPath(pathname);
+          }
+        });
+    load();
+    // Iniciar o cerrar el turno no cambia la ruta: guardar o borrar los datos del turno avisa acá.
+    const unsubscribe = subscribePanicChanges(load);
     return () => {
       mounted = false;
+      unsubscribe();
     };
   }, [pathname, permissionState]);
   if (loading) return null;
@@ -96,9 +101,9 @@ export default function GuardLayout() {
   if (permissionState === null) return null;
   if (permissionState !== 'ok') return <Redirect href="/permisos" />;
   // Con un turno iniciado, Hoy es la Ronda y no se abre otro turno.
-  const blockedWhileRunning =
-    pathname === '/' ||
-    (pathname.startsWith('/turno/') && !pathname.startsWith(`/turno/${savedShiftId}`));
+  const ownShift =
+    pathname === `/turno/${savedShiftId}` || pathname.startsWith(`/turno/${savedShiftId}/`);
+  const blockedWhileRunning = pathname === '/' || (pathname.startsWith('/turno/') && !ownShift);
   if (savedShiftId && localCheckPath === pathname && blockedWhileRunning) {
     return <Redirect href={`/turno/${savedShiftId}`} />;
   }
@@ -106,8 +111,11 @@ export default function GuardLayout() {
   return (
     <View style={{ flex: 1 }}>
       {!scanning && <GuardHeader shiftId={savedShiftId} />}
-      <View style={{ flex: 1 }}>
-        <Stack screenOptions={screenOptions} />
+      {/* Arriba y abajo los cubren la cabecera y la barra; con pánico, se reserva su lugar. */}
+      <View style={{ flex: 1, paddingBottom: panicShiftId && !scanning ? PANIC_OVERLAY_SPACE : 0 }}>
+        <ScreenEdges value={scanning ? undefined : ['left', 'right']}>
+          <Stack screenOptions={screenOptions} />
+        </ScreenEdges>
       </View>
       <GuardBar shiftId={savedShiftId} />
       {panicShiftId && <PanicOverlay bottomOffset={scanning ? 0 : GUARD_BAR_HEIGHT} />}

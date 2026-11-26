@@ -20,6 +20,7 @@ jest.mock('@/lib/cola', () => ({
   subscribeSyncState: jest.fn(() => () => undefined),
 }));
 jest.mock('./guard-menu', () => ({ GuardMenu: () => null }));
+jest.mock('@/lib/db/database', () => ({ subscribePanicChanges: jest.fn(() => () => undefined) }));
 
 const renderHeader = (shiftId: string | null = null) =>
   render(
@@ -56,4 +57,12 @@ it('en una pantalla interna vuelve atrás, o a Hoy si no hay historial', async (
   mockCanGoBack = false;
   await user.press(screen.getByRole('button', { name: 'Volver' }));
   expect(mockReplace).toHaveBeenCalledWith('/');
+});
+
+it('sin historial y con turno en curso, Volver lleva a la Ronda', async () => {
+  mockPathname = '/predios/x';
+  mockCanGoBack = false;
+  await renderHeader('run');
+  await userEvent.setup().press(screen.getByRole('button', { name: 'Volver' }));
+  expect(mockReplace).toHaveBeenCalledWith('/turno/run');
 });
