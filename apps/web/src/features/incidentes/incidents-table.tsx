@@ -112,7 +112,8 @@ export function IncidentsTable() {
   const [shownQ, setShownQ] = useState(value('q'));
   if (shownQ !== value('q')) {
     setShownQ(value('q'));
-    setSearchInput(value('q'));
+    // Solo si cambió por fuera (atrás/adelante): no borra el espacio de quien sigue escribiendo.
+    if (value('q') !== searchInput.trim()) setSearchInput(value('q'));
   }
   const invertedDates = Boolean(
     value('desde') && value('hasta') && value('desde') > value('hasta'),

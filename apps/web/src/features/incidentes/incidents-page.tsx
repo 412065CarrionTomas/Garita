@@ -26,6 +26,8 @@ export function IncidentsPage() {
   const [initialView, setInitialView] = useState<View | null>(null);
   if (initialView === null && pending.data)
     setInitialView(pending.data.count > 0 ? 'por-clasificar' : 'todos');
+  // Sin conteo no se sabe si hay pendientes: se abre la bandeja, que muestra su propio error.
+  else if (initialView === null && pending.isError) setInitialView('por-clasificar');
   const view: View | null =
     requested === 'todos' || requested === 'por-clasificar' ? requested : initialView;
   return (

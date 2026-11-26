@@ -86,6 +86,8 @@ export function IncidentReportsPage() {
   const [params, setParams] = useSearchParams();
   const [segment, setSegment] = useState<Segment | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
+  // Borrador de fechas (hasta inclusiva) mientras lo escrito no forma un período válido.
+  const [draft, setDraft] = useState<{ desde: string; hasta: string } | null>(null);
   const filters = Object.fromEntries(
     (['desde', 'hasta', 'predio', 'cliente'] as const).flatMap((key) => {
       const value = params.get(key);
@@ -93,7 +95,9 @@ export function IncidentReportsPage() {
     }),
   );
   const valid = incidentReportQuerySchema.safeParse(filters);
-  const query = new URLSearchParams(valid.success ? filters : {}).toString();
+  // La clave siempre lleva los filtros: con un período inválido no se consulta (enabled) y queda lo
+  // último válido de esos mismos filtros, no lo cacheado sin filtrar.
+  const query = new URLSearchParams(filters).toString();
   // Con un período inválido no se consulta nada: se conserva lo último válido debajo del aviso.
   const options = {
     placeholderData: keepPreviousData,
@@ -126,6 +130,18 @@ export function IncidentReportsPage() {
       item.days > 0 && shownFrom === addDays(today, 1 - item.days) && shownTo === addDays(today, 1),
   );
   const period: Period = customOpen || !preset ? 'custom' : preset.value;
+  // En pantalla la fecha final es inclusiva (como en Cumplimiento); la API recibe el día siguiente.
+  const dates = draft ?? {
+    desde: shownFrom ?? '',
+    hasta: shownTo ? addDays(shownTo, -1) : '',
+  };
+  const draftInvalid = draft !== null;
+  const editDates = (next: { desde: string; hasta: string }) => {
+    if (next.desde && next.hasta && next.desde <= next.hasta) {
+      setDraft(null);
+      update({ desde: next.desde, hasta: addDays(next.hasta, 1) });
+    } else setDraft(next);
+  };
 
   const update = (changes: Record<string, string | null>) => {
     setSegment(null);
@@ -192,9 +208,9 @@ export function IncidentReportsPage() {
               type="date"
               aria-label="Desde"
               className="w-auto"
-              value={params.get('desde') ?? data?.desde ?? ''}
+              value={dates.desde}
               onChange={(event) => {
-                update({ desde: event.target.value });
+                editDates({ ...dates, desde: event.target.value });
               }}
             />
             <span aria-hidden="true" className="text-muted-foreground">
@@ -202,11 +218,11 @@ export function IncidentReportsPage() {
             </span>
             <Input
               type="date"
-              aria-label="Hasta (sin incluir)"
+              aria-label="Hasta"
               className="w-auto"
-              value={params.get('hasta') ?? data?.hasta ?? ''}
+              value={dates.hasta}
               onChange={(event) => {
-                update({ hasta: event.target.value });
+                editDates({ ...dates, hasta: event.target.value });
               }}
             />
           </div>
@@ -237,7 +253,7 @@ export function IncidentReportsPage() {
           </p>
         )}
       </div>
-      {!valid.success && (
+      {(!valid.success || draftInvalid) && (
         <Alert role="alert">
           El período no es válido: el inicio va antes del fin y abarca hasta 12 meses.
         </Alert>
@@ -342,51 +358,60 @@ export function IncidentReportsPage() {
 
           <Section id="follow-up-title" title="Seguimiento abierto">
             {data.openFollowUps.length ? (
-              <div className="overflow-x-auto border-[1.5px] border-input">
-                <DataTable
-                  label="Incidentes con seguimiento abierto"
-                  rows={data.openFollowUps}
-                  getRowId={(row) => row.id}
-                  columns={[
-                    {
-                      id: 'type',
-                      header: 'Incidente',
-                      value: (row) => INCIDENT_TYPE_LABELS[row.type],
-                      cell: (row) => (
-                        <Link
-                          to={`/incidentes/${row.id}`}
-                          className="font-semibold underline-offset-4 hover:underline"
-                        >
-                          {INCIDENT_TYPE_LABELS[row.type]}
-                        </Link>
-                      ),
-                    },
-                    { id: 'site', header: 'Predio', width: 220, value: (row) => row.site.name },
-                    {
-                      id: 'severity',
-                      header: 'Gravedad',
-                      width: 110,
-                      cell: (row) => <SeverityBadge severity={row.severity} />,
-                    },
-                    {
-                      id: 'age',
-                      header: 'Abierto',
-                      type: 'number',
-                      width: 120,
-                      value: (row) => row.ageMs,
-                      cell: (row) => <span className="tabular-nums">{ageText(row.ageMs)}</span>,
-                    },
-                    {
-                      id: 'last',
-                      header: 'Última acción',
-                      value: (row) => row.lastAction ?? '',
-                      cell: (row) =>
-                        row.lastAction ?? (
-                          <span className="text-muted-foreground">Sin acciones todavía</span>
+              <div className="space-y-2">
+                {data.openFollowUpsTotal > data.openFollowUps.length && (
+                  <p className="text-muted-foreground">
+                    Se muestran los {data.openFollowUps.length} más prioritarios de{' '}
+                    {data.openFollowUpsTotal}. El resto está en Incidentes → Todos, filtrando por
+                    seguimiento abierto.
+                  </p>
+                )}
+                <div className="overflow-x-auto border-[1.5px] border-input">
+                  <DataTable
+                    label="Incidentes con seguimiento abierto"
+                    rows={data.openFollowUps}
+                    getRowId={(row) => row.id}
+                    columns={[
+                      {
+                        id: 'type',
+                        header: 'Incidente',
+                        value: (row) => INCIDENT_TYPE_LABELS[row.type],
+                        cell: (row) => (
+                          <Link
+                            to={`/incidentes/${row.id}`}
+                            className="font-semibold underline-offset-4 hover:underline"
+                          >
+                            {INCIDENT_TYPE_LABELS[row.type]}
+                          </Link>
                         ),
-                    },
-                  ]}
-                />
+                      },
+                      { id: 'site', header: 'Predio', width: 220, value: (row) => row.site.name },
+                      {
+                        id: 'severity',
+                        header: 'Gravedad',
+                        width: 110,
+                        cell: (row) => <SeverityBadge severity={row.severity} />,
+                      },
+                      {
+                        id: 'age',
+                        header: 'Abierto',
+                        type: 'number',
+                        width: 120,
+                        value: (row) => row.ageMs,
+                        cell: (row) => <span className="tabular-nums">{ageText(row.ageMs)}</span>,
+                      },
+                      {
+                        id: 'last',
+                        header: 'Última acción',
+                        value: (row) => row.lastAction ?? '',
+                        cell: (row) =>
+                          row.lastAction ?? (
+                            <span className="text-muted-foreground">Sin acciones todavía</span>
+                          ),
+                      },
+                    ]}
+                  />
+                </div>
               </div>
             ) : (
               <p className="text-muted-foreground">

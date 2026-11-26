@@ -53,6 +53,7 @@ export function DecisionForm({
     classification: Visibility;
     severity: IncidentSeverity | null;
     followUpStatus: IncidentFollowUpStatus;
+    clientNote?: string | null;
   };
   shortcuts?: boolean;
   submitLabel?: string;
@@ -70,7 +71,7 @@ export function DecisionForm({
   const canOpenFollowUp = (initial?.followUpStatus ?? 'none') === 'none';
   const [requiresFollowUp, setRequiresFollowUp] = useState(false);
   const [internalComment, setInternalComment] = useState('');
-  const [clientNote, setClientNote] = useState('');
+  const [clientNote, setClientNote] = useState(initial?.clientNote ?? '');
   const [reason, setReason] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const schema = reclassify ? incidentReclassificationSchema : incidentClassificationSchema;

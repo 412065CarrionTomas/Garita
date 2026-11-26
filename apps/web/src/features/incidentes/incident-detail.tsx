@@ -388,6 +388,10 @@ function IncidentDetailView({ id }: { id: string }) {
                           : 'internal',
                       severity: incident.severity,
                       followUpStatus: incident.followUpStatus,
+                      // El portal muestra la nota de la última decisión: sin precargarla se borraría.
+                      clientNote:
+                        incident.timeline.findLast((entry) => entry.kind === 'classification')
+                          ?.clientNote ?? null,
                     }
               }
               onDone={() => {

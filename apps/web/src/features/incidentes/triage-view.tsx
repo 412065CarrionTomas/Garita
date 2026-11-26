@@ -6,7 +6,7 @@ import {
 } from '@garita/shared';
 import { useQuery } from '@tanstack/react-query';
 import { Camera } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import { EmptyState } from '@/components/empty-state';
 import { Alert } from '@/components/ui/alert';
@@ -67,7 +67,7 @@ function SelectedIncident({
       </div>
       <section
         aria-label="Decisión"
-        className="shrink-0 border-t-[1.5px] border-input bg-card px-5 py-4"
+        className="max-h-[55%] shrink-0 overflow-y-auto border-t-[1.5px] border-input bg-card px-5 py-4"
       >
         <DecisionForm
           id={id}
@@ -149,8 +149,9 @@ export function TriageView() {
       ) : (
         <div
           ref={measure}
-          style={{ height }}
-          className="grid min-h-0 gap-0 border-[1.5px] border-input lg:grid-cols-[minmax(0,2fr)_minmax(0,5fr)]"
+          style={{ '--fill': `${String(height ?? 480)}px` } as CSSProperties}
+          // Alto fijo solo en dos columnas; en pantallas angostas fluye y scrollea la página.
+          className="grid min-h-0 gap-0 border-[1.5px] border-input lg:h-(--fill) lg:grid-cols-[minmax(0,2fr)_minmax(0,5fr)]"
         >
           <div className="flex min-h-0 flex-col border-b-[1.5px] border-input lg:border-r-[1.5px] lg:border-b-0">
             <p className="border-b border-border px-4 py-2.5 text-sm text-muted-foreground">

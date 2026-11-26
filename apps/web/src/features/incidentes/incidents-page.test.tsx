@@ -191,6 +191,54 @@ it('el archivo manda los filtros de la URL a la consulta y los chips filtran', a
   );
 });
 
+it('si falla el conteo inicial abre la bandeja en vez de quedar cargando', async () => {
+  mockApi();
+  const base = jest.mocked(apiGet).getMockImplementation();
+  jest
+    .mocked(apiGet)
+    .mockImplementation((path, schema) =>
+      path === '/incidentes/cola/cantidad'
+        ? Promise.reject(new Error('Sin red'))
+        : (base?.(path, schema) ?? Promise.reject(new Error('sin mock'))),
+    );
+  renderAt('/incidentes');
+  expect(
+    await screen.findByRole('list', { name: 'Incidentes por clasificar' }),
+  ).toBeInTheDocument();
+});
+
+it('reclasificar parte de la visibilidad, la gravedad y la nota al cliente vigentes', async () => {
+  mockApi({
+    '/incidentes/incident-1': {
+      ...detail,
+      classificationStatus: 'client_visible',
+      severity: 'high',
+      timeline: [
+        {
+          kind: 'classification',
+          id: 'c1',
+          at: '2026-10-21T03:00:00.000Z',
+          author: 'Ana Gómez',
+          classification: 'client_visible',
+          severity: 'high',
+          requiresFollowUp: false,
+          internalComment: 'Se avisó al cliente',
+          clientNote: 'Reforzamos la ronda nocturna',
+          reason: null,
+        },
+      ],
+    },
+  });
+  renderAt('/incidentes/incident-1', <IncidentDetailPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Reclasificar' }));
+  const form = await screen.findByRole('form', { name: 'Reclasificar incidente' });
+  expect(within(form).getByRole('radio', { name: /Visible al cliente/ })).toBeChecked();
+  expect(within(form).getByRole('radio', { name: /Alta/ })).toBeChecked();
+  expect(within(form).getByLabelText('Nota para el cliente (opcional)')).toHaveValue(
+    'Reforzamos la ronda nocturna',
+  );
+});
+
 it('el detalle muestra la bitácora y permite cerrar el seguimiento', async () => {
   mockApi({
     '/incidentes/incident-1': {
