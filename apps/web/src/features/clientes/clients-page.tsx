@@ -73,8 +73,8 @@ export function ClientsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [status, setStatus] = useState('');
-  // Orden elegido en el encabezado; sin elegir, el de la API por defecto.
-  const [sort, setSort] = useState<DataSort>(null);
+  // Arranca como lo ordena la API por defecto (nombre A–Z): el primer clic ya invierte.
+  const [sort, setSort] = useState<DataSort>({ id: 'nombre', dir: 'asc' });
   // Busca solo cuando se deja de tipear, sin botón de buscar.
   const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
   const params = new URLSearchParams({

@@ -92,7 +92,6 @@ export function DataTable<T>({
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [localSort, setLocalSort] = useState<DataSort>(null);
   const sort = onSortChange ? (serverSort ?? null) : localSort;
-  const canSortTable = sortable || Boolean(onSortChange);
   const [dragged, setDragged] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const resizing = useRef<{ id: string; x: number; width: number } | null>(null);
@@ -134,7 +133,7 @@ export function DataTable<T>({
     setOrder(ids);
     setAnnouncement(`${byId.get(id)?.header ?? ''}: columna ${target + 1} de ${ids.length}`);
   };
-  const canSort = (column: DataColumn<T>) => canSortTable && Boolean(column.value);
+  const canSort = (column: DataColumn<T>) => sortable && Boolean(column.value);
   const toggleSort = (column: DataColumn<T>) => {
     if (!canSort(column)) return;
     const next = (current: DataSort): DataSort =>
@@ -174,7 +173,7 @@ export function DataTable<T>({
         <TableHeader className="sticky top-0 z-10">
           <TableRow>
             {visible.map((column, index) => {
-              const sortDir = canSortTable && sort?.id === column.id ? sort.dir : null;
+              const sortDir = sortable && sort?.id === column.id ? sort.dir : null;
               return (
                 <TableHead
                   key={column.id}
