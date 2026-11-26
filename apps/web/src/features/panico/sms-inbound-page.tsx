@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { Search } from 'lucide-react';
@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { apiGet } from '@/lib/api-client';
+import { useDebouncedSearch } from '@/lib/use-debounced-search';
 import { cn } from '@/lib/utils';
 
 const results = { valid: 'Válido', unverified: 'No verificado', unknown: 'Desconocido' };
@@ -39,18 +40,8 @@ export function SmsInboundPage() {
   const [estado, setEstado] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
   // Busca solo cuando se deja de tipear, sin botón de buscar.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(1);
-    }, 300);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [searchInput]);
+  const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
   const params = new URLSearchParams({ pagina: String(page), porPagina: String(pageSize) });
   if (estado) params.set('estado', estado);
   if (search) params.set('buscar', search);
@@ -210,10 +201,9 @@ export function SmsInboundPage() {
           )}
           <Pagination
             page={page}
-            pages={Math.ceil(list.data.total / list.data.pageSize)}
+            pages={Math.ceil(list.data.total / pageSize)}
             pageSize={pageSize}
             total={list.data.total}
-            shown={list.data.items.length}
             onPageChange={setPage}
             onPageSizeChange={(size) => {
               setPageSize(size);

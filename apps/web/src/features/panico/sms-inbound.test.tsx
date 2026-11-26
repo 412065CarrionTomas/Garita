@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { apiGet } from '@/lib/api-client';
@@ -48,7 +48,6 @@ it('filtra por estado, contadores y búsqueda, y salta de página por número', 
       expect.anything(),
     );
   });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Estado' }), { target: { value: '' } });
 });
 it('muestra remitente, horas y enlace de la alerta asociada', async () => {
   jest.mocked(apiGet).mockResolvedValue({

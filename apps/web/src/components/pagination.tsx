@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId } from 'react';
 import { PAGE_SIZES } from '@garita/shared';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -11,7 +11,6 @@ export function Pagination({
   pages,
   pageSize,
   total,
-  shown,
   onPageChange,
   onPageSizeChange,
 }: {
@@ -19,20 +18,27 @@ export function Pagination({
   pages: number;
   pageSize: number;
   total: number;
-  /** Filas de la página actual. */
-  shown: number;
   onPageChange: (page: number) => void;
   /** Al cambiar el tamaño, quien lo usa vuelve a la página 1. */
   onPageSizeChange: (size: number) => void;
 }) {
   const sizeId = useId();
+  // Si la página quedó fuera de rango (p. ej. se dio de baja el único ítem de la última), vuelve a la última.
+  useEffect(() => {
+    if (pages > 0 && page > pages) onPageChange(pages);
+  }, [page, pages, onPageChange]);
+  // El rango sale de la página pedida, no de las filas en pantalla: mientras carga la página
+  // nueva se siguen viendo las de la anterior.
   const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-3 text-sm tabular-nums sm:grid-cols-[1fr_auto_1fr]">
       <span className="text-muted-foreground">
         {total === 0
           ? 'Sin resultados'
-          : `${String(first)}–${String(first + shown - 1)} de ${String(total)}`}
+          : first > total
+            ? `${String(total)} en total`
+            : `${String(first)}–${String(last)} de ${String(total)}`}
       </span>
       <nav
         aria-label="Paginación"

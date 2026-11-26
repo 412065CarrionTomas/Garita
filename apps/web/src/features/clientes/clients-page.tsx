@@ -2,8 +2,8 @@ import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tansta
 import type { clientListItemSchema } from '@garita/shared';
 import { clientInputSchema, clientsPageSchema, clientResponseSchema } from '@garita/shared';
 import { EllipsisVertical, Search } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useParams } from 'react-router';
+import { useState } from 'react';
+import { Link, useParams } from 'react-router';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { ClientUsersPanel } from './client-users-panel';
@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { useDebouncedSearch } from '@/lib/use-debounced-search';
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
@@ -71,18 +72,8 @@ export function ClientsPage() {
   const [pageSize, setPageSize] = useState(20);
   const [status, setStatus] = useState('');
   const [order, setOrder] = useState('nombre');
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
   // Busca solo cuando se deja de tipear, sin botón de buscar.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(1);
-    }, 300);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [searchInput]);
+  const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
   const params = new URLSearchParams({
     pagina: String(page),
     porPagina: String(pageSize),
@@ -313,12 +304,12 @@ export function ClientsPage() {
                   {clients.data.items.map((client) => (
                     <TableRow key={client.id}>
                       <TableCell className="whitespace-normal">
-                        <a
+                        <Link
                           className="block font-semibold hover:underline"
-                          href={`/clientes/${client.id}`}
+                          to={`/clientes/${client.id}`}
                         >
                           {client.name}
-                        </a>
+                        </Link>
                         <span className="text-sm text-muted-foreground tabular-nums">
                           {client.taxId ? `CUIT ${client.taxId}` : 'Sin CUIT'}
                         </span>
@@ -336,13 +327,13 @@ export function ClientsPage() {
                         </a>
                       </TableCell>
                       <TableCell className="tabular-nums">
-                        <a
-                          href={`/clientes/${client.id}`}
+                        <Link
+                          to={`/clientes/${client.id}`}
                           className="hover:underline"
                           aria-label={`${String(client._count.sites)} predios de ${client.name}`}
                         >
                           {client._count.sites}
-                        </a>
+                        </Link>
                       </TableCell>
                       <TableCell>
                         <StatusBadge tone={client.status === 'active' ? 'success' : 'neutral'}>
@@ -362,7 +353,7 @@ export function ClientsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-auto">
                             <DropdownMenuItem asChild>
-                              <a href={`/clientes/${client.id}`}>Ver predios</a>
+                              <Link to={`/clientes/${client.id}`}>Ver predios</Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onSelect={() => {
@@ -426,7 +417,6 @@ export function ClientsPage() {
             pages={clients.data.paginas}
             pageSize={pageSize}
             total={clients.data.total}
-            shown={clients.data.items.length}
             onPageChange={setPage}
             onPageSizeChange={(size) => {
               setPageSize(size);
@@ -603,7 +593,7 @@ export function ClientDetailPage() {
   return (
     <section aria-labelledby="client-title" className="space-y-6">
       <Button variant="link" asChild>
-        <a href="/clientes">Volver a Clientes</a>
+        <Link to="/clientes">Volver a Clientes</Link>
       </Button>
       <PageHeader
         id="client-title"

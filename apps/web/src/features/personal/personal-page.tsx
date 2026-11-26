@@ -14,6 +14,7 @@ import {
 } from '@garita/shared';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
+import { useDebouncedSearch } from '@/lib/use-debounced-search';
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
@@ -104,8 +105,8 @@ export function PersonalPage() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  // Busca solo cuando se deja de tipear, sin botón de buscar.
+  const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
   const [order, setOrder] = useState('recientes');
   const [creating, setCreating] = useState(false);
   const { busy, run } = useBusy();
@@ -157,16 +158,6 @@ export function PersonalPage() {
     enabled: deactivating?.role === 'guard',
     queryFn: loadAvailableGuards,
   });
-  // Busca solo cuando se deja de tipear, sin botón de buscar.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(1);
-    }, 300);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [searchInput]);
   const params = new URLSearchParams({
     pagina: String(page),
     porPagina: String(pageSize),
@@ -434,7 +425,7 @@ export function PersonalPage() {
         >
           <NativeSelectOption value="">Todos los estados</NativeSelectOption>
           <NativeSelectOption value="active">Activo</NativeSelectOption>
-          <NativeSelectOption value="invitation_pending">Invitación enviada</NativeSelectOption>
+          <NativeSelectOption value="invitation_pending">Invitación pendiente</NativeSelectOption>
           <NativeSelectOption value="invitation_failed">Envío fallido</NativeSelectOption>
           <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
         </NativeSelect>
@@ -729,7 +720,6 @@ export function PersonalPage() {
             pages={result.data.paginas}
             pageSize={pageSize}
             total={result.data.total}
-            shown={result.data.items.length}
             onPageChange={setPage}
             onPageSizeChange={(size) => {
               setPageSize(size);
