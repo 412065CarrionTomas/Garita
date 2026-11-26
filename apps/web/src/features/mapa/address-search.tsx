@@ -1,15 +1,18 @@
 import { useEffect, useId, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { env } from '@/config/env';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { DEFAULT_CENTER } from './map-style';
 import { parsePhoton, type AddressSuggestion } from './photon';
 
 // bbox = Argentina. Debounce y mínimo de caracteres: uso justo del servicio público de Photon.
 const BBOX = '-73.6,-55.1,-53.6,-21.8';
 const MIN_CHARS = 3;
-const DEBOUNCE_MS = 400;
+const DEBOUNCE_MS = 250;
+// Sin provincias ni países: solo lo que sirve para ubicar un predio o un punto.
+const LAYERS = ['house', 'street', 'other', 'locality', 'district', 'city'];
 
 /**
  * Buscador de direcciones con Photon (patrón combobox: flechas, Enter y Escape). Con `value` y
@@ -21,12 +24,15 @@ export function AddressSearch({
   value,
   onTextChange,
   required,
+  near,
 }: {
   onSelect: (latitude: number, longitude: number, label: string) => void;
   label?: string;
   value?: string;
   onTextChange?: (text: string) => void;
   required?: boolean;
+  /** Lo cercano sale primero (el predio que se edita); sin esto, o en 0, 0, la zona por defecto. */
+  near?: { latitude: number; longitude: number };
 }) {
   const id = useId();
   const [ownText, setOwnText] = useState('');
@@ -46,20 +52,33 @@ export function AddressSearch({
       clearTimeout(timer);
     };
   }, [text, open]);
+  const center = near && (near.latitude !== 0 || near.longitude !== 0) ? near : DEFAULT_CENTER;
+  // Redondeado (~100 m): mover el marcador unos metros no invalida lo ya buscado.
+  const bias = [center.latitude.toFixed(3), center.longitude.toFixed(3)] as const;
   const search = useQuery({
-    queryKey: ['geocoder', env.VITE_GEOCODER_URL, term],
+    queryKey: ['geocoder', env.VITE_GEOCODER_URL, term, ...bias],
     queryFn: async ({ signal }) => {
-      const url = `${env.VITE_GEOCODER_URL}?q=${encodeURIComponent(term)}&limit=5&bbox=${BBOX}`;
-      const res = await fetch(url, { signal });
+      const params = new URLSearchParams({
+        q: term,
+        limit: '5',
+        bbox: BBOX,
+        lat: bias[0],
+        lon: bias[1],
+      });
+      for (const layer of LAYERS) params.append('layer', layer);
+      const res = await fetch(`${env.VITE_GEOCODER_URL}?${params.toString()}`, { signal });
       if (!res.ok) throw new Error(`Buscador de direcciones: HTTP ${String(res.status)}`);
       return parsePhoton(await res.json());
     },
     enabled: term.length >= MIN_CHARS,
+    // Mientras llega la nueva búsqueda quedan las anteriores: la lista no parpadea al tipear.
+    placeholderData: keepPreviousData,
     staleTime: Infinity,
     retry: false,
   });
-  const suggestions = search.data ?? [];
+  const suggestions = term.length >= MIN_CHARS ? (search.data ?? []) : [];
   const expanded = open && suggestions.length > 0;
+  const searching = open && search.isFetching && suggestions.length === 0;
   const choose = (suggestion: AddressSuggestion) => {
     setText(suggestion.label);
     setTerm('');
@@ -144,6 +163,14 @@ export function AddressSearch({
             </li>
           ))}
         </ul>
+      )}
+      {searching && (
+        <p
+          role="status"
+          className="absolute top-full z-20 mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground shadow-md"
+        >
+          Buscando…
+        </p>
       )}
       {search.isError && (
         <p role="alert" className="text-sm text-danger">

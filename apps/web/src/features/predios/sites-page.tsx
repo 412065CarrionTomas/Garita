@@ -835,6 +835,7 @@ export function SitesPage() {
                 label="Dirección"
                 required
                 value={editForm.address}
+                near={editForm}
                 onTextChange={(address) => {
                   setEditForm((current) => ({ ...current, address }));
                 }}

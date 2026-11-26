@@ -48,3 +48,22 @@ it('ArrowUp desde -1 elige la ultima y elegir no busca de nuevo', async () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });
+it('prioriza lo cercano a `near` y, sin ubicación (0, 0), la zona por defecto', async () => {
+  const { unmount } = renderWithQueryClient(
+    <AddressSearch onSelect={jest.fn()} near={{ latitude: -33.1234, longitude: -64.3456 }} />,
+  );
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Calle' } });
+  await screen.findAllByRole('option');
+  const url = new URL(jest.mocked(fetch).mock.calls[0]?.[0] as string);
+  expect(url.searchParams.get('lat')).toBe('-33.123');
+  expect(url.searchParams.get('lon')).toBe('-64.346');
+  expect(url.searchParams.getAll('layer')).not.toContain('state');
+  unmount();
+  renderWithQueryClient(
+    <AddressSearch onSelect={jest.fn()} near={{ latitude: 0, longitude: 0 }} />,
+  );
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Calle' } });
+  await screen.findAllByRole('option');
+  const fallback = new URL(jest.mocked(fetch).mock.calls[1]?.[0] as string);
+  expect(fallback.searchParams.get('lat')).toBe('-31.400');
+});
