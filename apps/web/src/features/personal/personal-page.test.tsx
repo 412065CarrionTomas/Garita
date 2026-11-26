@@ -138,7 +138,7 @@ describe('PersonalPage', () => {
   });
 
   it('cambia el tamaño de página en el backend y salta a una página numerada', async () => {
-    jest.mocked(apiGet).mockResolvedValueOnce({ ...page, total: 40, paginas: 8 });
+    jest.mocked(apiGet).mockResolvedValueOnce({ ...page, total: 160, paginas: 8 });
     setup();
     await screen.findByText(/Ana Pérez/);
     expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute(

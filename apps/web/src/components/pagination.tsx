@@ -24,8 +24,10 @@ export function Pagination({
 }) {
   const sizeId = useId();
   // Si la página quedó fuera de rango (p. ej. se dio de baja el único ítem de la última), vuelve a la última.
+  // Sin resultados queda una sola página: la 1.
   useEffect(() => {
-    if (pages > 0 && page > pages) onPageChange(pages);
+    const maxPage = Math.max(1, pages);
+    if (page > maxPage) onPageChange(maxPage);
   }, [page, pages, onPageChange]);
   // El rango sale de la página pedida, no de las filas en pantalla: mientras carga la página
   // nueva se siguen viendo las de la anterior.

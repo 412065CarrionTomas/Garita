@@ -56,3 +56,8 @@ it('vuelve a la última página si la actual quedó vacía tras una baja', () =>
   expect(onPageChange).toHaveBeenCalledWith(1);
   expect(screen.queryByText(/21–20/)).not.toBeInTheDocument();
 });
+
+it('vuelve a la página 1 si ya no quedan resultados', () => {
+  const { onPageChange } = renderPagination({ page: 2, pages: 0, total: 0 });
+  expect(onPageChange).toHaveBeenCalledWith(1);
+});

@@ -414,7 +414,7 @@ export function ClientsPage() {
           )}
           <Pagination
             page={page}
-            pages={clients.data.paginas}
+            pages={Math.ceil(clients.data.total / pageSize)}
             pageSize={pageSize}
             total={clients.data.total}
             onPageChange={setPage}

@@ -717,7 +717,7 @@ export function PersonalPage() {
           )}
           <Pagination
             page={page}
-            pages={result.data.paginas}
+            pages={Math.ceil(result.data.total / pageSize)}
             pageSize={pageSize}
             total={result.data.total}
             onPageChange={setPage}
