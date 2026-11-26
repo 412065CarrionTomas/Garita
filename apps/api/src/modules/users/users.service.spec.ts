@@ -92,6 +92,23 @@ describe('UsersService invitation lifecycle', () => {
     });
   });
 
+  it('ordena por la columna en el sentido pedido y desempata por nombre A–Z', async () => {
+    db.user.count.mockResolvedValue(0);
+    db.user.findMany.mockResolvedValue([]);
+    await service.list({ orden: 'estado', sentido: 'desc', pagina: 1, porPagina: 20 });
+    await service.list({ orden: 'telefono', sentido: 'desc', pagina: 1, porPagina: 20 });
+    const orderBy = (call: number) =>
+      ((db.user.findMany.mock.calls as unknown[][])[call]?.[0] as { orderBy: object[] }).orderBy;
+    expect(orderBy(0)).toEqual([
+      { status: 'desc' },
+      { firstName: 'asc' },
+      { lastName: 'asc' },
+      { id: 'asc' },
+    ]);
+    // Sin teléfono, al final también en descendente.
+    expect(orderBy(1)[0]).toEqual({ phone: { sort: 'desc', nulls: 'last' } });
+  });
+
   it('counts only future scheduled shifts assigned to the owned guard', async () => {
     await expect(service.countFutureShifts('user')).resolves.toBe(1);
     expect(db.shift.count).toHaveBeenCalledWith(

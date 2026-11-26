@@ -81,11 +81,16 @@ export class UsersService {
         : { ...base, status: query.estado };
     // El id desempata: con OFFSET, un orden con empates puede repetir o saltear filas entre páginas.
     const dir = query.sentido ?? 'asc';
-    const byName = [{ firstName: dir }, { lastName: dir }, { id: 'asc' as const }];
+    // El nombre desempata siempre A–Z; el sentido elegido solo invierte la columna pedida.
+    const byName = [
+      { firstName: 'asc' as const },
+      { lastName: 'asc' as const },
+      { id: 'asc' as const },
+    ];
     // Los que no tienen teléfono o legajo van al final en los dos sentidos.
     const orderBy =
       query.orden === 'nombre'
-        ? byName
+        ? [{ firstName: dir }, { lastName: dir }, { id: 'asc' as const }]
         : query.orden === 'telefono'
           ? [{ phone: { sort: dir, nulls: 'last' as const } }, ...byName]
           : query.orden === 'legajo'

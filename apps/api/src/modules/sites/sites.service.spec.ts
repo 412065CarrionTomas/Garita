@@ -104,6 +104,17 @@ describe('SitesService audit regressions', () => {
     expect(page).toMatchObject({ total: 7, paginas: 2, resumen: { active: 4, inactive: 3 } });
   });
 
+  it('ordena por predios descendente desempatando A–Z, y al supervisor solo por nombre', async () => {
+    const { service, db } = setup();
+    const query = { orden: 'predios', sentido: 'desc', pagina: 1, porPagina: 20 } as const;
+    await service.listClients(query, { role: 'admin', userId: 'admin' } as never);
+    await service.listClients(query, { role: 'supervisor', userId: 'sup' } as never);
+    const orderBy = (call: number) =>
+      ((db.client.findMany.mock.calls as unknown[][])[call]?.[0] as { orderBy: object[] }).orderBy;
+    expect(orderBy(0)).toEqual([{ sites: { _count: 'desc' } }, { name: 'asc' }, { id: 'asc' }]);
+    expect(orderBy(1)).toEqual([{ name: 'asc' }, { id: 'asc' }]);
+  });
+
   it('impacto y cancelacion incluyen no iniciados vencidos y uncovered, y todos los in_progress', async () => {
     const { service, db } = setup();
     const impact = await service.impactSiteDeactivation('site');

@@ -58,7 +58,8 @@ export class SitesService {
     const where = { ...base, status: query.estado };
     // Al supervisor no se lo ordena por el total de predios: delataría los que no supervisa.
     const dir = query.sentido ?? 'asc';
-    const byName = [{ name: dir }, { id: 'asc' as const }];
+    // El nombre desempata siempre A–Z; el sentido elegido solo invierte la columna pedida.
+    const byName = [{ name: 'asc' as const }, { id: 'asc' as const }];
     const orderBy =
       query.orden === 'recientes'
         ? [{ createdAt: 'desc' as const }, { id: 'asc' as const }]
@@ -70,7 +71,9 @@ export class SitesService {
               ? [{ phone: dir }, ...byName]
               : query.orden === 'estado'
                 ? [{ status: dir }, ...byName]
-                : byName;
+                : query.orden === 'nombre'
+                  ? [{ name: dir }, { id: 'asc' as const }]
+                  : byName;
     const client = this.prisma.tenantPrisma.client;
     const [items, active, inactive] = await Promise.all([
       client.findMany({
