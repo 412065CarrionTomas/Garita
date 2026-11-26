@@ -73,6 +73,7 @@ export function parseStreetAddress(
 
 /** A esta distancia de un domicilio, el punto está "en" esa dirección. */
 const ADDRESS_MAX_METERS = 30;
+const ADDRESS_TIMEOUT_MS = 4000;
 
 /** Busca la calle y número del punto. Si Photon no responde o no hay domicilio cerca: null. */
 export async function fetchStreetAddress(
@@ -80,14 +81,16 @@ export async function fetchStreetAddress(
   longitude: number,
 ): Promise<string | null> {
   try {
-    const url = new URL('../reverse', env.VITE_GEOCODER_URL);
+    // Con barra final, "../reverse" queda junto a "api" aunque la URL tenga más tramos (proxy/photon/api).
+    const url = new URL('../reverse', env.VITE_GEOCODER_URL.replace(/\/?$/, '/'));
     url.search = new URLSearchParams({
       lat: String(latitude),
       lon: String(longitude),
       limit: '10',
       radius: String(ADDRESS_MAX_METERS / 1000), // km
     }).toString();
-    const res = await fetch(url);
+    // Es un dato secundario: no puede trabar el guardado del punto si Photon no contesta.
+    const res = await fetch(url, { signal: AbortSignal.timeout(ADDRESS_TIMEOUT_MS) });
     if (!res.ok) return null;
     return parseStreetAddress(await res.json(), latitude, longitude, ADDRESS_MAX_METERS);
   } catch {

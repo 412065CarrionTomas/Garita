@@ -51,7 +51,9 @@ const TAG_LABEL = { qr: 'QR', nfc_basic: 'NFC común', nfc_secure: 'NFC seguro' 
 
 /** Dirección si se pudo definir la calle; si no, las coordenadas (≈1 m con 5 decimales). */
 function locationLabel(point: { address?: string | null; latitude: number; longitude: number }) {
-  return point.address ?? `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
+  const address = point.address?.trim();
+  if (address) return address;
+  return `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
 }
 
 const idResponse = z.looseObject({ id: z.string() });
@@ -207,19 +209,26 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
     const index = Math.min(Math.max(value, 1), draft.length) - 1;
     setDraft([...rest.slice(0, index), moved, ...rest.slice(index)]);
   };
+  // Una consulta por ubicación: reintentar tras confirmar una ubicación lejana no vuelve a preguntar.
+  const addresses = useRef(new Map<string, Promise<string | null>>());
+  const addressAt = (latitude: number, longitude: number) => {
+    const key = `${String(latitude)},${String(longitude)}`;
+    const cached = addresses.current.get(key) ?? fetchStreetAddress(latitude, longitude);
+    addresses.current.set(key, cached);
+    return cached;
+  };
   const saveArrangement = () => run(() => sendArrangement(false));
   const sendArrangement = async (confirmFarLocation: boolean): Promise<void> => {
     if (!draft) return;
-    // Solo los movidos buscan su dirección de nuevo; los demás conservan la guardada.
-    const puntos = await Promise.all(
-      draft.map(async (point) => {
-        const saved = points.data?.find(({ id }) => id === point.id);
-        const moved = saved?.latitude !== point.latitude || saved.longitude !== point.longitude;
-        return moved
-          ? { ...point, address: await fetchStreetAddress(point.latitude, point.longitude) }
-          : point;
-      }),
-    );
+    // Solo los movidos buscan su dirección de nuevo, de a uno para no saturar al geocodificador.
+    const puntos = [];
+    for (const point of draft) {
+      const saved = points.data?.find(({ id }) => id === point.id);
+      const moved = saved?.latitude !== point.latitude || saved.longitude !== point.longitude;
+      puntos.push(
+        moved ? { ...point, address: await addressAt(point.latitude, point.longitude) } : point,
+      );
+    }
     try {
       await apiPatch(
         `/predios/${site.id}/puntos/orden`,
@@ -267,7 +276,7 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
     const body = relocated
       ? {
           ...parsed.data,
-          address: await fetchStreetAddress(parsed.data.latitude, parsed.data.longitude),
+          address: await addressAt(parsed.data.latitude, parsed.data.longitude),
         }
       : parsed.data;
     try {
