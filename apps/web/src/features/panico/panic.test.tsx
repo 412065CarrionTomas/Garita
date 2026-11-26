@@ -297,6 +297,36 @@ it('filtra el historial por predio y estado', async () => {
   });
 });
 
+it('si la página queda vacía (se atendió la última), vuelve a la última con alertas', async () => {
+  // La página 1 todavía cuenta 4 alertas; al pedir la 2, la última ya no está y quedan 3.
+  jest.mocked(apiGet).mockImplementation((path) => {
+    if (path === '/predios') return Promise.resolve([alert.site]);
+    const second = new URLSearchParams(path.split('?')[1]).get('pagina') === '2';
+    return Promise.resolve({
+      items: second ? [] : [alert],
+      total: second ? 3 : 4,
+      activeCount: 3,
+      page: second ? 2 : 1,
+      pageSize: 3,
+    });
+  });
+  renderWithQueryClient(
+    <MemoryRouter>
+      <PanicListPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText('Pedro Díaz');
+  fireEvent.change(screen.getByLabelText('Por página'), { target: { value: '3' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Página 2' }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+  expect(screen.getByText('Pedro Díaz')).toBeInTheDocument();
+});
+
 it('muestra la indicación preparada para una alerta SMS no verificada', async () => {
   jest.mocked(apiGet).mockResolvedValue({ ...alert, authenticated: false, phoneMismatch: true });
   renderWithQueryClient(
