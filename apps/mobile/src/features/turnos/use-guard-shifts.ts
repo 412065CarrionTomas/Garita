@@ -1,33 +1,48 @@
 import { useEffect, useState } from 'react';
+import { z } from 'zod';
 import {
-  accountSuspendedResponseSchema,
+  guardShiftSchema,
   guardShiftsPageSchema,
   type GuardShift,
   type GuardShiftsPage,
 } from '@garita/shared';
-import { apiGet, ApiError } from '@/lib/api-client';
+import { apiGet } from '@/lib/api-client';
+import { loadError, readCached, writeCached, type LoadError } from '@/lib/cached-get';
+import { auth } from '@/lib/firebase';
 import type { DayRange } from './shift-range';
-
-export type LoadError = 'suspended' | 'failed' | null;
 
 interface Loaded {
   key: string;
   shifts: GuardShift[];
   done: boolean;
   error: LoadError;
+  savedAt: string | null;
 }
+
+const cachedSchema = z.object({
+  desde: z.string(),
+  hasta: z.string(),
+  shifts: z.array(guardShiftSchema),
+});
 
 /**
  * Turnos del vigilador en un rango. Trae las páginas en orden y muestra cada una apenas llega;
  * si cambia el rango, descarta lo que seguía en vuelo. Mientras recarga conserva la lista previa
- * (la pantalla la recorta al rango vigente).
+ * (la pantalla la recorta al rango vigente). Guarda el último rango completo para verlo sin señal.
  */
 export function useGuardShifts({ desde, hasta }: DayRange) {
   const [attempt, setAttempt] = useState(0);
   const key = `${desde}|${hasta}|${attempt}`;
-  const [loaded, setLoaded] = useState<Loaded>({ key: '', shifts: [], done: false, error: null });
+  const [loaded, setLoaded] = useState<Loaded>({
+    key: '',
+    shifts: [],
+    done: false,
+    error: null,
+    savedAt: null,
+  });
   useEffect(() => {
     let active = true;
+    const cacheKey = `cache:${auth.currentUser?.uid ?? 'anon'}:turnos`;
     void (async () => {
       let cursor: string | null = null;
       let shifts: GuardShift[] = [];
@@ -42,19 +57,19 @@ export function useGuardShifts({ desde, hasta }: DayRange) {
           if (!active) return;
           shifts = [...shifts, ...page.items];
           cursor = page.nextCursor;
-          setLoaded({ key, shifts, done: !cursor, error: null });
+          setLoaded({ key, shifts, done: !cursor, error: null, savedAt: null });
         } while (cursor);
+        void writeCached(cacheKey, { desde, hasta, shifts });
       } catch (cause) {
+        const cached = await readCached(cacheKey, cachedSchema);
         if (!active) return;
-        const suspended =
-          cause instanceof ApiError &&
-          cause.status === 402 &&
-          accountSuspendedResponseSchema.safeParse(cause.payload).success;
+        const usable = cached?.data.desde === desde && cached.data.hasta === hasta;
         setLoaded((prev) => ({
-          ...prev,
           key,
+          shifts: usable ? cached.data.shifts : prev.shifts,
           done: true,
-          error: suspended ? 'suspended' : 'failed',
+          error: loadError(cause),
+          savedAt: usable ? cached.savedAt : null,
         }));
       }
     })();
@@ -67,6 +82,7 @@ export function useGuardShifts({ desde, hasta }: DayRange) {
     shifts: loaded.shifts,
     loading: !current || !loaded.done,
     error: current ? loaded.error : null,
+    savedAt: current ? loaded.savedAt : null,
     reload: () => setAttempt((n) => n + 1),
   };
 }

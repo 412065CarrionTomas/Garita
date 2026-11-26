@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { space } from '@garita/tokens';
 import { SUSPENSION_MESSAGES, type GuardShift } from '@garita/shared';
 import { Badge, Banner, Button, ListItem, Loading, Segmented, Text, useTheme } from '@/ui';
+import { cachedNotice } from '@/lib/cached-get';
 import { RangeCalendar } from './range-calendar';
 import { isoDay, monthRange, shiftStamp, splitByToday, totals, type DayRange } from './shift-range';
 import { useGuardShifts } from './use-guard-shifts';
@@ -32,7 +33,7 @@ export function ShiftsScreen() {
   const [preset, setPreset] = useState<Preset | null>('month');
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [site, setSite] = useState(ALL);
-  const { shifts, loading, error, reload } = useGuardShifts(range);
+  const { shifts, loading, error, savedAt, reload } = useGuardShifts(range);
 
   // Mientras llega el rango nuevo se ve solo lo que cae dentro de él.
   const inRange = shifts.filter(
@@ -89,12 +90,16 @@ export function ShiftsScreen() {
       <Text color="mutedForeground">
         {`${sum.count} ${sum.count === 1 ? 'turno' : 'turnos'} · ${sum.worked} h trabajadas · ${sum.planned} h por trabajar`}
       </Text>
-      {error && (
-        <Banner tone="danger">
-          {error === 'suspended'
-            ? SUSPENSION_MESSAGES.guard
-            : 'No se pudieron cargar los turnos. Deslizá hacia abajo para reintentar.'}
-        </Banner>
+      {savedAt ? (
+        <Banner tone="warning">{cachedNotice(savedAt)}</Banner>
+      ) : (
+        error && (
+          <Banner tone="danger">
+            {error === 'suspended'
+              ? SUSPENSION_MESSAGES.guard
+              : 'No se pudieron cargar los turnos. Deslizá hacia abajo para reintentar.'}
+          </Banner>
+        )
       )}
       {loading && visible.length === 0 && <Loading label="Cargando turnos…" />}
     </View>

@@ -1,4 +1,5 @@
 import { render, screen, userEvent } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { GuardShift } from '@garita/shared';
 import { apiGet, ApiError } from '@/lib/api-client';
 import { ShiftsScreen } from './shifts-screen';
@@ -36,7 +37,10 @@ const done: GuardShift = {
   summary: { windows: 4, windowsDone: 3, recorded: 14, expected: 16, incidents: 1 },
 };
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(async () => {
+  jest.clearAllMocks();
+  await AsyncStorage.clear();
+});
 
 it('muestra lo que viene y lo hecho en una sola lista, con totales y filtro de predio', async () => {
   jest.mocked(apiGet).mockResolvedValue({ items: [done, base], nextCursor: null });
@@ -70,15 +74,25 @@ it('abre los turnos por venir y pide el rango elegido, página por página', asy
 });
 
 it('avisa si la cuenta está suspendida', async () => {
-  jest
-    .mocked(apiGet)
-    .mockRejectedValue(
-      new ApiError('x', 402, {
-        code: 'ACCOUNT_SUSPENDED',
-        accountStatus: 'suspended',
-        message: 'x',
-      }),
-    );
+  jest.mocked(apiGet).mockRejectedValue(
+    new ApiError('x', 402, {
+      code: 'ACCOUNT_SUSPENDED',
+      accountStatus: 'suspended',
+      message: 'x',
+    }),
+  );
   await render(<ShiftsScreen />);
   expect(await screen.findByText(/cuenta de tu empresa está suspendida/)).toBeOnTheScreen();
+});
+
+it('sin señal vuelve a mostrar el último rango cargado', async () => {
+  jest.mocked(apiGet).mockResolvedValueOnce({ items: [base], nextCursor: null });
+  const first = await render(<ShiftsScreen />);
+  expect(await screen.findByText('Parque Ferreyra')).toBeOnTheScreen();
+  await first.unmount();
+
+  jest.mocked(apiGet).mockRejectedValue(new Error('offline'));
+  await render(<ShiftsScreen />);
+  expect(await screen.findByText(/Sin conexión. Mostrando lo guardado/)).toBeOnTheScreen();
+  expect(screen.getByText('Parque Ferreyra')).toBeOnTheScreen();
 });
