@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { apiGet } from '@/lib/api-client';
+import { lastPage } from '@/lib/page-items';
 import { panicListSchema, panicStatuses } from './queries';
 import { SmsBadges } from './sms-badges';
 
@@ -77,6 +78,11 @@ export function PanicListPage() {
     queryFn: () => apiGet('/predios', z.array(z.object({ id: z.string(), name: z.string() }))),
   });
   const active = list.data?.activeCount ?? 0;
+  // Se atendió lo último de la página: volver a la última que tenga alertas.
+  const total = list.data?.total;
+  if (total !== undefined && filters.pagina > lastPage(total, filters.porPagina)) {
+    setFilters({ ...filters, pagina: lastPage(total, filters.porPagina) });
+  }
 
   return (
     <section className="space-y-4" aria-label="Alertas de pánico">
@@ -141,9 +147,10 @@ export function PanicListPage() {
         <EmptyState title="No hay alertas para estos filtros" />
       ) : (
         <>
-          <div className="border-[1.5px] border-input">
+          <div className="overflow-x-auto border-[1.5px] border-input">
             <DataTable
               label="Alertas de pánico"
+              sortable={false}
               rows={list.data.items}
               getRowId={(alert) => alert.id}
               // Las activas se distinguen también por su sello, no solo por el fondo.

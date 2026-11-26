@@ -2,7 +2,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { noticeSchema } from '@garita/shared';
-import { NOTICE_KINDS, noticesListResponseSchema } from '@garita/shared';
+import { NOTICE_KINDS, NOTICE_STATUSES, noticesListResponseSchema } from '@garita/shared';
 import { z } from 'zod';
 import { apiGet } from '@/lib/api-client';
 import { DataTable } from '@/components/data-table';
@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { cn } from '@/lib/utils';
+import { lastPage } from '@/lib/page-items';
 import { noticeLabels, noticeTone, resolutionLabels } from './labels';
 
 type Notice = z.infer<typeof noticeSchema>;
@@ -93,16 +94,34 @@ function shortDate(iso: string) {
 }
 const STATUS_ORDER = { open: 0, resolved: 1 } as const;
 
+// Lo que venga en la URL se valida: un valor inválido haría fallar el pedido a la API.
+const urlFiltersSchema = z.object({
+  estado: z.enum(NOTICE_STATUSES).or(z.literal('')).catch('open'),
+  tipo: z.enum(NOTICE_KINDS).or(z.literal('')).catch(''),
+  predio: z.string().catch(''),
+});
+function filtersFromUrl(search: URLSearchParams) {
+  const url = urlFiltersSchema.parse(Object.fromEntries(search));
+  const kind: string = url.tipo;
+  return {
+    status: url.estado,
+    kind,
+    siteId: url.predio,
+    page: 1,
+    pageSize: 10,
+  };
+}
+
 export function NoticesPage() {
   // Se puede llegar filtrado desde otras pantallas (ej. /avisos?tipo=shift_unsynced).
   const [search] = useSearchParams();
-  const [filters, setFilters] = useState(() => ({
-    status: (search.get('estado') ?? 'open') as Status,
-    kind: search.get('tipo') ?? '',
-    siteId: search.get('predio') ?? '',
-    page: 1,
-    pageSize: 10,
-  }));
+  const [filters, setFilters] = useState(() => filtersFromUrl(search));
+  // Si cambia la URL con la pantalla abierta (otro enlace, atrás/adelante), se toman sus filtros.
+  const [shownUrl, setShownUrl] = useState(search.toString());
+  if (shownUrl !== search.toString()) {
+    setShownUrl(search.toString());
+    setFilters(filtersFromUrl(search));
+  }
   const update = (change: Partial<typeof filters>) => {
     setFilters((old) => ({ ...old, page: 1, ...change }));
   };
@@ -121,6 +140,11 @@ export function NoticesPage() {
     queryFn: () => apiGet('/predios', z.array(z.object({ id: z.string(), name: z.string() }))),
   });
   const open = notices.data?.openCount ?? 0;
+  // Se resolvió lo último de la página (ej. en vivo): volver a la última que tenga avisos.
+  const total = notices.data?.total;
+  if (total !== undefined && filters.page > lastPage(total, filters.pageSize)) {
+    setFilters({ ...filters, page: lastPage(total, filters.pageSize) });
+  }
 
   return (
     <section aria-labelledby="notices-title" className="space-y-4">
@@ -213,9 +237,10 @@ export function NoticesPage() {
         <EmptyState title="No hay avisos para estos filtros" />
       ) : (
         <>
-          <div className="border-[1.5px] border-input">
+          <div className="overflow-x-auto border-[1.5px] border-input">
             <DataTable
               label="Avisos"
+              sortable={false}
               rows={notices.data.items}
               getRowId={(notice) => notice.id}
               columns={[

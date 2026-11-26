@@ -32,6 +32,37 @@ it('compara por tipo y deja los vacíos al final', () => {
   expect(compareValues('abeja', 'Ñandú')).toBeLessThan(0);
   expect(compareValues('2026-01-02', '2025-12-31', 'date')).toBeGreaterThan(0);
   expect(compareValues(null, 1, 'number')).toBeGreaterThan(0);
+  // NaN y fechas inválidas cuentan como vacías: no rompen el orden.
+  expect(compareValues(Number.NaN, 1, 'number')).toBeGreaterThan(0);
+  expect(compareValues('no es fecha', '2026-01-01', 'date')).toBeGreaterThan(0);
+});
+
+it('sin orden en listas paginadas, y respeta el ancho de columnas que aparecen después', async () => {
+  const user = userEvent.setup();
+  const { rerender } = render(
+    <DataTable
+      label="Animales"
+      rows={rows}
+      columns={columns}
+      getRowId={(r) => r.id}
+      sortable={false}
+    />,
+  );
+  await user.click(screen.getByRole('button', { name: /Cantidad/ }));
+  expect(screen.getByRole('columnheader', { name: /Cantidad/ })).not.toHaveAttribute('aria-sort');
+  expect(firstColumn()).toEqual(['Ñandú', 'abeja', 'Zorro']);
+  rerender(
+    <DataTable
+      label="Animales"
+      rows={rows}
+      columns={[...columns, { id: 'actions', header: 'Acciones', hideHeader: true, width: 56 }]}
+      getRowId={(r) => r.id}
+    />,
+  );
+  expect(screen.getByRole('separator', { name: 'Ancho de Acciones' })).toHaveAttribute(
+    'aria-valuenow',
+    '56',
+  );
 });
 
 it('ordena al hacer clic: ascendente, descendente y sin orden', async () => {

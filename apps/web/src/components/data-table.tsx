@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { compareValues, isEmpty, type DataColumnType, type SortValue } from '@/lib/compare-values';
 import {
@@ -32,6 +32,8 @@ type Sort = { id: string; dir: 'asc' | 'desc' } | null;
 
 const MIN_WIDTH = 48;
 const KEY_STEP = 16;
+/** Lo mínimo que se le reserva a una columna sin ancho fijo: si no entra, la tabla se desplaza. */
+const FLEX_MIN_WIDTH = 160;
 
 /**
  * Pone el texto completo como `title` solo donde está cortado con "…": la celda o sus renglones
@@ -40,8 +42,16 @@ const KEY_STEP = 16;
 function revealIfTruncated(event: { currentTarget: HTMLElement }) {
   const cell = event.currentTarget;
   for (const el of [cell, ...cell.querySelectorAll<HTMLElement>('.truncate')]) {
-    if (el.scrollWidth > el.clientWidth) el.title = el.textContent;
-    else el.removeAttribute('title');
+    // Solo se toca el `title` que puso esta función, nunca uno propio del contenido.
+    if (el.title && !el.dataset.autoTitle) continue;
+    if (el.scrollWidth > el.clientWidth) {
+      // innerText respeta los renglones (nombre y dirección no quedan pegados); jsdom no lo tiene.
+      el.title = el.innerText || el.textContent;
+      el.dataset.autoTitle = 'true';
+    } else {
+      el.removeAttribute('title');
+      delete el.dataset.autoTitle;
+    }
   }
 }
 
@@ -58,6 +68,7 @@ export function DataTable<T>({
   label,
   className,
   rowClassName,
+  sortable = true,
 }: {
   columns: DataColumn<T>[];
   rows: T[];
@@ -65,6 +76,8 @@ export function DataTable<T>({
   label: string;
   className?: string;
   rowClassName?: (row: T) => string | undefined;
+  /** false en listas paginadas en el servidor: ordenar solo la página visible confunde. */
+  sortable?: boolean;
 }) {
   const [order, setOrder] = useState(() => columns.map((column) => column.id));
   const [widths, setWidths] = useState<Record<string, number>>(() =>
@@ -75,6 +88,14 @@ export function DataTable<T>({
   const [announcement, setAnnouncement] = useState('');
   const resizing = useRef<{ id: string; x: number; width: number } | null>(null);
   const headRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
+  const headerButtons = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Al mover una columna con el teclado, React reubica el <th> y el navegador le saca el foco.
+  const refocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    headerButtons.current[refocus.current]?.focus();
+    refocus.current = null;
+  });
 
   // Columnas nuevas (o que dejaron de venir) se ajustan sin perder el orden elegido.
   const byId = new Map(columns.map((column) => [column.id, column]));
@@ -91,7 +112,8 @@ export function DataTable<T>({
     return [...rows].sort((a, b) => {
       const [x, y] = [read(a), read(b)];
       // Los vacíos quedan al final en los dos sentidos.
-      if (isEmpty(x) || isEmpty(y)) return compareValues(x, y, column.type);
+      if (isEmpty(x, column.type) || isEmpty(y, column.type))
+        return compareValues(x, y, column.type);
       return sign * compareValues(x, y, column.type);
     });
   })();
@@ -103,8 +125,9 @@ export function DataTable<T>({
     setOrder(ids);
     setAnnouncement(`${byId.get(id)?.header ?? ''}: columna ${target + 1} de ${ids.length}`);
   };
+  const canSort = (column: DataColumn<T>) => sortable && Boolean(column.value);
   const toggleSort = (column: DataColumn<T>) => {
-    if (!column.value) return;
+    if (!canSort(column)) return;
     setSort((current) =>
       current?.id !== column.id
         ? { id: column.id, dir: 'asc' }
@@ -113,8 +136,11 @@ export function DataTable<T>({
           : null,
     );
   };
+  // El ancho elegido, o el inicial de la columna (también si apareció después del primer render).
+  const fixedWidth = (id: string) => widths[id] ?? byId.get(id)?.width;
   const widthOf = (id: string) =>
-    widths[id] ?? Math.max(MIN_WIDTH, headRefs.current[id]?.getBoundingClientRect().width ?? 0);
+    fixedWidth(id) ?? Math.max(MIN_WIDTH, headRefs.current[id]?.getBoundingClientRect().width ?? 0);
+  const minTableWidth = visible.reduce((sum, c) => sum + (fixedWidth(c.id) ?? FLEX_MIN_WIDTH), 0);
   const resize = (id: string, width: number) => {
     setWidths((current) => ({ ...current, [id]: Math.max(MIN_WIDTH, Math.round(width)) }));
   };
@@ -125,12 +151,13 @@ export function DataTable<T>({
         aria-label={label}
         containerClassName="overflow-visible"
         className={cn('table-fixed', className)}
+        style={{ width: `max(100%, ${String(minTableWidth)}px)` }}
       >
         <colgroup>
           {visible.map((column) => (
             <col
               key={column.id}
-              style={widths[column.id] ? { width: widths[column.id] } : undefined}
+              style={fixedWidth(column.id) ? { width: fixedWidth(column.id) } : undefined}
             />
           ))}
         </colgroup>
@@ -181,7 +208,10 @@ export function DataTable<T>({
                   ) : (
                     <button
                       type="button"
-                      title={`${column.header}. Clic para ordenar; arrastrá o usá Alt+←/→ para moverla.`}
+                      ref={(el) => {
+                        headerButtons.current[column.id] = el;
+                      }}
+                      title={`${column.header}. ${canSort(column) ? 'Clic para ordenar; a' : 'A'}rrastrá o usá Alt+←/→ para moverla.`}
                       onClick={() => {
                         toggleSort(column);
                       }}
@@ -189,6 +219,7 @@ export function DataTable<T>({
                         if (!event.altKey) return;
                         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
                         event.preventDefault();
+                        refocus.current = column.id;
                         move(column.id, index + (event.key === 'ArrowLeft' ? -1 : 1));
                       }}
                       className={cn(
@@ -213,7 +244,7 @@ export function DataTable<T>({
                     aria-orientation="vertical"
                     aria-label={`Ancho de ${column.header}`}
                     aria-valuemin={MIN_WIDTH}
-                    aria-valuenow={widths[column.id]}
+                    aria-valuenow={fixedWidth(column.id)}
                     tabIndex={0}
                     className="group absolute inset-y-0 right-0 flex w-2 cursor-col-resize touch-none justify-center"
                     onPointerDown={(event) => {

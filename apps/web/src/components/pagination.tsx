@@ -1,7 +1,8 @@
+import { useId } from 'react';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { PAGE_SIZES, pageItems } from '@/lib/page-items';
+import { lastPage, PAGE_SIZES, pageItems } from '@/lib/page-items';
 
 /** Pie de una lista paginada: cuántos se ven, las páginas (centradas) y cuántos por página. */
 export function Pagination({
@@ -23,17 +24,21 @@ export function Pagination({
   onPage: (page: number) => void;
   onPageSize: (size: number) => void;
 }) {
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const first = (page - 1) * pageSize + 1;
+  const id = useId();
+  const pages = lastPage(total, pageSize);
+  const current = Math.min(Math.max(1, page), pages);
+  const first = (current - 1) * pageSize + 1;
   const last = first + shown - 1;
   return (
     <div className="grid items-center gap-3 text-sm sm:grid-cols-[1fr_auto_1fr]">
       <p className="text-muted-foreground tabular-nums">
-        {first === last ? String(first) : `${String(first)}–${String(last)}`} de {String(total)}
+        {shown === 0
+          ? `0 de ${String(total)}`
+          : `${first === last ? String(first) : `${String(first)}–${String(last)}`} de ${String(total)}`}
       </p>
       <nav aria-label={`Páginas de ${label}`} className="justify-self-center">
         <ul className="flex items-center gap-1">
-          {pageItems(page, pages).map((item, index) =>
+          {pageItems(current, pages).map((item, index) =>
             item === 'gap' ? (
               <li
                 key={`gap-${String(index)}`}
@@ -47,13 +52,13 @@ export function Pagination({
                 <button
                   type="button"
                   aria-label={`Página ${String(item)}`}
-                  aria-current={item === page ? 'page' : undefined}
+                  aria-current={item === current ? 'page' : undefined}
                   onClick={() => {
-                    if (item !== page) onPage(item);
+                    if (item !== current) onPage(item);
                   }}
                   className={cn(
                     't-numeral h-9 min-w-9 rounded-md border-[1.5px] px-2 text-base transition-colors',
-                    item === page
+                    item === current
                       ? 'border-primary bg-primary text-primary-foreground'
                       : 'border-transparent text-foreground hover:border-input hover:bg-muted',
                   )}
@@ -66,9 +71,9 @@ export function Pagination({
         </ul>
       </nav>
       <div className="flex items-center gap-2 sm:justify-self-end">
-        <Label htmlFor={`page-size-${label}`}>Por página</Label>
+        <Label htmlFor={id}>Por página</Label>
         <NativeSelect
-          id={`page-size-${label}`}
+          id={id}
           size="sm"
           value={pageSize}
           onChange={(event) => {

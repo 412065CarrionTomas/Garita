@@ -189,6 +189,20 @@ it('llega filtrado desde otra pantalla', async () => {
   window.history.pushState({}, '', '/');
 });
 
+it('ignora filtros inválidos de la URL en vez de pedirlos a la API', async () => {
+  window.history.pushState({}, '', '/avisos?estado=abierto&tipo=invalido');
+  renderWithQueryClient(
+    <MemoryRouter initialEntries={['/avisos?estado=abierto&tipo=invalido']}>
+      <NoticesPage />
+    </MemoryRouter>,
+  );
+  await screen.findByRole('link', { name: /Ronda incumplida/ });
+  const requested = jest.mocked(apiGet).mock.calls.map(([url]) => url);
+  expect(requested).toContain('/avisos?estado=open&pagina=1&porPagina=10');
+  expect(screen.getByRole('combobox', { name: 'Tipo' })).toHaveValue('');
+  window.history.pushState({}, '', '/');
+});
+
 it('refresca y anuncia un aviso nuevo sin recargar; actualizado mueve al historial', async () => {
   current = [];
   renderWithQueryClient(
