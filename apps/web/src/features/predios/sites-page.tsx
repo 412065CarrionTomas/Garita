@@ -181,7 +181,8 @@ export function SitesPage() {
   const [listOpen, setListOpen] = useState(true);
   const [pointActions, setPointActions] = useState<HTMLDivElement | null>(null);
   // Columna de supervisores y baja: hasta el borde de la ventana; la lista se desplaza por dentro.
-  const [measureSide, sideHeight] = useFillHeight<HTMLDivElement>(16);
+  // Al menos 480 px: con "Dar de baja" fijo, a la lista de supervisores le quedan ~150 px.
+  const [measureSide, sideHeight] = useFillHeight<HTMLDivElement>(16, 480);
   const listId = useId();
   useEffect(() => {
     if (!listOpen) return;
