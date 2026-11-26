@@ -84,6 +84,8 @@ export async function fetchStreetAddress(
   longitude: number,
   signal: AbortSignal = AbortSignal.timeout(ADDRESS_TIMEOUT_MS),
 ): Promise<string | null> {
+  // El plazo compartido ya venció (ordenar varios puntos): ni se arma el pedido.
+  if (signal.aborted) return null;
   try {
     // Con barra final, "../reverse" queda junto a "api" aunque la URL tenga más tramos (proxy/photon/api).
     const url = new URL('../reverse', env.VITE_GEOCODER_URL.replace(/\/?$/, '/'));
