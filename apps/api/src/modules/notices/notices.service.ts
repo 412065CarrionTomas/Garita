@@ -107,7 +107,8 @@ export class NoticesService implements NoticesPort {
           shift: { select: { startsAt: true, endsAt: true } },
         },
       }),
-      this.prisma.tenantPrisma.notice.count({ where }),
+      // Sin paginar, el total es lo que trae la lista: el conteo extra solo hace falta al paginar.
+      query.pageSize ? this.prisma.tenantPrisma.notice.count({ where }) : null,
       this.prisma.tenantPrisma.notice.count({ where: { ...suspension, status: 'open' } }),
       this.prisma.tenantPrisma.notice.count({
         where: { ...suspension, status: 'open', views: { none: { userId } } },
@@ -115,7 +116,7 @@ export class NoticesService implements NoticesPort {
     ]);
     return {
       items: items.map(({ views, ...notice }) => ({ ...notice, seenAt: views[0]?.seenAt ?? null })),
-      total,
+      total: total ?? items.length,
       openCount,
       unseenOpenCount,
     };
