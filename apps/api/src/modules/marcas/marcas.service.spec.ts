@@ -249,6 +249,9 @@ describe('MarcasService', () => {
       expect(pairMaxSpeedKmh(['a-pie'], ['a-pie'], speeds, 25)).toBe(10);
       expect(pairMaxSpeedKmh(['a-pie'], ['en-auto'], speeds, 25)).toBe(60);
     });
+    it('una lectura de un punto compartido toma la más alta de sus rondas', () => {
+      expect(pairMaxSpeedKmh(['a-pie', 'en-auto'], ['a-pie'], speeds, 25)).toBe(60);
+    });
     it('sin ronda o ronda sin velocidad: la del predio entra en el par', () => {
       expect(pairMaxSpeedKmh(['a-pie'], [], speeds, 25)).toBe(25);
       expect(pairMaxSpeedKmh(['sin-velocidad'], ['a-pie'], speeds, 25)).toBe(25);

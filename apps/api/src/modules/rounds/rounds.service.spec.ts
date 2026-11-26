@@ -10,6 +10,7 @@ describe('round versions for the guard', () => {
     { tenantPrisma: { roundVersion: { findMany } } } as unknown as PrismaService,
     {} as TenantResourceService,
     {} as RouteBuilder,
+    { now: () => new Date() },
   );
   const guard = { userId: 'guard', companyId: 'company', role: 'guard', status: 'active' } as const;
   const checkpoint = (id: string, lat: string) => ({
@@ -116,6 +117,7 @@ describe('round speed', () => {
         findOwnedOrThrow: jest.fn().mockResolvedValue({ siteId: 's1' }),
       } as unknown as TenantResourceService,
       { build } as unknown as RouteBuilder,
+      { now: () => new Date() },
     );
     const user = { userId: 'u', companyId: 'c', role: 'admin', status: 'active' } as const;
     const input = {
@@ -139,5 +141,35 @@ describe('round speed', () => {
     expect(versionCreate).toHaveBeenLastCalledWith({
       data: expect.objectContaining({ speedProfile: null, maxSpeedKmh: null }) as unknown,
     });
+  });
+});
+
+describe('round list', () => {
+  it('only counts scheduled shifts that have not ended yet', async () => {
+    const findMany = jest.fn().mockResolvedValue([{ id: 'r1', _count: { shifts: 2 } }]);
+    const now = new Date('2026-11-26T12:00:00.000Z');
+    const service = new RoundsService(
+      { tenantPrisma: { round: { findMany } } } as unknown as PrismaService,
+      { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService,
+      {} as RouteBuilder,
+      { now: () => now },
+    );
+    await expect(service.list('s1')).resolves.toEqual([{ id: 'r1', scheduledShifts: 2 }]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          _count: {
+            select: {
+              shifts: {
+                where: {
+                  roundVersionId: null,
+                  shift: { status: { in: ['scheduled', 'unassigned'] }, endsAt: { gte: now } },
+                },
+              },
+            },
+          },
+        }) as unknown,
+      }),
+    );
   });
 });

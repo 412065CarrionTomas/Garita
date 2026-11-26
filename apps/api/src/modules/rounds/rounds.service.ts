@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -22,6 +23,7 @@ import {
   type SpeedProfile,
 } from '@garita/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { CLOCK, type Clock } from '../../common/clock';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { RouteBuilder } from '../routing/route-builder';
@@ -36,7 +38,7 @@ interface RoundInput {
   route?: RouteInput;
   allowStraight?: boolean;
   speedProfile?: SpeedProfile | null;
-  maxSpeedKmh?: number;
+  maxSpeedKmh?: number | null;
 }
 
 /** Velocidad que se guarda en la versión: sin perfil, ninguna (se usa la del predio). */
@@ -44,7 +46,7 @@ function roundSpeed(input: RoundInput) {
   const profile = input.speedProfile ?? null;
   if (!profile) return { speedProfile: null, maxSpeedKmh: null };
   const kmh = profile === 'custom' ? input.maxSpeedKmh : DEFAULT_SPEEDS_KMH[profile];
-  if (kmh === undefined)
+  if (kmh == null)
     throw new BadRequestException('El perfil personalizado requiere indicar la velocidad');
   return { speedProfile: profile, maxSpeedKmh: kmh };
 }
@@ -56,6 +58,7 @@ export class RoundsService {
     private readonly prisma: PrismaService,
     private readonly resources: TenantResourceService,
     private readonly routes: RouteBuilder,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
   /**
@@ -128,7 +131,11 @@ export class RoundsService {
             shifts: {
               where: {
                 roundVersionId: null,
-                shift: { status: { in: ['scheduled', 'unassigned'] } },
+                // Un turno sin asignar que ya pasó queda así para siempre: no lo alcanza la edición.
+                shift: {
+                  status: { in: ['scheduled', 'unassigned'] },
+                  endsAt: { gte: this.clock.now() },
+                },
               },
             },
           },
@@ -142,6 +149,7 @@ export class RoundsService {
   async create(siteId: string, input: RoundInput, user: AuthenticatedUser) {
     const site = await this.resources.findOwnedOrThrow('Site', siteId);
     if (site.status !== 'active') throw new NotFoundException('Recurso no encontrado');
+    const speed = roundSpeed(input);
     const points = await this.assertCheckpoints(siteId, input.checkpointIds);
     // Network call to the routing provider: never inside the transaction.
     const route = await this.buildRoute(siteId, input, points);
@@ -161,7 +169,7 @@ export class RoundsService {
                 windowEndLocal: input.windowEndLocal,
                 graceMinutes: input.graceMinutes,
                 route,
-                ...roundSpeed(input),
+                ...speed,
                 createdById: user.userId,
                 checkpoints: {
                   create: input.checkpointIds.map((checkpointId, position) => ({
@@ -198,6 +206,7 @@ export class RoundsService {
   async update(id: string, input: RoundInput, user: AuthenticatedUser) {
     const round = await this.resources.findOwnedOrThrow('Round', id);
     const siteId = String(round.siteId);
+    const speed = roundSpeed(input);
     const points = await this.assertCheckpoints(siteId, input.checkpointIds);
     const route = await this.buildRoute(siteId, input, points);
     try {
@@ -215,7 +224,7 @@ export class RoundsService {
             windowEndLocal: input.windowEndLocal,
             graceMinutes: input.graceMinutes,
             route,
-            ...roundSpeed(input),
+            ...speed,
             createdById: user.userId,
             checkpoints: {
               create: input.checkpointIds.map((checkpointId, position) => ({
