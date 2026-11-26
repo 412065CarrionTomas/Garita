@@ -80,9 +80,8 @@ export function DataTable<T>({
   sortable?: boolean;
 }) {
   const [order, setOrder] = useState(() => columns.map((column) => column.id));
-  const [widths, setWidths] = useState<Record<string, number>>(() =>
-    Object.fromEntries(columns.flatMap((c) => (c.width ? [[c.id, c.width]] : []))),
-  );
+  // Solo los anchos que eligió el usuario; el inicial sale de cada columna (ver `fixedWidth`).
+  const [widths, setWidths] = useState<Record<string, number>>({});
   const [sort, setSort] = useState<Sort>(null);
   const [dragged, setDragged] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -106,7 +105,7 @@ export function DataTable<T>({
 
   const sorted = (() => {
     const column = sort && byId.get(sort.id);
-    if (!sort || !column?.value) return rows;
+    if (!sortable || !sort || !column?.value) return rows;
     const read = column.value;
     const sign = sort.dir === 'asc' ? 1 : -1;
     return [...rows].sort((a, b) => {
@@ -164,7 +163,7 @@ export function DataTable<T>({
         <TableHeader className="sticky top-0 z-10">
           <TableRow>
             {visible.map((column, index) => {
-              const sortDir = sort?.id === column.id ? sort.dir : null;
+              const sortDir = sortable && sort?.id === column.id ? sort.dir : null;
               return (
                 <TableHead
                   key={column.id}
@@ -229,9 +228,11 @@ export function DataTable<T>({
                       )}
                     >
                       <span className="truncate">{column.header}</span>
-                      <span aria-hidden="true" className="w-2 shrink-0">
-                        {sortDir === 'asc' ? '▲' : sortDir === 'desc' ? '▼' : ''}
-                      </span>
+                      {canSort(column) && (
+                        <span aria-hidden="true" className="w-2 shrink-0">
+                          {sortDir === 'asc' ? '▲' : sortDir === 'desc' ? '▼' : ''}
+                        </span>
+                      )}
                     </button>
                   )}
                   {column.headerActions && (
@@ -262,6 +263,12 @@ export function DataTable<T>({
                       const start = resizing.current;
                       if (start?.id !== column.id) return;
                       resize(column.id, start.width + event.clientX - start.x);
+                    }}
+                    onPointerUp={() => {
+                      resizing.current = null;
+                    }}
+                    onPointerCancel={() => {
+                      resizing.current = null;
                     }}
                     onLostPointerCapture={() => {
                       resizing.current = null;

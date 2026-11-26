@@ -37,6 +37,25 @@ it('compara por tipo y deja los vacíos al final', () => {
   expect(compareValues('no es fecha', '2026-01-01', 'date')).toBeGreaterThan(0);
 });
 
+it('al pasar a sortable={false} deja de aplicar el orden elegido', async () => {
+  const user = userEvent.setup();
+  const table = (sortable: boolean) => (
+    <DataTable
+      label="Animales"
+      rows={rows}
+      columns={columns}
+      getRowId={(r) => r.id}
+      sortable={sortable}
+    />
+  );
+  const { rerender } = render(table(true));
+  await user.click(screen.getByRole('button', { name: /Nombre/ }));
+  expect(firstColumn()).toEqual(['abeja', 'Ñandú', 'Zorro']);
+  rerender(table(false));
+  expect(firstColumn()).toEqual(['Ñandú', 'abeja', 'Zorro']);
+  expect(screen.getByRole('columnheader', { name: /Nombre/ })).not.toHaveAttribute('aria-sort');
+});
+
 it('sin orden en listas paginadas, y respeta el ancho de columnas que aparecen después', async () => {
   const user = userEvent.setup();
   const { rerender } = render(
