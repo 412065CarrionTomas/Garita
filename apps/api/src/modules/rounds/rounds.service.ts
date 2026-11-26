@@ -102,15 +102,27 @@ export class RoundsService {
 
   async list(siteId: string) {
     await this.resources.findOwnedOrThrow('Site', siteId);
-    return this.prisma.tenantPrisma.round.findMany({
+    const rounds = await this.prisma.tenantPrisma.round.findMany({
       where: { siteId },
       include: {
         currentVersion: {
           include: { checkpoints: { orderBy: { position: 'asc' }, include: { checkpoint: true } } },
         },
+        // Los programados no fijan versión (se fija al iniciar): siguen a la vigente al editar.
+        _count: {
+          select: {
+            shifts: {
+              where: {
+                roundVersionId: null,
+                shift: { status: { in: ['scheduled', 'unassigned'] } },
+              },
+            },
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
+    return rounds.map(({ _count, ...round }) => ({ ...round, scheduledShifts: _count.shifts }));
   }
 
   async create(siteId: string, input: RoundInput, user: AuthenticatedUser) {
