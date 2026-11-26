@@ -42,6 +42,7 @@ jest.mock('@/features/navegacion/guard-bar', () => ({
   GUARD_BAR_HEIGHT: 64,
 }));
 jest.mock('@/features/panico/panic-overlay', () => ({
+  PANIC_OVERLAY_SPACE: 176,
   PanicOverlay: () => {
     const React = jest.requireActual('react');
     const { Text } = jest.requireActual('react-native');

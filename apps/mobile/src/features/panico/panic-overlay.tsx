@@ -16,7 +16,8 @@ const HOLD_MS = 2000;
 // Anillo de 112 con trazo de 6: piezas de tamaño fijo, como los casilleros de `src/ui`.
 const RING = 112;
 /** Alto que tapa el anillo sobre el contenido: las pantallas lo reservan abajo. */
-export const PANIC_OVERLAY_SPACE = RING + space[5] * 2;
+// Anillo, márgenes y una línea de estado (alerta activa) debajo.
+export const PANIC_OVERLAY_SPACE = RING + space[5] * 2 + space[6];
 const STROKE = 6;
 const RADIUS = (RING - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;

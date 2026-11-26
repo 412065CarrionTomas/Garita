@@ -28,8 +28,10 @@ export function RoundScreen({
   /** Abierto desde la Ronda en curso: muestra la ubicación del vigilador. */
   live?: boolean;
 }) {
-  const { versions: found, loading, error } = useRoundVersions(versionIds);
-  const versions = versionIds.flatMap((id) => found.get(id) ?? []);
+  // Sin repetidos: un id dos veces en el enlace no duplica capas ni claves.
+  const ids = [...new Set(versionIds)];
+  const { versions: found, partial, loading, error } = useRoundVersions(ids);
+  const versions = ids.flatMap((id) => found.get(id) ?? []);
   const doneSet = new Set(done);
   const stateOf = (id: string): PointState =>
     doneSet.has(id) ? 'done' : id === next ? 'next' : 'pending';
@@ -55,7 +57,7 @@ export function RoundScreen({
       ) : (
         <Text color="mutedForeground">{summary(versions[0])}</Text>
       )}
-      {versions.length < versionIds.length && (
+      {partial && (
         <Banner tone="warning">
           Algún recorrido no se pudo cargar sin señal. Se muestran los que están en el celular.
         </Banner>

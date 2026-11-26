@@ -24,7 +24,7 @@ const inFlight = new Map<string, Promise<GuardRoundVersion | undefined>>();
 let memoryUid: string | null = null;
 
 const uid = () => auth.currentUser?.uid ?? 'anon';
-const storageKey = (id: string) => `round-version:${uid()}:${id}`;
+const storageKey = (owner: string, id: string) => `round-version:${owner}:${id}`;
 const storedSchema = z.object({ savedAt: z.number(), version: guardRoundVersionSchema });
 
 /** Vacía la memoria: al cerrar sesión, para que el próximo usuario no vea lo de otro. */
@@ -34,8 +34,8 @@ export function clearRoundVersionsMemory() {
   memoryUid = null;
 }
 
-async function fromStorage(id: string) {
-  const raw = await AsyncStorage.getItem(storageKey(id)).catch(() => null);
+async function fromStorage(owner: string, id: string) {
+  const raw = await AsyncStorage.getItem(storageKey(owner, id)).catch(() => null);
   if (!raw) return undefined;
   try {
     return storedSchema.safeParse(JSON.parse(raw)).data;
@@ -45,47 +45,55 @@ async function fromStorage(id: string) {
 }
 
 /** Pide a la API, en un solo pedido por tanda, las versiones que faltan o hay que revalidar. */
-async function fetchMissing(ids: string[]) {
+async function fetchMissing(owner: string, ids: string[]) {
   for (let i = 0; i < ids.length; i += GUARD_ROUND_VERSIONS_MAX) {
     const batch = ids.slice(i, i + GUARD_ROUND_VERSIONS_MAX);
     const versions = await apiGet(
       `/rondas/versiones?ids=${batch.map(encodeURIComponent).join(',')}`,
       guardRoundVersionsSchema,
     );
+    // Si cambió el usuario mientras volvía la respuesta, no se guarda para el nuevo.
+    if (uid() !== owner) return;
     for (const version of versions) {
       memory.set(version.id, version);
       const entry = JSON.stringify({ savedAt: Date.now(), version });
-      void AsyncStorage.setItem(storageKey(version.id), entry).catch(() => undefined);
+      void AsyncStorage.setItem(storageKey(owner, version.id), entry).catch(() => undefined);
     }
   }
 }
 
 /** Carga una tanda: primero el disco; lo que falta o está viejo va en un solo pedido a la API. */
-async function load(ids: string[]) {
+async function load(owner: string, ids: string[]) {
   const toFetch: string[] = [];
   for (const id of ids) {
-    const stored = await fromStorage(id);
+    const stored = await fromStorage(owner, id);
+    if (uid() !== owner) return;
     if (stored) memory.set(id, stored.version);
     if (!stored || Date.now() - stored.savedAt > REVALIDATE_MS) toFetch.push(id);
   }
-  if (toFetch.length) await fetchMissing(toFetch);
+  if (toFetch.length) await fetchMissing(owner, toFetch);
 }
 
 /**
  * Devuelve las versiones pedidas que se pudieron conseguir. Las que ya están no tocan la red; las
  * que faltan van juntas en un pedido, y dos pantallas que piden la misma comparten la respuesta.
- * Sin señal devuelve lo que haya en el celular; solo falla si no consiguió ninguna.
+ * Sin señal devuelve lo que haya en el celular y `failed` avisa que alguna no llegó por la red;
+ * solo falla si no consiguió ninguna. Una versión que la API no devuelve (no autorizada) no es
+ * una falla de red.
  */
-export async function getRoundVersions(ids: string[]): Promise<Map<string, GuardRoundVersion>> {
-  if (memoryUid !== uid()) {
+export async function getRoundVersions(
+  ids: string[],
+): Promise<{ versions: Map<string, GuardRoundVersion>; failed: boolean }> {
+  const owner = uid();
+  if (memoryUid !== owner) {
     clearRoundVersionsMemory();
-    memoryUid = uid();
+    memoryUid = owner;
   }
   const unique = [...new Set(ids)];
   // Se registran en curso antes de cualquier espera: un pedido simultáneo las encuentra.
   const toLoad = unique.filter((id) => !memory.has(id) && !inFlight.has(id));
   if (toLoad.length) {
-    const batch = load(toLoad);
+    const batch = load(owner, toLoad);
     for (const id of toLoad) {
       // Si la red falla, lo que salió del disco igual sirve.
       const pending = batch.then(
@@ -109,7 +117,7 @@ export async function getRoundVersions(ids: string[]): Promise<Map<string, Guard
   });
   const failure = results.find((result) => result.status === 'rejected');
   if (!found.size && failure?.status === 'rejected') throw failure.reason;
-  return found;
+  return { versions: found, failed: Boolean(failure) };
 }
 
 /** Versiones de ronda para una pantalla, con estado de carga y error. */
@@ -118,16 +126,17 @@ export function useRoundVersions(ids: string[]) {
   const [state, setState] = useState<{
     key: string;
     versions: Map<string, GuardRoundVersion>;
+    failed: boolean;
     error: LoadError;
-  }>({ key: '', versions: new Map(), error: null });
+  }>({ key: '', versions: new Map(), failed: false, error: null });
   useEffect(() => {
     let active = true;
     getRoundVersions(key ? key.split(',') : [])
-      .then((versions) => {
-        if (active) setState({ key, versions, error: null });
+      .then(({ versions, failed }) => {
+        if (active) setState({ key, versions, failed, error: null });
       })
       .catch((cause: unknown) => {
-        if (active) setState({ key, versions: new Map(), error: loadError(cause) });
+        if (active) setState({ key, versions: new Map(), failed: true, error: loadError(cause) });
       });
     return () => {
       active = false;
@@ -136,6 +145,8 @@ export function useRoundVersions(ids: string[]) {
   const current = state.key === key;
   return {
     versions: current ? state.versions : new Map<string, GuardRoundVersion>(),
+    /** Alguna versión no llegó por falta de red (se muestran las del celular). */
+    partial: current && state.failed && state.versions.size > 0,
     loading: !current,
     error: current ? state.error : null,
   };

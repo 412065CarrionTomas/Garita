@@ -1,6 +1,7 @@
 import type { GuardShift } from '@garita/shared';
 import {
   addDays,
+  dayIn,
   endDay,
   isoDay,
   withEdge,
@@ -143,4 +144,8 @@ it('el día en que termina se calcula en la zona del predio', () => {
       }),
     ),
   ).toBe('2026-11-26');
+});
+
+it('con una zona inválida usa el día del celular en vez de fallar', () => {
+  expect(dayIn(new Date(2026, 10, 26, 12), 'Zona/Inexistente')).toBe('2026-11-26');
 });

@@ -15,7 +15,8 @@ export function isoDay(date: Date): string {
 /** Día `AAAA-MM-DD` desplazado `days` días. */
 export function addDays(day: string, days: number): string {
   const [y, m, d] = day.split('-').map(Number);
-  return isoDay(new Date(y ?? 0, (m ?? 1) - 1, (d ?? 1) + days));
+  // En UTC: un cambio de horario local no corre el día.
+  return new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, (d ?? 1) + days)).toISOString().slice(0, 10);
 }
 
 /**
@@ -50,10 +51,11 @@ export function totals(shifts: GuardShift[]) {
     if (shift.startedAt && shift.closedAt) {
       // El cierre automático llega después del horario (margen de envío): se cuenta hasta el fin.
       const end =
-        shift.status === 'auto_closed' && shift.closedAt > shift.endsAt
+        shift.status === 'auto_closed' && Date.parse(shift.closedAt) > Date.parse(shift.endsAt)
           ? shift.endsAt
           : shift.closedAt;
-      worked += hours(shift.startedAt, end);
+      // Un desfasaje de reloj no resta horas.
+      worked += Math.max(0, hours(shift.startedAt, end));
     } else if (shift.status === 'scheduled' || shift.status === 'in_progress')
       planned += hours(shift.startsAt, shift.endsAt);
   }
@@ -94,15 +96,22 @@ const dayFormats = new Map<string, Intl.DateTimeFormat>();
 export function dayIn(date: Date, timeZone: string): string {
   let format = dayFormats.get(timeZone);
   if (!format) {
-    format = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
+    try {
+      format = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+    } catch {
+      // Zona inválida: el día del celular, que es donde trabaja el vigilador.
+      return isoDay(date);
+    }
     dayFormats.set(timeZone, format);
   }
-  return format.format(date);
+  // Por partes, como `localDate` en la API: el formato completo de `en-CA` varía según el ICU.
+  const parts = Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 /** Un turno nocturno toca dos días: el que empieza y el que termina. */

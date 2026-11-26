@@ -53,3 +53,10 @@ it('avisa si no pudo cargar el recorrido', async () => {
   await render(<RoundScreen versionIds={['v1']} />);
   expect(await screen.findByText(/No se pudo cargar el recorrido/)).toBeOnTheScreen();
 });
+
+it('no repite una ronda pedida dos veces ni avisa falta de señal si la API respondió', async () => {
+  jest.mocked(apiGet).mockResolvedValue([version]);
+  await render(<RoundScreen versionIds={['v1', 'v1', 'ajena']} />);
+  expect(await screen.findAllByText('1. Portón')).toHaveLength(1);
+  expect(screen.queryByText(/no se pudo cargar sin señal/)).toBeNull();
+});

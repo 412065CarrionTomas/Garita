@@ -96,15 +96,13 @@ it('con la cuenta suspendida avisa aunque haya copia guardada', async () => {
   const first = await render(<TodayScreen />);
   expect(await screen.findByText('Predio b')).toBeOnTheScreen();
   await first.unmount();
-  jest
-    .mocked(apiGet)
-    .mockRejectedValue(
-      new ApiError('x', 402, {
-        code: 'ACCOUNT_SUSPENDED',
-        accountStatus: 'suspended',
-        message: 'x',
-      }),
-    );
+  jest.mocked(apiGet).mockRejectedValue(
+    new ApiError('x', 402, {
+      code: 'ACCOUNT_SUSPENDED',
+      accountStatus: 'suspended',
+      message: 'x',
+    }),
+  );
   await render(<TodayScreen />);
   expect(await screen.findByText(/cuenta de tu empresa está suspendida/)).toBeOnTheScreen();
   expect(screen.queryByText('Predio b')).toBeNull();
