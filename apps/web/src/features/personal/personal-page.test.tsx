@@ -148,11 +148,10 @@ describe('PersonalPage', () => {
     expect(screen.getByRole('button', { name: 'Página 8' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Página 5' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Página 8' }));
+    // Las páginas siguientes responden con el total por defecto (1), y la paginación vuelve sola a
+    // la 1: por eso se verifica que se pidió la 8, no que fue la última llamada.
     await waitFor(() => {
-      expect(apiGet).toHaveBeenLastCalledWith(
-        expect.stringContaining('pagina=8'),
-        expect.anything(),
-      );
+      expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('pagina=8'), expect.anything());
     });
     await userEvent.selectOptions(screen.getByLabelText('Por página'), '5');
     await waitFor(() => {
