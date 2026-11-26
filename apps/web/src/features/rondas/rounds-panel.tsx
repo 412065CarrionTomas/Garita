@@ -1,5 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { defaultRouteInput, previewWindows, roundRouteSchema, type LngLat } from '@garita/shared';
+import {
+  defaultRouteInput,
+  previewWindows,
+  roundRouteSchema,
+  speedProfileSchema,
+  type LngLat,
+} from '@garita/shared';
 import { Copy, EllipsisVertical, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useRef, useState, type CSSProperties } from 'react';
 import { z } from 'zod';
@@ -60,6 +66,8 @@ const roundsSchema = z.array(
         windowEndLocal: z.string(),
         graceMinutes: z.number(),
         route: z.unknown().optional(),
+        speedProfile: speedProfileSchema.nullish(),
+        maxSpeedKmh: z.number().nullish(),
         checkpoints: z.array(
           z.looseObject({
             position: z.number(),

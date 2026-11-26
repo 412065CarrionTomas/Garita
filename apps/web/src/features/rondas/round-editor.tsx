@@ -12,6 +12,7 @@ import {
   type RouteFailure,
   type RouteInput,
   type RouteMode,
+  type SpeedProfile,
 } from '@garita/shared';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { z } from 'zod';
@@ -21,6 +22,7 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { ApiError, apiPatch, apiPost } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
 import { useFloatingNotice } from '@/lib/use-floating-notice';
@@ -71,6 +73,9 @@ export interface EditorRound {
     windowEndLocal: string;
     graceMinutes: number;
     route?: unknown;
+    /** Sin perfil: la ronda usa la velocidad del predio. */
+    speedProfile?: SpeedProfile | null;
+    maxSpeedKmh?: number | null;
     checkpoints: { checkpoint: { id: string; name: string } }[];
   } | null;
 }
@@ -83,6 +88,7 @@ const INLINE_FIELDS = new Set([
   'windowStartLocal',
   'windowEndLocal',
   'graceMinutes',
+  'maxSpeedKmh',
 ]);
 
 const TOOLS: { value: RouteTool; label: string }[] = [
@@ -140,6 +146,8 @@ export function RoundEditor({
   const [start, setStart] = useState(version?.windowStartLocal ?? '22:00');
   const [end, setEnd] = useState(version?.windowEndLocal ?? '06:00');
   const [grace, setGrace] = useState(version?.graceMinutes ?? 15);
+  const [speed, setSpeed] = useState<SpeedProfile | ''>(version?.speedProfile ?? '');
+  const [customKmh, setCustomKmh] = useState(version?.maxSpeedKmh ?? 10);
   const [selected, setSelected] = useState(initialIds);
   const [draft, setDraft] = useState<RouteDraft>(() => {
     const saved = storedRouteInput(version?.route) ?? defaultRouteInput(versionIds.length);
@@ -385,7 +393,9 @@ export function RoundEditor({
     frequency !== (version?.frequencyMinutes ?? 120) ||
     start !== (version?.windowStartLocal ?? '22:00') ||
     end !== (version?.windowEndLocal ?? '06:00') ||
-    grace !== (version?.graceMinutes ?? 15);
+    grace !== (version?.graceMinutes ?? 15) ||
+    speed !== (version?.speedProfile ?? '') ||
+    (speed === 'custom' && customKmh !== version?.maxSpeedKmh);
   const leave = () => {
     if (dirty && !window.confirm('¿Descartar los cambios de la ronda?')) return;
     onClose();
@@ -400,6 +410,8 @@ export function RoundEditor({
       windowEndLocal: end,
       graceMinutes: grace,
       route,
+      speedProfile: speed || null,
+      ...(speed === 'custom' ? { maxSpeedKmh: customKmh } : {}),
       ...(allowStraight ? { allowStraight } : {}),
     });
     if (!parsed.success) {
@@ -506,6 +518,42 @@ export function RoundEditor({
             setGrace(next.grace);
           }}
         />
+        <div className="grid gap-1.5">
+          <Label htmlFor="round-speed">Velocidad</Label>
+          <div className="flex items-center gap-2">
+            <NativeSelect
+              id="round-speed"
+              value={speed}
+              onChange={(event) => {
+                setSpeed(event.target.value as SpeedProfile | '');
+                // Lo calculado era para el perfil anterior: las partes por calles se recalculan.
+                setMemo(new Map());
+              }}
+            >
+              <NativeSelectOption value="">La del predio</NativeSelectOption>
+              <NativeSelectOption value="walking">A pie (10 km/h)</NativeSelectOption>
+              <NativeSelectOption value="bicycle">Bicicleta (25 km/h)</NativeSelectOption>
+              <NativeSelectOption value="vehicle">Vehículo (60 km/h)</NativeSelectOption>
+              <NativeSelectOption value="custom">Personalizada</NativeSelectOption>
+            </NativeSelect>
+            {speed === 'custom' && (
+              <Input
+                type="number"
+                aria-label="Velocidad personalizada (km/h)"
+                aria-invalid={Boolean(fieldErrors.maxSpeedKmh)}
+                aria-describedby={fieldErrors.maxSpeedKmh ? 'round-speed-error' : undefined}
+                min={5}
+                max={120}
+                value={customKmh}
+                onChange={(event) => {
+                  setCustomKmh(Number(event.target.value));
+                }}
+                className="w-20"
+              />
+            )}
+          </div>
+          {fieldError('maxSpeedKmh', 'round-speed-error')}
+        </div>
         <EditorHelp />
         {/* En la fila del formulario y no como franja: no le quita alto al mapa ni a la lista. */}
         {Boolean(editing?.scheduledShifts) && (
@@ -735,7 +783,12 @@ export function RoundEditor({
               size="sm"
               disabled={calculate.isPending || estimate.pending === 0}
               onClick={() => {
-                calculate.mutate({ siteId, checkpointIds: selected, route });
+                calculate.mutate({
+                  siteId,
+                  checkpointIds: selected,
+                  route,
+                  speedProfile: speed || null,
+                });
               }}
             >
               {calculate.isPending ? 'Calculando…' : 'Calcular por calles'}

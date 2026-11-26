@@ -420,6 +420,8 @@ describe('RoundsPanel', () => {
       await screen.findByRole('heading', { name: 'Duplicar ronda', level: 3 }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Nombre')).toHaveValue('Copia de Perimetral');
+    expect(screen.getByLabelText('Velocidad')).toHaveValue('');
+    await user.selectOptions(screen.getByLabelText('Velocidad'), 'vehicle');
     await user.click(screen.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith(
@@ -431,6 +433,7 @@ describe('RoundsPanel', () => {
           windowStartLocal: '20:00',
           windowEndLocal: '08:00',
           graceMinutes: 10,
+          speedProfile: 'vehicle',
         }),
         expect.anything(),
         expect.anything(),
