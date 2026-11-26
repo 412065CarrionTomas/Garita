@@ -77,6 +77,25 @@ enum IncidentClassificationStatus {
   internal
 }
 
+enum IncidentSeverity {
+  low
+  medium
+  high
+}
+
+/// none: no requiere seguimiento; open: la empresa tiene acciones pendientes; closed: resuelto.
+enum IncidentFollowUpStatus {
+  none
+  open
+  closed
+}
+
+enum IncidentFollowUpActionKind {
+  note
+  close
+  reopen
+}
+
 enum AccountStatus {
   trial
   active
@@ -120,6 +139,7 @@ model Company {
   panicAlerts PanicAlert[]
   panicSmsDeliveries PanicSmsDelivery[]
   incidentClassifications IncidentClassification[]
+  incidentFollowUpActions IncidentFollowUpAction[]
   roundReviewDecisions RoundReviewDecision[]
   notificationPreferences NotificationPreference[]
   viewPreferences UserViewPreference[]
@@ -168,6 +188,7 @@ model User {
   resolvedPanicAlerts PanicAlert[] @relation("PanicResolver")
   panicSmsDeliveries PanicSmsDelivery[]
   incidentClassifications IncidentClassification[] @relation("IncidentDecider")
+  incidentFollowUpActions IncidentFollowUpAction[] @relation("IncidentFollowUpAuthor")
   roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
@@ -843,6 +864,9 @@ model Incident {
   simulation           ShiftEventSimulation
   countsForCompliance  Boolean                     @default(true)
   classificationStatus IncidentClassificationStatus @default(pending)
+  severity             IncidentSeverity?
+  followUpStatus       IncidentFollowUpStatus      @default(none)
+  followUpClosedAt     DateTime?                   @db.Timestamptz(3)
   createdAt            DateTime                    @default(now())
   company              Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   site                 Site                        @relation(fields: [siteId], references: [id], onDelete: Restrict)
@@ -852,6 +876,7 @@ model Incident {
   photos               IncidentPhoto[]
   photoAuthorizations  IncidentPhotoAuthorization[]
   classifications      IncidentClassification[]
+  followUpActions      IncidentFollowUpAction[]
 
   @@index([companyId, siteId, createdAt])
   @@index([companyId, classificationStatus, createdAt])
@@ -861,6 +886,7 @@ model Incident {
   @@index([companyId, trustedAt])
   @@index([companyId, occurredAtDevice])
   @@index([companyId, receivedAt])
+  @@index([companyId, followUpStatus])
 }
 
 enum PanicAlertStatus {
@@ -977,6 +1003,8 @@ model IncidentClassification {
   internalComment String                       @db.VarChar(1000)
   clientNote      String?                      @db.VarChar(500)
   reason          String?                      @db.VarChar(500)
+  severity        IncidentSeverity?
+  requiresFollowUp Boolean                     @default(false)
   decidedById     String
   decidedAt       DateTime                     @default(now()) @db.Timestamptz(3)
   company         Company                      @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -984,6 +1012,22 @@ model IncidentClassification {
   decidedBy       User                         @relation("IncidentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
 
   @@index([companyId, incidentId, decidedAt])
+}
+
+/// Bitácora de seguimiento: solo se agrega, nunca se edita.
+model IncidentFollowUpAction {
+  id         String                     @id @default(cuid())
+  companyId  String
+  incidentId String
+  kind       IncidentFollowUpActionKind
+  text       String                     @db.VarChar(1000)
+  authorId   String
+  createdAt  DateTime                   @default(now()) @db.Timestamptz(3)
+  company    Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  incident   Incident                   @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  author     User                       @relation("IncidentFollowUpAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([incidentId, createdAt])
 }
 
 model IncidentPhoto {
