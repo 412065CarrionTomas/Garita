@@ -151,6 +151,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
     await user.click(await screen.findByRole('button', { name: 'Editar predio' }));
     const dialog = screen.getByRole('dialog', { name: 'Editar predio' });
     expect(dialog).toBeInTheDocument();
@@ -175,6 +176,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Dar de baja el predio' });
     expect(dialog).toHaveTextContent('Se cancelarán 3 turnos');
@@ -191,6 +193,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
     expect(await screen.findByText(/Se cancelarán 3 turnos/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Confirmar baja' }));

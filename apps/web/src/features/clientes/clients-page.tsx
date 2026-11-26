@@ -4,6 +4,7 @@ import { clientInputSchema, clientsPageSchema, clientResponseSchema } from '@gar
 import { EllipsisVertical, Search } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
+import { lastPage } from '@/lib/page-items';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { ClientUsersPanel } from './client-users-panel';
@@ -28,6 +29,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+import { DataTable } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import {
@@ -87,6 +89,11 @@ export function ClientsPage() {
     // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
     placeholderData: keepPreviousData,
   });
+  // Se quitó lo último de la página (p. ej. una baja): volver a la última que tenga resultados.
+  const total = clients.data?.total;
+  if (total !== undefined && !clients.isPlaceholderData && page > lastPage(total, pageSize)) {
+    setPage(lastPage(total, pageSize));
+  }
   const changeStatus = (value: string) => {
     setStatus(value);
     setPage(1);
@@ -286,111 +293,136 @@ export function ClientsPage() {
       ) : (
         <div className="space-y-4">
           {clients.data.items.length > 0 ? (
-            <Card className="min-w-0 overflow-hidden py-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {['Cliente', 'Contacto', 'Teléfono', 'Predios', 'Estado'].map((heading) => (
-                      <TableHead key={heading} className="text-muted-foreground">
-                        {heading}
-                      </TableHead>
-                    ))}
-                    <TableHead className="w-12">
-                      <span className="sr-only">Acciones</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {clients.data.items.map((client) => (
-                    <TableRow key={client.id}>
-                      <TableCell className="whitespace-normal">
+            <div className="overflow-x-auto border-[1.5px] border-input">
+              <DataTable
+                label="Clientes"
+                sortable={false}
+                rows={clients.data.items}
+                getRowId={(client) => client.id}
+                columns={[
+                  {
+                    id: 'name',
+                    header: 'Cliente',
+                    cell: (client) => (
+                      <>
                         <Link
-                          className="block font-semibold hover:underline"
+                          className="block truncate font-semibold hover:underline"
                           to={`/clientes/${client.id}`}
                         >
                           {client.name}
                         </Link>
-                        <span className="text-sm text-muted-foreground tabular-nums">
+                        <span className="block truncate text-sm text-muted-foreground tabular-nums">
                           {client.taxId ? `CUIT ${client.taxId}` : 'Sin CUIT'}
                         </span>
-                      </TableCell>
-                      <TableCell className="whitespace-normal">
-                        <span className="block">{client.contactName}</span>
-                        <span className="text-sm text-muted-foreground">{client.email}</span>
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        <a
-                          href={`tel:${client.phone.replace(/[^+\d]/g, '')}`}
-                          className="hover:underline"
-                        >
-                          {client.phone}
-                        </a>
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        <Link
-                          to={`/clientes/${client.id}`}
-                          className="hover:underline"
-                          aria-label={`${String(client._count.sites)} predios de ${client.name}`}
-                        >
-                          {client._count.sites}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge tone={client.status === 'active' ? 'success' : 'neutral'}>
-                          {client.status === 'active' ? 'Activo' : 'Inactivo'}
-                        </StatusBadge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`Más acciones de ${client.name}`}
-                            >
-                              <EllipsisVertical aria-hidden="true" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-auto">
-                            <DropdownMenuItem asChild>
-                              <Link to={`/clientes/${client.id}`}>Ver predios</Link>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                setEditError('');
-                                setEditing(client);
-                                setEditForm({
-                                  name: client.name,
-                                  contactName: client.contactName,
-                                  phone: client.phone,
-                                  email: client.email,
-                                  taxId: client.taxId ?? '',
-                                });
-                              }}
-                            >
-                              Editar
-                            </DropdownMenuItem>
-                            {client.status === 'active' && (
-                              <>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  variant="destructive"
-                                  onSelect={() => {
-                                    setDeleting({ id: client.id, name: client.name });
-                                  }}
-                                >
-                                  Dar de baja
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
+                      </>
+                    ),
+                  },
+                  {
+                    id: 'contact',
+                    header: 'Contacto',
+                    cell: (client) => (
+                      <>
+                        <span className="block truncate">{client.contactName}</span>
+                        <span className="block truncate text-sm text-muted-foreground">
+                          {client.email}
+                        </span>
+                      </>
+                    ),
+                  },
+                  {
+                    id: 'phone',
+                    header: 'Teléfono',
+                    width: 176,
+                    cell: (client) => (
+                      <a
+                        href={`tel:${client.phone.replace(/[^+\d]/g, '')}`}
+                        className="tabular-nums hover:underline"
+                      >
+                        {client.phone}
+                      </a>
+                    ),
+                  },
+                  {
+                    id: 'sites',
+                    header: 'Predios',
+                    width: 112,
+                    align: 'right',
+                    cell: (client) => (
+                      <Link
+                        to={`/clientes/${client.id}`}
+                        className="tabular-nums hover:underline"
+                        aria-label={`${String(client._count.sites)} predios de ${client.name}`}
+                      >
+                        {client._count.sites}
+                      </Link>
+                    ),
+                  },
+                  {
+                    id: 'status',
+                    header: 'Estado',
+                    width: 128,
+                    cell: (client) => (
+                      <StatusBadge tone={client.status === 'active' ? 'success' : 'neutral'}>
+                        {client.status === 'active' ? 'Activo' : 'Inactivo'}
+                      </StatusBadge>
+                    ),
+                  },
+                  {
+                    id: 'actions',
+                    header: 'Acciones',
+                    hideHeader: true,
+                    width: 64,
+                    align: 'right',
+                    cell: (client) => (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Más acciones de ${client.name}`}
+                          >
+                            <EllipsisVertical aria-hidden="true" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-auto">
+                          <DropdownMenuItem asChild>
+                            <Link to={`/clientes/${client.id}`}>Ver predios</Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setEditError('');
+                              setEditing(client);
+                              setEditForm({
+                                name: client.name,
+                                contactName: client.contactName,
+                                phone: client.phone,
+                                email: client.email,
+                                taxId: client.taxId ?? '',
+                              });
+                            }}
+                          >
+                            Editar
+                          </DropdownMenuItem>
+                          {client.status === 'active' && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => {
+                                  setDeleting({ id: client.id, name: client.name });
+                                }}
+                              >
+                                Dar de baja
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ),
+                  },
+                ]}
+              />
+            </div>
           ) : status || search ? (
             <EmptyState
               title="No hay clientes para mostrar"
@@ -414,11 +446,12 @@ export function ClientsPage() {
           )}
           <Pagination
             page={page}
-            pages={Math.ceil(clients.data.total / pageSize)}
             pageSize={pageSize}
             total={clients.data.total}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
+            shown={clients.data.items.length}
+            label="clientes"
+            onPage={setPage}
+            onPageSize={(size) => {
               setPageSize(size);
               setPage(1);
             }}

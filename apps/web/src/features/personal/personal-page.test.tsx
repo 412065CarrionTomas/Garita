@@ -260,7 +260,10 @@ describe('PersonalPage', () => {
         within(screen.getByRole('table')).getByText('Activo').closest('[data-slot="badge"]'),
       ).toHaveAttribute('data-variant', 'normal');
       const section = screen.getByRole('region', { name: 'Personal' });
-      expect(section.querySelector('[data-slot="table-container"]')).toHaveClass('overflow-x-auto');
+      // La tabla de datos se desplaza en su contenedor, no corta las columnas.
+      expect(section.querySelector('[data-slot="table-container"]')?.parentElement).toHaveClass(
+        'overflow-x-auto',
+      );
       for (const element of section.querySelectorAll('[class]')) {
         expect(element.getAttribute('class')).not.toMatch(
           /(?:bg|text|border)-(?:red|amber|gray|white|black)(?:-|\b)/,

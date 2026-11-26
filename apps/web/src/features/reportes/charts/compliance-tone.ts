@@ -17,3 +17,16 @@ export const toneFill: Record<ChartTone, string> = {
 export function percentageTone(value: number | null): ChartTone {
   return value !== null && value < COMPLIANCE_THRESHOLD ? 'failure' : 'ink';
 }
+
+/**
+ * Tope del eje para cantidades: cuatro tramos redondos y enteros (son rondas o ventanas, no hay
+ * fracciones) que cubren el máximo sin dejar las barras por la mitad (1214 → 1600, 42 → 44, 1 → 4).
+ */
+export function niceMax(max: number): number {
+  if (max <= 4) return 4;
+  const raw = max / 4;
+  let magnitude = 10 ** Math.floor(Math.log10(raw));
+  // Tramo chico para su magnitud (10,5 → 20 dejaría media barra vacía): redondear un dígito más fino.
+  if (raw / magnitude < 2) magnitude = Math.max(1, magnitude / 10);
+  return Math.ceil(raw / magnitude) * magnitude * 4;
+}

@@ -13,10 +13,12 @@ import {
   usersPageSchema,
 } from '@garita/shared';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { lastPage } from '@/lib/page-items';
 import { useBusy } from '@/lib/use-busy';
 import { useDebouncedSearch } from '@/lib/use-debounced-search';
 import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
+import { DataTable } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import { SegmentedFilter } from '@/components/segmented-filter';
@@ -33,17 +35,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card } from '@/components/ui/card';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@/components/ui/table';
 import { useAuth } from '../auth/auth-context';
 import { loadAvailableGuards } from './available-guards';
 
@@ -172,6 +165,11 @@ export function PersonalPage() {
     // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
     placeholderData: keepPreviousData,
   });
+  // Se quitó lo último de la página (p. ej. una baja): volver a la última que tenga resultados.
+  const total = result.data?.total;
+  if (total !== undefined && !result.isPlaceholderData && page > lastPage(total, pageSize)) {
+    setPage(lastPage(total, pageSize));
+  }
   const changeStatus = (value: string) => {
     setStatus(value);
     setPage(1);
@@ -577,76 +575,98 @@ export function PersonalPage() {
               }
             />
           ) : (
-            <Card className="min-w-0 overflow-hidden py-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {['Nombre', 'Teléfono', 'Legajo', 'Rol', 'Estado'].map((heading) => (
-                      <TableHead key={heading} className="text-muted-foreground">
-                        {heading}
-                      </TableHead>
-                    ))}
-                    <TableHead className="w-12">
-                      <span className="sr-only">Acciones</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {result.data.items.map((person) => {
-                    const fullName = `${person.firstName} ${person.lastName}`;
-                    return (
-                      <TableRow key={person.id}>
-                        <TableCell className="whitespace-normal">
-                          <strong className="block font-semibold">{fullName}</strong>
-                          <span className="text-sm text-muted-foreground">{person.email}</span>
-                        </TableCell>
-                        <TableCell className="tabular-nums">
-                          {person.phone ? (
-                            <a
-                              href={`tel:${person.phone.replaceAll(' ', '')}`}
-                              className="hover:underline"
-                            >
-                              {person.phone}
-                            </a>
-                          ) : (
-                            '—'
-                          )}
-                        </TableCell>
-                        <TableCell className="tabular-nums">
-                          {person.employeeNumber ?? '—'}
-                        </TableCell>
-                        <TableCell>
-                          {person.role === 'guard' ? 'Vigilador' : 'Supervisor'}
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge
-                            tone={
-                              person.status === 'active'
-                                ? 'success'
-                                : person.status === 'invitation_pending'
-                                  ? person.invitationStatus === 'failed'
-                                    ? 'danger'
-                                    : 'warning'
-                                  : 'neutral'
-                            }
-                          >
-                            {person.status === 'invitation_pending'
-                              ? person.invitationStatus === 'failed'
-                                ? 'Envío fallido'
-                                : 'Invitación enviada'
-                              : person.status === 'active'
-                                ? 'Activo'
-                                : 'Desactivado'}
-                          </StatusBadge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {user?.role === 'admin' && (
+            <div className="overflow-x-auto border-[1.5px] border-input">
+              <DataTable
+                label="Personal"
+                sortable={false}
+                rows={result.data.items}
+                getRowId={(p) => p.id}
+                columns={[
+                  {
+                    id: 'name',
+                    header: 'Nombre',
+                    cell: (p) => (
+                      <>
+                        <strong className="block truncate font-semibold">
+                          {p.firstName} {p.lastName}
+                        </strong>
+                        <span className="block truncate text-sm text-muted-foreground">
+                          {p.email}
+                        </span>
+                      </>
+                    ),
+                  },
+                  {
+                    id: 'phone',
+                    header: 'Teléfono',
+                    width: 176,
+                    cell: (p) =>
+                      p.phone ? (
+                        <a
+                          href={`tel:${p.phone.replaceAll(' ', '')}`}
+                          className="tabular-nums hover:underline"
+                        >
+                          {p.phone}
+                        </a>
+                      ) : (
+                        '—'
+                      ),
+                  },
+                  {
+                    id: 'employeeNumber',
+                    header: 'Legajo',
+                    width: 112,
+                    className: 'tabular-nums',
+                    cell: (p) => p.employeeNumber ?? '—',
+                  },
+                  {
+                    id: 'role',
+                    header: 'Rol',
+                    width: 128,
+                    cell: (p) => (p.role === 'guard' ? 'Vigilador' : 'Supervisor'),
+                  },
+                  {
+                    id: 'status',
+                    header: 'Estado',
+                    width: 176,
+                    cell: (p) => (
+                      <StatusBadge
+                        tone={
+                          p.status === 'active'
+                            ? 'success'
+                            : p.status === 'invitation_pending'
+                              ? p.invitationStatus === 'failed'
+                                ? 'danger'
+                                : 'warning'
+                              : 'neutral'
+                        }
+                      >
+                        {p.status === 'invitation_pending'
+                          ? p.invitationStatus === 'failed'
+                            ? 'Envío fallido'
+                            : 'Invitación enviada'
+                          : p.status === 'active'
+                            ? 'Activo'
+                            : 'Desactivado'}
+                      </StatusBadge>
+                    ),
+                  },
+                  // Solo el administrador gestiona al personal.
+                  ...(user?.role === 'admin'
+                    ? [
+                        {
+                          id: 'actions',
+                          header: 'Acciones',
+                          hideHeader: true,
+                          width: 64,
+                          align: 'right' as const,
+                          cell: (p: (typeof result.data.items)[number]) => (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button
                                   variant="ghost"
                                   size="icon-sm"
-                                  aria-label={`Más acciones de ${fullName}`}
+                                  aria-label={`Más acciones de ${p.firstName} ${p.lastName}`}
                                 >
                                   <EllipsisVertical aria-hidden="true" />
                                 </Button>
@@ -654,18 +674,18 @@ export function PersonalPage() {
                               <DropdownMenuContent align="end" className="w-auto">
                                 <DropdownMenuItem
                                   onSelect={() => {
-                                    setEditing(person);
+                                    setEditing(p);
                                     setErrors({});
                                     setFormError('');
                                   }}
                                 >
                                   Editar
                                 </DropdownMenuItem>
-                                {person.status === 'invitation_pending' && (
+                                {p.status === 'invitation_pending' && (
                                   <DropdownMenuItem
                                     onSelect={() =>
                                       void runAction(
-                                        `/usuarios/${person.id}/reenviar-invitacion`,
+                                        `/usuarios/${p.id}/reenviar-invitacion`,
                                         'No se pudo reenviar la invitación.',
                                         personnelUserSchema,
                                       )
@@ -675,11 +695,11 @@ export function PersonalPage() {
                                   </DropdownMenuItem>
                                 )}
                                 <DropdownMenuSeparator />
-                                {person.status === 'deactivated' ? (
+                                {p.status === 'deactivated' ? (
                                   <DropdownMenuItem
                                     onSelect={() =>
                                       void runAction(
-                                        `/usuarios/${person.id}/reactivar`,
+                                        `/usuarios/${p.id}/reactivar`,
                                         'No se pudo reactivar el usuario.',
                                       )
                                     }
@@ -690,7 +710,7 @@ export function PersonalPage() {
                                   <DropdownMenuItem
                                     variant="destructive"
                                     onSelect={() => {
-                                      setDeactivating(person);
+                                      setDeactivating(p);
                                       setDeriveToUserId('');
                                       setLeaveUnassigned(false);
                                       setNotDerived([]);
@@ -706,22 +726,22 @@ export function PersonalPage() {
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </Card>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            </div>
           )}
           <Pagination
             page={page}
-            pages={Math.ceil(result.data.total / pageSize)}
             pageSize={pageSize}
             total={result.data.total}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
+            shown={result.data.items.length}
+            label="personal"
+            onPage={setPage}
+            onPageSize={(size) => {
               setPageSize(size);
               setPage(1);
             }}

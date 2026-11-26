@@ -1,88 +1,87 @@
-import { useEffect, useId } from 'react';
-import { PAGE_SIZES } from '@garita/shared';
-import { Button } from '@/components/ui/button';
+import { useId } from 'react';
+import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { pageNumbers } from '@/lib/page-numbers';
+import { lastPage, PAGE_SIZES, pageItems } from '@/lib/page-items';
 
-/** Paginación de listados paginados en el backend, con elección de tamaño de página. */
+/** Pie de una lista paginada: cuántos se ven, las páginas (centradas) y cuántos por página. */
 export function Pagination({
   page,
-  pages,
   pageSize,
   total,
-  onPageChange,
-  onPageSizeChange,
+  shown,
+  label,
+  onPage,
+  onPageSize,
 }: {
   page: number;
-  pages: number;
   pageSize: number;
   total: number;
-  onPageChange: (page: number) => void;
-  /** Al cambiar el tamaño, quien lo usa vuelve a la página 1. */
-  onPageSizeChange: (size: number) => void;
+  /** Cuántos trae la página actual. */
+  shown: number;
+  /** Qué se pagina, para lectores de pantalla (ej. "alertas"). */
+  label: string;
+  onPage: (page: number) => void;
+  onPageSize: (size: number) => void;
 }) {
-  const sizeId = useId();
-  // Si la página quedó fuera de rango (p. ej. se dio de baja el único ítem de la última), vuelve a la última.
-  // Sin resultados queda una sola página: la 1.
-  useEffect(() => {
-    const maxPage = Math.max(1, pages);
-    if (page > maxPage) onPageChange(maxPage);
-  }, [page, pages, onPageChange]);
-  // El rango sale de la página pedida, no de las filas en pantalla: mientras carga la página
-  // nueva se siguen viendo las de la anterior.
-  const first = (page - 1) * pageSize + 1;
-  const last = Math.min(page * pageSize, total);
+  const id = useId();
+  const pages = lastPage(total, pageSize);
+  const current = Math.min(Math.max(1, page), pages);
+  const first = (current - 1) * pageSize + 1;
+  const last = first + shown - 1;
   return (
-    <div className="grid grid-cols-[1fr_auto] items-center gap-3 text-sm tabular-nums sm:grid-cols-[1fr_auto_1fr]">
-      <span className="text-muted-foreground">
-        {total === 0
-          ? 'Sin resultados'
-          : first > total
-            ? `${String(total)} en total`
-            : `${String(first)}–${String(last)} de ${String(total)}`}
-      </span>
-      <nav
-        aria-label="Paginación"
-        className="col-span-2 row-start-2 flex items-center justify-center gap-1 sm:col-span-1 sm:row-start-auto"
-      >
-        {pageNumbers(page, pages).map((number, index) =>
-          number === null ? (
-            <span
-              key={`gap-${String(index)}`}
-              aria-hidden="true"
-              className="px-1 text-muted-foreground"
-            >
-              …
-            </span>
-          ) : (
-            <Button
-              key={number}
-              type="button"
-              size="sm"
-              variant={number === page ? 'default' : 'ghost'}
-              aria-label={`Página ${String(number)}`}
-              aria-current={number === page ? 'page' : undefined}
-              onClick={() => {
-                if (number !== page) onPageChange(number);
-              }}
-            >
-              {number}
-            </Button>
-          ),
-        )}
+    <div className="grid items-center gap-3 text-sm sm:grid-cols-[1fr_auto_1fr]">
+      <p className="text-muted-foreground tabular-nums">
+        {shown === 0
+          ? `0 de ${String(total)}`
+          : `${first === last ? String(first) : `${String(first)}–${String(last)}`} de ${String(total)}`}
+      </p>
+      <nav aria-label={`Páginas de ${label}`} className="justify-self-center">
+        <ul className="flex items-center gap-1">
+          {pageItems(current, pages).map((item, index) =>
+            item === 'gap' ? (
+              <li
+                key={`gap-${String(index)}`}
+                aria-hidden="true"
+                className="px-1 text-muted-foreground"
+              >
+                …
+              </li>
+            ) : (
+              <li key={item}>
+                <button
+                  type="button"
+                  aria-label={`Página ${String(item)}`}
+                  aria-current={item === current ? 'page' : undefined}
+                  onClick={() => {
+                    if (item !== current) onPage(item);
+                  }}
+                  className={cn(
+                    't-numeral h-9 min-w-9 rounded-md border-[1.5px] px-2 text-base transition-colors',
+                    item === current
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-transparent text-foreground hover:border-input hover:bg-muted',
+                  )}
+                >
+                  {item}
+                </button>
+              </li>
+            ),
+          )}
+        </ul>
       </nav>
-      <div className="flex items-center justify-end gap-2">
-        <Label htmlFor={sizeId}>Por página</Label>
+      <div className="flex items-center gap-2 sm:justify-self-end">
+        <Label htmlFor={id}>Por página</Label>
         <NativeSelect
-          id={sizeId}
-          value={String(pageSize)}
+          id={id}
+          size="sm"
+          value={pageSize}
           onChange={(event) => {
-            onPageSizeChange(Number(event.target.value));
+            onPageSize(Number(event.target.value));
           }}
         >
           {PAGE_SIZES.map((size) => (
-            <NativeSelectOption key={size} value={String(size)}>
+            <NativeSelectOption key={size} value={size}>
               {size}
             </NativeSelectOption>
           ))}

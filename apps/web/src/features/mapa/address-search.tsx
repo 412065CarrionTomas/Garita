@@ -11,14 +11,30 @@ const BBOX = '-73.6,-55.1,-53.6,-21.8';
 const MIN_CHARS = 3;
 const DEBOUNCE_MS = 400;
 
-/** Buscador de direcciones con Photon (patrón combobox: flechas, Enter y Escape). */
+/**
+ * Buscador de direcciones con Photon (patrón combobox: flechas, Enter y Escape). Con `value` y
+ * `onTextChange` es además el campo de dirección del formulario: lo escrito se guarda tal cual.
+ */
 export function AddressSearch({
   onSelect,
+  label = 'Buscar dirección',
+  value,
+  onTextChange,
+  required,
 }: {
-  onSelect: (latitude: number, longitude: number) => void;
+  onSelect: (latitude: number, longitude: number, label: string) => void;
+  label?: string;
+  value?: string;
+  onTextChange?: (text: string) => void;
+  required?: boolean;
 }) {
   const id = useId();
-  const [text, setText] = useState('');
+  const [ownText, setOwnText] = useState('');
+  const text = value ?? ownText;
+  const setText = (next: string) => {
+    setOwnText(next);
+    onTextChange?.(next);
+  };
   const [term, setTerm] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -49,11 +65,11 @@ export function AddressSearch({
     setTerm('');
     setOpen(false);
     setActive(-1);
-    onSelect(suggestion.latitude, suggestion.longitude);
+    onSelect(suggestion.latitude, suggestion.longitude, suggestion.label);
   };
   return (
     <div className="relative grid gap-2">
-      <Label htmlFor={`${id}-input`}>Buscar dirección</Label>
+      <Label htmlFor={`${id}-input`}>{label}</Label>
       {/* Se agranda a mano como un área de texto; un texto largo no la estira solo. */}
       <Textarea
         id={`${id}-input`}
@@ -66,6 +82,7 @@ export function AddressSearch({
           expanded && active >= 0 ? `${id}-option-${String(active)}` : undefined
         }
         autoComplete="off"
+        required={required}
         placeholder="Escribí una dirección"
         value={text}
         onChange={(event) => {

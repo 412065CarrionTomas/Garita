@@ -1,12 +1,18 @@
 import type { ReactNode } from 'react';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
+import { fetchStreetAddress } from '../mapa/photon';
 import { CheckpointsPanel } from './checkpoints-panel';
 
 jest.mock('../auth/auth-context', () => ({ useAuth: jest.fn() }));
+// Sin red: la búsqueda de la dirección por coordenadas se simula.
+jest.mock('../mapa/photon', () => ({
+  ...jest.requireActual<object>('../mapa/photon'),
+  fetchStreetAddress: jest.fn(() => Promise.resolve(null)),
+}));
 // Mapa caído: el formulario muestra la carga manual de coordenadas.
 jest.mock('@/features/mapa/site-location-map', () => ({
   SiteMapLocation: ({ unavailable }: { unavailable: ReactNode }) => unavailable,
@@ -308,4 +314,87 @@ it('en un predio inactivo solo deja descargar el sticker', async () => {
   expect(await screen.findByRole('menuitem', { name: 'Descargar sticker' })).toBeInTheDocument();
   expect(screen.queryByRole('menuitem', { name: 'Editar' })).not.toBeInTheDocument();
   expect(screen.queryByRole('menuitem', { name: 'Dar de baja' })).not.toBeInTheDocument();
+});
+
+it('muestra la dirección o, sin calle, las coordenadas, con tipo y rondas de cada punto', async () => {
+  setRole('admin');
+  const point = {
+    siteId: site.id,
+    toleranceRadiusMeters: 30,
+    stickerLocation: null,
+    isIndoor: false,
+    qrVersion: 1,
+    status: 'active',
+  };
+  jest.mocked(apiGet).mockResolvedValue([
+    {
+      ...point,
+      id: 'a',
+      name: 'Portón',
+      latitude: -34.6,
+      longitude: -58.4,
+      address: 'Av. Colón 1200',
+      tagType: 'nfc_secure',
+      roundsCount: 3,
+    },
+    {
+      ...point,
+      id: 'b',
+      name: 'Cerco',
+      latitude: -34.61234,
+      longitude: -58.4,
+      address: null,
+      tagType: 'qr',
+      roundsCount: 0,
+    },
+  ] as never);
+  renderWithQueryClient(<CheckpointsPanel site={site} />);
+  const table = await screen.findByRole('table', { name: 'Puntos de control de Predio A' });
+  const [, first, second] = within(table).getAllByRole('row');
+  expect(first).toHaveTextContent(/Portón.*Av\. Colón 1200.*NFC seguro.*3.*30 m/);
+  expect(second).toHaveTextContent(/Cerco.*-34\.61234, -58\.40000.*QR.*0.*30 m/);
+});
+
+it('al crear un punto guarda la dirección encontrada para su ubicación', async () => {
+  setRole('admin');
+  jest.mocked(apiGet).mockResolvedValue([] as never);
+  jest.mocked(fetchStreetAddress).mockResolvedValueOnce('Av. Colón 1200');
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={site} />);
+  await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
+  await user.type(await screen.findByLabelText('Nombre del punto'), 'Portón');
+  await user.click(screen.getByRole('button', { name: 'Crear punto' }));
+  await screen.findByText('Punto guardado.');
+  expect(fetchStreetAddress).toHaveBeenCalledWith(site.latitude, site.longitude, undefined);
+  expect(apiPost).toHaveBeenCalledWith(
+    '/predios/site-1/puntos',
+    expect.objectContaining({ name: 'Portón', address: 'Av. Colón 1200' }),
+    expect.anything(),
+    expect.anything(),
+  );
+});
+
+it('si no encontró dirección, la vuelve a buscar en el próximo guardado', async () => {
+  setRole('admin');
+  jest.mocked(apiGet).mockResolvedValue([] as never);
+  jest.mocked(fetchStreetAddress).mockClear();
+  jest
+    .mocked(fetchStreetAddress)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce('Av. Colón 1200');
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={site} />);
+  for (const name of ['Portón', 'Cerco']) {
+    await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
+    await user.type(await screen.findByLabelText('Nombre del punto'), name);
+    await user.click(screen.getByRole('button', { name: 'Crear punto' }));
+    await screen.findByText('Punto guardado.');
+  }
+  expect(fetchStreetAddress).toHaveBeenCalledTimes(2);
+  expect(apiPost).toHaveBeenLastCalledWith(
+    '/predios/site-1/puntos',
+    expect.objectContaining({ name: 'Cerco', address: 'Av. Colón 1200' }),
+    expect.anything(),
+    expect.anything(),
+  );
 });

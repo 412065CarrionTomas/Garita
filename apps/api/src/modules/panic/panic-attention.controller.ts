@@ -50,6 +50,7 @@ export class PanicAttentionController {
   @ApiQuery({ name: 'estado', required: false, enum: PANIC_STATUSES })
   @ApiQuery({ name: 'predio', required: false })
   @ApiQuery({ name: 'pagina', required: false, type: Number })
+  @ApiQuery({ name: 'porPagina', required: false, type: Number })
   list(@Query() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = panicAlertsQuerySchema.safeParse(raw);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);

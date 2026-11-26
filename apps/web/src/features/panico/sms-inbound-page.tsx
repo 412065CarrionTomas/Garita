@@ -3,24 +3,17 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { Search } from 'lucide-react';
 import { smsInboundListSchema } from '@garita/shared';
+import { DataTable } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { lastPage } from '@/lib/page-items';
 import { apiGet } from '@/lib/api-client';
 import { useDebouncedSearch } from '@/lib/use-debounced-search';
 import { cn } from '@/lib/utils';
@@ -51,6 +44,11 @@ export function SmsInboundPage() {
     // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
     placeholderData: keepPreviousData,
   });
+  // Se quitó lo último de la página (p. ej. una baja): volver a la última que tenga resultados.
+  const total = list.data?.total;
+  if (total !== undefined && !list.isPlaceholderData && page > lastPage(total, pageSize)) {
+    setPage(lastPage(total, pageSize));
+  }
   const changeEstado = (value: string) => {
     setEstado(value);
     setPage(1);
@@ -138,74 +136,93 @@ export function SmsInboundPage() {
       ) : (
         <div className="space-y-4">
           {list.data.items.length ? (
-            <Card className="min-w-0 overflow-hidden py-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {['Recibido', 'Origen', 'Mensaje', 'Estado', 'Alerta'].map((heading) => (
-                      <TableHead key={heading}>{heading}</TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {list.data.items.map((sms) => {
-                    const delayed =
-                      Date.parse(sms.receivedAt) - Date.parse(sms.gatewayReceivedAt) >
-                      GATEWAY_DELAY_MS;
-                    return (
-                      <TableRow key={sms.id}>
-                        <TableCell className="tabular-nums">
-                          <span className="block">{dateTime(sms.receivedAt)}</span>
-                          {delayed && (
-                            <span className="text-sm text-muted-foreground">
-                              Pasarela: {dateTime(sms.gatewayReceivedAt)}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className="block tabular-nums">{sms.fromOriginal}</span>
-                          {sms.sender && (
-                            <span className="text-sm text-muted-foreground">
-                              {sms.sender.guardName ?? 'Sin vigilador'} · {sms.sender.siteName}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="min-w-64 whitespace-pre-wrap break-words">
-                          {sms.text}
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge tone={sms.result === 'valid' ? 'info' : 'danger'}>
-                            {results[sms.result]}
-                          </StatusBadge>
-                        </TableCell>
-                        <TableCell>
-                          {sms.alertId ? (
-                            <Link
-                              to={`/alertas-panico/${sms.alertId}`}
-                              className="font-semibold underline-offset-4 hover:underline"
-                            >
-                              Ver alerta
-                            </Link>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </Card>
+            <div className="overflow-x-auto border-[1.5px] border-input">
+              <DataTable
+                label="SMS recibidos"
+                sortable={false}
+                rows={list.data.items}
+                getRowId={(sms) => sms.id}
+                columns={[
+                  {
+                    id: 'received',
+                    header: 'Recibido',
+                    width: 168,
+                    cell: (sms) => (
+                      <>
+                        <span className="block truncate tabular-nums">
+                          {dateTime(sms.receivedAt)}
+                        </span>
+                        {Date.parse(sms.receivedAt) - Date.parse(sms.gatewayReceivedAt) >
+                          GATEWAY_DELAY_MS && (
+                          <span className="block truncate text-sm text-muted-foreground">
+                            Pasarela: {dateTime(sms.gatewayReceivedAt)}
+                          </span>
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    id: 'origin',
+                    header: 'Origen',
+                    width: 240,
+                    cell: (sms) => (
+                      <>
+                        <span className="block truncate tabular-nums">{sms.fromOriginal}</span>
+                        {sms.sender && (
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {sms.sender.guardName ?? 'Sin vigilador'} · {sms.sender.siteName}
+                          </span>
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    id: 'text',
+                    header: 'Mensaje',
+                    // El mensaje es lo que se revisa: se lee completo en lugar de cortarse.
+                    className: 'whitespace-pre-wrap break-words py-2',
+                    cell: (sms) => sms.text,
+                  },
+                  {
+                    id: 'result',
+                    header: 'Estado',
+                    width: 160,
+                    cell: (sms) => (
+                      <StatusBadge tone={sms.result === 'valid' ? 'info' : 'danger'}>
+                        {results[sms.result]}
+                      </StatusBadge>
+                    ),
+                  },
+                  {
+                    id: 'alert',
+                    header: 'Alerta',
+                    width: 120,
+                    cell: (sms) =>
+                      sms.alertId ? (
+                        <Link
+                          to={`/alertas-panico/${sms.alertId}`}
+                          className="font-semibold underline-offset-4 hover:underline"
+                        >
+                          Ver alerta
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      ),
+                  },
+                ]}
+              />
+            </div>
           ) : (
             <EmptyState title="No hay SMS para estos filtros" />
           )}
           <Pagination
             page={page}
-            pages={Math.ceil(list.data.total / pageSize)}
             pageSize={pageSize}
             total={list.data.total}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
+            shown={list.data.items.length}
+            label="SMS"
+            onPage={setPage}
+            onPageSize={(size) => {
               setPageSize(size);
               setPage(1);
             }}
