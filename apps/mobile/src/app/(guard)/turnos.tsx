@@ -1,10 +1,10 @@
 import { Screen } from '@/ui';
-import { MyShiftsScreen } from '@/features/turnos/my-shifts-screen';
+import { ShiftsScreen } from '@/features/turnos/shifts-screen';
 
 export default function ShiftsRoute() {
   return (
     <Screen>
-      <MyShiftsScreen />
+      <ShiftsScreen />
     </Screen>
   );
 }
