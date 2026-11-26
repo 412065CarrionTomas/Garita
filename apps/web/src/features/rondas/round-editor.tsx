@@ -63,6 +63,8 @@ export interface EditorPoint {
 export interface EditorRound {
   id: string;
   name: string;
+  /** Turnos programados que toman la versión vigente: los alcanza la edición. */
+  scheduledShifts?: number;
   currentVersion: {
     frequencyMinutes: number;
     windowStartLocal: string;
@@ -505,6 +507,19 @@ export function RoundEditor({
           }}
         />
         <EditorHelp />
+        {/* En la fila del formulario y no como franja: no le quita alto al mapa ni a la lista. */}
+        {Boolean(editing?.scheduledShifts) && (
+          <p
+            role="note"
+            aria-label="Turnos afectados"
+            className="max-w-sm self-center text-sm text-muted-foreground"
+          >
+            {editing?.scheduledShifts === 1
+              ? 'Los cambios se aplican al turno programado con esta ronda.'
+              : `Los cambios se aplican a los ${String(editing?.scheduledShifts)} turnos programados con esta ronda.`}{' '}
+            Los turnos en curso y el historial no cambian.
+          </p>
+        )}
         <div className="ml-auto flex gap-2 self-center">
           <Button
             type="button"

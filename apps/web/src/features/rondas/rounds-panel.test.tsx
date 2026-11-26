@@ -439,6 +439,45 @@ describe('RoundsPanel', () => {
     expect(apiPatch).not.toHaveBeenCalled();
   });
 
+  it('al editar avisa cuántos turnos programados alcanza el cambio; al duplicar, no', async () => {
+    const rounds = [
+      {
+        id: 'r1',
+        name: 'Perimetral',
+        status: 'active',
+        scheduledShifts: 3,
+        currentVersion: {
+          frequencyMinutes: 60,
+          windowStartLocal: '20:00',
+          windowEndLocal: '08:00',
+          graceMinutes: 10,
+          route: null,
+          checkpoints: [{ position: 0, checkpoint: { id: 'p1', name: 'Portón' } }],
+        },
+      },
+    ];
+    jest
+      .mocked(useAuth)
+      .mockReturnValue({ user: { role: 'admin' }, loading: false } as ReturnType<typeof useAuth>);
+    jest
+      .mocked(apiGet)
+      .mockImplementation((path: string) =>
+        Promise.resolve((path.includes('puntos') ? points : rounds) as never),
+      );
+    renderWithQueryClient(<RoundsPanel site={site} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Acciones de Perimetral' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Editar' }));
+    expect(await screen.findByRole('note', { name: 'Turnos afectados' })).toHaveTextContent(
+      'Los cambios se aplican a los 3 turnos programados con esta ronda. Los turnos en curso y el historial no cambian.',
+    );
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    await user.click(await screen.findByRole('button', { name: 'Acciones de Perimetral' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Duplicar' }));
+    await screen.findByRole('heading', { name: 'Duplicar ronda', level: 3 });
+    expect(screen.queryByRole('note', { name: 'Turnos afectados' })).not.toBeInTheDocument();
+  });
+
   it('al duplicar omite los puntos dados de baja y avisa cuáles', async () => {
     const rounds = [
       {

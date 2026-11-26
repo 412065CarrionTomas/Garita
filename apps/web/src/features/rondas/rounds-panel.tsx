@@ -52,6 +52,7 @@ const roundsSchema = z.array(
     id: z.string(),
     name: z.string(),
     status: z.enum(['active', 'inactive']),
+    scheduledShifts: z.number().optional(),
     currentVersion: z
       .looseObject({
         frequencyMinutes: z.number(),
