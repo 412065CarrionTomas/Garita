@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { pageSizeSchema } from './pagination';
+import { pageNumberSchema, pageSizeSchema } from './pagination';
 
 /**
  * HU-37 contract: how an SMS received on the platform number was authenticated.
@@ -29,7 +29,7 @@ export const smsInboundQuerySchema = z
   .object({
     estado: smsInboundAuthResultSchema.optional(),
     buscar: z.string().trim().max(100).optional(),
-    pagina: z.coerce.number().int().min(1).max(100000).default(1),
+    pagina: pageNumberSchema,
     porPagina: pageSizeSchema,
   })
   .strict();

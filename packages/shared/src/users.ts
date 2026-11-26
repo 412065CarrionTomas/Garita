@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { LEGAL_VERSION } from './legal';
-import { pageSizeSchema } from './pagination';
+import { pageNumberSchema, pageSizeSchema } from './pagination';
 
 export const personnelRoleSchema = z.enum(['supervisor', 'guard']);
 export const personnelStatusSchema = z.enum(['invitation_pending', 'active', 'deactivated']);
@@ -32,7 +32,7 @@ export const listUsersQuerySchema = z.object({
   estado: z.enum([...personnelStatusSchema.options, 'invitation_failed']).optional(),
   buscar: z.string().trim().max(100).optional(),
   orden: z.enum(['recientes', 'nombre', 'estado']).default('recientes'),
-  pagina: z.coerce.number().int().positive().default(1),
+  pagina: pageNumberSchema,
   porPagina: pageSizeSchema,
 });
 export const personnelUserSchema = z.object({
