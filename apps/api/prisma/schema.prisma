@@ -1027,7 +1027,7 @@ model IncidentFollowUpAction {
   incident   Incident                   @relation(fields: [incidentId], references: [id], onDelete: Cascade)
   author     User                       @relation("IncidentFollowUpAuthor", fields: [authorId], references: [id], onDelete: Restrict)
 
-  @@index([incidentId, createdAt])
+  @@index([companyId, incidentId, createdAt])
 }
 
 model IncidentPhoto {
