@@ -57,6 +57,8 @@ export const incidentReportResponseSchema = z.object({
   /** 7 días (lunes primero) × 12 franjas de 2 h. */
   byWeekdayTimeBand: z.array(z.array(count).length(12)).length(7),
   highSeverity: count,
+  /** Total real; `openFollowUps` se acota a 50 filas. */
+  openFollowUpsTotal: count,
   previous: z.object({
     desde: z.iso.date(),
     hasta: z.iso.date(),
@@ -161,23 +163,31 @@ interface IncidentSource {
   receivedAt: Instant;
 }
 
+// Crear un Intl.DateTimeFormat es caro: uno por zona y uso, reutilizado en todo el reporte.
+const formatters = new Map<string, Intl.DateTimeFormat>();
+function formatter(kind: 'hour' | 'weekday', timeZone: string) {
+  const key = `${kind}|${timeZone}`;
+  let format = formatters.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(
+      'en-GB',
+      kind === 'hour'
+        ? { timeZone, hour: '2-digit', hourCycle: 'h23' }
+        : { timeZone, weekday: 'short' },
+    );
+    formatters.set(key, format);
+  }
+  return format;
+}
+
 export function incidentTimeBand(at: Instant, timezone: string): number {
-  const hour = Number(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone: timezone,
-      hour: '2-digit',
-      hourCycle: 'h23',
-    }).format(new Date(at)),
-  );
+  const hour = Number(formatter('hour', timezone).format(new Date(at)));
   return Math.floor(hour / 2) * 2;
 }
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /** Día de la semana en la zona dada: 0 = lunes … 6 = domingo. */
 export function incidentWeekday(at: Instant, timezone: string): number {
-  const day = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, weekday: 'short' }).format(
-    new Date(at),
-  );
-  return WEEKDAYS.indexOf(day);
+  return WEEKDAYS.indexOf(formatter('weekday', timezone).format(new Date(at)));
 }
 /** Día de la semana de una fecha local `AAAA-MM-DD`: 0 = lunes … 6 = domingo. */
 export function localDateWeekday(date: string): number {
@@ -215,12 +225,12 @@ export function computeIncidentReport(
     const weekday = byWeekdayTimeBand[incidentWeekday(at, timezone)];
     const slot = incidentTimeBand(at, timezone) / 2;
     if (weekday) weekday[slot] = (weekday[slot] ?? 0) + 1;
+    const timeBand = byTimeBand[slot];
+    if (timeBand) timeBand.value++;
     const severity = bySeverity.find((group) => group.id === row.severity);
     if (severity) severity.value++;
     const type = byType.find((group) => group.id === row.type);
     if (type) type.value++;
-    const band = byTimeBand[incidentTimeBand(row.trustedAt ?? row.occurredAtDevice, timezone) / 2];
-    if (band) band.value++;
     const classification = byClassification.find((group) => group.id === row.classificationStatus);
     if (classification) classification.value++;
     const site = sites.get(row.site.id) ?? { ...row.site, value: 0 };
