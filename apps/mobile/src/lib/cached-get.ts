@@ -65,10 +65,18 @@ export function useCachedGet<T extends z.ZodType>(path: string, schema: T) {
       try {
         const data = await apiGet(path, schema);
         if (!active) return;
-        setState({ data, savedAt: null, loading: false, error: null });
+        // `savedAt` es la hora de lo que se ve: si después falla un refresco, se avisa de cuándo es.
+        setState({ data, savedAt: new Date().toISOString(), loading: false, error: null });
         void writeCached(key, data);
       } catch (cause) {
-        if (active) setState((prev) => ({ ...prev, loading: false, error: loadError(cause) }));
+        if (!active) return;
+        const error = loadError(cause);
+        // Con la cuenta suspendida no se muestran datos viejos como si fueran válidos.
+        setState((prev) =>
+          error === 'suspended'
+            ? { data: null, savedAt: null, loading: false, error }
+            : { ...prev, loading: false, error },
+        );
       }
     })();
     return () => {

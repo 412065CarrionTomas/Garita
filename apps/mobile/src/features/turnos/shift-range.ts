@@ -12,6 +12,26 @@ export function isoDay(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/** Día `AAAA-MM-DD` desplazado `days` días. */
+export function addDays(day: string, days: number): string {
+  const [y, m, d] = day.split('-').map(Number);
+  return isoDay(new Date(y ?? 0, (m ?? 1) - 1, (d ?? 1) + days));
+}
+
+/**
+ * Pone `day` en un extremo del rango: si queda invertido el otro extremo lo acompaña, y si supera
+ * el tope de la API (un año) el otro extremo se acerca.
+ */
+export function withEdge(range: DayRange, edge: keyof DayRange, day: string, maxDays: number) {
+  const next = { ...range, [edge]: day };
+  if (next.desde > next.hasta) next[edge === 'desde' ? 'hasta' : 'desde'] = day;
+  if (addDays(next.desde, maxDays - 1) < next.hasta) {
+    if (edge === 'desde') next.hasta = addDays(day, maxDays - 1);
+    else next.desde = addDays(day, -(maxDays - 1));
+  }
+  return next;
+}
+
 /** Mes completo que contiene `date`, desplazado `offset` meses. */
 export function monthRange(date: Date, offset = 0): DayRange {
   const year = date.getFullYear();
@@ -27,8 +47,14 @@ export function totals(shifts: GuardShift[]) {
   let worked = 0;
   let planned = 0;
   for (const shift of shifts) {
-    if (shift.startedAt && shift.closedAt) worked += hours(shift.startedAt, shift.closedAt);
-    else if (shift.status === 'scheduled' || shift.status === 'in_progress')
+    if (shift.startedAt && shift.closedAt) {
+      // El cierre automático llega después del horario (margen de envío): se cuenta hasta el fin.
+      const end =
+        shift.status === 'auto_closed' && shift.closedAt > shift.endsAt
+          ? shift.endsAt
+          : shift.closedAt;
+      worked += hours(shift.startedAt, end);
+    } else if (shift.status === 'scheduled' || shift.status === 'in_progress')
       planned += hours(shift.startsAt, shift.endsAt);
   }
   return { count: shifts.length, worked: Math.round(worked), planned: Math.round(planned) };
@@ -59,18 +85,42 @@ export function shiftStamp(shift: GuardShift): { label: string; tone: Tone } {
 }
 
 /** Día en que termina (el del instante anterior al fin: un fin a las 00:00 no toca ese día). */
-export const endDay = (shift: GuardShift) => isoDay(new Date(Date.parse(shift.endsAt) - 1));
+export const endDay = (shift: GuardShift) =>
+  dayIn(new Date(Date.parse(shift.endsAt) - 1), shift.site.timezone);
+
+// Un formateador por zona horaria: crearlos es caro en Hermes.
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+/** Fecha `AAAA-MM-DD` en la zona del predio (la misma en que se calcula `serviceDate`). */
+export function dayIn(date: Date, timeZone: string): string {
+  let format = dayFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    dayFormats.set(timeZone, format);
+  }
+  return format.format(date);
+}
 
 /** Un turno nocturno toca dos días: el que empieza y el que termina. */
 export const touches = (shift: GuardShift, { desde, hasta }: DayRange) =>
   shift.serviceDate <= hasta && endDay(shift) >= desde;
 
-/** Separa en próximos (sin terminar, ascendente) y anteriores (el más reciente primero). */
+const PENDING = new Set<GuardShift['status']>(['scheduled', 'unassigned']);
+
+/**
+ * Separa en próximos (en curso o pendientes sin terminar, ascendente) y anteriores (el más
+ * reciente primero). Un turno cerrado, cancelado o ausente va a anteriores aunque su horario siga.
+ */
 export function splitByToday(shifts: GuardShift[], now: Date) {
   const upcoming: GuardShift[] = [];
   const past: GuardShift[] = [];
   for (const shift of shifts)
-    (shift.status === 'in_progress' || Date.parse(shift.endsAt) > now.getTime()
+    (shift.status === 'in_progress' ||
+    (PENDING.has(shift.status) && Date.parse(shift.endsAt) > now.getTime())
       ? upcoming
       : past
     ).push(shift);

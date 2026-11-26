@@ -1,7 +1,7 @@
 import { render, screen, userEvent } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Linking } from 'react-native';
-import { apiGet } from '@/lib/api-client';
+import { apiGet, ApiError } from '@/lib/api-client';
 import { TodayScreen } from './today-screen';
 
 const mockPush = jest.fn();
@@ -81,4 +81,32 @@ it('el nocturno de anoche que sigue vigente aparece en Hoy', async () => {
   } finally {
     jest.useRealTimers();
   }
+});
+
+it('un turno de hoy que ya terminó deja ver el próximo', async () => {
+  const ended = { ...shift('x', at(-3)), endsAt: at(-1) };
+  respond([ended, shift('b', at(72))]);
+  await render(<TodayScreen />);
+  expect(await screen.findByText('Próximo turno')).toBeOnTheScreen();
+  expect(screen.queryByText('Predio x')).toBeNull();
+});
+
+it('con la cuenta suspendida avisa aunque haya copia guardada', async () => {
+  respond([shift('b', at(72))]);
+  const first = await render(<TodayScreen />);
+  expect(await screen.findByText('Predio b')).toBeOnTheScreen();
+  await first.unmount();
+  jest
+    .mocked(apiGet)
+    .mockRejectedValue(
+      new ApiError('x', 402, {
+        code: 'ACCOUNT_SUSPENDED',
+        accountStatus: 'suspended',
+        message: 'x',
+      }),
+    );
+  await render(<TodayScreen />);
+  expect(await screen.findByText(/cuenta de tu empresa está suspendida/)).toBeOnTheScreen();
+  expect(screen.queryByText('Predio b')).toBeNull();
+  expect(screen.queryByText(/Sin conexión/)).toBeNull();
 });

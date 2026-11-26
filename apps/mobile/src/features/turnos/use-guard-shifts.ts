@@ -56,21 +56,25 @@ export function useGuardShifts({ desde, hasta }: DayRange) {
           );
           if (!active) return;
           shifts = [...shifts, ...page.items];
-          cursor = page.nextCursor;
+          // Un cursor repetido cortaría la paginación en un bucle: se trata como fin.
+          cursor = page.nextCursor === cursor ? null : page.nextCursor;
           setLoaded({ key, shifts, done: !cursor, error: null, savedAt: null });
         } while (cursor);
         void writeCached(cacheKey, { desde, hasta, shifts });
       } catch (cause) {
-        const cached = await readCached(cacheKey, cachedSchema);
+        const error = loadError(cause);
+        // Con la cuenta suspendida no se muestra la copia como si fuera válida.
+        const cached = error === 'suspended' ? null : await readCached(cacheKey, cachedSchema);
         if (!active) return;
         const usable = cached?.data.desde === desde && cached.data.hasta === hasta;
-        setLoaded((prev) => ({
+        // Sin copia del rango pedido no quedan datos de otro rango ni páginas a medias.
+        setLoaded({
           key,
-          shifts: usable ? cached.data.shifts : prev.shifts,
+          shifts: usable ? cached.data.shifts : [],
           done: true,
-          error: loadError(cause),
+          error,
           savedAt: usable ? cached.savedAt : null,
-        }));
+        });
       }
     })();
     return () => {

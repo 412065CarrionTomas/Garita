@@ -109,3 +109,20 @@ it('cada campo abre su calendario, resalta hoy y pide el rango nuevo', async () 
   expect(screen.queryByRole('button', { name: /, hoy$/ })).toBeNull();
   expect(jest.mocked(apiGet).mock.lastCall?.[0]).toContain(`hasta=${today}`);
 });
+
+it('con la cuenta suspendida no muestra la copia guardada como si fuera válida', async () => {
+  jest.mocked(apiGet).mockResolvedValueOnce({ items: [base], nextCursor: null });
+  const first = await render(<ShiftsScreen />);
+  expect(await screen.findByText('Parque Ferreyra')).toBeOnTheScreen();
+  await first.unmount();
+  jest.mocked(apiGet).mockRejectedValue(
+    new ApiError('x', 402, {
+      code: 'ACCOUNT_SUSPENDED',
+      accountStatus: 'suspended',
+      message: 'x',
+    }),
+  );
+  await render(<ShiftsScreen />);
+  expect(await screen.findByText(/cuenta de tu empresa está suspendida/)).toBeOnTheScreen();
+  expect(screen.queryByText('Parque Ferreyra')).toBeNull();
+});

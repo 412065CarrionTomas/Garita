@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { space } from '@garita/tokens';
-import { SUSPENSION_MESSAGES } from '@garita/shared';
-import { Banner, Loading, Segmented, Text, useTheme } from '@/ui';
-import { cachedNotice } from '@/lib/cached-get';
+import { Loading, Segmented, Text, useTheme } from '@/ui';
+import { LoadBanner } from '@/features/estado/load-banner';
 import { RangePicker } from './range-picker';
 import {
   endDay,
@@ -88,17 +87,7 @@ export function ShiftsScreen() {
       <Text color="mutedForeground">
         {`${sum.count} ${sum.count === 1 ? 'turno' : 'turnos'} · ${sum.worked} h trabajadas · ${sum.planned} h por trabajar`}
       </Text>
-      {savedAt ? (
-        <Banner tone="warning">{cachedNotice(savedAt)}</Banner>
-      ) : (
-        error && (
-          <Banner tone="danger">
-            {error === 'suspended'
-              ? SUSPENSION_MESSAGES.guard
-              : 'No se pudieron cargar los turnos. Deslizá hacia abajo para reintentar.'}
-          </Banner>
-        )
-      )}
+      <LoadBanner error={error} savedAt={savedAt} what="los turnos" />
       {loading && visible.length === 0 && <Loading label="Cargando turnos…" />}
     </View>
   );

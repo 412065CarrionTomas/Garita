@@ -4,7 +4,8 @@ import { radius, space, touch } from '@garita/tokens';
 import { Text, useTheme } from '@/ui';
 import { DateCalendar } from './date-calendar';
 import { formatDate } from './shift-row';
-import type { DayRange } from './shift-range';
+import { GUARD_SHIFTS_MAX_DAYS } from '@garita/shared';
+import { withEdge, type DayRange } from './shift-range';
 
 /** Rango con dos campos: cada uno abre el calendario para elegir su propio día. */
 export function RangePicker({
@@ -32,15 +33,12 @@ export function RangePicker({
       </View>
       {editing && (
         <DateCalendar
-          key={editing}
+          key={`${editing}-${range[editing]}`}
           value={range[editing]}
           range={range}
           marked={marked}
           onPick={(day) => {
-            // Si el día deja el rango invertido, el otro extremo lo acompaña.
-            const next = { ...range, [editing]: day };
-            if (next.desde > next.hasta) next[editing === 'desde' ? 'hasta' : 'desde'] = day;
-            onChange(next);
+            onChange(withEdge(range, editing, day, GUARD_SHIFTS_MAX_DAYS));
             setEditing(null);
           }}
         />

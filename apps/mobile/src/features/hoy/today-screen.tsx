@@ -2,11 +2,12 @@ import { Linking, RefreshControl, ScrollView, StyleSheet, View } from 'react-nat
 import { useRouter } from 'expo-router';
 import { z } from 'zod';
 import { space } from '@garita/tokens';
-import { SUSPENSION_MESSAGES } from '@garita/shared';
-import { Badge, Banner, Button, Card, Loading, Text, useTheme } from '@/ui';
-import { cachedNotice, useCachedGet } from '@/lib/cached-get';
+import { Badge, Button, Card, Loading, Text, useTheme } from '@/ui';
+import { LoadBanner } from '@/features/estado/load-banner';
+import { useCachedGet } from '@/lib/cached-get';
 import { directionsUrl } from '@/lib/maps';
-import { isoDay } from '@/features/turnos/shift-range';
+import { dayIn } from '@/features/turnos/shift-range';
+import { formatTime } from '@/features/turnos/shift-row';
 
 const upcomingSchema = z.array(
   z.looseObject({
@@ -28,16 +29,21 @@ const upcomingSchema = z.array(
 );
 type Upcoming = z.infer<typeof upcomingSchema>[number];
 
-const dayFormat = new Intl.DateTimeFormat('es-AR', {
-  weekday: 'long',
-  day: 'numeric',
-  month: 'long',
-});
-const timeFormat = new Intl.DateTimeFormat('es-AR', {
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
+// Un formateador por zona: las horas se muestran en la del predio, como en Turnos.
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+function formatDayIn(date: Date, timeZone: string) {
+  let format = dayFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('es-AR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      timeZone,
+    });
+    dayFormats.set(timeZone, format);
+  }
+  return format.format(date);
+}
 
 function greeting(hour: number) {
   if (hour >= 6 && hour < 12) return 'Buenos días';
@@ -49,16 +55,19 @@ export function TodayScreen() {
   const { colors } = useTheme();
   const { data, savedAt, loading, error, reload } = useCachedGet('/mis-turnos', upcomingSchema);
   const now = new Date();
-  const today = isoDay(now);
   const shifts = data ?? [];
   const startOf = (shift: Upcoming) => new Date(shift.assignments[0]?.startsAt ?? shift.startsAt);
-  // Hoy también incluye el nocturno de anoche que todavía no terminó.
-  const todays = shifts.filter(
-    (s) =>
-      s.status === 'in_progress' ||
-      isoDay(startOf(s)) === today ||
-      (isoDay(new Date(s.endsAt)) === today && new Date(s.endsAt) > now),
-  );
+  // De hoy (en la zona del predio) y sin terminar; incluye el nocturno de anoche todavía vigente.
+  const todays = shifts.filter((s) => {
+    if (s.status === 'in_progress') return true;
+    const tz = s.site.company.timezone;
+    const today = dayIn(now, tz);
+    const end = new Date(s.endsAt);
+    return (
+      end > now &&
+      (dayIn(startOf(s), tz) === today || dayIn(new Date(end.getTime() - 1), tz) === today)
+    );
+  });
   const next = todays.length ? null : shifts.find((s) => startOf(s) > now);
   return (
     <ScrollView
@@ -75,17 +84,7 @@ export function TodayScreen() {
       <Text variant="display" accessibilityRole="header">
         {greeting(now.getHours())}
       </Text>
-      {error && savedAt ? (
-        <Banner tone="warning">{cachedNotice(savedAt)}</Banner>
-      ) : (
-        error && (
-          <Banner tone="danger">
-            {error === 'suspended'
-              ? SUSPENSION_MESSAGES.guard
-              : 'No se pudieron cargar tus turnos. Deslizá hacia abajo para reintentar.'}
-          </Banner>
-        )
-      )}
+      <LoadBanner error={error} savedAt={savedAt} what="tus turnos" />
       {loading && !data && <Loading label="Cargando tus turnos…" />}
       {todays.length > 0 && <Text variant="title">Hoy</Text>}
       {todays.map((shift) => (
@@ -114,7 +113,7 @@ function ShiftCard({ shift, startsAt }: { shift: Upcoming; startsAt: Date }) {
     <Card style={styles.card}>
       <View style={styles.row}>
         <Text variant="heading" style={styles.fill}>
-          {`${timeFormat.format(startsAt)}–${timeFormat.format(new Date(shift.endsAt))}`}
+          {`${formatTime(startsAt.toISOString(), shift.site.company.timezone)}–${formatTime(shift.endsAt, shift.site.company.timezone)}`}
         </Text>
         <Badge
           tone={running ? 'info' : 'neutral'}
@@ -122,7 +121,7 @@ function ShiftCard({ shift, startsAt }: { shift: Upcoming; startsAt: Date }) {
           label={running ? 'En curso' : 'Programado'}
         />
       </View>
-      <Text color="mutedForeground">{dayFormat.format(startsAt)}</Text>
+      <Text color="mutedForeground">{formatDayIn(startsAt, shift.site.company.timezone)}</Text>
       <Text variant="subheading">{shift.site.name}</Text>
       <Text>{shift.site.address}</Text>
       {shift.site.accessInstructions && (

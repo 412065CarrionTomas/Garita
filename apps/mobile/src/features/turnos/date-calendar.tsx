@@ -57,7 +57,15 @@ export function DateCalendar({
       </View>
       <View style={styles.grid}>
         {WEEKDAYS.map((label, i) => (
-          <Text key={i} variant="caption" color="mutedForeground" style={styles.weekday}>
+          // Decorativo: cada día ya se anuncia con su nombre completo.
+          <Text
+            key={i}
+            variant="caption"
+            color="mutedForeground"
+            style={styles.weekday}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             {label}
           </Text>
         ))}

@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { FlatList, Linking, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { space } from '@garita/tokens';
-import { SUSPENSION_MESSAGES, guardSitesSchema, type GuardSite } from '@garita/shared';
-import { Banner, Button, Card, ListItem, Loading, Text, useTheme } from '@/ui';
-import { cachedNotice, useCachedGet } from '@/lib/cached-get';
+import { guardSitesSchema, type GuardSite } from '@garita/shared';
+import { Button, Card, ListItem, Loading, Text, useTheme } from '@/ui';
+import { LoadBanner } from '@/features/estado/load-banner';
+import { useCachedGet } from '@/lib/cached-get';
 import { directionsUrl } from '@/lib/maps';
 
 const nextFormat = new Intl.DateTimeFormat('es-AR', {
@@ -31,17 +32,7 @@ export function SitesScreen() {
         <View style={styles.header}>
           <Text variant="title">Predios</Text>
           {/* La copia se avisa solo si la API no respondió. */}
-          {error && savedAt ? (
-            <Banner tone="warning">{cachedNotice(savedAt)}</Banner>
-          ) : (
-            error && (
-              <Banner tone="danger">
-                {error === 'suspended'
-                  ? SUSPENSION_MESSAGES.guard
-                  : 'No se pudieron cargar los predios. Deslizá hacia abajo para reintentar.'}
-              </Banner>
-            )
-          )}
+          <LoadBanner error={error} savedAt={savedAt} what="los predios" />
           {loading && !data && <Loading label="Cargando predios…" />}
         </View>
       }
