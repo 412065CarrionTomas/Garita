@@ -38,7 +38,8 @@ export class SitesService {
     query: {
       estado?: 'active' | 'inactive';
       buscar?: string;
-      orden: 'nombre' | 'recientes' | 'predios';
+      orden: 'nombre' | 'recientes' | 'contacto' | 'telefono' | 'predios' | 'estado';
+      sentido?: 'asc' | 'desc';
       pagina: number;
       porPagina: number;
     },
@@ -56,16 +57,20 @@ export class SitesService {
     };
     const where = { ...base, status: query.estado };
     // Al supervisor no se lo ordena por el total de predios: delataría los que no supervisa.
+    const dir = query.sentido ?? 'asc';
+    const byName = [{ name: dir }, { id: 'asc' as const }];
     const orderBy =
       query.orden === 'recientes'
         ? [{ createdAt: 'desc' as const }, { id: 'asc' as const }]
         : query.orden === 'predios' && !supervisor
-          ? [
-              { sites: { _count: 'desc' as const } },
-              { name: 'asc' as const },
-              { id: 'asc' as const },
-            ]
-          : [{ name: 'asc' as const }, { id: 'asc' as const }];
+          ? [{ sites: { _count: dir } }, ...byName]
+          : query.orden === 'contacto'
+            ? [{ contactName: dir }, ...byName]
+            : query.orden === 'telefono'
+              ? [{ phone: dir }, ...byName]
+              : query.orden === 'estado'
+                ? [{ status: dir }, ...byName]
+                : byName;
     const client = this.prisma.tenantPrisma.client;
     const [items, active, inactive] = await Promise.all([
       client.findMany({

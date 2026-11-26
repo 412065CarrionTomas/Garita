@@ -57,11 +57,18 @@ describe('SmsInboundService.list', () => {
       { id: 'g-old', firstName: 'Bruno', lastName: 'Paz' },
       { id: 'g-new', firstName: 'Ana', lastName: 'Gómez' },
     ]);
-    const page = await service.list({ buscar: ' ayuda  tranquera ', pagina: 2, porPagina: 5 });
+    const page = await service.list({
+      buscar: ' ayuda  tranquera ',
+      orden: 'origen',
+      sentido: 'asc',
+      pagina: 2,
+      porPagina: 5,
+    });
     const args = (db.smsInbound.findMany.mock.calls as unknown[][])[0]?.[0] as {
       where: { AND: unknown[] };
       skip: number;
       take: number;
+      orderBy: object[];
     };
     expect(args.where.AND).toHaveLength(2);
     // El turno se busca solo para el SMS sin alerta, y con todas sus asignaciones.
@@ -72,6 +79,7 @@ describe('SmsInboundService.list', () => {
     expect(shiftArgs.where).toEqual({ id: { in: ['shift-1'] } });
     expect(shiftArgs.select.assignments.where).toBeUndefined();
     expect(args).toMatchObject({ skip: 5, take: 5 });
+    expect(args.orderBy[0]).toEqual({ fromNormalized: 'asc' });
     expect(page.items.map((item) => item.sender)).toEqual([
       { guardName: 'Bruno Paz', siteName: 'Predio Norte' },
       null,

@@ -183,7 +183,16 @@ export class SmsInboundService {
     const [rows, valid, unverified, unknown] = await Promise.all([
       db.smsInbound.findMany({
         where,
-        orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+        orderBy: [
+          query.orden === 'origen'
+            ? { fromNormalized: query.sentido }
+            : query.orden === 'estado'
+              ? { result: query.sentido }
+              : { receivedAt: query.sentido },
+          // Dentro del mismo origen o estado, lo más nuevo primero; el id desempata.
+          { receivedAt: 'desc' },
+          { id: 'desc' },
+        ],
         skip: (query.pagina - 1) * query.porPagina,
         take: query.porPagina,
         include: {

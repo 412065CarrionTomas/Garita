@@ -53,7 +53,8 @@ export class UsersService {
     rol?: 'supervisor' | 'guard';
     estado?: 'invitation_pending' | 'active' | 'deactivated' | 'invitation_failed';
     buscar?: string;
-    orden?: 'recientes' | 'nombre' | 'estado';
+    orden?: 'recientes' | 'nombre' | 'telefono' | 'legajo' | 'rol' | 'estado';
+    sentido?: 'asc' | 'desc';
     pagina: number;
     porPagina: number;
   }) {
@@ -79,17 +80,21 @@ export class UsersService {
         ? { ...base, ...failed }
         : { ...base, status: query.estado };
     // El id desempata: con OFFSET, un orden con empates puede repetir o saltear filas entre páginas.
-    const byName = [
-      { firstName: 'asc' as const },
-      { lastName: 'asc' as const },
-      { id: 'asc' as const },
-    ];
+    const dir = query.sentido ?? 'asc';
+    const byName = [{ firstName: dir }, { lastName: dir }, { id: 'asc' as const }];
+    // Los que no tienen teléfono o legajo van al final en los dos sentidos.
     const orderBy =
       query.orden === 'nombre'
         ? byName
-        : query.orden === 'estado'
-          ? [{ status: 'asc' as const }, ...byName]
-          : [{ createdAt: 'desc' as const }, { id: 'asc' as const }];
+        : query.orden === 'telefono'
+          ? [{ phone: { sort: dir, nulls: 'last' as const } }, ...byName]
+          : query.orden === 'legajo'
+            ? [{ employeeNumber: { sort: dir, nulls: 'last' as const } }, ...byName]
+            : query.orden === 'rol'
+              ? [{ role: dir }, ...byName]
+              : query.orden === 'estado'
+                ? [{ status: dir }, ...byName]
+                : [{ createdAt: 'desc' as const }, { id: 'asc' as const }];
     const count = (extra: object) =>
       this.prisma.tenantPrisma.user.count({ where: { ...base, ...extra } });
     const [users, active, pending, invitationFailed, deactivated] = await Promise.all([
