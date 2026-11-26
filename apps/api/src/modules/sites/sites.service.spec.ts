@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { Prisma } from '../../generated/prisma/client';
 import { SitesService } from './sites.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
@@ -188,5 +189,67 @@ describe('SitesService audit regressions', () => {
     });
     expect(db.site.create).not.toHaveBeenCalled();
     expect(db.site.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('sites for the guard', () => {
+  it('lists own sites with next shift, rounds and supervisor names only', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: 'site',
+        name: 'Parque',
+        address: 'Ruta 9 km 4',
+        latitude: new Prisma.Decimal('-31.4'),
+        longitude: new Prisma.Decimal('-64.1'),
+        accessInstructions: 'Portón norte',
+        supervisors: [{ user: { firstName: 'Ana', lastName: 'Paz' } }],
+        rounds: [
+          { name: 'Perimetral', currentVersion: { _count: { checkpoints: 8 } } },
+          { name: 'Interna', currentVersion: null },
+        ],
+        shifts: [{ startsAt: new Date('2026-11-14T01:00:00Z') }],
+      },
+    ]);
+    const service = new SitesService(
+      { tenantPrisma: { site: { findMany } } } as unknown as PrismaService,
+      {} as TenantResourceService,
+      { now: () => new Date('2026-11-13T12:00:00Z') },
+      {} as never,
+      {} as never,
+      {} as ShiftExecutionService,
+      {} as FirebaseIdentityProvider,
+    );
+    const sites = await service.listForGuard({
+      userId: 'guard',
+      companyId: 'company',
+      role: 'guard',
+      status: 'active',
+    });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      where: {
+        shifts: {
+          some: {
+            assignments: { some: { guardId: 'guard', isCurrent: true, active: true } },
+            endsAt: { gte: new Date('2026-08-15T12:00:00Z') },
+          },
+        },
+      },
+    });
+    expect(sites).toEqual([
+      {
+        id: 'site',
+        name: 'Parque',
+        address: 'Ruta 9 km 4',
+        latitude: -31.4,
+        longitude: -64.1,
+        accessInstructions: 'Portón norte',
+        supervisors: ['Ana Paz'],
+        rounds: [
+          { name: 'Perimetral', checkpoints: 8 },
+          { name: 'Interna', checkpoints: 0 },
+        ],
+        nextShiftAt: '2026-11-14T01:00:00.000Z',
+      },
+    ]);
   });
 });

@@ -26,6 +26,7 @@ export * from './realtime';
 export * from './field/trusted-time';
 export * from './incidents';
 export * from './sites/connectivity';
+export * from './sites/guard-sites';
 export * from './supervision/sync-status';
 export * from './supervision/window-status';
 export * from './supervision/review';

@@ -95,6 +95,13 @@ export class SitesController {
     return this.sites.getClient(id, user);
   }
 
+  @Get('mis-predios')
+  @Roles('guard')
+  @ApiOperation({ summary: 'Predios del vigilador: por venir o con turnos en los últimos 90 días' })
+  listForGuard(@CurrentUser() user: AuthenticatedUser) {
+    return this.sites.listForGuard(user);
+  }
+
   @Get('predios')
   @Roles('admin', 'supervisor', 'client')
   listSites(@Query() query: unknown, @CurrentUser() user: AuthenticatedUser) {
