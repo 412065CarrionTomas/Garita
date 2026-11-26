@@ -2,7 +2,7 @@ import { render, userEvent } from '@testing-library/react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GuardBar } from './guard-bar';
 
-const renderBar = () =>
+const renderBar = (shiftId: string | null = 'abc') =>
   render(
     <SafeAreaProvider
       initialMetrics={{
@@ -10,7 +10,7 @@ const renderBar = () =>
         insets: { top: 0, left: 0, right: 0, bottom: 0 },
       }}
     >
-      <GuardBar shiftId="abc" />
+      <GuardBar shiftId={shiftId} />
     </SafeAreaProvider>,
   );
 
@@ -26,12 +26,19 @@ beforeEach(() => {
   mockPathname = '/turno/abc';
 });
 
-it('marca el destino activo y navega a otro', async () => {
+it('con turno iniciado el primer destino es la Ronda', async () => {
   const screen = await renderBar();
   expect(screen.getByRole('tab', { name: 'Ronda' })).toBeSelected();
-  expect(screen.getByRole('tab', { name: 'Envío' })).not.toBeSelected();
-  await userEvent.setup().press(screen.getByRole('tab', { name: 'Envío' }));
-  expect(mockReplace).toHaveBeenCalledWith('/envio');
+  expect(screen.getByRole('tab', { name: 'Turnos' })).not.toBeSelected();
+  await userEvent.setup().press(screen.getByRole('tab', { name: 'Turnos' }));
+  expect(mockReplace).toHaveBeenCalledWith('/turnos');
+});
+
+it('sin turno el primer destino es Hoy', async () => {
+  mockPathname = '/';
+  const screen = await renderBar(null);
+  expect(screen.queryByRole('tab', { name: 'Ronda' })).toBeNull();
+  expect(screen.getByRole('tab', { name: 'Hoy' })).toBeSelected();
 });
 
 it('se oculta en el visor de la cámara', async () => {

@@ -19,7 +19,7 @@ jest.mock('expo-router', () => ({
     const { Text } = jest.requireActual('react-native') as { Text: unknown };
     return React.createElement(Text, null, 'GuardStack');
   },
-  usePathname: jest.fn(() => '/(guard)'),
+  usePathname: jest.fn(() => '/'),
 }));
 let mockUser: { id?: string; role: 'guard'; legalAcceptanceRequired?: boolean } = {
   role: 'guard',
@@ -31,6 +31,11 @@ jest.mock('@/features/permisos/permissions', () => ({ checkFieldPermissions: jes
 jest.mock('@/lib/db/database', () => ({
   createDefaultFieldRepository: jest.fn(async () => ({ getShiftData: async () => null })),
   subscribePanicChanges: jest.fn(() => () => undefined),
+}));
+jest.mock('@/features/navegacion/guard-header', () => ({ GuardHeader: () => null }));
+jest.mock('@/features/navegacion/guard-bar', () => ({
+  GuardBar: () => null,
+  GUARD_BAR_HEIGHT: 64,
 }));
 jest.mock('@/features/panico/panic-overlay', () => ({
   PanicOverlay: () => {
@@ -117,5 +122,17 @@ describe('guard permissions gate', () => {
     });
     await waitFor(() => expect(screen.queryByText('PanicOverlay')).toBeNull());
     expect(screen.getByText('GuardStack')).toBeOnTheScreen();
+  });
+
+  it('con turno iniciado deja ver Turnos sin volver a la Ronda', async () => {
+    const { usePathname } = jest.requireMock('expo-router') as { usePathname: jest.Mock };
+    usePathname.mockReturnValue('/turnos');
+    jest.mocked(checkFieldPermissions).mockResolvedValue('ok');
+    jest
+      .mocked(createDefaultFieldRepository)
+      .mockResolvedValue({ getShiftData: async () => ({ shift: { id: 'saved-shift' } }) } as never);
+    await render(<GuardLayout />);
+    await waitFor(() => expect(screen.getByText('GuardStack')).toBeOnTheScreen());
+    expect(screen.queryByText('/turno/saved-shift')).toBeNull();
   });
 });
