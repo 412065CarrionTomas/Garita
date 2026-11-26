@@ -30,6 +30,7 @@ const incidentReport = {
     new Date('2026-10-03T02:00:00Z'),
   ),
   previous: { desde: '2026-08-31', hasta: '2026-10-01', total: 4, highSeverity: 0 },
+  openFollowUpsTotal: 1,
   openFollowUps: [
     {
       id: 'i1',
@@ -118,7 +119,7 @@ it('muestra cifras contra el período anterior, sin el aviso de pendientes repet
   expect(kpis).toBeInTheDocument();
   expect(screen.getByText('−3 respecto del período anterior')).toBeInTheDocument();
   expect(screen.getByText('+1 respecto del período anterior')).toBeInTheDocument();
-  expect(screen.getByText('+50 % respecto del período anterior')).toBeInTheDocument();
+  expect(screen.getByText('+50 pp respecto del período anterior')).toBeInTheDocument();
   expect(screen.queryByText(/pendientes de clasificar/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Rondas incumplidas/)).not.toBeInTheDocument();
 });

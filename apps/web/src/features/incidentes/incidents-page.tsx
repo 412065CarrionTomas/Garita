@@ -1,8 +1,9 @@
 /* eslint react-refresh/only-export-components: off */
+import { useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/page-header';
 import { SegmentedFilter } from '@/components/segmented-filter';
-import { useIncidentPendingCount } from './incident-ui';
+import { RowsSkeleton, useIncidentPendingCount } from './incident-ui';
 import { IncidentsTable } from './incidents-table';
 import { TriageView } from './triage-view';
 
@@ -20,12 +21,13 @@ export function IncidentsPage() {
   const pending = useIncidentPendingCount(true);
   const count = pending.data?.count ?? 0;
   const requested = params.get('vista');
-  const view: View =
-    requested === 'todos' || requested === 'por-clasificar'
-      ? requested
-      : pending.data && count === 0
-        ? 'todos'
-        : 'por-clasificar';
+  // Sin vista en la URL se elige una sola vez, con el primer conteo: el sondeo de 30 s no cambia
+  // de pestaña a quien está trabajando.
+  const [initialView, setInitialView] = useState<View | null>(null);
+  if (initialView === null && pending.data)
+    setInitialView(pending.data.count > 0 ? 'por-clasificar' : 'todos');
+  const view: View | null =
+    requested === 'todos' || requested === 'por-clasificar' ? requested : initialView;
   return (
     <main className="space-y-4">
       <PageHeader
@@ -46,14 +48,20 @@ export function IncidentsPage() {
               },
               { value: 'todos', label: 'Todos' },
             ]}
-            value={view}
+            value={view ?? 'por-clasificar'}
             onChange={(vista) => {
               setParams({ vista }, { replace: true });
             }}
           />
         }
       />
-      {view === 'por-clasificar' ? <TriageView /> : <IncidentsTable />}
+      {view === null ? (
+        <RowsSkeleton label="Cargando incidentes…" />
+      ) : view === 'por-clasificar' ? (
+        <TriageView />
+      ) : (
+        <IncidentsTable />
+      )}
     </main>
   );
 }

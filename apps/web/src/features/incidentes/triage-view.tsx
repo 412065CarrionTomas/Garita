@@ -16,14 +16,7 @@ import { useFillHeight } from '@/lib/use-fill-height';
 import { cn } from '@/lib/utils';
 import { DecisionForm } from './decision-form';
 import { IncidentBody, useIncidentDetail } from './incident-detail';
-import { RowsSkeleton, ageText, fullDateTime } from './incident-ui';
-
-function isTyping(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)
-  );
-}
+import { RowsSkeleton, ageText, fullDateTime, shortcutsBlocked } from './incident-ui';
 
 function SelectedIncident({
   id,
@@ -35,10 +28,15 @@ function SelectedIncident({
   onConflict: () => void;
 }) {
   const detail = useIncidentDetail(id);
-  if (detail.isPending) return <RowsSkeleton label="Cargando incidente…" rows={4} />;
+  if (detail.isPending)
+    return (
+      <div className="p-5">
+        <RowsSkeleton label="Cargando incidente…" rows={4} />
+      </div>
+    );
   if (detail.isError)
     return (
-      <Alert variant="destructive">
+      <Alert variant="destructive" className="m-5">
         No se pudo cargar el incidente.{' '}
         <Button variant="outline" size="sm" onClick={() => void detail.refetch()}>
           Reintentar
@@ -48,25 +46,28 @@ function SelectedIncident({
   const incident = detail.data;
   const title = INCIDENT_TYPE_LABELS[incident.type];
   return (
-    <article aria-labelledby={`triage-${id}`} className="space-y-6">
-      <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div className="space-y-1">
-          <h2 id={`triage-${id}`} className="t-headline">
-            {title}
-          </h2>
-          <p className="text-muted-foreground">
-            {incident.site.name} · {fullDateTime(incident.occurredAt, incident.timezone)} ·{' '}
-            {incident.guardName}
-          </p>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link to={`/incidentes/${id}`}>Abrir ficha completa</Link>
-        </Button>
-      </header>
-      <IncidentBody incident={incident} compact />
+    // La ficha scrollea; la decisión queda fija al pie, sin taparla.
+    <article aria-labelledby={`triage-${id}`} className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
+        <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <div className="space-y-1">
+            <h2 id={`triage-${id}`} className="t-headline">
+              {title}
+            </h2>
+            <p className="text-muted-foreground">
+              {incident.site.name} · {fullDateTime(incident.occurredAt, incident.timezone)} ·{' '}
+              {incident.guardName}
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/incidentes/${id}`}>Abrir ficha completa</Link>
+          </Button>
+        </header>
+        <IncidentBody incident={incident} compact />
+      </div>
       <section
         aria-label="Decisión"
-        className="sticky bottom-0 border-t-[1.5px] border-input bg-background pt-4"
+        className="shrink-0 border-t-[1.5px] border-input bg-card px-5 py-4"
       >
         <DecisionForm
           id={id}
@@ -105,7 +106,7 @@ export function TriageView() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (isTyping(event.target) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
+      if (shortcutsBlocked(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
       const current = items.findIndex((item) => item.id === selectedId);
       const next = items[current + (event.key === 'ArrowDown' ? 1 : -1)];
       if (!next) return;
@@ -205,7 +206,7 @@ export function TriageView() {
               })}
             </ul>
           </div>
-          <div className="min-h-0 overflow-y-auto p-5">
+          <div className="flex min-h-0 flex-col">
             {selectedId && (
               <SelectedIncident
                 key={selectedId}

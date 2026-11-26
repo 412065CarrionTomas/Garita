@@ -139,7 +139,11 @@ function FollowUpActions({ incident }: { incident: Detail }) {
   const run = (kind: 'acciones' | 'cerrar' | 'reabrir') => {
     const parsed = incidentFollowUpActionInputSchema.safeParse({ text });
     if (!parsed.success) {
-      setError('Escribí al menos 3 caracteres.');
+      setError(
+        text.trim().length < 3
+          ? 'Escribí al menos 3 caracteres.'
+          : 'El texto puede tener hasta 1000 caracteres.',
+      );
       return;
     }
     setError(null);
@@ -374,6 +378,18 @@ function IncidentDetailView({ id }: { id: string }) {
             <DecisionForm
               id={incident.id}
               reclassify={!pending}
+              initial={
+                pending
+                  ? undefined
+                  : {
+                      classification:
+                        incident.classificationStatus === 'client_visible'
+                          ? 'client_visible'
+                          : 'internal',
+                      severity: incident.severity,
+                      followUpStatus: incident.followUpStatus,
+                    }
+              }
               onDone={() => {
                 setDeciding(false);
               }}

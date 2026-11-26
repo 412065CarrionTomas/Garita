@@ -151,6 +151,25 @@ it('si otro ya lo clasificó (409) avisa en vez de mostrar un error', async () =
   expect(screen.queryByText(/No se pudo guardar/)).not.toBeInTheDocument();
 });
 
+it('con fechas invertidas avisa y no consulta', async () => {
+  mockApi();
+  renderAt('/incidentes?vista=todos&desde=2026-11-10&hasta=2026-11-01');
+  expect(await screen.findByRole('alert')).toHaveTextContent('anterior o igual');
+  expect(jest.mocked(apiGet)).not.toHaveBeenCalledWith(
+    expect.stringMatching(/^\/incidentes\?/),
+    expect.anything(),
+  );
+});
+
+it('sin vista en la URL elige una sola vez según haya pendientes', async () => {
+  mockApi({ '/incidentes/cola/cantidad': { count: 0 } });
+  renderAt('/incidentes');
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'true');
+  });
+  expect(jest.mocked(apiGet)).not.toHaveBeenCalledWith('/incidentes/cola', expect.anything());
+});
+
 it('el archivo manda los filtros de la URL a la consulta y los chips filtran', async () => {
   mockApi();
   renderAt('/incidentes?vista=todos&tipo=intrusion');

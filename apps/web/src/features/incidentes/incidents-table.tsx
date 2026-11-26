@@ -43,9 +43,9 @@ const FILTER_KEYS = [
   'seguimiento',
 ] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
+// Tipo y vigilador no se ordenan: el tipo quedaría en el orden del enum (en inglés).
 const SORT_IDS: Record<string, string> = {
   occurred: 'fecha',
-  type: 'tipo',
   site: 'predio',
   severity: 'gravedad',
 };
@@ -108,6 +108,15 @@ export function IncidentsTable() {
     );
   };
   const [searchInput, setSearchInput] = useState(value('q'));
+  // Atrás/adelante cambian la URL: el campo de búsqueda la sigue.
+  const [shownQ, setShownQ] = useState(value('q'));
+  if (shownQ !== value('q')) {
+    setShownQ(value('q'));
+    setSearchInput(value('q'));
+  }
+  const invertedDates = Boolean(
+    value('desde') && value('hasta') && value('desde') > value('hasta'),
+  );
   useEffect(() => {
     const term = searchInput.trim();
     if (term === (params.get('q') ?? '')) return;
@@ -131,6 +140,7 @@ export function IncidentsTable() {
     queryKey: ['incidents', 'list', query.toString()],
     queryFn: () => apiGet(`/incidentes?${query}`, incidentListResponseSchema),
     placeholderData: keepPreviousData,
+    enabled: !invertedDates,
   });
   const sites = useQuery({
     queryKey: ['sites'],
@@ -276,7 +286,9 @@ export function IncidentsTable() {
           </Button>
         )}
       </div>
-      {list.isPending ? (
+      {invertedDates ? (
+        <Alert role="alert">La fecha “desde” tiene que ser anterior o igual a “hasta”.</Alert>
+      ) : list.isPending ? (
         <RowsSkeleton label="Cargando incidentes…" rows={10} />
       ) : list.isError ? (
         <Alert variant="destructive">
@@ -335,7 +347,6 @@ export function IncidentsTable() {
                 {
                   id: 'type',
                   header: 'Incidente',
-                  value: (row) => INCIDENT_TYPE_LABELS[row.type],
                   cell: (row) => (
                     <span className="block min-w-0">
                       <Link
@@ -353,7 +364,12 @@ export function IncidentsTable() {
                   ),
                 },
                 { id: 'site', header: 'Predio', width: 220, value: (row) => row.site.name },
-                { id: 'guard', header: 'Vigilador', width: 170, value: (row) => row.guardName },
+                {
+                  id: 'guard',
+                  header: 'Vigilador',
+                  width: 170,
+                  cell: (row) => <span className="truncate">{row.guardName}</span>,
+                },
                 {
                   id: 'severity',
                   header: 'Gravedad',

@@ -48,9 +48,24 @@ export function FollowUpBadge({ status }: { status: IncidentFollowUpStatus }) {
   );
 }
 
-/** "24/11 08:06"; con año solo si no es el actual. */
+/**
+ * Los atajos de teclado no actúan mientras se escribe en un campo ni con un diálogo abierto
+ * (por ejemplo, el visor de fotos).
+ */
+export function shortcutsBlocked(event: KeyboardEvent) {
+  const target = event.target;
+  const typing =
+    target instanceof HTMLElement &&
+    (['TEXTAREA', 'INPUT', 'SELECT'].includes(target.tagName) || target.isContentEditable);
+  return typing || document.querySelector('[role="dialog"]') !== null;
+}
+
+const yearIn = (value: Date, timeZone: string) =>
+  new Intl.DateTimeFormat('en', { timeZone, year: 'numeric' }).format(value);
+
+/** "24/11 08:06"; con año solo si no es el actual en la zona de la empresa. */
 export function shortDateTime(value: Date, timeZone: string) {
-  const sameYear = value.getFullYear() === new Date().getFullYear();
+  const sameYear = yearIn(value, timeZone) === yearIn(new Date(), timeZone);
   return value.toLocaleString('es-AR', {
     timeZone,
     day: '2-digit',

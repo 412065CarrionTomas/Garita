@@ -3,6 +3,7 @@ import {
   INCIDENT_SEVERITY_LABELS,
   incidentClassificationSchema,
   incidentReclassificationSchema,
+  type IncidentFollowUpStatus,
   type IncidentSeverity,
 } from '@garita/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -15,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, apiPost } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
+import { shortcutsBlocked } from './incident-ui';
 
 type Visibility = 'client_visible' | 'internal';
 
@@ -31,13 +33,6 @@ const VISIBILITY = [
 const choiceClass =
   'relative grid cursor-pointer gap-0.5 rounded-md border-[1.5px] border-input px-3 py-2.5 has-[:checked]:bg-muted has-[:checked]:ring-2 has-[:checked]:ring-inset has-[:checked]:ring-primary has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring';
 
-function isTyping(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)
-  );
-}
-
 /**
  * Decisión sobre un incidente: quién lo ve, gravedad, si requiere seguimiento y comentarios.
  * Con `shortcuts`, I/V eligen visibilidad, 1/2/3 la gravedad y Ctrl+Enter confirma.
@@ -49,9 +44,16 @@ export function DecisionForm({
   submitLabel,
   onDone,
   onConflict,
+  initial,
 }: {
   id: string;
   reclassify: boolean;
+  /** Al reclasificar, parte de lo decidido para no degradar nada sin querer. */
+  initial?: {
+    classification: Visibility;
+    severity: IncidentSeverity | null;
+    followUpStatus: IncidentFollowUpStatus;
+  };
   shortcuts?: boolean;
   submitLabel?: string;
   onDone: (result: { classification: Visibility; severity: IncidentSeverity }) => void;
@@ -60,8 +62,12 @@ export function DecisionForm({
 }) {
   const client = useQueryClient();
   const formRef = useRef<HTMLFormElement>(null);
-  const [classification, setClassification] = useState<Visibility>('internal');
-  const [severity, setSeverity] = useState<IncidentSeverity>('medium');
+  const [classification, setClassification] = useState<Visibility>(
+    initial?.classification ?? 'internal',
+  );
+  const [severity, setSeverity] = useState<IncidentSeverity>(initial?.severity ?? 'medium');
+  // Solo se abre un seguimiento que no existe; uno abierto o cerrado se maneja desde la ficha.
+  const canOpenFollowUp = (initial?.followUpStatus ?? 'none') === 'none';
   const [requiresFollowUp, setRequiresFollowUp] = useState(false);
   const [internalComment, setInternalComment] = useState('');
   const [clientNote, setClientNote] = useState('');
@@ -69,16 +75,17 @@ export function DecisionForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const schema = reclassify ? incidentReclassificationSchema : incidentClassificationSchema;
   const mutation = useMutation({
-    mutationFn: (body: unknown) =>
+    mutationFn: (body: { classification: Visibility; severity: IncidentSeverity }) =>
       apiPost(
         `/incidentes/${id}/${reclassify ? 'reclasificar' : 'clasificar'}`,
         body,
         schema,
         responseSchema,
       ),
-    onSuccess: async () => {
+    // Lo enviado, no el estado actual: pudo cambiar con un atajo mientras se guardaba.
+    onSuccess: async (_data, body) => {
       await client.invalidateQueries({ queryKey: ['incidents'] });
-      onDone({ classification, severity });
+      onDone(body);
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409 && onConflict) {
@@ -88,15 +95,17 @@ export function DecisionForm({
     },
   });
 
+  const pending = mutation.isPending;
   useEffect(() => {
     if (!shortcuts) return;
     const onKey = (event: KeyboardEvent) => {
+      if (pending || document.querySelector('[role="dialog"]')) return;
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         formRef.current?.requestSubmit();
         return;
       }
-      if (isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (shortcutsBlocked(event) || event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
       if (key === 'i') setClassification('internal');
       else if (key === 'v') setClassification('client_visible');
@@ -110,16 +119,17 @@ export function DecisionForm({
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [shortcuts]);
+  }, [shortcuts, pending]);
 
   const submit = (event: SyntheticEvent) => {
     event.preventDefault();
+    if (mutation.isPending) return;
     const parsed = schema.safeParse({
       classification,
       severity,
-      requiresFollowUp,
+      requiresFollowUp: canOpenFollowUp && requiresFollowUp,
       internalComment,
-      ...(classification === 'client_visible' && clientNote ? { clientNote } : {}),
+      ...(classification === 'client_visible' && clientNote.trim() ? { clientNote } : {}),
       ...(reclassify ? { reason } : {}),
     });
     if (!parsed.success) {
@@ -219,18 +229,20 @@ export function DecisionForm({
           </div>
         </fieldset>
       </div>
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id={`follow-up-${id}`}
-          checked={requiresFollowUp}
-          onCheckedChange={(checked) => {
-            setRequiresFollowUp(checked === true);
-          }}
-        />
-        <label htmlFor={`follow-up-${id}`} className="cursor-pointer">
-          Requiere seguimiento de la empresa (queda abierto hasta cerrarlo)
-        </label>
-      </div>
+      {canOpenFollowUp && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id={`follow-up-${id}`}
+            checked={requiresFollowUp}
+            onCheckedChange={(checked) => {
+              setRequiresFollowUp(checked === true);
+            }}
+          />
+          <label htmlFor={`follow-up-${id}`} className="cursor-pointer">
+            Requiere seguimiento de la empresa (queda abierto hasta cerrarlo)
+          </label>
+        </div>
+      )}
       <div className={cn('grid gap-4', classification === 'client_visible' && 'md:grid-cols-2')}>
         {field('internalComment', 'Comentario interno', internalComment, setInternalComment)}
         {classification === 'client_visible' &&

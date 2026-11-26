@@ -43,13 +43,22 @@ function addDays(day: string, delta: number) {
   return date.toISOString().slice(0, 10);
 }
 
-/** "+3 respecto del período anterior"; sin datos previos no compara. */
+/**
+ * "+3 respecto del período anterior"; sin datos previos no compara. La igualdad se decide con el
+ * valor ya redondeado, así nunca aparece "+0 min".
+ */
 function delta(current: number | null, previous: number | null, format = (n: number) => String(n)) {
   if (current === null || previous === null) return 'Sin datos del período anterior';
   const diff = current - previous;
-  if (Math.abs(diff) < 1e-9) return 'Igual que el período anterior';
-  return `${diff > 0 ? '+' : '−'}${format(Math.abs(diff))} respecto del período anterior`;
+  const text = format(Math.abs(diff));
+  if (text === format(0)) return 'Igual que el período anterior';
+  return `${diff > 0 ? '+' : '−'}${text} respecto del período anterior`;
 }
+/** Diferencia entre dos proporciones, en puntos porcentuales. */
+const points = (value: number) =>
+  `${(value * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 })} pp`;
+const dayText = (day: string) =>
+  new Date(`${day}T12:00:00Z`).toLocaleDateString('es-AR', { timeZone: 'UTC' });
 const percent = (value: number | null) =>
   value === null ? '—' : `${(value * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 })} %`;
 
@@ -76,7 +85,7 @@ export function IncidentReportsPage() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [segment, setSegment] = useState<Segment | null>(null);
-  const period = (params.get('periodo') ?? '30d') as Period;
+  const [customOpen, setCustomOpen] = useState(false);
   const filters = Object.fromEntries(
     (['desde', 'hasta', 'predio', 'cliente'] as const).flatMap((key) => {
       const value = params.get(key);
@@ -85,7 +94,12 @@ export function IncidentReportsPage() {
   );
   const valid = incidentReportQuerySchema.safeParse(filters);
   const query = new URLSearchParams(valid.success ? filters : {}).toString();
-  const options = { placeholderData: keepPreviousData, refetchOnWindowFocus: 'always' as const };
+  // Con un período inválido no se consulta nada: se conserva lo último válido debajo del aviso.
+  const options = {
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: 'always' as const,
+    enabled: valid.success,
+  };
   const incidents = useQuery({
     queryKey: ['reports', 'incidents', query],
     queryFn: () => apiGet(`/reportes/incidentes?${query}`, incidentReportResponseSchema),
@@ -103,6 +117,15 @@ export function IncidentReportsPage() {
   });
   const data = incidents.data;
   const timezone = data?.timezone ?? DEFAULT_TZ;
+  // El botón activo sale de las fechas consultadas, no de un parámetro aparte.
+  const today = localReportDay(new Date(), timezone);
+  const shownFrom = params.get('desde') ?? data?.desde;
+  const shownTo = params.get('hasta') ?? data?.hasta;
+  const preset = PERIODS.find(
+    (item) =>
+      item.days > 0 && shownFrom === addDays(today, 1 - item.days) && shownTo === addDays(today, 1),
+  );
+  const period: Period = customOpen || !preset ? 'custom' : preset.value;
 
   const update = (changes: Record<string, string | null>) => {
     setSegment(null);
@@ -118,13 +141,14 @@ export function IncidentReportsPage() {
     );
   };
   const choosePeriod = (value: Period) => {
-    const preset = PERIODS.find((item) => item.value === value);
-    if (!preset || value === 'custom') {
-      update({ periodo: 'custom', desde: data?.desde ?? null, hasta: data?.hasta ?? null });
+    const chosen = PERIODS.find((item) => item.value === value);
+    if (!chosen || value === 'custom') {
+      setCustomOpen(true);
+      update({ desde: shownFrom ?? null, hasta: shownTo ?? null });
       return;
     }
-    const today = localReportDay(new Date(), timezone);
-    update({ periodo: value, desde: addDays(today, 1 - preset.days), hasta: addDays(today, 1) });
+    setCustomOpen(false);
+    update({ desde: addDays(today, 1 - chosen.days), hasta: addDays(today, 1) });
   };
   const open = (kind: Segment['kind'], title: string, segmentFilters: Record<string, string>) => {
     setSegment({ kind, title, filters: segmentFilters });
@@ -146,7 +170,7 @@ export function IncidentReportsPage() {
           <ExportPdfButton
             endpoint="/reportes/incidentes/pdf"
             filters={{ ...filters, ...(data ? { desde: data.desde, hasta: data.hasta } : {}) }}
-            disabled={!data || fetching}
+            disabled={!data || fetching || !valid.success}
           />
         }
       />
@@ -209,8 +233,7 @@ export function IncidentReportsPage() {
         ))}
         {data && (
           <p className="text-sm text-muted-foreground tabular-nums sm:ml-auto">
-            {new Date(`${data.desde}T12:00:00Z`).toLocaleDateString('es-AR')} al{' '}
-            {new Date(`${addDays(data.hasta, -1)}T12:00:00Z`).toLocaleDateString('es-AR')}
+            {dayText(data.desde)} al {dayText(addDays(data.hasta, -1))}
           </p>
         )}
       </div>
@@ -249,7 +272,7 @@ export function IncidentReportsPage() {
             />
             <Kpi
               label="Seguimiento abierto"
-              value={data.openFollowUps.length}
+              value={data.openFollowUpsTotal}
               detail="Pendientes hoy, de cualquier fecha"
             />
             <Kpi
@@ -276,7 +299,7 @@ export function IncidentReportsPage() {
               detail={delta(
                 panic.data.falseAlarmProportion,
                 panic.data.previous.falseAlarmProportion,
-                (n) => percent(n),
+                points,
               )}
             />
           </dl>
