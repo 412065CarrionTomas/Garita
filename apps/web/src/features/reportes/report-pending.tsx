@@ -1,6 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { reportPendingResponseSchema, reportPointsResponseSchema } from '@garita/shared';
+import {
+  reportPendingResponseSchema,
+  reportPointsResponseSchema,
+  responseTimesReportSchema,
+} from '@garita/shared';
 import { apiGet } from '@/lib/api-client';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -30,6 +34,15 @@ export function ReportPending({
         reportPointsResponseSchema,
       ),
   });
+  // Rondas incumplidas: cuánto tarda un supervisor en ver el aviso (los incidentes van en su reporte).
+  const times = useQuery({
+    queryKey: ['reports', 'response-times', period, predio],
+    queryFn: () =>
+      apiGet(`/reportes/tiempos-de-respuesta?${period}&${siteQuery}`, responseTimesReportSchema),
+  });
+  const missed = times.data?.totals.missedRound;
+  const minutes = (ms: number | null) =>
+    ms === null ? '—' : `${(ms / 60000).toLocaleString('es-AR', { maximumFractionDigits: 1 })} min`;
   const date = (value: string | null) =>
     value
       ? new Date(value).toLocaleString('es-AR', { timeZone: timezone, hourCycle: 'h23' })
@@ -46,12 +59,16 @@ export function ReportPending({
           label: 'rondas en revisión',
           meta: age(pending.data.inReview.oldestAt),
         },
-        {
-          to: '/incidentes/cola',
-          count: pending.data.incidents.count,
-          label: 'incidentes pendientes de clasificar',
-          meta: age(pending.data.incidents.oldestAt),
-        },
+        ...(missed
+          ? [
+              {
+                to: '/avisos?tipo=round_missed',
+                count: missed.unanswered,
+                label: 'avisos de ronda incumplida sin ver (período)',
+                meta: `Tiempo hasta verlos: promedio ${minutes(missed.averageMs)}, máximo ${minutes(missed.maximumMs)}`,
+              },
+            ]
+          : []),
         {
           to: '/avisos?tipo=shift_unsynced',
           count: pending.data.unsynced.count,
