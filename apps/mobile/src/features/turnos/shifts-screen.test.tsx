@@ -23,7 +23,7 @@ const base: GuardShift = {
   startedAt: null,
   closedAt: null,
   site: { id: 'a', name: 'Parque Ferreyra', timezone: 'UTC' },
-  rounds: ['Perimetral'],
+  rounds: [{ name: 'Perimetral', versionId: 'v1' }],
   summary: null,
 };
 const done: GuardShift = {

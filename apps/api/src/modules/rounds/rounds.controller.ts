@@ -8,9 +8,15 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { previewRoundSchema, roundInputSchema, roundRoutePreviewInputSchema } from '@garita/shared';
+import {
+  guardRoundVersionsQuerySchema,
+  previewRoundSchema,
+  roundInputSchema,
+  roundRoutePreviewInputSchema,
+} from '@garita/shared';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { RoundsService } from './rounds.service';
@@ -20,6 +26,14 @@ import { RoundsService } from './rounds.service';
 @ApiBearerAuth()
 export class RoundsController {
   constructor(private readonly rounds: RoundsService) {}
+
+  @Get('rondas/versiones')
+  @Roles('guard')
+  versionsForGuard(@Query() query: unknown, @CurrentUser() user: AuthenticatedUser) {
+    const parsed = guardRoundVersionsQuerySchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues);
+    return this.rounds.versionsForGuard(parsed.data.ids, user);
+  }
   @Get('predios/:id/rondas')
   @Roles('admin', 'supervisor')
   @ApiResponse({ status: 200 })

@@ -41,7 +41,8 @@ export const guardShiftSchema = z.object({
   startedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
   site: z.object({ id: z.string(), name: z.string(), timezone: z.string() }),
-  rounds: z.array(z.string()),
+  /** `versionId`: la fijada al iniciar o, si todavía no empezó, la vigente de la ronda. */
+  rounds: z.array(z.object({ name: z.string(), versionId: z.string().nullable() })),
   summary: guardShiftSummarySchema.nullable(),
 });
 export type GuardShift = z.infer<typeof guardShiftSchema>;

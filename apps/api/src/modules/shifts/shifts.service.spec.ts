@@ -146,7 +146,12 @@ describe('guard shifts in a date range', () => {
     startedAt: started ? new Date('2030-05-09T22:03:00Z') : null,
     closedAt: started ? new Date('2030-05-10T06:01:00Z') : null,
     site: { id: 'site', name: 'Predio', company: { timezone: 'America/Argentina/Cordoba' } },
-    rounds: [{ round: { name: 'Perimetral' } }],
+    rounds: [
+      {
+        roundVersionId: started ? 'v1' : null,
+        round: { name: 'Perimetral', currentVersionId: 'v2' },
+      },
+    ],
     assignments: [
       { startsAt: new Date('2030-05-09T23:00:00Z'), endsAt: new Date('2030-05-10T06:00:00Z') },
     ],
@@ -178,10 +183,12 @@ describe('guard shifts in a date range', () => {
       startedAt: '2030-05-09T22:03:00.000Z',
       closedAt: '2030-05-10T06:01:00.000Z',
       site: { id: 'site', name: 'Predio', timezone: 'America/Argentina/Cordoba' },
-      rounds: ['Perimetral'],
+      rounds: [{ name: 'Perimetral', versionId: 'v1' }],
       summary: { windows: 3, windowsDone: 2, recorded: 7, expected: 12, incidents: 2 },
     });
     expect(page.items[1]?.summary).toBeNull();
+    // Sin iniciar sigue la versión vigente de la ronda.
+    expect(page.items[1]?.rounds).toEqual([{ name: 'Perimetral', versionId: 'v2' }]);
   });
 
   it('pages with a cursor after the last returned shift', async () => {

@@ -48,7 +48,7 @@ export function ShiftRow({ shift, onOpen }: { shift: GuardShift; onOpen: (id: st
       detail={
         s
           ? `Ventanas ${s.windowsDone}/${s.windows} · Puntos ${s.recorded}/${s.expected}${s.incidents ? ` · ${s.incidents} ${s.incidents === 1 ? 'incidente' : 'incidentes'}` : ''}`
-          : `Rondas: ${shift.rounds.join(', ') || 'sin rondas'}`
+          : `Rondas: ${shift.rounds.map((r) => r.name).join(', ') || 'sin rondas'}`
       }
       trailing={
         <Badge tone={stamp.tone} variant={opens ? 'dashed' : 'solid'} label={stamp.label} />

@@ -575,7 +575,12 @@ export class ShiftsService {
         startedAt: true,
         closedAt: true,
         site: { select: { id: true, name: true, company: { select: { timezone: true } } } },
-        rounds: { select: { round: { select: { name: true } } } },
+        rounds: {
+          select: {
+            roundVersionId: true,
+            round: { select: { name: true, currentVersionId: true } },
+          },
+        },
         assignments: { where: mine, select: { startsAt: true, endsAt: true }, take: 1 },
         roundWindowStates: {
           select: { status: true, recordedCount: true, expectedCount: true },
@@ -606,7 +611,10 @@ export class ShiftsService {
           startedAt: shift.startedAt?.toISOString() ?? null,
           closedAt: shift.closedAt?.toISOString() ?? null,
           site: { id: shift.site.id, name: shift.site.name, timezone: shift.site.company.timezone },
-          rounds: shift.rounds.map(({ round }) => round.name),
+          rounds: shift.rounds.map(({ round, roundVersionId }) => ({
+            name: round.name,
+            versionId: roundVersionId ?? round.currentVersionId,
+          })),
           summary: shift.startedAt
             ? {
                 windows: windows.length,
