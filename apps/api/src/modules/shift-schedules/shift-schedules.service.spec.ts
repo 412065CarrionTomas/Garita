@@ -47,7 +47,7 @@ describe('schedule list', () => {
 
   it('filters expiring schedules and adds names, days to end and shift counts', async () => {
     const result = await service.list({ estado: 'por_vencer' });
-    expect(findMany.mock.lastCall?.[0]).toMatchObject({
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
         status: 'active',
         endDate: { gte: new Date('2026-11-26'), lte: new Date('2026-12-10') },

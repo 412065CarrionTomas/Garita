@@ -308,7 +308,8 @@ describe('weekly shift board', () => {
     expect(board.today).toBe('2026-11-26');
     expect(board.days[0]).toBe('2026-11-23');
     expect(board.sites.map((site) => site.name)).toEqual(['Acopio', 'Barrio']);
-    const barrio = board.sites[1]!;
+    const [, barrio] = board.sites;
+    if (!barrio) throw new Error('Falta el predio Barrio');
     expect(barrio.days[0]).toEqual([
       expect.objectContaining({
         id: 'night',
@@ -321,7 +322,7 @@ describe('weekly shift board', () => {
       expect.objectContaining({ id: 'gap', origin: 'manual', guard: null }),
     ]);
     expect(board.summary).toEqual({ total: 2, unassigned: 1, noShow: 0, uncovered: 0 });
-    expect(findMany.mock.lastCall?.[0]).toMatchObject({
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
         serviceDate: {
           gte: new Date('2026-11-23T00:00:00.000Z'),
