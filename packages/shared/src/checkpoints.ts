@@ -7,8 +7,14 @@ export const checkpointInputSchema = z.object({
   longitude: z.number().min(-180).max(180),
   toleranceRadiusMeters: z.number().int().min(10).max(200).default(30),
   stickerLocation: z.string().trim().max(500).optional(),
-  /** Calle y número del punto; null si no hay domicilio cerca. Sin el campo, no se toca. */
-  address: z.string().trim().max(300).nullable().optional(),
+  /** Calle y número del punto; null (o vacía) si no hay domicilio cerca. Sin el campo, no se toca. */
+  address: z
+    .string()
+    .trim()
+    .max(300)
+    .transform((value) => value || null)
+    .nullable()
+    .optional(),
   isIndoor: z.boolean().default(false),
   confirmFarLocation: z.boolean().optional(),
 });
@@ -21,7 +27,13 @@ export const checkpointArrangementInputSchema = z.object({
         id: z.string().min(1),
         latitude: z.number().min(-90).max(90),
         longitude: z.number().min(-180).max(180),
-        address: z.string().trim().max(300).nullable().optional(),
+        address: z
+          .string()
+          .trim()
+          .max(300)
+          .transform((value) => value || null)
+          .nullable()
+          .optional(),
       }),
     )
     .min(1)
