@@ -232,7 +232,7 @@ export function PortalPage() {
                 description="Probá otro período o predio; las rondas en verificación aún no cuentan en el porcentaje."
               />
             )}
-            <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+            <div className="grid min-w-0 gap-4 lg:grid-cols-2 [&>section]:rounded-md [&>section]:border [&>section]:border-border [&>section]:bg-card">
               <ComplianceChart
                 title="Rondas por estado"
                 rows={(['completa', 'incompleta', 'no_realizada'] as const).map((status) => ({

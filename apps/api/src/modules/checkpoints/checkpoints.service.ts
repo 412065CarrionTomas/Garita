@@ -21,6 +21,7 @@ interface CheckpointInput {
   longitude: number;
   toleranceRadiusMeters: number;
   stickerLocation?: string;
+  address?: string | null;
   isIndoor: boolean;
   confirmFarLocation?: boolean;
 }
@@ -49,32 +50,37 @@ export class CheckpointsService {
 
   async list(siteId: string, includeNfcTag = false, user?: AuthenticatedUser) {
     await this.resources.findOwnedOrThrow('Site', siteId);
-    if (!includeNfcTag)
-      return this.prisma.tenantPrisma.checkpoint.findMany({
+    const [checkpoints, rounds] = await Promise.all([
+      this.prisma.tenantPrisma.checkpoint.findMany({
         where: { siteId, status: 'active' },
         orderBy: [{ position: 'asc' }, { name: 'asc' }],
-      });
-    const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
-      where: { siteId, status: 'active' },
-      orderBy: [{ position: 'asc' }, { name: 'asc' }],
-      include: {
-        nfcTags: {
-          where: { status: 'active' },
-          take: 1,
-          select: { status: true, associatedAt: true, uid: true },
+        include: {
+          nfcTags: {
+            where: { status: 'active' },
+            take: 1,
+            select: { status: true, associatedAt: true, uid: true, kind: true },
+          },
         },
-      },
+      }),
+      this.usage.countActiveRoundsBySite(siteId),
+    ]);
+    return checkpoints.map(({ nfcTags, ...checkpoint }) => {
+      const tag = nfcTags.at(0);
+      return {
+        ...checkpoint,
+        roundsCount: rounds.get(checkpoint.id) ?? 0,
+        tagType: !tag ? 'qr' : tag.kind === 'secure' ? 'nfc_secure' : 'nfc_basic',
+        ...(includeNfcTag && {
+          etiquetaNfc: tag
+            ? {
+                status: tag.status,
+                associatedAt: tag.associatedAt,
+                ...(user?.role === 'admin' ? { uid: tag.uid } : {}),
+              }
+            : null,
+        }),
+      };
     });
-    return checkpoints.map(({ nfcTags, ...checkpoint }) => ({
-      ...checkpoint,
-      etiquetaNfc: nfcTags[0]
-        ? {
-            status: nfcTags[0].status,
-            associatedAt: nfcTags[0].associatedAt,
-            ...(user?.role === 'admin' ? { uid: nfcTags[0].uid } : {}),
-          }
-        : null,
-    }));
   }
 
   async create(siteId: string, input: CheckpointInput, user: AuthenticatedUser) {
@@ -95,6 +101,7 @@ export class CheckpointsService {
           longitude: input.longitude,
           toleranceRadiusMeters: input.toleranceRadiusMeters,
           stickerLocation: input.stickerLocation,
+          address: input.address,
           isIndoor: input.isIndoor,
           position: (last._max.position ?? 0) + 1,
           qrVersion: 1,
@@ -125,6 +132,7 @@ export class CheckpointsService {
           longitude: input.longitude,
           toleranceRadiusMeters: input.toleranceRadiusMeters,
           stickerLocation: input.stickerLocation,
+          address: input.address,
           isIndoor: input.isIndoor,
         },
       });
@@ -175,7 +183,12 @@ export class CheckpointsService {
         // Solo si sigue activo en este predio: si lo dieron de baja recién, la lista quedó vieja.
         const { count } = await tx.checkpoint.updateMany({
           where: { id: point.id, siteId, status: 'active' },
-          data: { position: index + 1, latitude: point.latitude, longitude: point.longitude },
+          data: {
+            position: index + 1,
+            latitude: point.latitude,
+            longitude: point.longitude,
+            address: point.address,
+          },
         });
         if (count !== 1) throw outdated();
       }

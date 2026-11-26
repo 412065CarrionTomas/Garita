@@ -55,7 +55,7 @@ it('rechaza seis meses antes de llamar a la API', async () => {
     />,
   );
   await userEvent.click(screen.getByRole('button'));
-  expect(screen.getByRole('status')).toHaveTextContent(
+  expect(screen.getByRole('alert')).toHaveTextContent(
     'El período máximo para exportar es de 3 meses',
   );
   expect(apiDownload).not.toHaveBeenCalled();
@@ -64,7 +64,7 @@ it('informa el error y permite reintentar sin crear enlaces', async () => {
   jest.mocked(apiDownload).mockRejectedValue(new Error('offline'));
   render(<ExportPdfButton endpoint="/reportes/incidentes/pdf" filters={filters} />);
   await userEvent.click(screen.getByRole('button'));
-  expect(await screen.findByText(/No pudimos generar el PDF/)).toBeInTheDocument();
-  expect(screen.getByRole('button')).toBeEnabled();
+  expect(await screen.findByRole('alert')).toHaveTextContent(/No pudimos generar el PDF/);
+  expect(screen.getByRole('button', { name: 'Exportar a PDF' })).toBeEnabled();
   expect(createObjectURL).not.toHaveBeenCalled();
 });

@@ -286,15 +286,45 @@ it('filtra el historial por predio y estado', async () => {
       <PanicListPage />
     </MemoryRouter>,
   );
-  await screen.findByText('Depósito Ruta 9 · Pedro Díaz');
-  fireEvent.change(screen.getByLabelText('Predio'), { target: { value: 'site' } });
-  fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'confirmed' } });
+  await screen.findByText('Pedro Díaz');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Predio' }), { target: { value: 'site' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmadas' }));
   await waitFor(() => {
     expect(apiGet).toHaveBeenCalledWith(
-      '/alertas-panico?pagina=1&estado=confirmed&predio=site',
+      '/alertas-panico?pagina=1&porPagina=10&estado=confirmed&predio=site',
       expect.anything(),
     );
   });
+});
+
+it('si la página queda vacía (se atendió la última), vuelve a la última con alertas', async () => {
+  // La página 1 todavía cuenta 4 alertas; al pedir la 2, la última ya no está y quedan 3.
+  jest.mocked(apiGet).mockImplementation((path) => {
+    if (path === '/predios') return Promise.resolve([alert.site]);
+    const second = new URLSearchParams(path.split('?')[1]).get('pagina') === '2';
+    return Promise.resolve({
+      items: second ? [] : [alert],
+      total: second ? 3 : 4,
+      activeCount: 3,
+      page: second ? 2 : 1,
+      pageSize: 3,
+    });
+  });
+  renderWithQueryClient(
+    <MemoryRouter>
+      <PanicListPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText('Pedro Díaz');
+  fireEvent.change(screen.getByLabelText('Por página'), { target: { value: '3' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Página 2' }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+  expect(screen.getByText('Pedro Díaz')).toBeInTheDocument();
 });
 
 it('muestra la indicación preparada para una alerta SMS no verificada', async () => {

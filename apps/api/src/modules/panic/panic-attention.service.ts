@@ -38,8 +38,8 @@ export class PanicAttentionService {
         where,
         include: summaryInclude,
         orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-        skip: (filters.pagina - 1) * 25,
-        take: 25,
+        skip: (filters.pagina - 1) * filters.porPagina,
+        take: filters.porPagina,
       }),
       this.prisma.tenantPrisma.panicAlert.count({ where }),
       this.prisma.tenantPrisma.panicAlert.count({
@@ -51,7 +51,7 @@ export class PanicAttentionService {
       total,
       activeCount,
       page: filters.pagina,
-      pageSize: 25,
+      pageSize: filters.porPagina,
     };
   }
 

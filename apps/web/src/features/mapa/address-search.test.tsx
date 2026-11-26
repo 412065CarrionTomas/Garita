@@ -41,7 +41,7 @@ it('ArrowUp desde -1 elige la ultima y elegir no busca de nuevo', async () => {
   await screen.findAllByRole('option');
   fireEvent.keyDown(input, { key: 'ArrowUp' });
   fireEvent.keyDown(input, { key: 'Enter' });
-  expect(select).toHaveBeenCalledWith(-35, -59);
+  expect(select).toHaveBeenCalledWith(-35, -59, 'Ultima, Ciudad');
   await new Promise((resolve) => setTimeout(resolve, 450));
   expect(fetch).toHaveBeenCalledTimes(1);
   await waitFor(() => {

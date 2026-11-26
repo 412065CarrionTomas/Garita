@@ -15,6 +15,8 @@ import { useAuth } from '../auth/auth-context';
 import { AddressSearch } from '../mapa/address-search';
 import { SiteLocation } from '../mapa/site-location';
 import { SitesMap } from '../mapa/sites-map';
+import { fetchStreetAddress } from '../mapa/photon';
+import { DataTable, type DataColumn } from '@/components/data-table';
 
 import { Alert } from '@/components/ui/alert';
 import {
@@ -44,14 +46,18 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+
+const TAG_LABEL = { qr: 'QR', nfc_basic: 'NFC común', nfc_secure: 'NFC seguro' } as const;
+
+/** Dirección si se pudo definir la calle; si no, las coordenadas (≈1 m con 5 decimales). */
+function locationLabel(point: { address?: string | null; latitude: number; longitude: number }) {
+  const address = point.address?.trim();
+  if (address) return address;
+  return `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
+}
+
+/** Plazo para buscar las direcciones de todos los puntos movidos al guardar el orden. */
+const ARRANGEMENT_ADDRESS_MS = 6000;
 
 const idResponse = z.looseObject({ id: z.string() });
 const emptyInput = z.object({});
@@ -206,13 +212,40 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
     const index = Math.min(Math.max(value, 1), draft.length) - 1;
     setDraft([...rest.slice(0, index), moved, ...rest.slice(index)]);
   };
+  // Una consulta por ubicación: reintentar tras confirmar una ubicación lejana no vuelve a preguntar.
+  // Lo que no dio dirección (fallo, plazo vencido o sin domicilio) no se guarda: se reintenta luego.
+  const addresses = useRef(new Map<string, Promise<string | null>>());
+  const addressAt = (latitude: number, longitude: number, signal?: AbortSignal) => {
+    const key = `${String(latitude)},${String(longitude)}`;
+    const cached = addresses.current.get(key);
+    if (cached) return cached;
+    const found = fetchStreetAddress(latitude, longitude, signal);
+    addresses.current.set(key, found);
+    void found.then((address) => {
+      if (address === null) addresses.current.delete(key);
+    });
+    return found;
+  };
   const saveArrangement = () => run(() => sendArrangement(false));
   const sendArrangement = async (confirmFarLocation: boolean): Promise<void> => {
     if (!draft) return;
+    // Solo los movidos buscan su dirección de nuevo, de a uno para no saturar al geocodificador y
+    // con un plazo para toda la tanda: si Photon no contesta, no se espera 4 s por cada punto.
+    const deadline = AbortSignal.timeout(ARRANGEMENT_ADDRESS_MS);
+    const puntos = [];
+    for (const point of draft) {
+      const saved = points.data?.find(({ id }) => id === point.id);
+      const moved = saved?.latitude !== point.latitude || saved.longitude !== point.longitude;
+      puntos.push(
+        moved
+          ? { ...point, address: await addressAt(point.latitude, point.longitude, deadline) }
+          : point,
+      );
+    }
     try {
       await apiPatch(
         `/predios/${site.id}/puntos/orden`,
-        { puntos: draft, confirmFarLocation },
+        { puntos, confirmFarLocation },
         checkpointArrangementInputSchema,
         checkpointsResponseSchema,
       );
@@ -247,11 +280,22 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
       setMessage('Revisá el nombre, la ubicación y el radio de tolerancia (entre 10 y 200 m).');
       return;
     }
+    // La dirección se busca al crear el punto o al moverlo (o si todavía no tenía).
+    const saved = points.data?.find(({ id }) => id === editingId);
+    const relocated =
+      !saved?.address ||
+      saved.latitude !== parsed.data.latitude ||
+      saved.longitude !== parsed.data.longitude;
+    const body = relocated
+      ? {
+          ...parsed.data,
+          address: await addressAt(parsed.data.latitude, parsed.data.longitude),
+        }
+      : parsed.data;
     try {
       if (editingId)
-        await apiPatch(`/puntos/${editingId}`, parsed.data, checkpointInputSchema, idResponse);
-      else
-        await apiPost(`/predios/${site.id}/puntos`, parsed.data, checkpointInputSchema, idResponse);
+        await apiPatch(`/puntos/${editingId}`, body, checkpointInputSchema, idResponse);
+      else await apiPost(`/predios/${site.id}/puntos`, body, checkpointInputSchema, idResponse);
       setConfirmFar(false);
       setEditingId(undefined);
       setForm(emptyForm);
@@ -310,7 +354,17 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
   const rows = draft
     ? draft.flatMap((moved) => {
         const point = points.data?.find(({ id }) => id === moved.id);
-        return point ? [{ ...point, latitude: moved.latitude, longitude: moved.longitude }] : [];
+        if (!point) return [];
+        const relocated = point.latitude !== moved.latitude || point.longitude !== moved.longitude;
+        // Movido en el borrador: la dirección guardada ya no corresponde hasta guardar.
+        return [
+          {
+            ...point,
+            latitude: moved.latitude,
+            longitude: moved.longitude,
+            address: relocated ? null : point.address,
+          },
+        ];
       })
     : (points.data ?? []);
   const numberOf = (id: string, index: number, name: string, inMap: boolean) =>
@@ -330,6 +384,199 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
     ) : (
       index + 1
     );
+
+  // Junto al título de la columna Punto: no agrandan las filas ni la cabecera del predio.
+  const listActions = admin && !draft && (
+    <>
+      {site.status === 'active' && (
+        <Button
+          variant="outline"
+          size="icon-xs"
+          className="size-6"
+          aria-label="Agregar punto"
+          title="Agregar punto"
+          aria-expanded={formOpen}
+          aria-controls={`point-form-${site.id}`}
+          onClick={() => {
+            setMessage('');
+            setFormOpen(true);
+          }}
+        >
+          <Plus aria-hidden="true" />
+        </Button>
+      )}
+      {!!points.data?.length && (
+        <Button
+          variant="outline"
+          size="icon-xs"
+          className="size-6"
+          aria-label="Descargar stickers de todos"
+          title="Descargar stickers de todos"
+          onClick={() => void download()}
+        >
+          <Download aria-hidden="true" />
+        </Button>
+      )}
+    </>
+  );
+  const tableRows = rows.map((point, index) => ({ ...point, number: index + 1 }));
+  type Row = (typeof tableRows)[number];
+  const columns: DataColumn<Row>[] = [
+    {
+      id: 'number',
+      header: 'N°',
+      type: 'number',
+      width: 64,
+      value: (point) => point.number,
+      cell: (point) => (
+        <span className="t-numeral text-muted-foreground">
+          {numberOf(point.id, point.number - 1, point.name, false)}
+        </span>
+      ),
+    },
+    {
+      id: 'name',
+      header: 'Punto',
+      headerActions: listActions,
+      value: (point) => point.name,
+      cell: (point) => (
+        <>
+          <span className="block truncate font-semibold">
+            {point.name}
+            {point.isIndoor ? ' · Interior' : ''}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground tabular-nums">
+            {locationLabel(point)}
+          </span>
+        </>
+      ),
+    },
+    {
+      id: 'type',
+      header: 'Tipo',
+      width: 120,
+      value: (point) => TAG_LABEL[point.tagType ?? 'qr'],
+    },
+    {
+      id: 'rounds',
+      header: 'Rondas',
+      type: 'number',
+      align: 'right',
+      width: 96,
+      value: (point) => point.roundsCount,
+    },
+    {
+      id: 'radius',
+      header: 'Radio',
+      type: 'number',
+      align: 'right',
+      width: 88,
+      value: (point) => point.toleranceRadiusMeters,
+      cell: (point) => `${String(point.toleranceRadiusMeters)} m`,
+    },
+    ...(admin
+      ? [
+          {
+            id: 'actions',
+            header: 'Acciones',
+            hideHeader: true,
+            width: 56,
+            cell: (point: Row) => (
+              // En el modo edición los demás cambios esperan: se entra por ⋮ después.
+              <div className={cn('flex justify-end', draft && 'invisible')}>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Más acciones de ${point.name}`}
+                    >
+                      <EllipsisVertical aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {canArrange && (
+                      <>
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            edit(point);
+                          }}
+                        >
+                          Editar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            if (
+                              window.confirm(
+                                'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
+                              )
+                            )
+                              void apiPost(
+                                `/puntos/${point.id}/regenerar-qr`,
+                                {},
+                                emptyInput,
+                                z.looseObject({
+                                  checkpoint: idResponse,
+                                  qrPayload: z.string(),
+                                }),
+                              )
+                                .then(async () => {
+                                  await points.refetch();
+                                  setMessage('QR regenerado. Imprimí un sticker nuevo.');
+                                })
+                                .catch(() => {
+                                  setMessage('No se pudo regenerar el QR. Intentá de nuevo.');
+                                });
+                          }}
+                        >
+                          Regenerar QR
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    <DropdownMenuItem onSelect={() => void download(point.id)}>
+                      Descargar sticker
+                    </DropdownMenuItem>
+                    {canArrange && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => {
+                            setPendingAction(() => async () => {
+                              try {
+                                await apiPost(
+                                  `/puntos/${point.id}/baja`,
+                                  {},
+                                  emptyInput,
+                                  idResponse,
+                                );
+                              } catch (error) {
+                                if (error instanceof ApiError && error.status === 409) {
+                                  const names = roundNames(error);
+                                  setMessage(
+                                    names.length
+                                      ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
+                                      : 'No se puede dar de baja: está incluida en rondas activas.',
+                                  );
+                                  return;
+                                }
+                                setMessage('No se pudo dar de baja el punto. Intentá de nuevo.');
+                              }
+                            });
+                          }}
+                        >
+                          Dar de baja
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ),
+          },
+        ]
+      : []),
+  ];
 
   const confirm = async () => {
     if (!pendingAction) return;
@@ -362,16 +609,18 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
               <DialogTitle className="text-lg font-semibold">
                 {editingId ? 'Editar punto' : 'Nuevo punto'}
               </DialogTitle>
-              <DialogDescription className="sr-only">
-                Completá los datos y ubicá el punto en el mapa.
+              <DialogDescription>
+                Buscá la dirección o ubicá el punto en el mapa arrastrando el marcador. Los números
+                son los demás puntos del predio.
               </DialogDescription>
               <form
                 id={`point-form-${site.id}`}
-                className="mt-4 grid items-start gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]"
+                className="mt-4 grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]"
                 onSubmit={(event) => void save(event)}
               >
-                {/* Mide lo mismo que el mapa: la lista de puntos usa solo lo que sobra y se desplaza. */}
-                <div className="flex min-w-0 flex-col gap-4 lg:h-[calc(90vh-8rem)] lg:min-h-80">
+                {/* Mide lo mismo que el mapa: la descripción del sticker llena el hueco y, al abrir
+                    la lista de puntos, le cede lugar (la lista se desplaza por dentro). */}
+                <div className="flex min-w-0 flex-col gap-4 lg:h-[calc(90vh-14rem)] lg:min-h-80">
                   <Label className="grid min-w-0 gap-2">
                     Nombre del punto
                     <Input
@@ -405,14 +654,14 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                       className="w-full"
                     />
                   </Label>
-                  <Label className="grid min-w-0 gap-2">
+                  <Label className="flex min-h-24 min-w-0 flex-1 flex-col items-stretch gap-2">
                     Descripción de ubicación del sticker (opcional)
                     <Textarea
                       value={form.stickerLocation}
                       onChange={(event) => {
                         setForm({ ...form, stickerLocation: event.target.value });
                       }}
-                      className="w-full"
+                      className="w-full flex-1 resize-none"
                     />
                   </Label>
                   <Label className="flex gap-2">
@@ -425,16 +674,6 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                     />
                     Punto interior
                   </Label>
-                  <div className="flex gap-3">
-                    <Button type="submit" disabled={busy}>
-                      {editingId ? 'Guardar cambios' : 'Crear punto'}
-                    </Button>
-                    <DialogClose asChild>
-                      <Button type="button" variant="ghost">
-                        Cancelar
-                      </Button>
-                    </DialogClose>
-                  </div>
                   {confirmFar && (
                     <Alert
                       role="alertdialog"
@@ -467,7 +706,7 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                   )}
                   {message && <p role="status">{message}</p>}
                   {!!points.data?.length && (
-                    <details className="min-h-0 shrink overflow-y-auto rounded-md border border-border">
+                    <details className="min-h-0 shrink-0 overflow-y-auto rounded-md border border-border open:shrink open:basis-0 open:grow">
                       <summary className="sticky top-0 cursor-pointer bg-popover px-3 py-2 text-sm font-semibold">
                         Puntos del predio ({points.data.length})
                       </summary>
@@ -490,13 +729,23 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                   others={(points.data ?? [])
                     .map((point, index) => ({ ...point, label: String(index + 1) }))
                     .filter((point) => point.id !== editingId)}
-                  mapClassName="h-[calc(90vh-8rem)] min-h-80"
+                  mapClassName="h-[calc(90vh-14rem)] min-h-80"
                   latitude={form.latitude}
                   longitude={form.longitude}
                   onChange={(latitude, longitude) => {
                     setForm({ ...form, latitude, longitude });
                   }}
                 />
+                <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4 lg:col-span-2">
+                  <DialogClose asChild>
+                    <Button type="button" variant="outline">
+                      Cancelar
+                    </Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={busy}>
+                    {editingId ? 'Guardar cambios' : 'Crear punto'}
+                  </Button>
+                </div>
               </form>
             </DialogContent>
           </Dialog>
@@ -563,185 +812,14 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                 )}
               {/* En pantallas anchas la tabla se desplaza sola y ocupa el mismo alto que el mapa. */}
               <div ref={measureFill} style={{ maxHeight: fillHeight }} className="overflow-y-auto">
-                <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-muted">
-                    <TableRow>
-                      <TableHead scope="col" className="t-label w-12">
-                        N°
-                      </TableHead>
-                      <TableHead scope="col" className="t-label">
-                        {/* Las acciones de la lista van junto al título y no agrandan la fila. */}
-                        <span className="flex items-center gap-1.5">
-                          Punto
-                          {admin && site.status === 'active' && !draft && (
-                            <Button
-                              variant="outline"
-                              size="icon-xs"
-                              className="size-6"
-                              aria-label="Agregar punto"
-                              title="Agregar punto"
-                              aria-expanded={formOpen}
-                              aria-controls={`point-form-${site.id}`}
-                              onClick={() => {
-                                setMessage('');
-                                setFormOpen(true);
-                              }}
-                            >
-                              <Plus aria-hidden="true" />
-                            </Button>
-                          )}
-                          {admin && !draft && points.data.length > 0 && (
-                            <Button
-                              variant="outline"
-                              size="icon-xs"
-                              className="size-6"
-                              aria-label="Descargar stickers de todos"
-                              title="Descargar stickers de todos"
-                              onClick={() => void download()}
-                            >
-                              <Download aria-hidden="true" />
-                            </Button>
-                          )}
-                        </span>
-                      </TableHead>
-                      <TableHead scope="col" className="t-label">
-                        Radio
-                      </TableHead>
-                      {admin && (
-                        <TableHead scope="col" className="t-label w-px">
-                          <span className="sr-only">Acciones</span>
-                        </TableHead>
-                      )}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((point, index) => (
-                      <TableRow key={point.id}>
-                        <TableCell className="t-numeral text-muted-foreground">
-                          {numberOf(point.id, index, point.name, false)}
-                        </TableCell>
-                        <TableCell className="font-semibold">
-                          {point.name}
-                          {point.isIndoor ? ' · Interior' : ''}
-                        </TableCell>
-                        <TableCell className="text-sm tabular-nums">
-                          {point.toleranceRadiusMeters} m
-                          <span className="block text-xs text-muted-foreground">
-                            {point.latitude}, {point.longitude}
-                          </span>
-                        </TableCell>
-                        {admin && (
-                          <TableCell>
-                            {/* En el modo edición los demás cambios esperan: se entra por ⋮ después. */}
-                            <div
-                              className={cn(
-                                'flex items-center justify-end gap-1',
-                                draft && 'invisible',
-                              )}
-                            >
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label={`Más acciones de ${point.name}`}
-                                  >
-                                    <EllipsisVertical aria-hidden="true" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  {canArrange && (
-                                    <>
-                                      <DropdownMenuItem
-                                        onSelect={() => {
-                                          edit(point);
-                                        }}
-                                      >
-                                        Editar
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onSelect={() => {
-                                          if (
-                                            window.confirm(
-                                              'El QR impreso dejará de ser válido. ¿Querés regenerarlo?',
-                                            )
-                                          )
-                                            void apiPost(
-                                              `/puntos/${point.id}/regenerar-qr`,
-                                              {},
-                                              emptyInput,
-                                              z.looseObject({
-                                                checkpoint: idResponse,
-                                                qrPayload: z.string(),
-                                              }),
-                                            )
-                                              .then(async () => {
-                                                await points.refetch();
-                                                setMessage(
-                                                  'QR regenerado. Imprimí un sticker nuevo.',
-                                                );
-                                              })
-                                              .catch(() => {
-                                                setMessage(
-                                                  'No se pudo regenerar el QR. Intentá de nuevo.',
-                                                );
-                                              });
-                                        }}
-                                      >
-                                        Regenerar QR
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
-                                  <DropdownMenuItem onSelect={() => void download(point.id)}>
-                                    Descargar sticker
-                                  </DropdownMenuItem>
-                                  {canArrange && (
-                                    <>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
-                                        variant="destructive"
-                                        onSelect={() => {
-                                          setPendingAction(() => async () => {
-                                            try {
-                                              await apiPost(
-                                                `/puntos/${point.id}/baja`,
-                                                {},
-                                                emptyInput,
-                                                idResponse,
-                                              );
-                                            } catch (error) {
-                                              if (
-                                                error instanceof ApiError &&
-                                                error.status === 409
-                                              ) {
-                                                const names = roundNames(error);
-                                                setMessage(
-                                                  names.length
-                                                    ? `No se puede dar de baja: está incluida en ${names.join(', ')}.`
-                                                    : 'No se puede dar de baja: está incluida en rondas activas.',
-                                                );
-                                                return;
-                                              }
-                                              setMessage(
-                                                'No se pudo dar de baja el punto. Intentá de nuevo.',
-                                              );
-                                            }
-                                          });
-                                        }}
-                                      >
-                                        Dar de baja
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <DataTable
+                  label={`Puntos de control de ${site.name}`}
+                  // Al editar el orden, la tabla muestra siempre la secuencia que se está armando.
+                  sortable={!draft}
+                  rows={tableRows}
+                  getRowId={(point) => point.id}
+                  columns={columns}
+                />
               </div>
             </div>
           )}
