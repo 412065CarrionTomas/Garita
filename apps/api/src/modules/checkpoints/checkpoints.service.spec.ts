@@ -19,9 +19,13 @@ function setup() {
     tenantPrisma: { ...db, $transaction: (action: (tx: typeof db) => unknown) => action(db) },
   } as unknown as PrismaService;
   const resources = { findOwnedOrThrow: jest.fn() } as unknown as TenantResourceService;
-  const usage = { findActiveRoundsUsing: jest.fn().mockResolvedValue([]) };
+  const usage = {
+    findActiveRoundsUsing: jest.fn().mockResolvedValue([]),
+    countActiveRoundsBySite: jest.fn().mockResolvedValue(new Map<string, number>()),
+  };
   return {
     db,
+    usage,
     service: new CheckpointsService(prisma, resources, {} as SitesService, {} as QrService, usage),
   };
 }
@@ -54,6 +58,7 @@ describe('arrange', () => {
     id,
     latitude: { toNumber: () => -31.35 },
     longitude: { toNumber: () => -64.29 },
+    nfcTags: [],
   });
   function arrangeSetup() {
     const { db, service } = setup();
@@ -109,4 +114,21 @@ describe('arrange', () => {
     await service.arrange('site', { puntos, confirmFarLocation: true }, user);
     expect(db.checkpoint.updateMany).toHaveBeenCalledTimes(2);
   });
+});
+
+it('lista cada punto con sus rondas activas y cómo se marca', async () => {
+  const { db, usage, service } = setup();
+  db.checkpoint.findMany.mockResolvedValue([
+    { id: 'a', nfcTags: [] },
+    { id: 'b', nfcTags: [{ kind: 'basic' }] },
+    { id: 'c', nfcTags: [{ kind: 'secure' }] },
+  ]);
+  usage.countActiveRoundsBySite.mockResolvedValue(new Map([['b', 2]]));
+  const points = await service.list('site');
+  expect(points.map(({ id, roundsCount, tagType }) => [id, roundsCount, tagType])).toEqual([
+    ['a', 0, 'qr'],
+    ['b', 2, 'nfc_basic'],
+    ['c', 0, 'nfc_secure'],
+  ]);
+  expect(points[0]).not.toHaveProperty('etiquetaNfc');
 });

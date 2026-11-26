@@ -291,6 +291,8 @@ model Checkpoint {
   longitude             Decimal                  @db.Decimal(10, 6)
   toleranceRadiusMeters Int                      @default(30)
   stickerLocation       String?
+  // Calle y número si hay un domicilio dentro del radio del punto; si no, null (se muestran las coordenadas).
+  address               String?
   isIndoor              Boolean                  @default(false)
   // N° del punto en el predio (1 = primero); orden sugerido al armar una ronda.
   position              Int                      @default(0)

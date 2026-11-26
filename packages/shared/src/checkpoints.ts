@@ -7,6 +7,8 @@ export const checkpointInputSchema = z.object({
   longitude: z.number().min(-180).max(180),
   toleranceRadiusMeters: z.number().int().min(10).max(200).default(30),
   stickerLocation: z.string().trim().max(500).optional(),
+  /** Calle y número del punto; null si no hay domicilio cerca. Sin el campo, no se toca. */
+  address: z.string().trim().max(300).nullable().optional(),
   isIndoor: z.boolean().default(false),
   confirmFarLocation: z.boolean().optional(),
 });
@@ -19,6 +21,7 @@ export const checkpointArrangementInputSchema = z.object({
         id: z.string().min(1),
         latitude: z.number().min(-90).max(90),
         longitude: z.number().min(-180).max(180),
+        address: z.string().trim().max(300).nullable().optional(),
       }),
     )
     .min(1)
@@ -36,7 +39,12 @@ export const checkpointResponseSchema = z.looseObject({
   longitude: z.coerce.number(),
   toleranceRadiusMeters: z.number(),
   stickerLocation: z.string().nullable(),
+  address: z.string().nullable().optional(),
   isIndoor: z.boolean(),
+  /** Rondas activas que lo incluyen en su versión vigente. */
+  roundsCount: z.number().int().optional(),
+  /** Cómo se marca: con QR, o con la etiqueta NFC activa. */
+  tagType: z.enum(['qr', 'nfc_basic', 'nfc_secure']).optional(),
   qrVersion: z.number().int(),
   status: recordStatusSchema,
 });
