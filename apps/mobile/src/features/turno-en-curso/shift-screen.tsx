@@ -325,13 +325,29 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
               label={`Ver recorrido: ${round.name}`}
               onPress={() =>
                 router.push({
-                  pathname: '/ronda/[versionId]',
-                  params: { versionId: round.currentVersionId ?? '' },
+                  pathname: '/recorridos',
+                  params: { ids: round.currentVersionId ?? '' },
                 })
               }
             />
           ) : null,
         )}
+      {!data && (scheduled?.rounds?.length ?? 0) > 1 && (
+        <Button
+          variant="outline"
+          label="Ver todos los recorridos"
+          onPress={() =>
+            router.push({
+              pathname: '/recorridos',
+              params: {
+                ids: (scheduled?.rounds ?? [])
+                  .flatMap(({ round }) => round.currentVersionId ?? [])
+                  .join(','),
+              },
+            })
+          }
+        />
+      )}
       {!data && !scheduled && (
         <Banner tone="warning">El turno no está disponible o ya no está asignado.</Banner>
       )}
@@ -418,9 +434,9 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
                         label="Ver recorrido en el mapa"
                         onPress={() =>
                           router.push({
-                            pathname: '/ronda/[versionId]',
+                            pathname: '/recorridos',
                             params: {
-                              versionId: definition.roundVersionId,
+                              ids: definition.roundVersionId,
                               hechos: points
                                 .filter((p) => p.status === 'done' || p.status === 'late')
                                 .map((p) => p.id)

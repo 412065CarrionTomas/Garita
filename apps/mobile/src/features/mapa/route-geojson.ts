@@ -2,38 +2,51 @@ import type { GuardRoundVersion, LngLat } from '@garita/shared';
 
 export type PointState = 'done' | 'next' | 'pending';
 
+/** Inicial con la que se rotulan los puntos de una ronda cuando hay varias en el mapa. */
+export const roundInitial = (version: GuardRoundVersion) =>
+  version.name.trim().charAt(0).toUpperCase() || 'R';
+
 /**
- * GeoJSON de una ronda para el mapa: la línea del recorrido guardado (o recta entre los puntos si
- * la ronda no tiene recorrido) y los puntos numerados en orden, con su estado.
+ * GeoJSON de una o varias rondas: la línea de cada recorrido guardado (o recta entre sus puntos si
+ * no tiene) y los puntos numerados en orden, con su estado. `round` es el índice de la ronda; con
+ * varias, el rótulo lleva su inicial (P1, I1) para no depender solo del color.
  */
 export function routeGeoJson(
-  version: GuardRoundVersion,
+  versions: GuardRoundVersion[],
   stateOf: (checkpointId: string) => PointState = () => 'pending',
 ) {
-  const points: LngLat[] = version.checkpoints.map((c) => [c.longitude, c.latitude]);
-  const lines: LngLat[][] = version.route
-    ? version.route.legs.flatMap((leg) => leg.sections.map((section) => section.geometry))
-    : points.length > 1
-      ? [points]
-      : [];
+  const many = versions.length > 1;
+  const lines = versions.flatMap((version, round) => {
+    const points: LngLat[] = version.checkpoints.map((c) => [c.longitude, c.latitude]);
+    const paths = version.route
+      ? version.route.legs.flatMap((leg) => leg.sections.map((section) => section.geometry))
+      : points.length > 1
+        ? [points]
+        : [];
+    return paths.map((coordinates) => ({
+      type: 'Feature' as const,
+      properties: { round },
+      geometry: { type: 'LineString' as const, coordinates },
+    }));
+  });
+  const points = versions.flatMap((version, round) =>
+    version.checkpoints.map((c, i) => ({
+      type: 'Feature' as const,
+      properties: {
+        round,
+        label: `${many ? roundInitial(version) : ''}${i + 1}`,
+        state: stateOf(c.id),
+      },
+      geometry: { type: 'Point' as const, coordinates: [c.longitude, c.latitude] as LngLat },
+    })),
+  );
   return {
-    line: {
-      type: 'FeatureCollection' as const,
-      features: lines.map((coordinates) => ({
-        type: 'Feature' as const,
-        properties: {},
-        geometry: { type: 'LineString' as const, coordinates },
-      })),
-    },
-    points: {
-      type: 'FeatureCollection' as const,
-      features: version.checkpoints.map((c, i) => ({
-        type: 'Feature' as const,
-        properties: { label: String(i + 1), state: stateOf(c.id) },
-        geometry: { type: 'Point' as const, coordinates: [c.longitude, c.latitude] },
-      })),
-    },
-    bounds: boundsOf([...points, ...lines.flat()]),
+    line: { type: 'FeatureCollection' as const, features: lines },
+    points: { type: 'FeatureCollection' as const, features: points },
+    bounds: boundsOf([
+      ...points.map((p) => p.geometry.coordinates),
+      ...lines.flatMap((l) => l.geometry.coordinates),
+    ]),
   };
 }
 

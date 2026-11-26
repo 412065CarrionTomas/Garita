@@ -102,7 +102,7 @@ function SiteDetail({ site, onClose }: { site: GuardSite; onClose: () => void })
             variant="outline"
             label={`${name} (${checkpoints} puntos)`}
             accessibilityHint="Abre el recorrido en el mapa"
-            onPress={() => router.push({ pathname: '/ronda/[versionId]', params: { versionId } })}
+            onPress={() => router.push({ pathname: '/recorridos', params: { ids: versionId } })}
           />
         ) : (
           <Text key={name}>{`${name} (${checkpoints} puntos)`}</Text>

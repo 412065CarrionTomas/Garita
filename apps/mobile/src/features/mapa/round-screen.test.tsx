@@ -40,8 +40,8 @@ beforeEach(async () => {
 
 it('muestra el mapa y los puntos en orden con lo marcado y el siguiente', async () => {
   jest.mocked(apiGet).mockResolvedValue([version]);
-  await render(<RoundScreen versionId="v1" done={['a']} next="b" />);
-  expect(await screen.findByText(/Mapa del recorrido Perimetral con 3 puntos/)).toBeOnTheScreen();
+  await render(<RoundScreen versionIds={['v1']} done={['a']} next="b" />);
+  expect(await screen.findByText(/Mapa con el recorrido Perimetral/)).toBeOnTheScreen();
   expect(screen.getByText('Cada 60 min · 22:00–06:00 · 3 puntos')).toBeOnTheScreen();
   expect(screen.getByText('1. Portón · marcado')).toBeOnTheScreen();
   expect(screen.getByText('2. Galpón (interior) · siguiente')).toBeOnTheScreen();
@@ -50,6 +50,6 @@ it('muestra el mapa y los puntos en orden con lo marcado y el siguiente', async 
 
 it('avisa si no pudo cargar el recorrido', async () => {
   jest.mocked(apiGet).mockRejectedValue(new Error('offline'));
-  await render(<RoundScreen versionId="v1" />);
+  await render(<RoundScreen versionIds={['v1']} />);
   expect(await screen.findByText(/No se pudo cargar el recorrido/)).toBeOnTheScreen();
 });

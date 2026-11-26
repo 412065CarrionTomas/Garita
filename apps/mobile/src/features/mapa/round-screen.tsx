@@ -1,10 +1,10 @@
-import { ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
-import { SUSPENSION_MESSAGES } from '@garita/shared';
-import { Banner, Loading, Text } from '@/ui';
+import { SUSPENSION_MESSAGES, type GuardRoundVersion } from '@garita/shared';
+import { Banner, Loading, Text, useTheme } from '@/ui';
 import { useRoundVersions } from '@/lib/round-versions';
-import { RouteMap } from './route-map';
-import type { PointState } from './route-geojson';
+import { RouteMap, roundStyle } from './route-map';
+import { roundInitial, type PointState } from './route-geojson';
 
 const STATE_LABEL: Record<PointState, string> = {
   done: 'marcado',
@@ -13,25 +13,25 @@ const STATE_LABEL: Record<PointState, string> = {
 };
 
 /**
- * Recorrido de una versión de ronda: mapa y puntos en orden. Durante el turno llegan los puntos
- * ya marcados y el siguiente; fuera de turno todos se ven pendientes.
+ * Recorrido de una o varias rondas: mapa y puntos en orden. Con varias, cada una lleva su tipo de
+ * línea y su inicial (leyenda arriba). Durante el turno llegan los puntos marcados y el siguiente.
  */
 export function RoundScreen({
-  versionId,
+  versionIds,
   done = [],
   next,
 }: {
-  versionId: string;
+  versionIds: string[];
   done?: string[];
   next?: string;
 }) {
-  const { versions, loading, error } = useRoundVersions([versionId]);
-  const version = versions.get(versionId);
+  const { versions: found, loading, error } = useRoundVersions(versionIds);
+  const versions = versionIds.flatMap((id) => found.get(id) ?? []);
   const doneSet = new Set(done);
   const stateOf = (id: string): PointState =>
     doneSet.has(id) ? 'done' : id === next ? 'next' : 'pending';
 
-  if (!version)
+  if (!versions.length)
     return loading ? (
       <Loading label="Cargando recorrido…" />
     ) : (
@@ -42,32 +42,71 @@ export function RoundScreen({
       </Banner>
     );
 
-  const points = version.checkpoints;
+  const many = versions.length > 1;
+  const names = versions.map((v) => v.name).join(' y ');
   return (
     <ScrollView contentContainerStyle={styles.content}>
-      <Text variant="title">{version.name}</Text>
-      <Text color="mutedForeground">
-        {`Cada ${version.frequencyMinutes} min · ${version.windowStartLocal}–${version.windowEndLocal} · ${points.length} puntos`}
-      </Text>
+      <Text variant="title">{many ? 'Recorridos del turno' : (versions[0]?.name ?? '')}</Text>
+      {many ? (
+        versions.map((version, i) => <Legend key={version.id} version={version} index={i} />)
+      ) : (
+        <Text color="mutedForeground">{summary(versions[0])}</Text>
+      )}
       <RouteMap
-        version={version}
+        versions={versions}
         stateOf={stateOf}
-        label={`Mapa del recorrido ${version.name} con ${points.length} puntos numerados en orden`}
+        label={`Mapa con ${many ? 'los recorridos' : 'el recorrido'} ${names}, puntos numerados en orden`}
       />
-      {points.map((point, i) => {
-        const state = stateOf(point.id);
-        return (
-          <Text
-            key={point.id}
-            variant={state === 'next' ? 'label' : 'body'}
-            color={state === 'pending' ? 'foreground' : state === 'done' ? 'success' : 'primary'}
-          >
-            {`${i + 1}. ${point.name}${point.isIndoor ? ' (interior)' : ''}${state === 'pending' ? '' : ` · ${STATE_LABEL[state]}`}`}
-          </Text>
-        );
-      })}
+      {versions.map((version) => (
+        <View key={version.id} style={styles.group}>
+          {many && <Text variant="subheading">{version.name}</Text>}
+          {version.checkpoints.map((point, i) => {
+            const state = stateOf(point.id);
+            return (
+              <Text
+                key={point.id}
+                variant={state === 'next' ? 'label' : 'body'}
+                color={
+                  state === 'pending' ? 'foreground' : state === 'done' ? 'success' : 'primary'
+                }
+              >
+                {`${many ? roundInitial(version) : ''}${i + 1}. ${point.name}${point.isIndoor ? ' (interior)' : ''}${state === 'pending' ? '' : ` · ${STATE_LABEL[state]}`}`}
+              </Text>
+            );
+          })}
+        </View>
+      ))}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({ content: { gap: space[3] } });
+const summary = (version?: GuardRoundVersion) =>
+  version
+    ? `Cada ${version.frequencyMinutes} min · ${version.windowStartLocal}–${version.windowEndLocal} · ${version.checkpoints.length} puntos`
+    : '';
+
+/** Muestra de la línea de la ronda, su inicial y su frecuencia: la leyenda no depende del color. */
+function Legend({ version, index }: { version: GuardRoundVersion; index: number }) {
+  const { colors } = useTheme();
+  const style = roundStyle(index);
+  return (
+    <View style={styles.legend}>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={[styles.swatch, { borderColor: colors[style.color], borderStyle: style.border }]}
+      />
+      <Text style={styles.fill}>
+        {`${roundInitial(version)} · ${version.name} (${style.name}) · ${summary(version)}`}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  content: { gap: space[3] },
+  group: { gap: space[1] },
+  legend: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
+  swatch: { width: space[8], borderTopWidth: 3 },
+  fill: { flex: 1 },
+});
