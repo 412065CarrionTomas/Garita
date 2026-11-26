@@ -400,6 +400,9 @@ model RoundVersion {
   graceMinutes     Int
   /// Recorrido ideal (roundRouteSchema de @garita/shared). Null: rondas previas, se dibujan rectas.
   route            Json?
+  /// Velocidad de la ronda (recorrido por calles y tiempo imposible). Null: la del predio.
+  speedProfile     SpeedProfile?
+  maxSpeedKmh      Int?
   createdById      String
   createdAt        DateTime                 @default(now())
   round            Round                    @relation(fields: [roundId], references: [id], onDelete: Restrict)
