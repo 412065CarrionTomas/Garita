@@ -40,7 +40,8 @@ const DEFAULT_TZ = 'America/Argentina/Buenos_Aires';
 function addDays(day: string, delta: number) {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + delta);
-  return date.toISOString().slice(0, 10);
+  // Una fecha mal escrita en la URL no rompe la pantalla: queda tal cual y la valida el esquema.
+  return Number.isNaN(date.getTime()) ? day : date.toISOString().slice(0, 10);
 }
 
 /**
@@ -137,9 +138,14 @@ export function IncidentReportsPage() {
   };
   const draftInvalid = draft !== null;
   const editDates = (next: { desde: string; hasta: string }) => {
-    if (next.desde && next.hasta && next.desde <= next.hasta) {
+    // A la URL solo llega un período válido (orden y tope de 12 meses incluidos).
+    const candidate =
+      next.desde && next.hasta
+        ? { ...filters, desde: next.desde, hasta: addDays(next.hasta, 1) }
+        : null;
+    if (candidate && incidentReportQuerySchema.safeParse(candidate).success) {
       setDraft(null);
-      update({ desde: next.desde, hasta: addDays(next.hasta, 1) });
+      update({ desde: candidate.desde, hasta: candidate.hasta });
     } else setDraft(next);
   };
 
@@ -158,6 +164,8 @@ export function IncidentReportsPage() {
   };
   const choosePeriod = (value: Period) => {
     const chosen = PERIODS.find((item) => item.value === value);
+    // Cambiar de período descarta un borrador inválido y su aviso.
+    setDraft(null);
     if (!chosen || value === 'custom') {
       setCustomOpen(true);
       update({ desde: shownFrom ?? null, hasta: shownTo ?? null });
@@ -186,7 +194,7 @@ export function IncidentReportsPage() {
           <ExportPdfButton
             endpoint="/reportes/incidentes/pdf"
             filters={{ ...filters, ...(data ? { desde: data.desde, hasta: data.hasta } : {}) }}
-            disabled={!data || fetching || !valid.success}
+            disabled={!data || fetching || !valid.success || draftInvalid}
           />
         }
       />

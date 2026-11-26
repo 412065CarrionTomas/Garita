@@ -171,4 +171,14 @@ it('los filtros van en una sola barra y se aplican al cambiar', async () => {
   await user.click(screen.getByRole('button', { name: 'Fechas' }));
   fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2027-01-01' } });
   expect(await screen.findByRole('alert')).toHaveTextContent('El período no es válido');
+  expect(screen.getByRole('button', { name: 'Exportar a PDF' })).toBeDisabled();
+  // Elegir un período descarta el borrador inválido y su aviso.
+  await user.click(screen.getByRole('button', { name: '7 días' }));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it('una fecha mal escrita en la URL no rompe la pantalla', async () => {
+  window.history.pushState({}, '', '/incidentes-y-respuesta?desde=2026-10-01&hasta=nada');
+  renderPage();
+  expect(await screen.findByRole('alert')).toHaveTextContent('El período no es válido');
 });
