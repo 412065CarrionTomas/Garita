@@ -592,7 +592,15 @@ export function SitesPage() {
                       <RoundsPanel site={site} />
                     </TabsContent>
                     <TabsContent value="configuracion" className="pt-2">
-                      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_--spacing(96)]">
+                      <div
+                        className={cn(
+                          'grid items-start gap-4',
+                          // La columna de supervisores y baja solo existe para admin en un predio activo.
+                          user?.role === 'admin' &&
+                            site.status === 'active' &&
+                            'xl:grid-cols-[minmax(0,1fr)_--spacing(96)]',
+                        )}
+                      >
                         <div className="divide-y divide-border rounded-md border border-border bg-card">
                           <SettingsSection
                             title="Datos del predio"
