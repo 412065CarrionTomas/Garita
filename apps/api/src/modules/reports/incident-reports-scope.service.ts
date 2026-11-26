@@ -42,6 +42,14 @@ export class ReportScopeService {
           (!input.cliente || site.clientId === input.cliente),
       )
       .map((site) => site.id);
+    // Período anterior de igual cantidad de días, para comparar.
+    const days = Math.round(
+      (Date.parse(`${period.hasta}T00:00:00Z`) - Date.parse(`${period.desde}T00:00:00Z`)) /
+        86_400_000,
+    );
+    const start = new Date(`${period.desde}T00:00:00Z`);
+    start.setUTCDate(start.getUTCDate() - days);
+    const previous = { desde: start.toISOString().slice(0, 10), hasta: period.desde };
     return {
       ...period,
       timezone: company.timezone,
@@ -50,6 +58,13 @@ export class ReportScopeService {
       dateRange: {
         gte: localDateTimeToUtc(period.desde, 0, company.timezone),
         lt: localDateTimeToUtc(period.hasta, 0, company.timezone),
+      },
+      previous: {
+        ...previous,
+        dateRange: {
+          gte: localDateTimeToUtc(previous.desde, 0, company.timezone),
+          lt: localDateTimeToUtc(previous.hasta, 0, company.timezone),
+        },
       },
     };
   }

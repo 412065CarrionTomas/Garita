@@ -4,6 +4,7 @@ import {
   computePanicReport,
   computeResponseTimes,
   localDateTimeToUtc,
+  localDateWeekday,
   type IncidentReportQuery,
   type IncidentReportDetailQuery,
   type PanicReportDetailQuery,
@@ -33,24 +34,34 @@ export class IncidentReportsService {
   private incidentWhere(
     scope: ReportScope,
     input: IncidentReportDetailQuery | IncidentReportQuery,
+    dateRange = scope.dateRange,
   ): Prisma.IncidentWhereInput {
     const ranges = [];
-    if ('franja' in input && input.franja !== undefined) {
+    const franja = 'franja' in input ? input.franja : undefined;
+    const dia = 'dia' in input ? input.dia : undefined;
+    if (franja !== undefined || dia !== undefined) {
+      // Un rango por día local: la franja (o el día entero) en la zona de la empresa.
       const day = new Date(`${scope.desde}T00:00:00Z`);
       while (day.toISOString().slice(0, 10) < scope.hasta) {
         const date = day.toISOString().slice(0, 10);
-        const gte = localDateTimeToUtc(date, input.franja * 60, scope.timezone);
         day.setUTCDate(day.getUTCDate() + 1);
+        const nextDate = day.toISOString().slice(0, 10);
+        if (dia !== undefined && localDateWeekday(date) !== dia) continue;
+        const gte = localDateTimeToUtc(date, (franja ?? 0) * 60, scope.timezone);
         const lt =
-          input.franja === 22
-            ? localDateTimeToUtc(day.toISOString().slice(0, 10), 0, scope.timezone)
-            : localDateTimeToUtc(date, (input.franja + 2) * 60, scope.timezone);
+          franja === undefined || franja === 22
+            ? localDateTimeToUtc(nextDate, 0, scope.timezone)
+            : localDateTimeToUtc(date, (franja + 2) * 60, scope.timezone);
         ranges.push({ gte, lt });
       }
-    } else ranges.push(scope.dateRange);
+      // Sin días que coincidan, ningún incidente (un OR vacío no filtra en Prisma).
+      if (!ranges.length) ranges.push({ gte: scope.dateRange.gte, lt: scope.dateRange.gte });
+    } else ranges.push(dateRange);
     return {
       siteId: { in: scope.siteIds },
       ...('tipo' in input && input.tipo ? { type: input.tipo } : {}),
+      ...('gravedad' in input && input.gravedad ? { severity: input.gravedad } : {}),
+      ...('seguimiento' in input && input.seguimiento ? { followUpStatus: 'open' as const } : {}),
       ...('clasificacion' in input && input.clasificacion
         ? { classificationStatus: input.clasificacion }
         : {}),
@@ -63,22 +74,70 @@ export class IncidentReportsService {
 
   incidents(input: IncidentReportQuery, user: AuthenticatedUser) {
     return this.scopes.measured('incidents', input, user, async (scope) => {
-      const rows = await this.prisma.tenantPrisma.incident.findMany({
-        where: this.incidentWhere(scope, input),
-        select: {
-          type: true,
-          classificationStatus: true,
-          site: { select: named },
-          trustedAt: true,
-          occurredAtDevice: true,
-          receivedAt: true,
-        },
-      });
+      const db = this.prisma.tenantPrisma;
+      const now = this.clock.now();
+      const [rows, previousRows, followUps] = await Promise.all([
+        db.incident.findMany({
+          where: this.incidentWhere(scope, input),
+          select: {
+            type: true,
+            classificationStatus: true,
+            severity: true,
+            followUpStatus: true,
+            site: { select: named },
+            trustedAt: true,
+            occurredAtDevice: true,
+            receivedAt: true,
+          },
+        }),
+        db.incident.findMany({
+          where: this.incidentWhere(scope, input, scope.previous.dateRange),
+          select: { severity: true },
+        }),
+        // El seguimiento abierto no depende del período: es trabajo pendiente hoy.
+        db.incident.findMany({
+          where: { siteId: { in: scope.siteIds }, followUpStatus: 'open' },
+          orderBy: [{ severity: { sort: 'desc', nulls: 'last' } }, { createdAt: 'asc' }],
+          take: 50,
+          select: {
+            id: true,
+            type: true,
+            severity: true,
+            createdAt: true,
+            site: { select: named },
+            classifications: {
+              where: { requiresFollowUp: true },
+              orderBy: { decidedAt: 'asc' },
+              take: 1,
+              select: { decidedAt: true },
+            },
+            followUpActions: { orderBy: { createdAt: 'desc' }, take: 1, select: { text: true } },
+          },
+        }),
+      ]);
       return {
         desde: scope.desde,
         hasta: scope.hasta,
         timezone: scope.timezone,
-        ...computeIncidentReport(rows, scope.timezone, this.clock.now()),
+        ...computeIncidentReport(rows, scope.timezone, now),
+        previous: {
+          desde: scope.previous.desde,
+          hasta: scope.previous.hasta,
+          total: previousRows.length,
+          highSeverity: previousRows.filter((row) => row.severity === 'high').length,
+        },
+        openFollowUps: followUps.map((row) => {
+          const openedAt = row.classifications[0]?.decidedAt ?? row.createdAt;
+          return {
+            id: row.id,
+            type: row.type,
+            site: row.site,
+            severity: row.severity,
+            openedAt: openedAt.toISOString(),
+            ageMs: Math.max(0, now.getTime() - openedAt.getTime()),
+            lastAction: row.followUpActions[0]?.text ?? null,
+          };
+        }),
         filters: {
           sites: scope.sites.map(({ id, name }) => ({ id, name })),
           clients: [...new Map(scope.sites.map((site) => [site.client.id, site.client])).values()],
@@ -103,6 +162,8 @@ export class IncidentReportsService {
             site: { select: named },
             type: true,
             classificationStatus: true,
+            severity: true,
+            followUpStatus: true,
             trustedAt: true,
             occurredAtDevice: true,
           },
@@ -117,6 +178,8 @@ export class IncidentReportsService {
           site: row.site,
           type: row.type,
           classificationStatus: row.classificationStatus,
+          severity: row.severity,
+          followUpStatus: row.followUpStatus,
           occurredAt: (row.trustedAt ?? row.occurredAtDevice).toISOString(),
         })),
       };
@@ -125,75 +188,22 @@ export class IncidentReportsService {
 
   responseTimes(input: IncidentReportQuery, user: AuthenticatedUser) {
     return this.scopes.measured('response_times', input, user, async (scope) => {
-      const db = this.prisma.tenantPrisma;
-      const siteId = { in: scope.siteIds };
-      const [panics, notices, incidents] = await Promise.all([
-        db.panicAlert.findMany({
-          where: { siteId, triggeredAt: scope.dateRange },
-          select: {
-            site: { select: named },
-            triggeredAt: true,
-            confirmedAt: true,
-            escalatedAt: true,
-            confirmedBy: { select: person },
-          },
-        }),
-        db.notice.findMany({
-          where: { siteId, kind: 'round_missed', createdAt: scope.dateRange },
-          select: {
-            site: { select: named },
-            createdAt: true,
-            views: {
-              where: { user: { role: 'supervisor' } },
-              orderBy: [{ seenAt: 'asc' }, { userId: 'asc' }],
-              take: 1,
-              select: { seenAt: true, user: { select: person } },
-            },
-          },
-        }),
-        db.incident.findMany({
-          where: { siteId, receivedAt: scope.dateRange },
-          select: {
-            site: { select: named },
-            receivedAt: true,
-            classifications: {
-              orderBy: [{ decidedAt: 'asc' }, { id: 'asc' }],
-              take: 1,
-              select: { decidedAt: true, decidedBy: { select: person } },
-            },
-          },
-        }),
+      const [result, previous] = await Promise.all([
+        this.responseSamples(scope, scope.dateRange),
+        this.responseSamples(scope, scope.previous.dateRange),
       ]);
-      const result = computeResponseTimes(
-        panics.map((row) => ({
-          ...row,
-          confirmedBy: row.confirmedBy ? namePerson(row.confirmedBy) : null,
-        })),
-        notices.map((row) => ({
-          site: row.site,
-          startedAt: row.createdAt,
-          responses: row.views.map((view) => ({ at: view.seenAt, by: namePerson(view.user) })),
-        })),
-        incidents.map((row) => ({
-          site: row.site,
-          startedAt: row.receivedAt,
-          responses: row.classifications.map((decision) => ({
-            at: decision.decidedAt,
-            by: namePerson(decision.decidedBy),
-          })),
-        })),
-      );
       const base = {
         desde: scope.desde,
         hasta: scope.hasta,
         timezone: scope.timezone,
         totals: result.totals,
+        previousTotals: previous.totals,
         bySite: result.bySite,
       };
       if (user.role === 'admin')
         return { ...base, bySupervisor: result.bySupervisor } satisfies ResponseTimesReport;
       const own = result.bySupervisor.find((row) => row.id === user.userId);
-      const current = await db.user.findUniqueOrThrow({
+      const current = await this.prisma.tenantPrisma.user.findUniqueOrThrow({
         where: { id: user.userId },
         select: person,
       });
@@ -204,17 +214,85 @@ export class IncidentReportsService {
     });
   }
 
+  private async responseSamples(scope: ReportScope, dateRange: ReportScope['dateRange']) {
+    const db = this.prisma.tenantPrisma;
+    const siteId = { in: scope.siteIds };
+    const [panics, notices, incidents] = await Promise.all([
+      db.panicAlert.findMany({
+        where: { siteId, triggeredAt: dateRange },
+        select: {
+          site: { select: named },
+          triggeredAt: true,
+          confirmedAt: true,
+          escalatedAt: true,
+          confirmedBy: { select: person },
+        },
+      }),
+      db.notice.findMany({
+        where: { siteId, kind: 'round_missed', createdAt: dateRange },
+        select: {
+          site: { select: named },
+          createdAt: true,
+          views: {
+            where: { user: { role: 'supervisor' } },
+            orderBy: [{ seenAt: 'asc' }, { userId: 'asc' }],
+            take: 1,
+            select: { seenAt: true, user: { select: person } },
+          },
+        },
+      }),
+      db.incident.findMany({
+        where: { siteId, receivedAt: dateRange },
+        select: {
+          site: { select: named },
+          receivedAt: true,
+          classifications: {
+            orderBy: [{ decidedAt: 'asc' }, { id: 'asc' }],
+            take: 1,
+            select: { decidedAt: true, decidedBy: { select: person } },
+          },
+        },
+      }),
+    ]);
+    return computeResponseTimes(
+      panics.map((row) => ({
+        ...row,
+        confirmedBy: row.confirmedBy ? namePerson(row.confirmedBy) : null,
+      })),
+      notices.map((row) => ({
+        site: row.site,
+        startedAt: row.createdAt,
+        responses: row.views.map((view) => ({ at: view.seenAt, by: namePerson(view.user) })),
+      })),
+      incidents.map((row) => ({
+        site: row.site,
+        startedAt: row.receivedAt,
+        responses: row.classifications.map((decision) => ({
+          at: decision.decidedAt,
+          by: namePerson(decision.decidedBy),
+        })),
+      })),
+    );
+  }
+
   panic(input: IncidentReportQuery, user: AuthenticatedUser) {
     return this.scopes.measured('panic', input, user, async (scope) => {
-      const rows = await this.prisma.tenantPrisma.panicAlert.findMany({
-        where: { siteId: { in: scope.siteIds }, triggeredAt: scope.dateRange },
-        select: { outcome: true, channel: true },
-      });
+      const find = (triggeredAt: ReportScope['dateRange']) =>
+        this.prisma.tenantPrisma.panicAlert.findMany({
+          where: { siteId: { in: scope.siteIds }, triggeredAt },
+          select: { outcome: true, channel: true },
+        });
+      const [rows, previousRows] = await Promise.all([
+        find(scope.dateRange),
+        find(scope.previous.dateRange),
+      ]);
+      const previous = computePanicReport(previousRows);
       return {
         desde: scope.desde,
         hasta: scope.hasta,
         timezone: scope.timezone,
         ...computePanicReport(rows),
+        previous: { total: previous.total, falseAlarmProportion: previous.falseAlarmProportion },
       };
     });
   }
