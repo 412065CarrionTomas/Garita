@@ -550,15 +550,20 @@ export class ShiftsService {
   }
 
   /**
-   * Turnos del vigilador en un rango libre de fechas de servicio, pasados y futuros, paginados por
-   * cursor. Los iniciados traen el resumen de lo hecho en la misma consulta (sin N+1).
+   * Turnos del vigilador que tocan un rango libre de días, pasados y futuros, paginados por cursor.
+   * Un turno nocturno cuenta en los dos días: el que empieza y el que termina. Los iniciados traen
+   * el resumen de lo hecho en la misma consulta (sin N+1).
    */
   async mineInRange(user: AuthenticatedUser, query: GuardShiftsQuery): Promise<GuardShiftsPage> {
     const mine = { guardId: user.userId, isCurrent: true, active: true };
     const rows = await this.prisma.tenantPrisma.shift.findMany({
       where: {
         ...suspendedVisibleShiftWhere(user),
-        serviceDate: { gte: new Date(query.desde), lte: new Date(query.hasta) },
+        // Un día antes para traer el nocturno que termina en `desde`; se descarta abajo si no llega.
+        serviceDate: {
+          gte: new Date(Date.parse(query.desde) - 86_400_000),
+          lte: new Date(query.hasta),
+        },
         assignments: { some: mine },
       },
       select: {
@@ -582,27 +587,36 @@ export class ShiftsService {
       ...(query.cursor && { cursor: { id: query.cursor }, skip: 1 }),
     });
     const page = rows.slice(0, GUARD_SHIFTS_PAGE_SIZE);
+    // El último día tocado es el del instante anterior al fin (un fin a las 00:00 no cuenta).
+    const reaches = (shift: (typeof page)[number]) =>
+      localDate(
+        new Date((shift.assignments[0] ?? shift).endsAt.getTime() - 1),
+        shift.site.company.timezone,
+      ) >= query.desde;
     return {
-      items: page.map(({ assignments, roundWindowStates: windows, _count, ...shift }) => ({
-        id: shift.id,
-        status: shift.status,
-        serviceDate: shift.serviceDate.toISOString().slice(0, 10),
-        startsAt: (assignments[0] ?? shift).startsAt.toISOString(),
-        endsAt: (assignments[0] ?? shift).endsAt.toISOString(),
-        startedAt: shift.startedAt?.toISOString() ?? null,
-        closedAt: shift.closedAt?.toISOString() ?? null,
-        site: { id: shift.site.id, name: shift.site.name, timezone: shift.site.company.timezone },
-        rounds: shift.rounds.map(({ round }) => round.name),
-        summary: shift.startedAt
-          ? {
-              windows: windows.length,
-              windowsDone: windows.filter((w) => DONE_WINDOW.has(w.status)).length,
-              recorded: windows.reduce((sum, w) => sum + w.recordedCount, 0),
-              expected: windows.reduce((sum, w) => sum + w.expectedCount, 0),
-              incidents: _count.incidents,
-            }
-          : null,
-      })),
+      // El cursor sigue al último leído aunque se descarte, para no repetir ni saltear filas.
+      items: page
+        .filter(reaches)
+        .map(({ assignments, roundWindowStates: windows, _count, ...shift }) => ({
+          id: shift.id,
+          status: shift.status,
+          serviceDate: shift.serviceDate.toISOString().slice(0, 10),
+          startsAt: (assignments[0] ?? shift).startsAt.toISOString(),
+          endsAt: (assignments[0] ?? shift).endsAt.toISOString(),
+          startedAt: shift.startedAt?.toISOString() ?? null,
+          closedAt: shift.closedAt?.toISOString() ?? null,
+          site: { id: shift.site.id, name: shift.site.name, timezone: shift.site.company.timezone },
+          rounds: shift.rounds.map(({ round }) => round.name),
+          summary: shift.startedAt
+            ? {
+                windows: windows.length,
+                windowsDone: windows.filter((w) => DONE_WINDOW.has(w.status)).length,
+                recorded: windows.reduce((sum, w) => sum + w.recordedCount, 0),
+                expected: windows.reduce((sum, w) => sum + w.expectedCount, 0),
+                incidents: _count.incidents,
+              }
+            : null,
+        })),
       nextCursor: rows.length > GUARD_SHIFTS_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
     };
   }

@@ -163,7 +163,7 @@ describe('guard shifts in a date range', () => {
     const page = await service.mineInRange(guard, { desde: '2030-05-01', hasta: '2030-05-31' });
     expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
-        serviceDate: { gte: new Date('2030-05-01'), lte: new Date('2030-05-31') },
+        serviceDate: { gte: new Date('2030-04-30'), lte: new Date('2030-05-31') },
         assignments: { some: { guardId: 'guard', isCurrent: true, active: true } },
       },
       take: 51,
@@ -197,5 +197,18 @@ describe('guard shifts in a date range', () => {
     });
     expect(page.items).toHaveLength(50);
     expect(page.nextCursor).toBe('s49');
+  });
+
+  it('counts an overnight shift on the day it ends, but not one that ends before the range', async () => {
+    const overnight = row('night', false); // 22:00 del 9 a 06:00 UTC del 10 (03:00 en Córdoba)
+    const evening = {
+      ...row('evening', false),
+      assignments: [
+        { startsAt: new Date('2030-05-09T18:00:00Z'), endsAt: new Date('2030-05-10T03:00:00Z') },
+      ], // termina 00:00 del 10 en Córdoba: no toca el 10
+    };
+    findMany.mockResolvedValueOnce([overnight, evening]);
+    const page = await service.mineInRange(guard, { desde: '2030-05-10', hasta: '2030-05-10' });
+    expect(page.items.map((s) => s.id)).toEqual(['night']);
   });
 });
