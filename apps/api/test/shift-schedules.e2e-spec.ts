@@ -603,7 +603,7 @@ describe('HU-32 programaciones semanales por HTTP', () => {
     );
     expect(
       (await http().get('/api/v1/programaciones-turnos').set(auth('foreign')).expect(200)).body,
-    ).toEqual([]);
+    ).toEqual({ items: [], expiring: 0 });
     await http().get('/api/v1/programaciones-turnos').set(auth('supervisor')).expect(200);
     await http()
       .get(`/api/v1/programaciones-turnos?predio=${hiddenSiteId}`)

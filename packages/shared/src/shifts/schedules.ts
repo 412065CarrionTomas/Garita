@@ -47,10 +47,18 @@ export const shiftScheduleInputSchema = shiftScheduleDefinitionSchema.superRefin
 );
 export const shiftSchedulePatchSchema = fields.partial();
 export const shiftScheduleExtensionSchema = z.strictObject({ endDate: z.iso.date() });
+/** Días antes del fin en que una programación vigente pasa a "por vencer". */
+export const SCHEDULE_EXPIRING_DAYS = 14;
+export const SCHEDULE_LIST_STATES = ['vigente', 'por_vencer', 'finalizada', 'cancelada'] as const;
+export type ScheduleListState = (typeof SCHEDULE_LIST_STATES)[number];
 export const shiftScheduleQuerySchema = z.strictObject({
   predio: z.string().optional(),
   vigilador: z.string().optional(),
+  /** Sin estado: las vigentes (incluye las por vencer). */
+  estado: z.enum(SCHEDULE_LIST_STATES).optional(),
+  q: z.string().trim().max(100).optional(),
 });
+export type ShiftScheduleQuery = z.infer<typeof shiftScheduleQuerySchema>;
 export type ShiftScheduleInput = z.infer<typeof shiftScheduleInputSchema>;
 
 export const scheduledShiftSchema = z.object({
@@ -83,6 +91,24 @@ export const shiftScheduleSchema = fields.extend({
   id: z.string(),
   status: z.enum(['active', 'finished', 'cancelled']),
 });
+export const shiftScheduleListItemSchema = shiftScheduleSchema.extend({
+  siteName: z.string(),
+  guardName: z.string(),
+  roundNames: z.array(z.string()),
+  /** Días hasta la fecha final (negativo si ya pasó). */
+  daysToEnd: z.number().int(),
+  /** Turnos generados que todavía no empezaron. */
+  upcomingCount: z.number().int(),
+  /** Turnos generados que después se editaron a mano. */
+  modifiedCount: z.number().int(),
+});
+export type ShiftScheduleListItem = z.infer<typeof shiftScheduleListItemSchema>;
+export const shiftScheduleListSchema = z.object({
+  items: z.array(shiftScheduleListItemSchema),
+  /** Vigentes que terminan dentro de SCHEDULE_EXPIRING_DAYS, sin importar el filtro de estado. */
+  expiring: z.number().int(),
+});
+export type ShiftScheduleList = z.infer<typeof shiftScheduleListSchema>;
 export const scheduleOperationSchema = z.object({
   schedule: shiftScheduleSchema,
   generated: z.array(z.string()),
