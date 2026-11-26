@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import {
+  DEFAULT_SPEEDS_KMH,
   defaultRouteInput,
   roundRouteSchema,
   type GuardRoundVersion,
@@ -18,6 +19,7 @@ import {
   type RouteInput,
   type RoundRoutePreviewInput,
   type RoundRoutePreviewResponse,
+  type SpeedProfile,
 } from '@garita/shared';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -33,6 +35,18 @@ interface RoundInput {
   graceMinutes: number;
   route?: RouteInput;
   allowStraight?: boolean;
+  speedProfile?: SpeedProfile | null;
+  maxSpeedKmh?: number;
+}
+
+/** Velocidad que se guarda en la versión: sin perfil, ninguna (se usa la del predio). */
+function roundSpeed(input: RoundInput) {
+  const profile = input.speedProfile ?? null;
+  if (!profile) return { speedProfile: null, maxSpeedKmh: null };
+  const kmh = profile === 'custom' ? input.maxSpeedKmh : DEFAULT_SPEEDS_KMH[profile];
+  if (kmh === undefined)
+    throw new BadRequestException('El perfil personalizado requiere indicar la velocidad');
+  return { speedProfile: profile, maxSpeedKmh: kmh };
 }
 
 @Injectable()
@@ -147,6 +161,7 @@ export class RoundsService {
                 windowEndLocal: input.windowEndLocal,
                 graceMinutes: input.graceMinutes,
                 route,
+                ...roundSpeed(input),
                 createdById: user.userId,
                 checkpoints: {
                   create: input.checkpointIds.map((checkpointId, position) => ({
@@ -200,6 +215,7 @@ export class RoundsService {
             windowEndLocal: input.windowEndLocal,
             graceMinutes: input.graceMinutes,
             route,
+            ...roundSpeed(input),
             createdById: user.userId,
             checkpoints: {
               create: input.checkpointIds.map((checkpointId, position) => ({
@@ -246,7 +262,7 @@ export class RoundsService {
   async previewRoute(input: RoundRoutePreviewInput): Promise<RoundRoutePreviewResponse> {
     await this.resources.findOwnedOrThrow('Site', input.siteId);
     const points = await this.assertCheckpoints(input.siteId, input.checkpointIds);
-    return this.computeRoute(input.siteId, input.route, points);
+    return this.computeRoute(input.siteId, input.route, points, input.speedProfile);
   }
 
   /** Checks the points and returns their location in the round's order. */
@@ -286,6 +302,7 @@ export class RoundsService {
       siteId,
       input.route ?? defaultRouteInput(points.length),
       points,
+      input.speedProfile,
     );
     if (input.route && failures.length > 0 && !input.allowStraight)
       throw new UnprocessableEntityException({
@@ -295,14 +312,19 @@ export class RoundsService {
     return route;
   }
 
-  private async computeRoute(siteId: string, input: RouteInput, points: LngLat[]) {
+  private async computeRoute(
+    siteId: string,
+    input: RouteInput,
+    points: LngLat[],
+    profile?: SpeedProfile | null,
+  ) {
     const site = await this.siteRouting(siteId);
     const issues = validateRouteInput(input, points, site.location);
     if (issues.length > 0)
       throw new BadRequestException(
         issues.map((issue) => ({ ...issue, path: ['route', ...issue.path] })),
       );
-    return this.routes.build(input, points, site.profile);
+    return this.routes.build(input, points, profile ?? site.profile);
   }
 
   private handleUnique(error: unknown): never {

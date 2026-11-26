@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { MarcasService, type EvaluateRecordInput } from './marcas.service';
+import { MarcasService, pairMaxSpeedKmh, type EvaluateRecordInput } from './marcas.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
 import type { NfcTagsService } from '../nfc-tags/nfc-tags.service';
@@ -22,6 +22,7 @@ describe('MarcasService', () => {
     [{ data: CreatedFlag[]; skipDuplicates?: boolean }]
   >();
   const shiftFindFirst = jest.fn();
+  const shiftRoundFindMany = jest.fn();
   const siteUpdate = jest.fn();
 
   const createdFlags = (): CreatedFlag[] => {
@@ -37,6 +38,7 @@ describe('MarcasService', () => {
     },
     recordFlag: { createMany: recordFlagCreateMany },
     shift: { findFirst: shiftFindFirst },
+    shiftRound: { findMany: shiftRoundFindMany },
     site: { update: siteUpdate },
   };
 
@@ -190,6 +192,39 @@ describe('MarcasService', () => {
       ).toBe(true);
     });
 
+    it('usa la velocidad de la ronda y, entre rondas distintas, la más alta del par', async () => {
+      checkpointFindUnique.mockResolvedValue({
+        id: 'cp-1',
+        latitude: -34.6037,
+        longitude: -58.3816,
+        toleranceRadiusMeters: 30,
+        isIndoor: false,
+        site: { maxSpeedKmh: 60 },
+        nfcTags: [],
+      });
+      // 500 m en 2 minutos: 15 km/h. Pasa el máximo a pie (10) y no el del predio (60).
+      const previous = (roundId: string) => ({
+        occurredAtDevice: new Date('2026-10-14T09:58:00.000Z'),
+        countedFor: [{ roundId, windowIndex: 0 }],
+        checkpoint: { id: 'cp-prev', latitude: -34.6037 - 500 / 111195, longitude: -58.3816 },
+      });
+      shiftRoundFindMany.mockResolvedValue([
+        { roundId: 'a-pie', roundVersion: { maxSpeedKmh: 10 } },
+        { roundId: 'en-auto', roundVersion: { maxSpeedKmh: 60 } },
+      ]);
+      const input = { ...baseInput, countedFor: [{ roundId: 'a-pie', windowIndex: 0 }] };
+      const impossible = () => createdFlags().some((flag) => flag.type === 'impossible_time');
+
+      checkpointRecordFindFirst.mockResolvedValue(previous('a-pie'));
+      await service.evaluateRecord(input);
+      expect(impossible()).toBe(true);
+
+      recordFlagCreateMany.mockClear();
+      checkpointRecordFindFirst.mockResolvedValue(previous('en-auto'));
+      await service.evaluateRecord(input);
+      expect(impossible()).toBe(false);
+    });
+
     it('si el checkpoint no existe, no falla ni crea marcas', async () => {
       checkpointFindUnique.mockResolvedValue(null);
 
@@ -201,6 +236,22 @@ describe('MarcasService', () => {
       checkpointFindUnique.mockRejectedValue(new Error('DB connection failure'));
 
       await expect(service.evaluateRecord(baseInput)).resolves.not.toThrow();
+    });
+  });
+
+  describe('pairMaxSpeedKmh', () => {
+    const speeds = new Map<string, number | null>([
+      ['a-pie', 10],
+      ['en-auto', 60],
+      ['sin-velocidad', null],
+    ]);
+    it('misma ronda: su velocidad; rondas distintas: la más alta', () => {
+      expect(pairMaxSpeedKmh(['a-pie'], ['a-pie'], speeds, 25)).toBe(10);
+      expect(pairMaxSpeedKmh(['a-pie'], ['en-auto'], speeds, 25)).toBe(60);
+    });
+    it('sin ronda o ronda sin velocidad: la del predio entra en el par', () => {
+      expect(pairMaxSpeedKmh(['a-pie'], [], speeds, 25)).toBe(25);
+      expect(pairMaxSpeedKmh(['sin-velocidad'], ['a-pie'], speeds, 25)).toBe(25);
     });
   });
 

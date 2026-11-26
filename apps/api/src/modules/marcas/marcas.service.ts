@@ -31,6 +31,35 @@ export interface EvaluateRecordInput {
   simulation: 'simulated' | 'not_simulated' | 'unavailable';
   phoneNfc: 'on' | 'off' | 'unsupported';
   sdmMessage?: string | null;
+  /** Rondas para las que contó (imputación); vacío o ausente: fuera de ventana. */
+  countedFor?: Prisma.JsonValue;
+}
+
+function roundIdsOf(countedFor: Prisma.JsonValue | undefined): string[] {
+  if (!Array.isArray(countedFor)) return [];
+  return countedFor.flatMap((entry) =>
+    entry && typeof entry === 'object' && 'roundId' in entry && typeof entry.roundId === 'string'
+      ? [entry.roundId]
+      : [],
+  );
+}
+
+/**
+ * Máximo para el tiempo imposible entre dos lecturas: la velocidad de cada una es la más alta de
+ * sus rondas (la del predio si la ronda no tiene, o si la lectura no contó para ninguna), y del par
+ * se toma la más alta. Así el paso de una ronda a pie a una en auto no se marca por error.
+ */
+export function pairMaxSpeedKmh(
+  current: string[],
+  previous: string[],
+  roundSpeeds: ReadonlyMap<string, number | null>,
+  siteKmh: number,
+): number {
+  const speedOf = (roundIds: string[]) =>
+    roundIds.length === 0
+      ? siteKmh
+      : Math.max(...roundIds.map((id) => roundSpeeds.get(id) ?? siteKmh));
+  return Math.max(speedOf(current), speedOf(previous));
 }
 
 @Injectable()
@@ -50,7 +79,7 @@ export class MarcasService {
   async evaluateRecord(record: EvaluateRecordInput): Promise<void> {
     const startTime = performance.now();
     try {
-      // 1. Load checkpoint, site maxSpeedKmh, and active NFC tags
+      // 1. Load checkpoint, site maxSpeedKmh (fallback for rounds without speed), and active NFC tags
       const checkpoint = await this.prisma.tenantPrisma.checkpoint.findUnique({
         where: { id: record.checkpointId },
         select: {
@@ -97,6 +126,7 @@ export class MarcasService {
             select: {
               occurredAtDevice: true,
               trustedAt: true,
+              countedFor: true,
               checkpoint: { select: { id: true, latitude: true, longitude: true } },
             },
           }),
@@ -109,6 +139,24 @@ export class MarcasService {
             (b.trustedAt ?? b.occurredAtDevice).getTime() -
             (a.trustedAt ?? a.occurredAtDevice).getTime(),
         )[0];
+
+      // Velocidad de las rondas del par: la de la versión que el turno fijó al iniciar.
+      const currentRounds = roundIdsOf(record.countedFor);
+      const previousRounds = roundIdsOf(previousRecord?.countedFor);
+      const pairRounds = [...new Set([...currentRounds, ...previousRounds])];
+      const shiftRounds =
+        previousRecord && pairRounds.length > 0
+          ? await this.prisma.tenantPrisma.shiftRound.findMany({
+              where: { shiftId: record.shiftId, roundId: { in: pairRounds } },
+              select: { roundId: true, roundVersion: { select: { maxSpeedKmh: true } } },
+            })
+          : [];
+      const maxSpeedKmh = pairMaxSpeedKmh(
+        currentRounds,
+        previousRounds,
+        new Map(shiftRounds.map((sr) => [sr.roundId, sr.roundVersion?.maxSpeedKmh ?? null])),
+        checkpoint.site.maxSpeedKmh,
+      );
 
       // 3. Evaluate flags deterministically
       const flags = evaluateRecordFlags({
@@ -146,9 +194,7 @@ export class MarcasService {
               },
             }
           : null,
-        site: {
-          maxSpeedKmh: checkpoint.site.maxSpeedKmh,
-        },
+        site: { maxSpeedKmh },
       });
 
       const secureTag = checkpoint.nfcTags[0];

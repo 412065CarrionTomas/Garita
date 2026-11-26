@@ -79,3 +79,65 @@ describe('round versions for the guard', () => {
     });
   });
 });
+
+describe('round speed', () => {
+  it('saves the round speed in the new version and routes with its profile', async () => {
+    const versionCreate = jest.fn().mockResolvedValue({ id: 'v2' });
+    const tx = {
+      roundVersion: {
+        findFirstOrThrow: jest.fn().mockResolvedValue({ versionNumber: 1 }),
+        create: versionCreate,
+      },
+      round: { update: jest.fn().mockResolvedValue({ id: 'r1' }) },
+    };
+    const tenantPrisma = {
+      checkpoint: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'p1',
+            latitude: new Prisma.Decimal('-31.4'),
+            longitude: new Prisma.Decimal('-64.1'),
+          },
+        ]),
+      },
+      site: {
+        findFirstOrThrow: jest.fn().mockResolvedValue({
+          latitude: new Prisma.Decimal('-31.4'),
+          longitude: new Prisma.Decimal('-64.1'),
+          maxSpeedProfile: 'walking',
+        }),
+      },
+      $transaction: (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+    };
+    const build = jest.fn().mockResolvedValue({ route: { closed: true, legs: [] }, failures: [] });
+    const service = new RoundsService(
+      { tenantPrisma } as unknown as PrismaService,
+      {
+        findOwnedOrThrow: jest.fn().mockResolvedValue({ siteId: 's1' }),
+      } as unknown as TenantResourceService,
+      { build } as unknown as RouteBuilder,
+    );
+    const user = { userId: 'u', companyId: 'c', role: 'admin', status: 'active' } as const;
+    const input = {
+      name: 'Perímetro',
+      checkpointIds: ['p1'],
+      frequencyMinutes: 120,
+      windowStartLocal: '22:00',
+      windowEndLocal: '06:00',
+      graceMinutes: 15,
+    };
+
+    await service.update('r1', { ...input, speedProfile: 'vehicle' }, user);
+    expect(build).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'vehicle');
+    expect(versionCreate).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ speedProfile: 'vehicle', maxSpeedKmh: 60 }) as unknown,
+    });
+
+    // Sin velocidad propia: nada en la versión y el recorrido con el perfil del predio.
+    await service.update('r1', input, user);
+    expect(build).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'walking');
+    expect(versionCreate).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ speedProfile: null, maxSpeedKmh: null }) as unknown,
+    });
+  });
+});
