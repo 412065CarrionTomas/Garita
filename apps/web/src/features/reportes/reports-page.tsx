@@ -54,7 +54,8 @@ const dateLabel = (day: string) => day.split('-').reverse().join('/');
 function addDays(day: string, days: number): string {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+  // Fecha inválida o fuera de rango: se devuelve tal cual y la rechaza la validación del período.
+  return Number.isNaN(date.getTime()) ? day : date.toISOString().slice(0, 10);
 }
 
 export function ReportsPage() {

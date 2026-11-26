@@ -81,10 +81,13 @@ export function BarList({
                   style={{ left: `${(tick / top) * 100}%` }}
                 />
               ))}
-              <span
-                className={cn('absolute inset-y-0 left-0', toneClass[tone])}
-                style={{ width: `${width}%`, ...toneStyle[tone] }}
-              />
+              {/* En 0 no se dibuja: el borde de la falla quedaría como una raya roja sobre el cero. */}
+              {width > 0 && (
+                <span
+                  className={cn('absolute inset-y-0 left-0', toneClass[tone])}
+                  style={{ width: `${width}%`, ...toneStyle[tone] }}
+                />
+              )}
               <span
                 className="pointer-events-none absolute bottom-full z-10 mb-1 hidden border-[1.5px] border-input bg-card px-2 py-0.5 text-sm font-semibold whitespace-nowrap tabular-nums group-hover:block"
                 style={{ left: `${width}%`, translate: width > 50 ? '-100% 0' : undefined }}

@@ -64,7 +64,7 @@ export function ExportPdfButton({
         title={iconOnly ? 'Exportar a PDF' : undefined}
         onClick={() => void download()}
       >
-        {iconOnly ? <FileDown aria-hidden="true" /> : 'Exportar a PDF'}
+        {iconOnly ? <FileDown aria-hidden="true" /> : busy ? 'Generando el PDF…' : 'Exportar a PDF'}
       </Button>
       <p role="status" aria-live="polite" className="sr-only">
         {status}

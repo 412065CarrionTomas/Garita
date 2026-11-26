@@ -90,9 +90,9 @@ export function NotDoneList({ query, timezone }: { query: string; timezone: stri
             {
               id: 'window',
               header: 'Ventana',
-              type: 'date',
               width: 128,
-              value: (item) => item.startsAt,
+              // Por horario del día ("08:00" < "22:00"), no por fecha: para eso está "Fecha".
+              value: (item) => hour(item.startsAt),
               cell: (item) => `${hour(item.startsAt)}–${hour(item.endsAt)}`,
               className: 'tabular-nums',
             },
