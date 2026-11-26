@@ -8,7 +8,7 @@ export async function loadAvailableGuards() {
     let pages: number;
     do {
       const result = await apiGet(
-        `/usuarios?rol=guard&estado=${status}&pagina=${page}`,
+        `/usuarios?rol=guard&estado=${status}&porPagina=50&pagina=${page}`,
         usersPageSchema,
       );
       for (const guard of result.items) guards.set(guard.id, guard);

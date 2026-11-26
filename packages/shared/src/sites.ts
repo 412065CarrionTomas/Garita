@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { speedProfileSchema } from './marcas/types';
+import { pageNumberSchema, pageSizeSchema, sortDirectionSchema } from './pagination';
 
 export const recordStatusSchema = z.enum(['active', 'inactive']);
 export const clientInputSchema = z.object({
@@ -17,7 +18,13 @@ export const clientListQuerySchema = z.object({
     (value) => (value === '' ? undefined : value),
     recordStatusSchema.optional(),
   ),
-  pagina: z.coerce.number().int().positive().default(1),
+  buscar: z.string().trim().max(100).optional(),
+  orden: z
+    .enum(['nombre', 'recientes', 'contacto', 'telefono', 'predios', 'estado'])
+    .default('nombre'),
+  sentido: sortDirectionSchema,
+  pagina: pageNumberSchema,
+  porPagina: pageSizeSchema,
 });
 export const siteInputSchema = z
   .object({
@@ -45,17 +52,25 @@ export const supervisorAssignmentSchema = z.object({
     .array(z.string().min(1))
     .refine((ids) => new Set(ids).size === ids.length, 'No se permiten supervisores duplicados'),
 });
-export const clientsResponseSchema = z.array(
-  z.looseObject({
-    id: z.string(),
-    name: z.string(),
-    contactName: z.string(),
-    phone: z.string(),
-    email: z.string(),
-    taxId: z.string().nullable(),
-    status: recordStatusSchema,
-  }),
-);
+export const clientListItemSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  contactName: z.string(),
+  phone: z.string(),
+  email: z.string(),
+  taxId: z.string().nullable(),
+  status: recordStatusSchema,
+  /** Al supervisor solo se le cuentan los predios que supervisa. */
+  _count: z.object({ sites: z.number() }),
+});
+export const clientsPageSchema = z.object({
+  items: z.array(clientListItemSchema),
+  pagina: z.number(),
+  total: z.number(),
+  paginas: z.number(),
+  /** Conteos por estado con la búsqueda aplicada, sin el filtro de estado. */
+  resumen: z.object({ active: z.number(), inactive: z.number() }),
+});
 export const siteResponseSchema = z.looseObject({
   id: z.string(),
   clientId: z.string(),

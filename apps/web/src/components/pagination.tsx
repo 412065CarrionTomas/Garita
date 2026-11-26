@@ -28,7 +28,8 @@ export function Pagination({
   const pages = lastPage(total, pageSize);
   const current = Math.min(Math.max(1, page), pages);
   const first = (current - 1) * pageSize + 1;
-  const last = first + shown - 1;
+  // Acotado al total: mientras carga otra página se siguen viendo las filas de la anterior.
+  const last = Math.min(first + shown - 1, total);
   return (
     <div className="grid items-center gap-3 text-sm sm:grid-cols-[1fr_auto_1fr]">
       <p className="text-muted-foreground tabular-nums">

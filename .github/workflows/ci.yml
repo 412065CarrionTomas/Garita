@@ -45,8 +45,13 @@ jobs:
       - name: Verificar formato
         run: pnpm format:check
 
-      - name: Lint, tipos, tests y build
-        run: pnpm turbo run lint typecheck test build
+      - name: Lint, tipos y build
+        run: pnpm turbo run lint typecheck build
+
+      # Los tests van aparte y de a uno: cada Jest abre un proceso por núcleo, y en paralelo con
+      # lint/tipos/build el primer render de mobile superaba los 30 s de timeout en el runner.
+      - name: Tests
+        run: pnpm turbo run test --concurrency=1
 
   secretos:
     name: Buscar secretos expuestos

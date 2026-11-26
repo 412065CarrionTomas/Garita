@@ -55,3 +55,18 @@ it('sin filas en la página no muestra un rango imposible', () => {
   expect(screen.getByRole('button', { name: 'Página 2' })).toHaveAttribute('aria-current', 'page');
   expect(screen.queryByRole('button', { name: 'Página 3' })).not.toBeInTheDocument();
 });
+
+it('mientras carga otra página no muestra un rango que pasa el total', () => {
+  render(
+    <Pagination
+      page={2}
+      pageSize={20}
+      total={25}
+      shown={20}
+      label="alertas"
+      onPage={jest.fn()}
+      onPageSize={jest.fn()}
+    />,
+  );
+  expect(screen.getByText('21–25 de 25')).toBeInTheDocument();
+});

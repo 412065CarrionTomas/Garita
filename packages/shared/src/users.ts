@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LEGAL_VERSION } from './legal';
+import { pageNumberSchema, pageSizeSchema, sortDirectionSchema } from './pagination';
 
 export const personnelRoleSchema = z.enum(['supervisor', 'guard']);
 export const personnelStatusSchema = z.enum(['invitation_pending', 'active', 'deactivated']);
@@ -27,8 +28,15 @@ export const updateUserRequestSchema = createUserRequestSchema
   .refine((value) => Object.keys(value).length > 0);
 export const listUsersQuerySchema = z.object({
   rol: personnelRoleSchema.optional(),
-  estado: personnelStatusSchema.optional(),
-  pagina: z.coerce.number().int().positive().default(1),
+  /** `invitation_failed` es un subconjunto de `invitation_pending`: el último envío falló. */
+  estado: z.enum([...personnelStatusSchema.options, 'invitation_failed']).optional(),
+  buscar: z.string().trim().max(100).optional(),
+  orden: z
+    .enum(['recientes', 'nombre', 'telefono', 'legajo', 'rol', 'estado'])
+    .default('recientes'),
+  sentido: sortDirectionSchema,
+  pagina: pageNumberSchema,
+  porPagina: pageSizeSchema,
 });
 export const personnelUserSchema = z.object({
   id: z.string(),
@@ -46,6 +54,13 @@ export const usersPageSchema = z.object({
   pagina: z.number(),
   total: z.number(),
   paginas: z.number(),
+  /** Conteos por estado con los filtros de rol y búsqueda, sin el de estado. */
+  resumen: z.object({
+    active: z.number(),
+    invitation_pending: z.number(),
+    invitation_failed: z.number(),
+    deactivated: z.number(),
+  }),
 });
 export const invitationRedeemRequestSchema = z.object({
   token: z.string().min(1).max(512),

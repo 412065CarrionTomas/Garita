@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
+import { searchTerms } from '@garita/shared';
 import {
   IN_PROGRESS_SHIFT_CLOSURE_PORT,
   WEEKLY_SCHEDULE_TERMINATION_PORT,
@@ -33,23 +34,80 @@ export class SitesService {
     @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly firebase: FirebaseIdentityProvider,
   ) {}
 
-  async listClients(status?: 'active' | 'inactive', page = 1, user?: AuthenticatedUser) {
-    return this.prisma.tenantPrisma.client.findMany({
-      where: status ? { status } : undefined,
-      orderBy: { name: 'asc' },
-      skip: (page - 1) * 50,
-      take: 50,
-      include: {
-        _count: {
-          select: {
-            sites:
-              user?.role === 'supervisor'
-                ? { where: { supervisors: { some: { userId: user.userId } } } }
-                : true,
+  async listClients(
+    query: {
+      estado?: 'active' | 'inactive';
+      buscar?: string;
+      orden: 'nombre' | 'recientes' | 'contacto' | 'telefono' | 'predios' | 'estado';
+      sentido?: 'asc' | 'desc';
+      pagina: number;
+      porPagina: number;
+    },
+    user?: AuthenticatedUser,
+  ) {
+    const supervisor = user?.role === 'supervisor';
+    // Cada palabra tiene que aparecer en algún campo: "ferreyra peralta" encuentra al cliente.
+    const terms = searchTerms(query.buscar);
+    const base = {
+      AND: terms.map((term) => ({
+        OR: (['name', 'contactName', 'email', 'taxId'] as const).map((field) => ({
+          [field]: { contains: term, mode: 'insensitive' as const },
+        })),
+      })),
+    };
+    const where = { ...base, status: query.estado };
+    // Al supervisor no se lo ordena por el total de predios: delataría los que no supervisa.
+    const dir = query.sentido ?? 'asc';
+    // El nombre desempata siempre A–Z; el sentido elegido solo invierte la columna pedida.
+    const byName = [{ name: 'asc' as const }, { id: 'asc' as const }];
+    const orderBy =
+      query.orden === 'recientes'
+        ? [{ createdAt: 'desc' as const }, { id: 'asc' as const }]
+        : query.orden === 'predios' && !supervisor
+          ? [{ sites: { _count: dir } }, ...byName]
+          : query.orden === 'contacto'
+            ? [{ contactName: dir }, ...byName]
+            : query.orden === 'telefono'
+              ? [{ phone: dir }, ...byName]
+              : query.orden === 'estado'
+                ? [{ status: dir }, ...byName]
+                : query.orden === 'nombre'
+                  ? [{ name: dir }, { id: 'asc' as const }]
+                  : byName;
+    const client = this.prisma.tenantPrisma.client;
+    const [items, active, inactive] = await Promise.all([
+      client.findMany({
+        where,
+        orderBy,
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
+        include: {
+          _count: {
+            select: {
+              sites:
+                user?.role === 'supervisor'
+                  ? { where: { supervisors: { some: { userId: user.userId } } } }
+                  : true,
+            },
           },
         },
-      },
-    });
+      }),
+      client.count({ where: { ...base, status: 'active' } }),
+      client.count({ where: { ...base, status: 'inactive' } }),
+    ]);
+    const total =
+      query.estado === 'active'
+        ? active
+        : query.estado === 'inactive'
+          ? inactive
+          : active + inactive;
+    return {
+      items,
+      pagina: query.pagina,
+      total,
+      paginas: Math.ceil(total / query.porPagina),
+      resumen: { active, inactive },
+    };
   }
 
   async createClient(data: Prisma.ClientUncheckedCreateInput) {

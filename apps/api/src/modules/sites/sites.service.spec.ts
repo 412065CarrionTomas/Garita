@@ -14,7 +14,11 @@ function setup() {
       updateMany: jest.fn(),
       create: jest.fn(),
     },
-    client: { update: jest.fn().mockResolvedValue({ id: 'client' }) },
+    client: {
+      update: jest.fn().mockResolvedValue({ id: 'client' }),
+      count: jest.fn().mockResolvedValue(7),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     user: {
       count: jest.fn().mockResolvedValue(2),
       findMany: jest.fn().mockResolvedValue([
@@ -78,6 +82,39 @@ function setup() {
   return { service, db, resources, firebase };
 }
 describe('SitesService audit regressions', () => {
+  it('pagina clientes buscando cada palabra y no ordena por predios al supervisor', async () => {
+    const { service, db } = setup();
+    db.client.count.mockResolvedValueOnce(4).mockResolvedValueOnce(3);
+    const page = await service.listClients(
+      { buscar: ' ferreyra  peralta ', orden: 'predios', pagina: 2, porPagina: 5 },
+      { role: 'supervisor', userId: 'sup' } as never,
+    );
+    const args = (db.client.findMany.mock.calls as unknown[][])[0]?.[0] as {
+      where: { AND: { OR: object[] }[] };
+      orderBy: object[];
+      skip: number;
+      take: number;
+    };
+    expect(args.where.AND).toHaveLength(2);
+    expect(args.where.AND[1]?.OR).toContainEqual({
+      contactName: { contains: 'peralta', mode: 'insensitive' },
+    });
+    expect(args.orderBy).toEqual([{ name: 'asc' }, { id: 'asc' }]);
+    expect(args).toMatchObject({ skip: 5, take: 5 });
+    expect(page).toMatchObject({ total: 7, paginas: 2, resumen: { active: 4, inactive: 3 } });
+  });
+
+  it('ordena por predios descendente desempatando A–Z, y al supervisor solo por nombre', async () => {
+    const { service, db } = setup();
+    const query = { orden: 'predios', sentido: 'desc', pagina: 1, porPagina: 20 } as const;
+    await service.listClients(query, { role: 'admin', userId: 'admin' } as never);
+    await service.listClients(query, { role: 'supervisor', userId: 'sup' } as never);
+    const orderBy = (call: number) =>
+      ((db.client.findMany.mock.calls as unknown[][])[call]?.[0] as { orderBy: object[] }).orderBy;
+    expect(orderBy(0)).toEqual([{ sites: { _count: 'desc' } }, { name: 'asc' }, { id: 'asc' }]);
+    expect(orderBy(1)).toEqual([{ name: 'asc' }, { id: 'asc' }]);
+  });
+
   it('impacto y cancelacion incluyen no iniciados vencidos y uncovered, y todos los in_progress', async () => {
     const { service, db } = setup();
     const impact = await service.impactSiteDeactivation('site');

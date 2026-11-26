@@ -22,7 +22,7 @@ export class GuardSelectionService {
   async validate(maxGuards: number, selection: GuardSelection | undefined, adminId: string) {
     const guards: { id: string; firstName: string; lastName: string; status: string }[] = [];
     for (let pagina = 1; ; pagina++) {
-      const page = await this.users.list({ rol: 'guard', pagina });
+      const page = await this.users.list({ rol: 'guard', pagina, porPagina: 50 });
       guards.push(...page.items.filter((g) => countsTowardGuardLimit(g.status)));
       if (pagina >= page.paginas) break;
     }

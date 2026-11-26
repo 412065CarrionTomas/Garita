@@ -126,3 +126,38 @@ it('ensancha una columna con el teclado', async () => {
   await user.keyboard('{ArrowRight}');
   expect(Number(handle.getAttribute('aria-valuenow'))).toBeGreaterThan(48);
 });
+
+it('con orden de afuera avisa el clic y muestra el orden sin reordenar las filas', async () => {
+  const user = userEvent.setup();
+  const onSortChange = jest.fn();
+  const { rerender } = render(
+    <DataTable
+      label="Animales"
+      rows={rows}
+      getRowId={(r) => r.id}
+      columns={columns}
+      sort={null}
+      onSortChange={onSortChange}
+    />,
+  );
+  await user.click(screen.getByRole('button', { name: /Nombre/ }));
+  expect(onSortChange).toHaveBeenLastCalledWith({ id: 'name', dir: 'asc' });
+  // La API ya mandó las filas en orden: la tabla no las toca.
+  expect(firstColumn()).toEqual(['Ñandú', 'abeja', 'Zorro']);
+  rerender(
+    <DataTable
+      label="Animales"
+      rows={rows}
+      getRowId={(r) => r.id}
+      columns={columns}
+      sort={{ id: 'name', dir: 'asc' }}
+      onSortChange={onSortChange}
+    />,
+  );
+  expect(screen.getByRole('columnheader', { name: 'Nombre' })).toHaveAttribute(
+    'aria-sort',
+    'ascending',
+  );
+  await user.click(screen.getByRole('button', { name: /Nombre/ }));
+  expect(onSortChange).toHaveBeenLastCalledWith({ id: 'name', dir: 'desc' });
+});

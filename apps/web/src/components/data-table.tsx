@@ -28,7 +28,7 @@ export interface DataColumn<T> {
   className?: string;
 }
 
-type Sort = { id: string; dir: 'asc' | 'desc' } | null;
+export type DataSort = { id: string; dir: 'asc' | 'desc' } | null;
 
 const MIN_WIDTH = 48;
 const KEY_STEP = 16;
@@ -69,6 +69,8 @@ export function DataTable<T>({
   className,
   rowClassName,
   sortable = true,
+  sort: serverSort,
+  onSortChange,
 }: {
   columns: DataColumn<T>[];
   rows: T[];
@@ -78,11 +80,18 @@ export function DataTable<T>({
   rowClassName?: (row: T) => string | undefined;
   /** false en listas paginadas en el servidor: ordenar solo la página visible confunde. */
   sortable?: boolean;
+  /**
+   * Orden hecho afuera (p. ej. por la API en una lista paginada): la tabla muestra el orden y
+   * avisa los clics, pero no reordena las filas. Ordena las columnas que tienen `value`.
+   */
+  sort?: DataSort;
+  onSortChange?: (sort: DataSort) => void;
 }) {
   const [order, setOrder] = useState(() => columns.map((column) => column.id));
   // Solo los anchos que eligió el usuario; el inicial sale de cada columna (ver `fixedWidth`).
   const [widths, setWidths] = useState<Record<string, number>>({});
-  const [sort, setSort] = useState<Sort>(null);
+  const [localSort, setLocalSort] = useState<DataSort>(null);
+  const sort = onSortChange ? (serverSort ?? null) : localSort;
   const [dragged, setDragged] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const resizing = useRef<{ id: string; x: number; width: number } | null>(null);
@@ -105,7 +114,7 @@ export function DataTable<T>({
 
   const sorted = (() => {
     const column = sort && byId.get(sort.id);
-    if (!sortable || !sort || !column?.value) return rows;
+    if (onSortChange || !sortable || !sort || !column?.value) return rows;
     const read = column.value;
     const sign = sort.dir === 'asc' ? 1 : -1;
     return [...rows].sort((a, b) => {
@@ -127,13 +136,14 @@ export function DataTable<T>({
   const canSort = (column: DataColumn<T>) => sortable && Boolean(column.value);
   const toggleSort = (column: DataColumn<T>) => {
     if (!canSort(column)) return;
-    setSort((current) =>
+    const next = (current: DataSort): DataSort =>
       current?.id !== column.id
         ? { id: column.id, dir: 'asc' }
         : current.dir === 'asc'
           ? { id: column.id, dir: 'desc' }
-          : null,
-    );
+          : null;
+    if (onSortChange) onSortChange(next(sort));
+    else setLocalSort(next);
   };
   // El ancho elegido, o el inicial de la columna (también si apareció después del primer render).
   const fixedWidth = (id: string) => widths[id] ?? byId.get(id)?.width;
