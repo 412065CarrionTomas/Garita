@@ -1,6 +1,8 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { clientInputSchema, clientsResponseSchema, clientResponseSchema } from '@garita/shared';
-import { useState } from 'react';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { clientListItemSchema } from '@garita/shared';
+import { clientInputSchema, clientsPageSchema, clientResponseSchema } from '@garita/shared';
+import { EllipsisVertical, Search } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
@@ -27,6 +29,16 @@ import {
 } from '@/components/ui/alert-dialog';
 
 import { PageHeader } from '@/components/page-header';
+import { Pagination } from '@/components/pagination';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -45,15 +57,49 @@ import {
 } from '@/components/ui/table';
 
 const response = z.looseObject({ id: z.string() });
+const SUMMARY = [
+  { value: 'active', label: 'Activos' },
+  { value: 'inactive', label: 'Inactivos' },
+] as const;
+
 export function ClientsPage() {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const { busy, run } = useBusy();
   const [form, setForm] = useState({ name: '', contactName: '', phone: '', email: '', taxId: '' });
-  const clients = useQuery({
-    queryKey: ['clientes'],
-    queryFn: () => apiGet('/clientes', clientsResponseSchema),
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [status, setStatus] = useState('');
+  const [order, setOrder] = useState('nombre');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  // Busca solo cuando se deja de tipear, sin botón de buscar.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [searchInput]);
+  const params = new URLSearchParams({
+    pagina: String(page),
+    porPagina: String(pageSize),
+    orden: order,
   });
+  if (status) params.set('estado', status);
+  if (search) params.set('buscar', search);
+  const clients = useQuery({
+    queryKey: ['clientes', 'listado', status, search, order, page, pageSize],
+    queryFn: () => apiGet(`/clientes?${params.toString()}`, clientsPageSchema),
+    // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
+    placeholderData: keepPreviousData,
+  });
+  const changeStatus = (value: string) => {
+    setStatus(value);
+    setPage(1);
+  };
   const create = useMutation({
     mutationFn: () => apiPost('/clientes', form, clientInputSchema, response),
     onSuccess: () => {
@@ -65,9 +111,7 @@ export function ClientsPage() {
   const [error, setError] = useState('');
   const [editError, setEditError] = useState('');
   const [actionError, setActionError] = useState('');
-  const [editing, setEditing] = useState<z.infer<typeof clientsResponseSchema>[number] | null>(
-    null,
-  );
+  const [editing, setEditing] = useState<z.infer<typeof clientListItemSchema> | null>(null);
   const [editForm, setEditForm] = useState({
     name: '',
     contactName: '',
@@ -170,21 +214,198 @@ export function ClientsPage() {
         </DialogContent>
       </Dialog>
       {actionError && <Alert variant="destructive">{actionError}</Alert>}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">Listado</h2>
-        </CardHeader>
-        <CardContent>
-          {clients.isPending ? (
-            <div role="status" className="space-y-3">
-              <span className="sr-only">Cargando clientes…</span>
-              {[0, 1, 2].map((row) => (
-                <Skeleton key={row} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : clients.isError ? (
-            <Alert variant="destructive">No se pudieron cargar los clientes.</Alert>
-          ) : clients.data.length === 0 ? (
+      {clients.data && (
+        <div role="group" aria-label="Resumen de clientes" className="flex flex-wrap gap-2">
+          {SUMMARY.map(({ value, label }) => {
+            const pressed = status === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={pressed}
+                onClick={() => {
+                  changeStatus(pressed ? '' : value);
+                }}
+                className={cn(
+                  'flex min-h-9 items-baseline gap-2 rounded-md border-[1.5px] px-3 py-1.5 text-sm transition-colors',
+                  pressed
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-input bg-card hover:bg-muted',
+                )}
+              >
+                <span className="text-base font-semibold tabular-nums">
+                  {clients.data.resumen[value]}
+                </span>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-80">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            type="search"
+            aria-label="Buscar clientes"
+            placeholder="Buscar por nombre, contacto, correo o CUIT"
+            className="pl-9"
+            value={searchInput}
+            onChange={(event) => {
+              setSearchInput(event.target.value);
+            }}
+          />
+        </div>
+        <NativeSelect
+          aria-label="Filtrar por estado"
+          value={status}
+          onChange={(event) => {
+            changeStatus(event.target.value);
+          }}
+        >
+          <NativeSelectOption value="">Todos los estados</NativeSelectOption>
+          <NativeSelectOption value="active">Activo</NativeSelectOption>
+          <NativeSelectOption value="inactive">Inactivo</NativeSelectOption>
+        </NativeSelect>
+        <NativeSelect
+          aria-label="Ordenar por"
+          value={order}
+          onChange={(event) => {
+            setOrder(event.target.value);
+            setPage(1);
+          }}
+        >
+          <NativeSelectOption value="nombre">Nombre (A–Z)</NativeSelectOption>
+          <NativeSelectOption value="recientes">Más recientes</NativeSelectOption>
+          <NativeSelectOption value="predios">Más predios</NativeSelectOption>
+        </NativeSelect>
+      </div>
+      {clients.isPending ? (
+        <div role="status" className="space-y-3">
+          <span className="sr-only">Cargando clientes…</span>
+          {[0, 1, 2].map((row) => (
+            <Skeleton key={row} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : clients.isError ? (
+        <Alert variant="destructive">No se pudieron cargar los clientes.</Alert>
+      ) : (
+        <div className="space-y-4">
+          {clients.data.items.length > 0 ? (
+            <Card className="min-w-0 overflow-hidden py-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {['Cliente', 'Contacto', 'Teléfono', 'Predios', 'Estado'].map((heading) => (
+                      <TableHead key={heading} className="text-muted-foreground">
+                        {heading}
+                      </TableHead>
+                    ))}
+                    <TableHead className="w-12">
+                      <span className="sr-only">Acciones</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {clients.data.items.map((client) => (
+                    <TableRow key={client.id}>
+                      <TableCell className="whitespace-normal">
+                        <a
+                          className="block font-semibold hover:underline"
+                          href={`/clientes/${client.id}`}
+                        >
+                          {client.name}
+                        </a>
+                        <span className="text-sm text-muted-foreground tabular-nums">
+                          {client.taxId ? `CUIT ${client.taxId}` : 'Sin CUIT'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="whitespace-normal">
+                        <span className="block">{client.contactName}</span>
+                        <span className="text-sm text-muted-foreground">{client.email}</span>
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        <a
+                          href={`tel:${client.phone.replace(/[^+\d]/g, '')}`}
+                          className="hover:underline"
+                        >
+                          {client.phone}
+                        </a>
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        <a
+                          href={`/clientes/${client.id}`}
+                          className="hover:underline"
+                          aria-label={`${String(client._count.sites)} predios de ${client.name}`}
+                        >
+                          {client._count.sites}
+                        </a>
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge tone={client.status === 'active' ? 'success' : 'neutral'}>
+                          {client.status === 'active' ? 'Activo' : 'Inactivo'}
+                        </StatusBadge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Más acciones de ${client.name}`}
+                            >
+                              <EllipsisVertical aria-hidden="true" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-auto">
+                            <DropdownMenuItem asChild>
+                              <a href={`/clientes/${client.id}`}>Ver predios</a>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setEditError('');
+                                setEditing(client);
+                                setEditForm({
+                                  name: client.name,
+                                  contactName: client.contactName,
+                                  phone: client.phone,
+                                  email: client.email,
+                                  taxId: client.taxId ?? '',
+                                });
+                              }}
+                            >
+                              Editar
+                            </DropdownMenuItem>
+                            {client.status === 'active' && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  onSelect={() => {
+                                    setDeleting({ id: client.id, name: client.name });
+                                  }}
+                                >
+                                  Dar de baja
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          ) : status || search ? (
+            <EmptyState
+              title="No hay clientes para mostrar"
+              description="Revisá la búsqueda o los filtros."
+            />
+          ) : (
             <EmptyState
               title="Todavía no hay clientes"
               description="Registrá un cliente para empezar a organizar sus predios."
@@ -199,74 +420,21 @@ export function ClientsPage() {
                 </Button>
               }
             />
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {clients.data.map((client) => (
-                    <TableRow key={client.id}>
-                      <TableCell className="whitespace-normal">
-                        <div className="min-w-40">
-                          <strong>
-                            <a className="underline" href={`/clientes/${client.id}`}>
-                              {client.name}
-                            </a>
-                          </strong>
-                          <p>
-                            {client.contactName} · {client.phone} · {client.email}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge tone={client.status === 'active' ? 'success' : 'neutral'}>
-                          {client.status === 'active' ? 'Activo' : 'Inactivo'}
-                        </StatusBadge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setEditError('');
-                              setEditing(client);
-                              setEditForm({
-                                name: client.name,
-                                contactName: client.contactName,
-                                phone: client.phone,
-                                email: client.email,
-                                taxId: client.taxId ?? '',
-                              });
-                            }}
-                          >
-                            Editar
-                          </Button>
-                          <Button
-                            variant="ghostDestructive"
-                            size="sm"
-                            onClick={() => {
-                              setDeleting({ id: client.id, name: client.name });
-                            }}
-                          >
-                            Dar de baja
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
           )}
-        </CardContent>
-      </Card>
+          <Pagination
+            page={page}
+            pages={clients.data.paginas}
+            pageSize={pageSize}
+            total={clients.data.total}
+            shown={clients.data.items.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </div>
+      )}
       <Dialog
         open={editing !== null}
         onOpenChange={(open) => {

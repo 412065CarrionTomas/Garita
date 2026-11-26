@@ -208,11 +208,14 @@ export function SitesPage() {
       const clients: { id: string; name: string }[] = [];
       for (let page = 1; ; page++) {
         const batch = await apiGet(
-          `/clientes?estado=active&pagina=${page}`,
-          z.array(z.looseObject({ id: z.string(), name: z.string() })),
+          `/clientes?estado=active&porPagina=50&pagina=${String(page)}`,
+          z.looseObject({
+            items: z.array(z.looseObject({ id: z.string(), name: z.string() })),
+            paginas: z.number(),
+          }),
         );
-        clients.push(...batch);
-        if (batch.length < 50) return clients;
+        clients.push(...batch.items);
+        if (page >= batch.paginas) return clients;
       }
     },
   });

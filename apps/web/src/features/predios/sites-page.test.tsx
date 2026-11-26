@@ -37,8 +37,8 @@ jest.mock('@/lib/api-client', () => ({
           supervisors: [{ user: { id: 'supervisor-1' } }],
         },
       ];
-    if (path.startsWith('/clientes?estado=active&pagina='))
-      return [{ id: 'client-1', name: 'Cliente' }];
+    if (path.startsWith('/clientes?estado=active&porPagina=50&pagina='))
+      return { items: [{ id: 'client-1', name: 'Cliente' }], paginas: 1 };
     if (path === '/predios/supervisores-disponibles')
       return [{ id: 'supervisor-1', firstName: 'Ana', lastName: 'Gómez' }];
     return [];
@@ -281,12 +281,13 @@ it('trae todas las paginas de clientes activos y muestra el cliente incluido en 
   jest.mocked(useAuth).mockReturnValue(profile('admin'));
   const original = jest.mocked(apiGet).getMockImplementation();
   jest.mocked(apiGet).mockImplementation(((path: string, schema: unknown) => {
-    if (path === '/clientes?estado=active&pagina=1')
-      return Promise.resolve(
-        Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, name: `Cliente ${i}` })),
-      );
-    if (path === '/clientes?estado=active&pagina=2')
-      return Promise.resolve([{ id: 'last', name: 'Ultimo cliente' }]);
+    if (path === '/clientes?estado=active&porPagina=50&pagina=1')
+      return Promise.resolve({
+        items: Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, name: `Cliente ${i}` })),
+        paginas: 2,
+      });
+    if (path === '/clientes?estado=active&porPagina=50&pagina=2')
+      return Promise.resolve({ items: [{ id: 'last', name: 'Ultimo cliente' }], paginas: 2 });
     return original?.(path, schema as never);
   }) as typeof apiGet);
   try {
@@ -295,7 +296,10 @@ it('trae todas las paginas de clientes activos y muestra el cliente incluido en 
     expect(await screen.findByText('Cliente: Cliente desde predio')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
     expect(await screen.findByRole('option', { name: 'Ultimo cliente' })).toBeInTheDocument();
-    expect(apiGet).toHaveBeenCalledWith('/clientes?estado=active&pagina=2', expect.anything());
+    expect(apiGet).toHaveBeenCalledWith(
+      '/clientes?estado=active&porPagina=50&pagina=2',
+      expect.anything(),
+    );
   } finally {
     jest.mocked(apiGet).mockImplementation(original);
   }
