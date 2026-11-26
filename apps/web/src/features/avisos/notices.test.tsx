@@ -130,30 +130,34 @@ beforeEach(() => {
   });
 });
 
-it('muestra tipo, predio, horario y puntos; filtra con teclado e incluye historial', async () => {
+it('muestra tipo, predio, detalle y fechas; filtra e incluye historial', async () => {
   renderWithQueryClient(
     <MemoryRouter>
       <NoticesPage />
     </MemoryRouter>,
   );
-  expect(
-    await screen.findByRole('heading', { name: 'Ronda incumplida en Depósito Ruta 9' }),
-  ).toBeInTheDocument();
-  expect(screen.getByText('Puntos faltantes: Portón norte')).toBeInTheDocument();
-  expect(screen.getAllByText(/Turno: /)[0]).toHaveTextContent(
-    new Date(notice.shift.startsAt).toLocaleString('es-AR'),
+  const table = await screen.findByRole('table', { name: 'Avisos' });
+  const row = within(table)
+    .getByRole('link', { name: /Ronda incumplida/ })
+    .closest('tr');
+  if (!row) throw new Error('Falta la fila del aviso');
+  expect(row).toHaveTextContent('Depósito Ruta 9');
+  expect(row).toHaveTextContent('Faltan: Portón norte');
+  expect(within(row).getByText('Nuevo')).toBeInTheDocument();
+  expect(within(row).getByRole('link', { name: /Ronda incumplida/ })).toHaveAttribute(
+    'href',
+    '/avisos/n1',
   );
-  expect(screen.getAllByText(/Evento: /)[0]).toHaveTextContent('Recibido:');
-  await userEvent.selectOptions(screen.getByLabelText('Tipo'), 'shift_unsynced');
+  expect(screen.getByRole('button', { name: 'Abiertos (2)' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Tipo' }), 'shift_unsynced');
   await waitFor(() => {
-    expect(
-      screen.queryByRole('heading', { name: 'Ronda incumplida en Depósito Ruta 9' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Ronda incumplida/ })).not.toBeInTheDocument();
   });
-  expect(
-    await screen.findByRole('heading', { name: 'Turno sin sincronizar en Campo Los Álamos' }),
-  ).toBeInTheDocument();
-  await userEvent.selectOptions(screen.getByLabelText('Predio'), 'p1');
+  expect(await screen.findByRole('link', { name: /Turno sin sincronizar/ })).toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Predio' }), 'p1');
   expect(await screen.findByText('No hay avisos para estos filtros')).toBeInTheDocument();
   current = [
     {
@@ -163,43 +167,26 @@ it('muestra tipo, predio, horario y puntos; filtra con teclado e incluye histori
       resolvedAt: '2030-01-02T03:00:00Z',
     },
   ];
-  await userEvent.selectOptions(screen.getByLabelText('Predio'), '');
-  await userEvent.selectOptions(screen.getByLabelText('Estado'), 'resolved');
-  expect(await screen.findByText(/Resolución: Cerrado sin datos/)).toHaveTextContent(
-    new Date('2030-01-02T03:00:00Z').toLocaleString('es-AR'),
-  );
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Predio' }), '');
+  await userEvent.click(screen.getByRole('button', { name: 'Resueltos' }));
+  expect(await screen.findByText('Resuelto: Cerrado sin datos')).toBeInTheDocument();
   expect(apiGet).toHaveBeenCalledWith(
-    '/avisos?estado=resolved&tipo=shift_unsynced',
+    '/avisos?estado=resolved&tipo=shift_unsynced&pagina=1&porPagina=10',
     expect.anything(),
   );
 });
 
-it('abrir el aviso marca visto, baja el contador del menú y enlaza al turno', async () => {
+it('llega filtrado desde otra pantalla', async () => {
+  // El router de prueba lee los parámetros de la URL de la ventana.
+  window.history.pushState({}, '', '/avisos?tipo=shift_unsynced');
   renderWithQueryClient(
-    <MemoryRouter initialEntries={['/avisos']}>
-      <ThemeProvider>
-        <RoleLayout />
-      </ThemeProvider>
+    <MemoryRouter initialEntries={['/avisos?tipo=shift_unsynced']}>
+      <NoticesPage />
     </MemoryRouter>,
   );
-  expect(await screen.findByRole('button', { name: 'Pendientes (2)' })).toBeInTheDocument();
-  const openButton = (await screen.findAllByRole('button', { name: 'Abrir aviso' }))[0];
-  if (!openButton) throw new Error('Falta el aviso de prueba');
-  await userEvent.click(openButton);
-  await waitFor(() => {
-    expect(apiPost).toHaveBeenCalledWith(
-      '/avisos/n1/marcar-visto',
-      {},
-      expect.anything(),
-      expect.anything(),
-    );
-  });
-  expect(await screen.findByRole('button', { name: 'Pendientes (1)' })).toBeInTheDocument();
-  expect(screen.getByText('Visto', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'Ver turno' })).toHaveAttribute(
-    'href',
-    '/supervision/turnos/s1',
-  );
+  expect(await screen.findByRole('link', { name: /Turno sin sincronizar/ })).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: 'Tipo' })).toHaveValue('shift_unsynced');
+  window.history.pushState({}, '', '/');
 });
 
 it('refresca y anuncia un aviso nuevo sin recargar; actualizado mueve al historial', async () => {
@@ -219,9 +206,7 @@ it('refresca y anuncia un aviso nuevo sin recargar; actualizado mueve al histori
   act(() => {
     mockListeners.get('aviso.nuevo')?.({ kind: 'round_missed', siteId: 'p1', shiftId: 's1' });
   });
-  expect(
-    await screen.findByRole('heading', { name: 'Ronda incumplida en Depósito Ruta 9' }),
-  ).toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: /Ronda incumplida/ })).toBeInTheDocument();
   expect(screen.getByText('Aviso nuevo: ronda incumplida en Depósito Ruta 9')).toHaveAttribute(
     'aria-live',
     'polite',

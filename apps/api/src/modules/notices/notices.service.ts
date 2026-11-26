@@ -94,16 +94,20 @@ export class NoticesService implements NoticesPort {
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.siteId ? { siteId: query.siteId } : {}),
     };
-    const [items, openCount, unseenOpenCount] = await Promise.all([
+    const [items, total, openCount, unseenOpenCount] = await Promise.all([
       this.prisma.tenantPrisma.notice.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...(query.pageSize
+          ? { skip: (query.page - 1) * query.pageSize, take: query.pageSize }
+          : {}),
         include: {
           views: { where: { userId }, select: { seenAt: true } },
           site: { select: { name: true, minutesToSignal: true } },
           shift: { select: { startsAt: true, endsAt: true } },
         },
       }),
+      this.prisma.tenantPrisma.notice.count({ where }),
       this.prisma.tenantPrisma.notice.count({ where: { ...suspension, status: 'open' } }),
       this.prisma.tenantPrisma.notice.count({
         where: { ...suspension, status: 'open', views: { none: { userId } } },
@@ -111,6 +115,7 @@ export class NoticesService implements NoticesPort {
     ]);
     return {
       items: items.map(({ views, ...notice }) => ({ ...notice, seenAt: views[0]?.seenAt ?? null })),
+      total,
       openCount,
       unseenOpenCount,
     };
