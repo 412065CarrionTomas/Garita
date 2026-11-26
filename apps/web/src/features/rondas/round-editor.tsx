@@ -147,6 +147,8 @@ export function RoundEditor({
   const [end, setEnd] = useState(version?.windowEndLocal ?? '06:00');
   const [grace, setGrace] = useState(version?.graceMinutes ?? 15);
   const [speed, setSpeed] = useState<SpeedProfile | ''>(version?.speedProfile ?? '');
+  // El perfil al momento de responder «Calcular por calles»: una respuesta de otro se descarta.
+  const speedRef = useRef(speed);
   const [customKmh, setCustomKmh] = useState(version?.maxSpeedKmh ?? 10);
   const [selected, setSelected] = useState(initialIds);
   const [draft, setDraft] = useState<RouteDraft>(() => {
@@ -237,6 +239,7 @@ export function RoundEditor({
       ),
     // Las fallas se leen contra el recorrido enviado: mientras tanto se pudo seguir editando.
     onSuccess: (result, sent) => {
+      if ((sent.speedProfile ?? '') !== speedRef.current) return;
       setMemo((current) => rememberRoute(current, result.route, result.failures));
       const streets = result.route.legs.flatMap((leg) =>
         leg.sections.filter((section) => section.mode === 'streets'),
@@ -525,7 +528,10 @@ export function RoundEditor({
               id="round-speed"
               value={speed}
               onChange={(event) => {
-                setSpeed(event.target.value as SpeedProfile | '');
+                const next = event.target.value as SpeedProfile | '';
+                setSpeed(next);
+                speedRef.current = next;
+                setFieldErrors(({ maxSpeedKmh: _dropped, ...rest }) => rest);
                 // Lo calculado era para el perfil anterior: las partes por calles se recalculan.
                 setMemo(new Map());
               }}

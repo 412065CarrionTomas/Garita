@@ -52,7 +52,12 @@ export function AddressSearch({
       clearTimeout(timer);
     };
   }, [text, open]);
-  const center = near && (near.latitude !== 0 || near.longitude !== 0) ? near : DEFAULT_CENTER;
+  const located =
+    near &&
+    Number.isFinite(near.latitude) &&
+    Number.isFinite(near.longitude) &&
+    (near.latitude !== 0 || near.longitude !== 0);
+  const center = located ? near : DEFAULT_CENTER;
   // Redondeado (~100 m): mover el marcador unos metros no invalida lo ya buscado.
   const bias = [center.latitude.toFixed(3), center.longitude.toFixed(3)] as const;
   const search = useQuery({
@@ -70,7 +75,8 @@ export function AddressSearch({
       if (!res.ok) throw new Error(`Buscador de direcciones: HTTP ${String(res.status)}`);
       return parsePhoton(await res.json());
     },
-    enabled: term.length >= MIN_CHARS,
+    // Solo con la lista abierta: mover el marcador con el buscador cerrado no vuelve a buscar.
+    enabled: open && term.length >= MIN_CHARS,
     // Mientras llega la nueva búsqueda quedan las anteriores: la lista no parpadea al tipear.
     placeholderData: keepPreviousData,
     staleTime: Infinity,
@@ -141,7 +147,12 @@ export function AddressSearch({
           id={`${id}-list`}
           role="listbox"
           aria-label="Sugerencias de direcciones"
-          className="absolute top-full z-20 mt-1 w-full overflow-hidden rounded-md border border-border bg-card shadow-md"
+          // Son de la búsqueda anterior mientras llega la nueva: se ven atenuadas.
+          aria-busy={search.isPlaceholderData}
+          className={cn(
+            'absolute top-full z-20 mt-1 w-full overflow-hidden rounded-md border border-border bg-card shadow-md',
+            search.isPlaceholderData && 'opacity-60',
+          )}
         >
           {suggestions.map((suggestion, index) => (
             <li

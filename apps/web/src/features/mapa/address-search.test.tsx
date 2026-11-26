@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithQueryClient } from '@/test/render';
 import { AddressSearch } from './address-search';
@@ -66,4 +67,30 @@ it('prioriza lo cercano a `near` y, sin ubicación (0, 0), la zona por defecto',
   await screen.findAllByRole('option');
   const fallback = new URL(jest.mocked(fetch).mock.calls[1]?.[0] as string);
   expect(fallback.searchParams.get('lat')).toBe('-31.400');
+});
+it('con la lista cerrada, mover la referencia no vuelve a buscar', async () => {
+  function Harness() {
+    const [near, setNear] = useState({ latitude: -31.4, longitude: -64.18 });
+    return (
+      <>
+        <AddressSearch onSelect={jest.fn()} near={near} />
+        <button
+          type="button"
+          onClick={() => {
+            setNear({ latitude: -31.5, longitude: -64.3 });
+          }}
+        >
+          Mover
+        </button>
+      </>
+    );
+  }
+  renderWithQueryClient(<Harness />);
+  const input = screen.getByRole('combobox');
+  fireEvent.change(input, { target: { value: 'Calle' } });
+  await screen.findAllByRole('option');
+  fireEvent.blur(input);
+  fireEvent.click(screen.getByRole('button', { name: 'Mover' }));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(fetch).toHaveBeenCalledTimes(1);
 });
