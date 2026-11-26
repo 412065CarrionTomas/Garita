@@ -59,7 +59,7 @@ function useAttentionRows(): AttentionRow[] {
           ? `El próximo empieza ${clock(p.unassigned.nextAt)}`
           : 'Todos cubiertos'
         : unknown(pending.isError),
-      to: '/turnos',
+      to: '/turnos?vista=lista&estado=problema',
       action: 'Cubrir',
     },
     {

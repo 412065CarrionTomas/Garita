@@ -75,7 +75,7 @@ export function ReportPending({
           meta: age(pending.data.unsynced.oldestAt),
         },
         {
-          to: '/turnos',
+          to: '/turnos?vista=lista&estado=problema',
           count: pending.data.unassigned.count,
           label: 'turnos futuros sin vigilador',
           meta: `Próximo: ${date(pending.data.unassigned.nextAt)}`,
