@@ -118,7 +118,8 @@ export function NoticesPage() {
   const [filters, setFilters] = useState(() => filtersFromUrl(search));
   // Si cambia la URL con la pantalla abierta (otro enlace, atrás/adelante), se toman sus filtros.
   const [shownUrl, setShownUrl] = useState(search.toString());
-  if (shownUrl !== search.toString()) {
+  const urlChanged = shownUrl !== search.toString();
+  if (urlChanged) {
     setShownUrl(search.toString());
     setFilters(filtersFromUrl(search));
   }
@@ -142,7 +143,8 @@ export function NoticesPage() {
   const open = notices.data?.openCount ?? 0;
   // Se resolvió lo último de la página (ej. en vivo): volver a la última que tenga avisos.
   const total = notices.data?.total;
-  if (total !== undefined && filters.page > lastPage(total, filters.pageSize)) {
+  // Si además cambió la URL, manda la URL (y `total` es de los filtros anteriores).
+  if (!urlChanged && total !== undefined && filters.page > lastPage(total, filters.pageSize)) {
     setFilters({ ...filters, page: lastPage(total, filters.pageSize) });
   }
 

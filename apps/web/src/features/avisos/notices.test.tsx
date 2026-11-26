@@ -189,6 +189,35 @@ it('llega filtrado desde otra pantalla', async () => {
   window.history.pushState({}, '', '/');
 });
 
+it('si la página queda vacía (se resolvió lo último), vuelve a la última con avisos', async () => {
+  // La página 1 todavía cuenta 4 avisos; al pedir la 2, el último ya se resolvió y quedan 3.
+  jest.mocked(apiGet).mockImplementation((path) => {
+    if (path === '/predios') return Promise.resolve([] as never);
+    const second = new URLSearchParams(path.split('?')[1]).get('pagina') === '2';
+    return Promise.resolve({
+      items: second ? [] : [notice],
+      total: second ? 3 : 4,
+      openCount: 3,
+      unseenOpenCount: 0,
+    } as never);
+  });
+  renderWithQueryClient(
+    <MemoryRouter initialEntries={['/avisos']}>
+      <NoticesPage />
+    </MemoryRouter>,
+  );
+  await screen.findByRole('link', { name: /Ronda incumplida/ });
+  fireEvent.change(screen.getByLabelText('Por página'), { target: { value: '3' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Página 2' }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+  expect(screen.getByRole('link', { name: /Ronda incumplida/ })).toBeInTheDocument();
+});
+
 it('ignora filtros inválidos de la URL en vez de pedirlos a la API', async () => {
   window.history.pushState({}, '', '/avisos?estado=abierto&tipo=invalido');
   renderWithQueryClient(
