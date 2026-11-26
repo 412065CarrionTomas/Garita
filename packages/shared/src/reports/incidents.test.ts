@@ -3,6 +3,8 @@ import {
   computeResponseTimes,
   computePanicReport,
   incidentTimeBand,
+  incidentWeekday,
+  localDateWeekday,
   firstResponse,
   summarizeResponseTimes,
 } from './incidents';
@@ -81,5 +83,29 @@ describe('HU-26 cálculos de incidentes y respuesta', () => {
     expect(result.byOutcome.find((row) => row.id === 'unresolved')?.value).toBe(1);
     expect(result.byChannel.find((row) => row.id === 'sms')?.value).toBe(1);
     expect(result.falseAlarmProportion).toBe(0.5);
+  });
+  it('ubica cada incidente en el día y la franja locales del mapa de calor', () => {
+    // Domingo 23:30 en Buenos Aires = lunes 02:30 UTC.
+    expect(incidentWeekday('2026-11-23T02:30:00Z', 'America/Argentina/Buenos_Aires')).toBe(6);
+    expect(localDateWeekday('2026-11-23')).toBe(0);
+    const report = computeIncidentReport(
+      [
+        {
+          type: 'intrusion',
+          classificationStatus: 'internal',
+          severity: 'high',
+          site: { id: 'p', name: 'Predio' },
+          occurredAtDevice: '2026-11-23T02:30:00Z',
+          trustedAt: null,
+          receivedAt: '2026-11-23T02:31:00Z',
+        },
+      ],
+      'America/Argentina/Buenos_Aires',
+      new Date('2026-11-24T00:00:00Z'),
+    );
+    expect(report.byWeekdayTimeBand[6]?.[11]).toBe(1);
+    expect(report.byWeekdayTimeBand.flat().reduce((a, b) => a + b, 0)).toBe(1);
+    expect(report.highSeverity).toBe(1);
+    expect(report.bySeverity.map((row) => row.id)).toEqual(['high', 'medium', 'low']);
   });
 });
