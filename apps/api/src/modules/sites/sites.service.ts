@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
-import { searchTerms } from '@garita/shared';
+import { GUARD_SITES_LOOKBACK_DAYS, searchTerms, type GuardSite } from '@garita/shared';
 import {
   IN_PROGRESS_SHIFT_CLOSURE_PORT,
   WEEKLY_SCHEDULE_TERMINATION_PORT,
@@ -225,6 +225,69 @@ export class SitesService {
     return user.role === 'supervisor'
       ? { ...client, _count: { sites: client.sites.length } }
       : client;
+  }
+
+  /**
+   * Predios donde el vigilador tiene turnos por venir o tuvo en los últimos 90 días, con lo que
+   * necesita en el campo. Supervisores solo por nombre: los datos de contacto no se exponen.
+   */
+  async listForGuard(user: AuthenticatedUser): Promise<GuardSite[]> {
+    const now = this.clock.now();
+    const mine = { some: { guardId: user.userId, isCurrent: true, active: true } };
+    const since = new Date(now.getTime() - GUARD_SITES_LOOKBACK_DAYS * 86_400_000);
+    const sites = await this.prisma.tenantPrisma.site.findMany({
+      where: { status: 'active', shifts: { some: { assignments: mine, endsAt: { gte: since } } } },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        latitude: true,
+        longitude: true,
+        accessInstructions: true,
+        supervisors: {
+          where: { user: { status: 'active' } },
+          select: { user: { select: { firstName: true, lastName: true } } },
+          orderBy: { user: { firstName: 'asc' } },
+        },
+        rounds: {
+          where: { status: 'active' },
+          select: {
+            name: true,
+            currentVersion: { select: { id: true, _count: { select: { checkpoints: true } } } },
+          },
+          orderBy: { name: 'asc' },
+        },
+        shifts: {
+          where: {
+            assignments: mine,
+            endsAt: { gte: now },
+            status: { in: ['scheduled', 'in_progress'] },
+          },
+          select: {
+            startsAt: true,
+            assignments: { where: mine.some, select: { startsAt: true }, take: 1 },
+          },
+          orderBy: { startsAt: 'asc' },
+          take: 1,
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+    return sites.map(({ supervisors, rounds, shifts, latitude, longitude, ...site }) => ({
+      ...site,
+      latitude: latitude.toNumber(),
+      longitude: longitude.toNumber(),
+      supervisors: supervisors.map(({ user: u }) => `${u.firstName} ${u.lastName}`),
+      rounds: rounds.map((round) => ({
+        name: round.name,
+        checkpoints: round.currentVersion?._count.checkpoints ?? 0,
+        versionId: round.currentVersion?.id ?? null,
+      })),
+      // En un relevo, la hora en que entra este vigilador, no la del turno.
+      nextShiftAt: shifts[0]
+        ? (shifts[0].assignments[0] ?? shifts[0]).startsAt.toISOString()
+        : null,
+    }));
   }
 
   async listSites(clientId?: string, status?: 'active' | 'inactive', user?: AuthenticatedUser) {

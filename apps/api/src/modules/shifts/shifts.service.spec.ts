@@ -125,3 +125,107 @@ describe('audit shift list filters', () => {
     });
   });
 });
+
+describe('guard shifts in a date range', () => {
+  const findMany = jest.fn();
+  const service = new ShiftsService(
+    { tenantPrisma: { shift: { findMany } } } as unknown as PrismaService,
+    {} as TenantResourceService,
+    { now: () => new Date('2030-05-10T12:00:00Z') },
+    { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
+    { resolve: jest.fn(), raise: jest.fn() },
+    { emitToSite: jest.fn() },
+  );
+  const guard = { userId: 'guard', companyId: 'company', role: 'guard', status: 'active' } as const;
+  const win = (status: string, recordedCount: number, startsAt: string, endsAt?: string) => ({
+    status,
+    recordedCount,
+    expectedCount: 4,
+    startsAt: new Date(startsAt),
+    endsAt: new Date(endsAt ?? new Date(Date.parse(startsAt) + 3_600_000).toISOString()),
+  });
+  const row = (id: string, started: boolean) => ({
+    id,
+    status: started ? 'closed' : 'scheduled',
+    serviceDate: new Date('2030-05-09T00:00:00Z'),
+    startsAt: new Date('2030-05-09T22:00:00Z'),
+    endsAt: new Date('2030-05-10T06:00:00Z'),
+    startedAt: started ? new Date('2030-05-09T22:03:00Z') : null,
+    closedAt: started ? new Date('2030-05-10T06:01:00Z') : null,
+    site: { id: 'site', name: 'Predio', company: { timezone: 'America/Argentina/Cordoba' } },
+    rounds: [
+      {
+        roundVersionId: started ? 'v1' : null,
+        round: { name: 'Perimetral', currentVersionId: 'v2' },
+      },
+    ],
+    assignments: [
+      { startsAt: new Date('2030-05-09T23:00:00Z'), endsAt: new Date('2030-05-10T06:00:00Z') },
+    ],
+    roundWindowStates: [
+      win('complete', 4, '2030-05-09T23:00:00Z'),
+      win('complete_late', 3, '2030-05-10T01:00:00Z'),
+      win('not_done', 0, '2030-05-10T03:00:00Z'),
+      // Del vigilador relevado, antes de la asignación: no cuenta.
+      win('complete', 4, '2030-05-09T22:00:00Z', '2030-05-09T23:00:00Z'),
+    ],
+    _count: { incidents: 2 },
+  });
+
+  it('filters by service date and own assignment, and summarizes only started shifts', async () => {
+    findMany.mockResolvedValueOnce([row('a', true), row('b', false)]);
+    const page = await service.mineInRange(guard, { desde: '2030-05-01', hasta: '2030-05-31' });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      where: {
+        serviceDate: { gte: new Date('2030-04-30'), lte: new Date('2030-05-31') },
+        assignments: { some: { guardId: 'guard', isCurrent: true } },
+        NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
+      },
+      take: 51,
+    });
+    expect(page.nextCursor).toBeNull();
+    expect(page.items[0]).toEqual({
+      id: 'a',
+      status: 'closed',
+      serviceDate: '2030-05-09',
+      startsAt: '2030-05-09T23:00:00.000Z',
+      endsAt: '2030-05-10T06:00:00.000Z',
+      startedAt: '2030-05-09T22:03:00.000Z',
+      closedAt: '2030-05-10T06:01:00.000Z',
+      site: { id: 'site', name: 'Predio', timezone: 'America/Argentina/Cordoba' },
+      rounds: [{ name: 'Perimetral', versionId: 'v1' }],
+      summary: { windows: 3, windowsDone: 2, recorded: 7, expected: 12, incidents: 2 },
+    });
+    expect(page.items[1]?.summary).toBeNull();
+    // Sin iniciar sigue la versión vigente de la ronda.
+    expect(page.items[1]?.rounds).toEqual([{ name: 'Perimetral', versionId: 'v2' }]);
+  });
+
+  it('pages with a cursor after the last returned shift', async () => {
+    findMany.mockResolvedValueOnce(Array.from({ length: 51 }, (_, i) => row(`s${i}`, false)));
+    const page = await service.mineInRange(guard, {
+      desde: '2030-01-01',
+      hasta: '2030-12-31',
+      cursor: 'prev',
+    });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      cursor: { id: 'prev' },
+      skip: 1,
+    });
+    expect(page.items).toHaveLength(50);
+    expect(page.nextCursor).toBe('s49');
+  });
+
+  it('counts an overnight shift on the day it ends, but not one that ends before the range', async () => {
+    const overnight = row('night', false); // 22:00 del 9 a 06:00 UTC del 10 (03:00 en Córdoba)
+    const evening = {
+      ...row('evening', false),
+      assignments: [
+        { startsAt: new Date('2030-05-09T18:00:00Z'), endsAt: new Date('2030-05-10T03:00:00Z') },
+      ], // termina 00:00 del 10 en Córdoba: no toca el 10
+    };
+    findMany.mockResolvedValueOnce([overnight, evening]);
+    const page = await service.mineInRange(guard, { desde: '2030-05-10', hasta: '2030-05-10' });
+    expect(page.items.map((s) => s.id)).toEqual(['night']);
+  });
+});

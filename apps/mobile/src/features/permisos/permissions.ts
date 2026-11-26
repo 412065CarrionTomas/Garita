@@ -11,9 +11,10 @@ export async function checkFieldPermissions(): Promise<FieldPermissionState> {
   if (Platform.OS === 'ios' && location.ios?.accuracy === 'reduced') return 'location_approximate';
   if (Platform.OS === 'android' && location.android?.accuracy !== 'fine')
     return 'location_approximate';
-  if (!(await Location.hasServicesEnabledAsync())) return 'location_services_off';
   const camera = await Camera.Camera.getCameraPermissionsAsync();
   if (!camera.granted) return 'camera_denied';
+  // Al final: 'location_services_off' implica que ambos permisos ya están dados.
+  if (!(await Location.hasServicesEnabledAsync())) return 'location_services_off';
   return 'ok';
 }
 

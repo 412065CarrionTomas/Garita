@@ -14,6 +14,9 @@ import {
   windowsForShift,
   buildShiftNotification,
   previousAssignmentResult,
+  GUARD_SHIFTS_PAGE_SIZE,
+  type GuardShiftsPage,
+  type GuardShiftsQuery,
   type ReassignShiftRequest,
   type ShiftInput,
 } from '@garita/shared';
@@ -27,6 +30,9 @@ import { isShiftOverlapViolation } from './shift-overlap-error';
 import { NOTIFICATIONS_PORT, type NotificationsPort } from '../../common/ports/notifications.port';
 import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
+
+/** Ventanas de ronda que cuentan como cumplidas en el resumen del vigilador. */
+const DONE_WINDOW = new Set(['complete', 'complete_late']);
 
 interface ShiftListQuery {
   predio?: string;
@@ -541,6 +547,100 @@ export class ShiftsService {
       include: this.shiftInclude(),
       orderBy: { startsAt: 'asc' },
     });
+  }
+
+  /**
+   * Turnos del vigilador que tocan un rango libre de días, pasados y futuros, paginados por cursor.
+   * Un turno nocturno cuenta en los dos días: el que empieza y el que termina. Los iniciados traen
+   * el resumen de lo hecho en la misma consulta (sin N+1).
+   */
+  async mineInRange(user: AuthenticatedUser, query: GuardShiftsQuery): Promise<GuardShiftsPage> {
+    // Sin `active`: las asignaciones de turnos ausentes o cancelados quedan inactivas y el
+    // historial tiene que mostrarlos. Este endpoint queda bloqueado con la cuenta suspendida.
+    const mine = { guardId: user.userId, isCurrent: true };
+    const rows = await this.prisma.tenantPrisma.shift.findMany({
+      where: {
+        // Un día antes para traer el nocturno que termina en `desde`; se descarta abajo si no llega.
+        serviceDate: { gte: new Date(previousDate(query.desde)), lte: new Date(query.hasta) },
+        assignments: { some: mine },
+        NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
+      },
+      select: {
+        id: true,
+        status: true,
+        serviceDate: true,
+        startsAt: true,
+        endsAt: true,
+        startedAt: true,
+        closedAt: true,
+        site: { select: { id: true, name: true, company: { select: { timezone: true } } } },
+        rounds: {
+          select: {
+            roundVersionId: true,
+            round: { select: { name: true, currentVersionId: true } },
+          },
+        },
+        assignments: { where: mine, select: { startsAt: true, endsAt: true }, take: 1 },
+        roundWindowStates: {
+          select: {
+            status: true,
+            recordedCount: true,
+            expectedCount: true,
+            startsAt: true,
+            endsAt: true,
+          },
+        },
+        _count: { select: { incidents: { where: { guardId: user.userId } } } },
+      },
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+      take: GUARD_SHIFTS_PAGE_SIZE + 1,
+      ...(query.cursor && { cursor: { id: query.cursor }, skip: 1 }),
+    });
+    const page = rows.slice(0, GUARD_SHIFTS_PAGE_SIZE);
+    // El último día tocado es el del instante anterior al fin (un fin a las 00:00 no cuenta).
+    const reaches = (shift: (typeof page)[number]) =>
+      localDate(
+        new Date((shift.assignments[0] ?? shift).endsAt.getTime() - 1),
+        shift.site.company.timezone,
+      ) >= query.desde;
+    return {
+      // El cursor sigue al último leído aunque se descarte, para no repetir ni saltear filas.
+      items: page.filter(reaches).map(({ assignments, roundWindowStates, _count, ...shift }) => {
+        const own = assignments[0] ?? shift;
+        // En un turno con relevo, solo las ventanas que cayeron en la asignación del vigilador.
+        const windows = roundWindowStates.filter(
+          (w) => w.startsAt < own.endsAt && w.endsAt > own.startsAt,
+        );
+        return {
+          id: shift.id,
+          status: shift.status,
+          serviceDate: shift.serviceDate.toISOString().slice(0, 10),
+          startsAt: own.startsAt.toISOString(),
+          endsAt: own.endsAt.toISOString(),
+          startedAt: shift.startedAt?.toISOString() ?? null,
+          closedAt: shift.closedAt?.toISOString() ?? null,
+          site: {
+            id: shift.site.id,
+            name: shift.site.name,
+            timezone: shift.site.company.timezone,
+          },
+          rounds: shift.rounds.map(({ round, roundVersionId }) => ({
+            name: round.name,
+            versionId: roundVersionId ?? round.currentVersionId,
+          })),
+          summary: shift.startedAt
+            ? {
+                windows: windows.length,
+                windowsDone: windows.filter((w) => DONE_WINDOW.has(w.status)).length,
+                recorded: windows.reduce((sum, w) => sum + w.recordedCount, 0),
+                expected: windows.reduce((sum, w) => sum + w.expectedCount, 0),
+                incidents: _count.incidents,
+              }
+            : null,
+        };
+      }),
+      nextCursor: rows.length > GUARD_SHIFTS_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
+    };
   }
 
   async futureForUser(id: string) {
