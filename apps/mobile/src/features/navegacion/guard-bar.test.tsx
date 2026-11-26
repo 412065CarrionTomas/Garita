@@ -39,6 +39,7 @@ it('sin turno el primer destino es Hoy', async () => {
   const screen = await renderBar(null);
   expect(screen.queryByRole('tab', { name: 'Ronda' })).toBeNull();
   expect(screen.getByRole('tab', { name: 'Hoy' })).toBeSelected();
+  expect(screen.getByRole('tab', { name: 'Predios' })).not.toBeSelected();
 });
 
 it('se oculta en el visor de la cámara', async () => {

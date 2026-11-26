@@ -24,6 +24,7 @@ export function GuardBar({ shiftId }: { shiftId: string | null }) {
       ? { label: 'Ronda', href: `/turno/${shiftId}`, active: pathname.startsWith('/turno/') }
       : { label: 'Hoy', href: '/', active: pathname === '/' },
     { label: 'Turnos', href: '/turnos', active: pathname.startsWith('/turnos') },
+    { label: 'Predios', href: '/predios', active: pathname.startsWith('/predios') },
   ];
   // El visor de la cámara ocupa toda la pantalla.
   if (pathname.includes('escaneo')) return null;
