@@ -84,6 +84,13 @@ describe('validación del recorrido', () => {
       false,
     );
     expect(roundInputSchema.safeParse(base).success).toBe(true);
+    // Velocidad propia: opcional; la personalizada exige km/h.
+    expect(roundInputSchema.safeParse({ ...base, speedProfile: 'vehicle' }).success).toBe(true);
+    expect(roundInputSchema.safeParse({ ...base, speedProfile: null }).success).toBe(true);
+    expect(roundInputSchema.safeParse({ ...base, speedProfile: 'custom' }).success).toBe(false);
+    expect(
+      roundInputSchema.safeParse({ ...base, speedProfile: 'custom', maxSpeedKmh: 40 }).success,
+    ).toBe(true);
   });
 
   it('no deja que el recorrido se aleje más de 25 km del predio', () => {
