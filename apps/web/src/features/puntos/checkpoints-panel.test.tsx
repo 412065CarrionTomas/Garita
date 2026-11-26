@@ -365,10 +365,35 @@ it('al crear un punto guarda la dirección encontrada para su ubicación', async
   await user.type(await screen.findByLabelText('Nombre del punto'), 'Portón');
   await user.click(screen.getByRole('button', { name: 'Crear punto' }));
   await screen.findByText('Punto guardado.');
-  expect(fetchStreetAddress).toHaveBeenCalledWith(site.latitude, site.longitude);
+  expect(fetchStreetAddress).toHaveBeenCalledWith(site.latitude, site.longitude, undefined);
   expect(apiPost).toHaveBeenCalledWith(
     '/predios/site-1/puntos',
     expect.objectContaining({ name: 'Portón', address: 'Av. Colón 1200' }),
+    expect.anything(),
+    expect.anything(),
+  );
+});
+
+it('si no encontró dirección, la vuelve a buscar en el próximo guardado', async () => {
+  setRole('admin');
+  jest.mocked(apiGet).mockResolvedValue([] as never);
+  jest.mocked(fetchStreetAddress).mockClear();
+  jest
+    .mocked(fetchStreetAddress)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce('Av. Colón 1200');
+  const user = userEvent.setup();
+  renderWithQueryClient(<CheckpointsPanel site={site} />);
+  for (const name of ['Portón', 'Cerco']) {
+    await user.click(await screen.findByRole('button', { name: 'Agregar punto' }));
+    await user.type(await screen.findByLabelText('Nombre del punto'), name);
+    await user.click(screen.getByRole('button', { name: 'Crear punto' }));
+    await screen.findByText('Punto guardado.');
+  }
+  expect(fetchStreetAddress).toHaveBeenCalledTimes(2);
+  expect(apiPost).toHaveBeenLastCalledWith(
+    '/predios/site-1/puntos',
+    expect.objectContaining({ name: 'Cerco', address: 'Av. Colón 1200' }),
     expect.anything(),
     expect.anything(),
   );

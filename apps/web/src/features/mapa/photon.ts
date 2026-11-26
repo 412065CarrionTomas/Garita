@@ -75,10 +75,14 @@ export function parseStreetAddress(
 const ADDRESS_MAX_METERS = 30;
 const ADDRESS_TIMEOUT_MS = 4000;
 
-/** Busca la calle y número del punto. Si Photon no responde o no hay domicilio cerca: null. */
+/**
+ * Busca la calle y número del punto. Si Photon no responde o no hay domicilio cerca: null.
+ * `signal` permite darle un plazo compartido a varias búsquedas (por defecto, 4 s cada una).
+ */
 export async function fetchStreetAddress(
   latitude: number,
   longitude: number,
+  signal: AbortSignal = AbortSignal.timeout(ADDRESS_TIMEOUT_MS),
 ): Promise<string | null> {
   try {
     // Con barra final, "../reverse" queda junto a "api" aunque la URL tenga más tramos (proxy/photon/api).
@@ -90,7 +94,7 @@ export async function fetchStreetAddress(
       radius: String(ADDRESS_MAX_METERS / 1000), // km
     }).toString();
     // Es un dato secundario: no puede trabar el guardado del punto si Photon no contesta.
-    const res = await fetch(url, { signal: AbortSignal.timeout(ADDRESS_TIMEOUT_MS) });
+    const res = await fetch(url, { signal });
     if (!res.ok) return null;
     return parseStreetAddress(await res.json(), latitude, longitude, ADDRESS_MAX_METERS);
   } catch {

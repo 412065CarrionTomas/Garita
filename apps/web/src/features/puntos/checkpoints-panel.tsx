@@ -56,6 +56,9 @@ function locationLabel(point: { address?: string | null; latitude: number; longi
   return `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
 }
 
+/** Plazo para buscar las direcciones de todos los puntos movidos al guardar el orden. */
+const ARRANGEMENT_ADDRESS_MS = 6000;
+
 const idResponse = z.looseObject({ id: z.string() });
 const emptyInput = z.object({});
 
@@ -210,23 +213,33 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
     setDraft([...rest.slice(0, index), moved, ...rest.slice(index)]);
   };
   // Una consulta por ubicación: reintentar tras confirmar una ubicación lejana no vuelve a preguntar.
+  // Lo que no dio dirección (fallo, plazo vencido o sin domicilio) no se guarda: se reintenta luego.
   const addresses = useRef(new Map<string, Promise<string | null>>());
-  const addressAt = (latitude: number, longitude: number) => {
+  const addressAt = (latitude: number, longitude: number, signal?: AbortSignal) => {
     const key = `${String(latitude)},${String(longitude)}`;
-    const cached = addresses.current.get(key) ?? fetchStreetAddress(latitude, longitude);
-    addresses.current.set(key, cached);
-    return cached;
+    const cached = addresses.current.get(key);
+    if (cached) return cached;
+    const found = fetchStreetAddress(latitude, longitude, signal);
+    addresses.current.set(key, found);
+    void found.then((address) => {
+      if (address === null) addresses.current.delete(key);
+    });
+    return found;
   };
   const saveArrangement = () => run(() => sendArrangement(false));
   const sendArrangement = async (confirmFarLocation: boolean): Promise<void> => {
     if (!draft) return;
-    // Solo los movidos buscan su dirección de nuevo, de a uno para no saturar al geocodificador.
+    // Solo los movidos buscan su dirección de nuevo, de a uno para no saturar al geocodificador y
+    // con un plazo para toda la tanda: si Photon no contesta, no se espera 4 s por cada punto.
+    const deadline = AbortSignal.timeout(ARRANGEMENT_ADDRESS_MS);
     const puntos = [];
     for (const point of draft) {
       const saved = points.data?.find(({ id }) => id === point.id);
       const moved = saved?.latitude !== point.latitude || saved.longitude !== point.longitude;
       puntos.push(
-        moved ? { ...point, address: await addressAt(point.latitude, point.longitude) } : point,
+        moved
+          ? { ...point, address: await addressAt(point.latitude, point.longitude, deadline) }
+          : point,
       );
     }
     try {
@@ -801,6 +814,8 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
               <div ref={measureFill} style={{ maxHeight: fillHeight }} className="overflow-y-auto">
                 <DataTable
                   label={`Puntos de control de ${site.name}`}
+                  // Al editar el orden, la tabla muestra siempre la secuencia que se está armando.
+                  sortable={!draft}
                   rows={tableRows}
                   getRowId={(point) => point.id}
                   columns={columns}
