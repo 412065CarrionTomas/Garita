@@ -1,35 +1,36 @@
-import { useId, useState } from 'react';
+import { useState } from 'react';
+import { FileDown } from 'lucide-react';
 import { isReportExportPeriodAllowed, REPORT_EXPORT_PERIOD_MESSAGE } from '@garita/shared';
 import { apiDownload } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
+import { FloatingNotice } from '@/components/floating-notice';
+import { useFloatingNotice } from '@/lib/use-floating-notice';
 
 export function ExportPdfButton({
   endpoint,
   filters,
   disabled = false,
+  iconOnly = false,
 }: {
   endpoint: '/reportes/rondas/pdf' | '/reportes/incidentes/pdf' | '/portal/reporte/pdf';
   filters: Record<string, string | undefined>;
   disabled?: boolean;
+  /** Solo el ícono (con nombre accesible y tooltip), para barras de filtros. */
+  iconOnly?: boolean;
 }) {
-  const statusId = useId();
   const [busy, setBusy] = useState(false);
-  // The text belongs to the filters it was produced for; other filters start clean.
-  const key = JSON.stringify(filters);
-  const [state, setState] = useState({ key: '', text: '' });
-  const message = state.key === key ? state.text : '';
-  const setMessage = (text: string) => {
-    setState({ key, text });
-  };
+  // Avance y éxito solo para lector de pantalla; un problema, en aviso flotante: el botón no se mueve.
+  const [status, setStatus] = useState('');
+  const { notice, notify, close } = useFloatingNotice();
   const tooLong =
     filters.desde && filters.hasta && !isReportExportPeriodAllowed(filters.desde, filters.hasta);
   const download = async () => {
     if (tooLong) {
-      setMessage(REPORT_EXPORT_PERIOD_MESSAGE);
+      notify(REPORT_EXPORT_PERIOD_MESSAGE, 'danger');
       return;
     }
     setBusy(true);
-    setMessage('Generando el PDF…');
+    setStatus('Generando el PDF…');
     try {
       const query = new URLSearchParams(
         Object.entries(filters).filter((entry): entry is [string, string] => Boolean(entry[1])),
@@ -43,28 +44,34 @@ export function ExportPdfButton({
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setMessage('El PDF está listo para descargar.');
+      setStatus('El PDF está listo para descargar.');
     } catch {
-      setMessage('No pudimos generar el PDF. Revisá los filtros o intentá nuevamente.');
+      setStatus('');
+      notify('No pudimos generar el PDF. Revisá los filtros o intentá nuevamente.', 'danger');
     } finally {
       setBusy(false);
     }
   };
   return (
-    <div className="space-y-2">
+    <>
       <Button
         type="button"
         variant="outline"
+        size={iconOnly ? 'icon-lg' : 'default'}
         disabled={disabled || busy}
         aria-busy={busy}
-        aria-describedby={statusId}
+        aria-label={iconOnly ? 'Exportar a PDF' : undefined}
+        title={iconOnly ? 'Exportar a PDF' : undefined}
         onClick={() => void download()}
       >
-        {busy ? 'Generando el PDF…' : 'Exportar a PDF'}
+        {iconOnly ? <FileDown aria-hidden="true" /> : 'Exportar a PDF'}
       </Button>
-      <p id={statusId} role="status" aria-live="polite" className="text-sm text-muted-foreground">
-        {tooLong ? REPORT_EXPORT_PERIOD_MESSAGE : message}
+      <p role="status" aria-live="polite" className="sr-only">
+        {status}
       </p>
-    </div>
+      {notice && (
+        <FloatingNotice key={notice.id} text={notice.text} tone={notice.tone} onClose={close} />
+      )}
+    </>
   );
 }
