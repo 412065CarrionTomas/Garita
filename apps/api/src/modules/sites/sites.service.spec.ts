@@ -207,7 +207,12 @@ describe('sites for the guard', () => {
           { name: 'Perimetral', currentVersion: { id: 'v1', _count: { checkpoints: 8 } } },
           { name: 'Interna', currentVersion: null },
         ],
-        shifts: [{ startsAt: new Date('2026-11-14T01:00:00Z') }],
+        shifts: [
+          {
+            startsAt: new Date('2026-11-14T01:00:00Z'),
+            assignments: [{ startsAt: new Date('2026-11-14T03:00:00Z') }],
+          },
+        ],
       },
     ]);
     const service = new SitesService(
@@ -227,6 +232,7 @@ describe('sites for the guard', () => {
     });
     expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
+        status: 'active',
         shifts: {
           some: {
             assignments: { some: { guardId: 'guard', isCurrent: true, active: true } },
@@ -248,7 +254,7 @@ describe('sites for the guard', () => {
           { name: 'Perimetral', checkpoints: 8, versionId: 'v1' },
           { name: 'Interna', checkpoints: 0, versionId: null },
         ],
-        nextShiftAt: '2026-11-14T01:00:00.000Z',
+        nextShiftAt: '2026-11-14T03:00:00.000Z',
       },
     ]);
   });

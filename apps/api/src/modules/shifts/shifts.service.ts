@@ -555,16 +555,15 @@ export class ShiftsService {
    * el resumen de lo hecho en la misma consulta (sin N+1).
    */
   async mineInRange(user: AuthenticatedUser, query: GuardShiftsQuery): Promise<GuardShiftsPage> {
-    const mine = { guardId: user.userId, isCurrent: true, active: true };
+    // Sin `active`: las asignaciones de turnos ausentes o cancelados quedan inactivas y el
+    // historial tiene que mostrarlos. Este endpoint queda bloqueado con la cuenta suspendida.
+    const mine = { guardId: user.userId, isCurrent: true };
     const rows = await this.prisma.tenantPrisma.shift.findMany({
       where: {
-        ...suspendedVisibleShiftWhere(user),
         // Un día antes para traer el nocturno que termina en `desde`; se descarta abajo si no llega.
-        serviceDate: {
-          gte: new Date(Date.parse(query.desde) - 86_400_000),
-          lte: new Date(query.hasta),
-        },
+        serviceDate: { gte: new Date(previousDate(query.desde)), lte: new Date(query.hasta) },
         assignments: { some: mine },
+        NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
       },
       select: {
         id: true,
@@ -583,7 +582,13 @@ export class ShiftsService {
         },
         assignments: { where: mine, select: { startsAt: true, endsAt: true }, take: 1 },
         roundWindowStates: {
-          select: { status: true, recordedCount: true, expectedCount: true },
+          select: {
+            status: true,
+            recordedCount: true,
+            expectedCount: true,
+            startsAt: true,
+            endsAt: true,
+          },
         },
         _count: { select: { incidents: { where: { guardId: user.userId } } } },
       },
@@ -600,17 +605,25 @@ export class ShiftsService {
       ) >= query.desde;
     return {
       // El cursor sigue al último leído aunque se descarte, para no repetir ni saltear filas.
-      items: page
-        .filter(reaches)
-        .map(({ assignments, roundWindowStates: windows, _count, ...shift }) => ({
+      items: page.filter(reaches).map(({ assignments, roundWindowStates, _count, ...shift }) => {
+        const own = assignments[0] ?? shift;
+        // En un turno con relevo, solo las ventanas que cayeron en la asignación del vigilador.
+        const windows = roundWindowStates.filter(
+          (w) => w.startsAt < own.endsAt && w.endsAt > own.startsAt,
+        );
+        return {
           id: shift.id,
           status: shift.status,
           serviceDate: shift.serviceDate.toISOString().slice(0, 10),
-          startsAt: (assignments[0] ?? shift).startsAt.toISOString(),
-          endsAt: (assignments[0] ?? shift).endsAt.toISOString(),
+          startsAt: own.startsAt.toISOString(),
+          endsAt: own.endsAt.toISOString(),
           startedAt: shift.startedAt?.toISOString() ?? null,
           closedAt: shift.closedAt?.toISOString() ?? null,
-          site: { id: shift.site.id, name: shift.site.name, timezone: shift.site.company.timezone },
+          site: {
+            id: shift.site.id,
+            name: shift.site.name,
+            timezone: shift.site.company.timezone,
+          },
           rounds: shift.rounds.map(({ round, roundVersionId }) => ({
             name: round.name,
             versionId: roundVersionId ?? round.currentVersionId,
@@ -624,7 +637,8 @@ export class ShiftsService {
                 incidents: _count.incidents,
               }
             : null,
-        })),
+        };
+      }),
       nextCursor: rows.length > GUARD_SHIFTS_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
     };
   }

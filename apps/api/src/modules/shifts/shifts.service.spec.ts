@@ -137,6 +137,13 @@ describe('guard shifts in a date range', () => {
     { emitToSite: jest.fn() },
   );
   const guard = { userId: 'guard', companyId: 'company', role: 'guard', status: 'active' } as const;
+  const win = (status: string, recordedCount: number, startsAt: string, endsAt?: string) => ({
+    status,
+    recordedCount,
+    expectedCount: 4,
+    startsAt: new Date(startsAt),
+    endsAt: new Date(endsAt ?? new Date(Date.parse(startsAt) + 3_600_000).toISOString()),
+  });
   const row = (id: string, started: boolean) => ({
     id,
     status: started ? 'closed' : 'scheduled',
@@ -156,9 +163,11 @@ describe('guard shifts in a date range', () => {
       { startsAt: new Date('2030-05-09T23:00:00Z'), endsAt: new Date('2030-05-10T06:00:00Z') },
     ],
     roundWindowStates: [
-      { status: 'complete', recordedCount: 4, expectedCount: 4 },
-      { status: 'complete_late', recordedCount: 3, expectedCount: 4 },
-      { status: 'not_done', recordedCount: 0, expectedCount: 4 },
+      win('complete', 4, '2030-05-09T23:00:00Z'),
+      win('complete_late', 3, '2030-05-10T01:00:00Z'),
+      win('not_done', 0, '2030-05-10T03:00:00Z'),
+      // Del vigilador relevado, antes de la asignación: no cuenta.
+      win('complete', 4, '2030-05-09T22:00:00Z', '2030-05-09T23:00:00Z'),
     ],
     _count: { incidents: 2 },
   });
@@ -169,7 +178,8 @@ describe('guard shifts in a date range', () => {
     expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
         serviceDate: { gte: new Date('2030-04-30'), lte: new Date('2030-05-31') },
-        assignments: { some: { guardId: 'guard', isCurrent: true, active: true } },
+        assignments: { some: { guardId: 'guard', isCurrent: true } },
+        NOT: { status: 'cancelled' },
       },
       take: 51,
     });

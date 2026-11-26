@@ -45,15 +45,30 @@ export class RoundsService {
   ) {}
 
   /**
-   * Versiones de ronda para el vigilador: solo las de sus turnos (la fijada al iniciar o la vigente
-   * de una ronda que tiene programada). Pedir otra devuelve menos elementos, nunca un error.
+   * Versiones de ronda para el vigilador: las de sus turnos (la fijada al iniciar o la vigente de
+   * una ronda programada) y la vigente de las rondas activas de los predios donde tiene turnos,
+   * que son las que ve en Predios. Pedir otra devuelve menos elementos, nunca un error.
+   * Con la cuenta suspendida, solo las fijadas en los turnos que siguen visibles.
    */
   async versionsForGuard(ids: string[], user: AuthenticatedUser): Promise<GuardRoundVersion[]> {
-    const mine = {
-      some: { shift: { assignments: { some: { guardId: user.userId, isCurrent: true } } } },
-    };
+    const own = { some: { guardId: user.userId, isCurrent: true } };
+    const where: Prisma.RoundVersionWhereInput = user.suspension
+      ? { id: { in: ids }, shifts: { some: { shiftId: { in: user.suspension.shiftIds } } } }
+      : {
+          id: { in: ids },
+          OR: [
+            { shifts: { some: { shift: { assignments: own } } } },
+            { currentFor: { shifts: { some: { shift: { assignments: own } } } } },
+            {
+              currentFor: {
+                status: 'active',
+                site: { shifts: { some: { assignments: own } } },
+              },
+            },
+          ],
+        };
     const versions = await this.prisma.tenantPrisma.roundVersion.findMany({
-      where: { id: { in: ids }, OR: [{ shifts: mine }, { currentFor: { shifts: mine } }] },
+      where,
       select: {
         id: true,
         frequencyMinutes: true,

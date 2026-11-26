@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   guardRoundVersionsQuerySchema,
   previewRoundSchema,
@@ -29,6 +29,8 @@ export class RoundsController {
 
   @Get('rondas/versiones')
   @Roles('guard')
+  @ApiOperation({ summary: 'Versiones de ronda del vigilador, con puntos en orden y recorrido' })
+  @ApiQuery({ name: 'ids', description: 'Ids de versión separados por coma (hasta 20)' })
   versionsForGuard(@Query() query: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = guardRoundVersionsQuerySchema.safeParse(query);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);

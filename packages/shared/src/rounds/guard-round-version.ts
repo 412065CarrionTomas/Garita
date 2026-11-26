@@ -7,7 +7,14 @@ export const GUARD_ROUND_VERSIONS_MAX = 20;
 export const guardRoundVersionsQuerySchema = z.object({
   ids: z
     .string()
-    .transform((value) => [...new Set(value.split(',').filter(Boolean))])
+    .transform((value) => [
+      ...new Set(
+        value
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ])
     .pipe(z.array(z.string().min(1)).min(1).max(GUARD_ROUND_VERSIONS_MAX)),
 });
 

@@ -35,13 +35,15 @@ describe('round versions for the guard', () => {
       },
     ]);
     const versions = await service.versionsForGuard(['v3', 'other'], guard);
-    const mine = {
-      some: { shift: { assignments: { some: { guardId: 'guard', isCurrent: true } } } },
-    };
+    const own = { some: { guardId: 'guard', isCurrent: true } };
     expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {
         id: { in: ['v3', 'other'] },
-        OR: [{ shifts: mine }, { currentFor: { shifts: mine } }],
+        OR: [
+          { shifts: { some: { shift: { assignments: own } } } },
+          { currentFor: { shifts: { some: { shift: { assignments: own } } } } },
+          { currentFor: { status: 'active', site: { shifts: { some: { assignments: own } } } } },
+        ],
       },
     });
     expect(versions).toEqual([
@@ -59,5 +61,16 @@ describe('round versions for the guard', () => {
         route: null,
       },
     ]);
+  });
+
+  it('with a suspended account only reads versions pinned to the still visible shifts', async () => {
+    findMany.mockResolvedValueOnce([]);
+    await service.versionsForGuard(['v3'], {
+      ...guard,
+      suspension: { shiftIds: ['running'], panicIds: [] },
+    });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      where: { id: { in: ['v3'] }, shifts: { some: { shiftId: { in: ['running'] } } } },
+    });
   });
 });

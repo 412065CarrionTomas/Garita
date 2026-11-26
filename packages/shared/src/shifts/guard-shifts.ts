@@ -3,11 +3,21 @@ import { z } from 'zod';
 /** Turnos por página de `GET /mis-turnos/rango`. */
 export const GUARD_SHIFTS_PAGE_SIZE = 50;
 
+/** Días que puede abarcar un rango (un año): la app trae todas sus páginas de corrido. */
+export const GUARD_SHIFTS_MAX_DAYS = 366;
+
+const daysBetween = (desde: string, hasta: string) =>
+  (Date.parse(hasta) - Date.parse(desde)) / 86_400_000;
+
 /** Rango libre de fechas de servicio (inclusive) y cursor opaco de la página siguiente. */
 export const guardShiftsQuerySchema = z
   .object({ desde: z.iso.date(), hasta: z.iso.date(), cursor: z.string().min(1).optional() })
   .refine((query) => query.desde <= query.hasta, {
     message: 'desde debe ser anterior o igual a hasta',
+    path: ['hasta'],
+  })
+  .refine((query) => daysBetween(query.desde, query.hasta) < GUARD_SHIFTS_MAX_DAYS, {
+    message: `El rango no puede superar ${GUARD_SHIFTS_MAX_DAYS} días`,
     path: ['hasta'],
   });
 export type GuardShiftsQuery = z.infer<typeof guardShiftsQuerySchema>;

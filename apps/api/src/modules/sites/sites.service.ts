@@ -236,7 +236,7 @@ export class SitesService {
     const mine = { some: { guardId: user.userId, isCurrent: true, active: true } };
     const since = new Date(now.getTime() - GUARD_SITES_LOOKBACK_DAYS * 86_400_000);
     const sites = await this.prisma.tenantPrisma.site.findMany({
-      where: { shifts: { some: { assignments: mine, endsAt: { gte: since } } } },
+      where: { status: 'active', shifts: { some: { assignments: mine, endsAt: { gte: since } } } },
       select: {
         id: true,
         name: true,
@@ -244,7 +244,11 @@ export class SitesService {
         latitude: true,
         longitude: true,
         accessInstructions: true,
-        supervisors: { select: { user: { select: { firstName: true, lastName: true } } } },
+        supervisors: {
+          where: { user: { status: 'active' } },
+          select: { user: { select: { firstName: true, lastName: true } } },
+          orderBy: { user: { firstName: 'asc' } },
+        },
         rounds: {
           where: { status: 'active' },
           select: {
@@ -259,7 +263,10 @@ export class SitesService {
             endsAt: { gte: now },
             status: { in: ['scheduled', 'in_progress'] },
           },
-          select: { startsAt: true },
+          select: {
+            startsAt: true,
+            assignments: { where: mine.some, select: { startsAt: true }, take: 1 },
+          },
           orderBy: { startsAt: 'asc' },
           take: 1,
         },
@@ -276,7 +283,10 @@ export class SitesService {
         checkpoints: round.currentVersion?._count.checkpoints ?? 0,
         versionId: round.currentVersion?.id ?? null,
       })),
-      nextShiftAt: shifts[0]?.startsAt.toISOString() ?? null,
+      // En un relevo, la hora en que entra este vigilador, no la del turno.
+      nextShiftAt: shifts[0]
+        ? (shifts[0].assignments[0] ?? shifts[0]).startsAt.toISOString()
+        : null,
     }));
   }
 
