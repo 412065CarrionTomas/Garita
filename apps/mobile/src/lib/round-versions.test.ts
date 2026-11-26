@@ -50,6 +50,31 @@ it('dos pedidos simultáneos de la misma versión comparten una sola llamada', a
   expect(apiGet).toHaveBeenCalledTimes(1);
 });
 
+it('sin señal devuelve lo que hay en el celular aunque falte otra versión', async () => {
+  respondWith();
+  await getRoundVersions(['v1']);
+  clearRoundVersionsMemory();
+  jest.mocked(apiGet).mockRejectedValue(new Error('offline'));
+  const versions = await getRoundVersions(['v1', 'v2']);
+  expect([...versions.keys()]).toEqual(['v1']);
+  await expect(getRoundVersions(['v3'])).rejects.toThrow('offline');
+});
+
+it('revalida una vez por día lo guardado en disco', async () => {
+  respondWith();
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  await getRoundVersions(['v8']);
+  clearRoundVersionsMemory();
+  now.mockReturnValue(1_000 + 60_000);
+  await getRoundVersions(['v8']);
+  expect(apiGet).toHaveBeenCalledTimes(1);
+  clearRoundVersionsMemory();
+  now.mockReturnValue(1_000 + 25 * 3_600_000);
+  await getRoundVersions(['v8']);
+  expect(apiGet).toHaveBeenCalledTimes(2);
+  now.mockRestore();
+});
+
 it('sin señal sirve lo guardado en el celular', async () => {
   respondWith();
   await getRoundVersions(['v5']);

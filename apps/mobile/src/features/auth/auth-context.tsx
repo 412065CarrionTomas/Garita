@@ -23,6 +23,7 @@ import {
   dismissPanicNotification,
   recordLockedPanicFailure,
 } from '@/features/panico/bloqueado/notification';
+import { clearRoundVersionsMemory } from '@/lib/round-versions';
 
 export const DISABLED_MESSAGE =
   'Tu usuario no está habilitado. Si recibiste una invitación, activala desde el enlace del correo; si no, contactá a tu administrador';
@@ -165,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOut(auth);
     await dismissPanicNotification().catch(recordLockedPanicFailure);
     registeredUid = null;
+    clearRoundVersionsMemory();
     if (uid) await AsyncStorage.removeItem(profileKey(uid));
     setUser(null);
   }, []);
