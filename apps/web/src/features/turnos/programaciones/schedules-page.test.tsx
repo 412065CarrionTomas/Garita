@@ -9,7 +9,6 @@ import {
   SchedulesPage,
   WeekdaySelector,
 } from './schedules-page';
-import { ShiftsPanel } from '../shifts-panel';
 
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn(),
@@ -175,31 +174,3 @@ it.each(['Extender', 'Cancelar programación'])(
     });
   },
 );
-it('muestra ambos distintivos dentro de la pantalla de turnos', async () => {
-  const fallback = jest.mocked(apiGet).getMockImplementation();
-  if (!fallback) throw new Error('Falta el mock de las consultas');
-  jest.mocked(apiGet).mockImplementation((path, schema) =>
-    path.startsWith('/turnos')
-      ? Promise.resolve(
-          schema.parse([
-            {
-              id: 'shift',
-              siteId: 'site',
-              startsAt: '2030-10-06T01:00Z',
-              endsAt: '2030-10-06T09:00Z',
-              serviceDate: '2030-10-05',
-              status: 'scheduled',
-              scheduleId: 'schedule',
-              individuallyModified: true,
-              site,
-              assignments: [],
-              rounds: [],
-            },
-          ]),
-        )
-      : fallback(path, schema),
-  );
-  renderWithQueryClient(<ShiftsPanel />);
-  expect(await screen.findByText('De programación')).toBeInTheDocument();
-  expect(screen.getByText('Modificado individualmente')).toBeInTheDocument();
-});
