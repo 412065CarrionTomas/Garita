@@ -1,4 +1,5 @@
-export const PAGE_SIZES = [3, 5, 10, 20, 50] as const;
+// Los mismos tamaños que acepta la API: si difieren, la lista respondería 400.
+export { PAGE_SIZES } from '@garita/shared';
 
 /** Última página que existe (al menos la 1, aunque no haya nada). */
 export const lastPage = (total: number, pageSize: number) =>
