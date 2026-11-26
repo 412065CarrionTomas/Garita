@@ -18,12 +18,12 @@ export const roundInputSchema = z
     /** Sin perfil (o null): la ronda usa la velocidad del predio. */
     speedProfile: speedProfileSchema.nullish(),
     /** Solo con el perfil personalizado; los demás usan su velocidad por defecto. */
-    maxSpeedKmh: speedKmhSchema.optional(),
+    maxSpeedKmh: speedKmhSchema.nullish(),
   })
   .superRefine((value, context) => {
     for (const { field, message } of validateWindowConfig(value))
       context.addIssue({ code: 'custom', message, path: [field] });
-    if (value.speedProfile === 'custom' && value.maxSpeedKmh === undefined)
+    if (value.speedProfile === 'custom' && value.maxSpeedKmh == null)
       context.addIssue({
         code: 'custom',
         message: 'El perfil personalizado requiere indicar la velocidad en km/h',

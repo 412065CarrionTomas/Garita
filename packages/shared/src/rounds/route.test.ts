@@ -87,6 +87,11 @@ describe('validación del recorrido', () => {
     // Velocidad propia: opcional; la personalizada exige km/h.
     expect(roundInputSchema.safeParse({ ...base, speedProfile: 'vehicle' }).success).toBe(true);
     expect(roundInputSchema.safeParse({ ...base, speedProfile: null }).success).toBe(true);
+    // Tal como lo devuelve el listado: null en los dos campos.
+    expect(
+      roundInputSchema.safeParse({ ...base, speedProfile: null, maxSpeedKmh: null }).data
+        ?.maxSpeedKmh,
+    ).toBeNull();
     expect(roundInputSchema.safeParse({ ...base, speedProfile: 'custom' }).success).toBe(false);
     expect(
       roundInputSchema.safeParse({ ...base, speedProfile: 'custom', maxSpeedKmh: 40 }).success,
