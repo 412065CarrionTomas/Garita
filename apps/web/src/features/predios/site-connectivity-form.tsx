@@ -73,12 +73,7 @@ export function SiteConnectivityForm({
 
   return (
     <form noValidate onSubmit={submit} aria-label="Conectividad" className="space-y-4">
-      <h3 className="font-cond text-lg font-semibold tracking-wider uppercase">Conectividad</h3>
-      <p className="text-sm text-muted-foreground">
-        Los cambios se aplican a los turnos que no empezaron. Los turnos en curso conservan su
-        configuración.
-      </p>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
         <div className="grid gap-2">
           <Label htmlFor={`connectivity-type-${siteId}`}>Tipo de conectividad</Label>
           <NativeSelect
@@ -95,48 +90,57 @@ export function SiteConnectivityForm({
           </NativeSelect>
         </div>
         {type === 'without_signal' && (
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Tiempo hasta zona con señal</legend>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor={`connectivity-hours-${siteId}`}>Horas</Label>
-                <Input
-                  id={`connectivity-hours-${siteId}`}
-                  type="number"
-                  min={0}
-                  max={12}
-                  step={1}
-                  value={hours}
-                  onChange={(event) => {
-                    setHours(Number(event.target.value));
-                    save.reset();
-                  }}
-                  aria-invalid={submitted && Boolean(travelError)}
-                  aria-describedby={`${helpId} ${travelErrorId}`}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor={`connectivity-minutes-${siteId}`}>Minutos</Label>
-                <Input
-                  id={`connectivity-minutes-${siteId}`}
-                  type="number"
-                  min={0}
-                  max={59}
-                  step={1}
-                  value={minutes}
-                  onChange={(event) => {
-                    setMinutes(Number(event.target.value));
-                    save.reset();
-                  }}
-                  aria-invalid={submitted && Boolean(travelError)}
-                  aria-describedby={`${helpId} ${travelErrorId}`}
-                />
-              </div>
+          // Horas y minutos en el mismo renglón que el resto: elegir "Sin señal" no agranda la sección.
+          <fieldset className="grid content-start gap-2">
+            <legend className="t-label mb-2 text-foreground">Tiempo hasta zona con señal</legend>
+            <div className="flex items-center gap-2">
+              <Label htmlFor={`connectivity-hours-${siteId}`} className="sr-only">
+                Horas
+              </Label>
+              <Input
+                id={`connectivity-hours-${siteId}`}
+                type="number"
+                min={0}
+                max={12}
+                step={1}
+                value={hours}
+                onChange={(event) => {
+                  setHours(Number(event.target.value));
+                  save.reset();
+                }}
+                aria-invalid={submitted && Boolean(travelError)}
+                aria-describedby={`${helpId} ${travelErrorId}`}
+                className="w-20"
+              />
+              <span aria-hidden="true" className="text-sm text-muted-foreground">
+                h
+              </span>
+              <Label htmlFor={`connectivity-minutes-${siteId}`} className="sr-only">
+                Minutos
+              </Label>
+              <Input
+                id={`connectivity-minutes-${siteId}`}
+                type="number"
+                min={0}
+                max={59}
+                step={1}
+                value={minutes}
+                onChange={(event) => {
+                  setMinutes(Number(event.target.value));
+                  save.reset();
+                }}
+                aria-invalid={submitted && Boolean(travelError)}
+                aria-describedby={`${helpId} ${travelErrorId}`}
+                className="ml-2 w-20"
+              />
+              <span aria-hidden="true" className="text-sm text-muted-foreground">
+                min
+              </span>
             </div>
             <p
               id={travelErrorId}
               role={submitted && travelError ? 'alert' : undefined}
-              className="text-sm text-danger"
+              className="text-sm text-danger empty:hidden"
             >
               {submitted && travelError}
             </p>
@@ -157,11 +161,12 @@ export function SiteConnectivityForm({
             }}
             aria-invalid={submitted && Boolean(marginError)}
             aria-describedby={`${helpId} ${marginErrorId}`}
+            className="w-28"
           />
           <p
             id={marginErrorId}
             role={submitted && marginError ? 'alert' : undefined}
-            className="text-sm text-danger"
+            className="text-sm text-danger empty:hidden"
           >
             {submitted && marginError}
           </p>
@@ -177,10 +182,16 @@ export function SiteConnectivityForm({
           {errorMessage(save.error, 'No se pudo guardar la conectividad. Volvé a intentar.')}
         </Alert>
       )}
-      {save.isSuccess && <p role="status">Conectividad guardada</p>}
-      <Button variant="outline" disabled={save.isPending}>
-        {save.isPending ? 'Guardando…' : 'Guardar conectividad'}
-      </Button>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="outline" disabled={save.isPending}>
+          {save.isPending ? 'Guardando…' : 'Guardar conectividad'}
+        </Button>
+        {save.isSuccess && (
+          <p role="status" className="text-sm text-success">
+            Conectividad guardada
+          </p>
+        )}
+      </div>
     </form>
   );
 }

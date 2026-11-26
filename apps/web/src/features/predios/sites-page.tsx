@@ -1,5 +1,8 @@
 import { SiteConnectivityForm } from './site-connectivity-form';
-import { useQuery } from '@tanstack/react-query';
+import { SettingsSection, settingsTitleClass } from './settings-section';
+import { cn } from '@/lib/utils';
+import { useFillHeight } from '@/lib/use-fill-height';
+import { skipToken, useQuery } from '@tanstack/react-query';
 import {
   siteInputSchema,
   checkpointsResponseSchema,
@@ -12,8 +15,9 @@ import { apiGet, apiPost, apiPut, apiPatch } from '@/lib/api-client';
 import { errorMessage } from '@/lib/error-message';
 import { useAuth } from '../auth/auth-context';
 import { useEffect, useId, useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import type { CSSProperties, SyntheticEvent } from 'react';
 import { SiteLocation } from '../mapa/site-location';
+import { AddressSearch } from '../mapa/address-search';
 import { z } from 'zod';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
@@ -40,7 +44,6 @@ import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -72,12 +75,7 @@ function SiteSpeedConfig({
           : site.maxSpeedProfile === 'custom'
             ? `Personalizado (${site.maxSpeedKmh ?? 10} km/h)`
             : 'A pie (10 km/h)';
-    return (
-      <div className="mt-2 text-sm text-muted-foreground">
-        <span>Velocidad máxima de recorrido: </span>
-        <span className="font-medium">{profileLabel}</span>
-      </div>
-    );
+    return <p className="text-sm font-medium">{profileLabel}</p>;
   }
 
   const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
@@ -113,14 +111,9 @@ function SiteSpeedConfig({
   };
 
   return (
-    <form onSubmit={(event) => void handleSubmit(event)} className="space-y-3">
-      <Label
-        htmlFor={`speed-profile-${site.id}`}
-        className="font-cond block text-lg font-semibold tracking-wider text-foreground uppercase"
-      >
-        Velocidad máxima de recorrido
-      </Label>
-      <div className="mt-1 flex flex-wrap items-center gap-3">
+    <form onSubmit={(event) => void handleSubmit(event)} className="space-y-2">
+      <Label htmlFor={`speed-profile-${site.id}`}>Perfil</Label>
+      <div className="flex flex-wrap items-center gap-3">
         <NativeSelect
           id={`speed-profile-${site.id}`}
           aria-label={`Velocidad máxima de recorrido para ${site.name}`}
@@ -187,6 +180,8 @@ export function SitesPage() {
   // Al elegir un predio la lista se pliega para dejarle el ancho al detalle y al mapa.
   const [listOpen, setListOpen] = useState(true);
   const [pointActions, setPointActions] = useState<HTMLDivElement | null>(null);
+  // Columna de supervisores y baja: hasta el borde de la ventana; la lista se desplaza por dentro.
+  const [measureSide, sideHeight] = useFillHeight<HTMLDivElement>(16);
   const listId = useId();
   useEffect(() => {
     if (!listOpen) return;
@@ -265,6 +260,19 @@ export function SitesPage() {
   const response = z.looseObject({ id: z.string() });
   const [createError, setCreateError] = useState('');
   const [editError, setEditError] = useState('');
+  const openEdit = (site: z.infer<typeof sitesResponseSchema>[number]) => {
+    setEditError('');
+    setEditing(site);
+    setEditForm({
+      clientId: site.clientId,
+      name: site.name,
+      address: site.address,
+      latitude: Number(site.latitude),
+      longitude: Number(site.longitude),
+      accessInstructions: site.accessInstructions ?? '',
+      observations: site.observations ?? '',
+    });
+  };
   const [actionError, setActionError] = useState('');
   const save = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -298,6 +306,8 @@ export function SitesPage() {
     queryFn: () => apiGet(`/predios/${selected?.id ?? ''}/puntos`, checkpointsResponseSchema),
     enabled: !!selected,
   });
+  // Lo carga la pestaña Rondas (montada siempre); acá solo se lee la caché para el total.
+  const rounds = useQuery<unknown[]>({ queryKey: ['rondas', selected?.id], queryFn: skipToken });
   return (
     <section aria-labelledby="sites-title" className="space-y-6">
       <Dialog open={creating} onOpenChange={setCreating}>
@@ -528,12 +538,11 @@ export function SitesPage() {
                         </button>
                         <p className="text-xs leading-none text-muted-foreground">
                           <span>Cliente: {site.client?.name}</span> · {site.address}
-                          {points.data && <> · {points.data.length} puntos</>}
                         </p>
                       </div>
-                      {/* Título a la izquierda; pestañas y acciones a la derecha, todo apoyado en la misma línea de base y sin superar el alto del título. */}
-                      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-                        <div className="flex min-w-0 flex-wrap items-center gap-3">
+                      {/* Título y pestañas en una fila, con la línea de las pestañas a todo el ancho. */}
+                      <div className="mt-1 flex flex-wrap items-end justify-between gap-x-6 gap-y-1 border-b border-border">
+                        <div className="flex min-w-0 flex-wrap items-center gap-3 pb-2.5">
                           <h2 className="t-headline leading-none break-words">{site.name}</h2>
                           <StatusBadge tone={site.status === 'active' ? 'success' : 'neutral'}>
                             {site.status === 'active' ? 'Activo' : 'Inactivo'}
@@ -542,46 +551,32 @@ export function SitesPage() {
                             <StatusBadge tone="neutral">Sin supervisor activo</StatusBadge>
                           )}
                         </div>
-                        <div className="flex flex-wrap items-end gap-2">
-                          <TabsList className="group-data-horizontal/tabs:h-7">
-                            <TabsTrigger value="puntos">Puntos de control</TabsTrigger>
-                            <TabsTrigger value="rondas">Rondas</TabsTrigger>
-                            <TabsTrigger value="configuracion">Configuración</TabsTrigger>
+                        {/* Pestañas a la derecha del título; Cancelar y Guardar al editar puntos. */}
+                        <div className="flex flex-wrap items-end gap-x-4">
+                          <TabsList className="group-data-horizontal/tabs:h-11 group-data-horizontal/tabs:border-b-0">
+                            {(
+                              [
+                                ['puntos', 'Puntos de control', points.data?.length],
+                                ['rondas', 'Rondas', rounds.data?.length],
+                                ['configuracion', 'Configuración', undefined],
+                              ] as const
+                            ).map(([value, label, count]) => (
+                              <TabsTrigger
+                                key={value}
+                                value={value}
+                                className="font-cond px-4 text-base tracking-wider uppercase"
+                              >
+                                {label}
+                                {count !== undefined && ' '}
+                                {count !== undefined && (
+                                  <span className="t-numeral text-sm text-muted-foreground">
+                                    {count}
+                                  </span>
+                                )}
+                              </TabsTrigger>
+                            ))}
                           </TabsList>
-                          {/* Cancelar y Guardar del modo edición de puntos. */}
-                          <div ref={setPointActions} className="contents" />
-                          {user?.role === 'admin' && site.status === 'active' && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="xs"
-                                onClick={() => {
-                                  setEditError('');
-                                  setEditing(site);
-                                  setEditForm({
-                                    clientId: site.clientId,
-                                    name: site.name,
-                                    address: site.address,
-                                    latitude: Number(site.latitude),
-                                    longitude: Number(site.longitude),
-                                    accessInstructions: site.accessInstructions ?? '',
-                                    observations: site.observations ?? '',
-                                  });
-                                }}
-                              >
-                                Editar predio
-                              </Button>
-                              <Button
-                                variant="ghostDestructive"
-                                size="xs"
-                                onClick={() => {
-                                  setDeleting({ id: site.id, name: site.name });
-                                }}
-                              >
-                                Dar de baja
-                              </Button>
-                            </>
-                          )}
+                          <div ref={setPointActions} className="flex items-center gap-2 pb-1.5" />
                         </div>
                       </div>
                     </header>
@@ -597,10 +592,54 @@ export function SitesPage() {
                       <RoundsPanel site={site} />
                     </TabsContent>
                     <TabsContent value="configuracion" className="pt-2">
-                      <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-                        {canConfigure && (
-                          <Card>
-                            <CardContent>
+                      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_--spacing(96)]">
+                        <div className="divide-y divide-border rounded-md border border-border bg-card">
+                          <SettingsSection
+                            title="Datos del predio"
+                            description="Lo que ven el vigilador y el cliente: nombre, ubicación e indicaciones."
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-4">
+                              <dl className="grid min-w-0 flex-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                                {[
+                                  ['Cliente', site.client?.name],
+                                  ['Dirección', site.address],
+                                  [
+                                    'Coordenadas',
+                                    `${Number(site.latitude).toFixed(6)}, ${Number(site.longitude).toFixed(6)}`,
+                                  ],
+                                  ['Instrucciones de acceso', site.accessInstructions],
+                                  ['Observaciones', site.observations],
+                                ].map(([label, value]) => (
+                                  <div key={label} className="min-w-0 space-y-1">
+                                    <dt className="t-label text-foreground">{label}</dt>
+                                    <dd
+                                      className={cn(
+                                        'text-base',
+                                        value?.trim() ? 'break-words' : 'text-muted-foreground',
+                                      )}
+                                    >
+                                      {value?.trim() ? value : 'Sin cargar'}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                              {user?.role === 'admin' && site.status === 'active' && (
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    openEdit(site);
+                                  }}
+                                >
+                                  Editar predio
+                                </Button>
+                              )}
+                            </div>
+                          </SettingsSection>
+                          {canConfigure && (
+                            <SettingsSection
+                              title="Conectividad"
+                              description="Los cambios se aplican a los turnos que no empezaron. Los turnos en curso conservan su configuración."
+                            >
                               <SiteConnectivityForm
                                 key={`${site.id}-${String(site.connectivityType)}-${String(site.minutesToSignal)}-${String(site.marginMinutes)}`}
                                 siteId={site.id}
@@ -611,25 +650,42 @@ export function SitesPage() {
                                 })}
                                 onSaved={() => void sites.refetch()}
                               />
-                            </CardContent>
-                          </Card>
-                        )}
-                        <Card>
-                          <CardContent>
+                            </SettingsSection>
+                          )}
+                          <SettingsSection
+                            title="Velocidad máxima de recorrido"
+                            description="Un recorrido entre dos puntos más rápido que esto se marca para revisar."
+                          >
                             <SiteSpeedConfig
                               site={site}
                               canConfigure={canConfigure}
                               onSaved={() => void sites.refetch()}
                             />
-                          </CardContent>
-                        </Card>
+                          </SettingsSection>
+                        </div>
                         {user?.role === 'admin' && site.status === 'active' && (
-                          <Card>
-                            <CardContent>
-                              <fieldset className="grid gap-1">
-                                <legend className="font-cond mb-2 text-lg font-semibold tracking-wider uppercase">
-                                  Supervisores asignados
-                                </legend>
+                          <div
+                            ref={measureSide}
+                            style={
+                              { '--side-height': `${String(sideHeight ?? 0)}px` } as CSSProperties
+                            }
+                            className={cn(
+                              'flex flex-col gap-4',
+                              sideHeight !== undefined && 'xl:max-h-(--side-height)',
+                            )}
+                          >
+                            <fieldset className="flex min-h-0 flex-col rounded-md border border-border bg-card p-5">
+                              <legend className="sr-only">Supervisores asignados</legend>
+                              <p
+                                aria-hidden="true"
+                                className={cn(settingsTitleClass, 'text-foreground')}
+                              >
+                                Supervisores asignados
+                              </p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                Ven el predio, sus turnos y avisos. Se guarda al marcar.
+                              </p>
+                              <div className="mt-3 grid min-h-0 gap-0.5 overflow-y-auto">
                                 {supervisors.data?.length === 0 && (
                                   <p className="text-sm text-muted-foreground">
                                     No hay supervisores disponibles.
@@ -673,9 +729,32 @@ export function SitesPage() {
                                     {supervisor.firstName} {supervisor.lastName}
                                   </label>
                                 ))}
-                              </fieldset>
-                            </CardContent>
-                          </Card>
+                              </div>
+                            </fieldset>
+                            <section
+                              aria-labelledby={`site-delete-${site.id}`}
+                              className="shrink-0 space-y-3 rounded-md border border-danger bg-card p-5"
+                            >
+                              <h3
+                                id={`site-delete-${site.id}`}
+                                className={cn(settingsTitleClass, 'text-danger')}
+                              >
+                                Dar de baja
+                              </h3>
+                              <p className="text-sm text-muted-foreground">
+                                Cancela los turnos futuros, termina las programaciones semanales y
+                                quita los supervisores. Antes de confirmar vas a ver a qué afecta.
+                              </p>
+                              <Button
+                                variant="destructive"
+                                onClick={() => {
+                                  setDeleting({ id: site.id, name: site.name });
+                                }}
+                              >
+                                Dar de baja
+                              </Button>
+                            </section>
+                          </div>
                         )}
                       </div>
                     </TabsContent>
@@ -694,13 +773,17 @@ export function SitesPage() {
           }
         }}
       >
-        <DialogContent aria-describedby="site-edit-description" className="space-y-4">
+        {/* Grande, como el de puntos: el mapa es lo que más se usa para ubicar bien el predio. */}
+        <DialogContent
+          aria-describedby="site-edit-description"
+          className="w-[calc(100%-2rem)] max-w-none"
+        >
           <DialogTitle className="text-lg font-semibold">Editar predio</DialogTitle>
           <DialogDescription id="site-edit-description">
-            Actualizá los datos, la ubicación y las indicaciones del predio.
+            Buscá la dirección o ubicá el predio en el mapa arrastrando el marcador.
           </DialogDescription>
           <form
-            className="grid gap-4 sm:grid-cols-2"
+            className="mt-4 grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]"
             onSubmit={(event) => {
               event.preventDefault();
               const parsed = siteInputSchema.safeParse(editForm);
@@ -722,32 +805,59 @@ export function SitesPage() {
                 });
             }}
           >
-            <div className="grid gap-2">
-              <Label htmlFor="site-edit-name">Nombre</Label>
-              <Input
-                id="site-edit-name"
-                required
-                value={editForm.name}
-                onChange={(event) => {
-                  setEditForm({ ...editForm, name: event.target.value });
-                }}
-                className="w-full"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="site-edit-address">Dirección</Label>
-              <Input
-                id="site-edit-address"
+            {/* Las indicaciones se estiran hasta el alto del mapa: sin huecos en la columna. */}
+            <div className="flex min-w-0 flex-col gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="site-edit-name">Nombre</Label>
+                <Input
+                  id="site-edit-name"
+                  required
+                  value={editForm.name}
+                  onChange={(event) => {
+                    setEditForm({ ...editForm, name: event.target.value });
+                  }}
+                  className="w-full"
+                />
+              </div>
+              <AddressSearch
+                label="Dirección"
                 required
                 value={editForm.address}
-                onChange={(event) => {
-                  setEditForm({ ...editForm, address: event.target.value });
+                onTextChange={(address) => {
+                  setEditForm((current) => ({ ...current, address }));
                 }}
-                className="w-full"
+                onSelect={(latitude, longitude, address) => {
+                  setEditForm((current) => ({ ...current, latitude, longitude, address }));
+                }}
               />
+              <div className="flex min-h-32 flex-1 flex-col gap-2">
+                <Label htmlFor="site-edit-accessInstructions">Instrucciones de acceso</Label>
+                <Textarea
+                  id="site-edit-accessInstructions"
+                  value={editForm.accessInstructions}
+                  onChange={(event) => {
+                    setEditForm({ ...editForm, accessInstructions: event.target.value });
+                  }}
+                  className="w-full flex-1 resize-none"
+                />
+              </div>
+              <div className="flex min-h-32 flex-1 flex-col gap-2">
+                <Label htmlFor="site-edit-observations">Observaciones</Label>
+                <Textarea
+                  id="site-edit-observations"
+                  value={editForm.observations}
+                  onChange={(event) => {
+                    setEditForm({ ...editForm, observations: event.target.value });
+                  }}
+                  className="w-full flex-1 resize-none"
+                />
+              </div>
+              {editError && <Alert variant="destructive">{editError}</Alert>}
             </div>
-            <div className="sm:col-span-2">
+            <div className="min-w-0">
               <SiteLocation
+                search={false}
+                mapClassName="h-[calc(90vh-14rem)] min-h-80"
                 latitude={editForm.latitude}
                 longitude={editForm.longitude}
                 onChange={(latitude, longitude) => {
@@ -755,34 +865,7 @@ export function SitesPage() {
                 }}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="site-edit-accessInstructions">Instrucciones de acceso</Label>
-              <Textarea
-                id="site-edit-accessInstructions"
-                value={editForm.accessInstructions}
-                onChange={(event) => {
-                  setEditForm({ ...editForm, accessInstructions: event.target.value });
-                }}
-                className="w-full"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="site-edit-observations">Observaciones</Label>
-              <Textarea
-                id="site-edit-observations"
-                value={editForm.observations}
-                onChange={(event) => {
-                  setEditForm({ ...editForm, observations: event.target.value });
-                }}
-                className="w-full"
-              />
-            </div>
-            {editError && (
-              <Alert variant="destructive" className="sm:col-span-2">
-                {editError}
-              </Alert>
-            )}
-            <div className="flex flex-wrap justify-end gap-2 sm:col-span-2">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4 lg:col-span-2">
               <Button
                 type="button"
                 variant="outline"
