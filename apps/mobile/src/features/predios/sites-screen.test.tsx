@@ -18,7 +18,7 @@ const site: GuardSite = {
   longitude: -64.1,
   accessInstructions: 'Portón norte, pedir llave en garita',
   supervisors: ['Ana Paz'],
-  rounds: [{ name: 'Perimetral', checkpoints: 8 }],
+  rounds: [{ name: 'Perimetral', checkpoints: 8, versionId: 'v1' }],
   nextShiftAt: null,
 };
 

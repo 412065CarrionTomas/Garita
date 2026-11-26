@@ -12,7 +12,9 @@ export const guardSiteSchema = z.object({
   longitude: z.number(),
   accessInstructions: z.string().nullable(),
   supervisors: z.array(z.string()),
-  rounds: z.array(z.object({ name: z.string(), checkpoints: z.number().int() })),
+  rounds: z.array(
+    z.object({ name: z.string(), checkpoints: z.number().int(), versionId: z.string().nullable() }),
+  ),
   nextShiftAt: z.iso.datetime().nullable(),
 });
 export type GuardSite = z.infer<typeof guardSiteSchema>;

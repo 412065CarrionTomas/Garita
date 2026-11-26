@@ -249,7 +249,7 @@ export class SitesService {
           where: { status: 'active' },
           select: {
             name: true,
-            currentVersion: { select: { _count: { select: { checkpoints: true } } } },
+            currentVersion: { select: { id: true, _count: { select: { checkpoints: true } } } },
           },
           orderBy: { name: 'asc' },
         },
@@ -274,6 +274,7 @@ export class SitesService {
       rounds: rounds.map((round) => ({
         name: round.name,
         checkpoints: round.currentVersion?._count.checkpoints ?? 0,
+        versionId: round.currentVersion?.id ?? null,
       })),
       nextShiftAt: shifts[0]?.startsAt.toISOString() ?? null,
     }));

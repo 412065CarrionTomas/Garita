@@ -204,7 +204,7 @@ describe('sites for the guard', () => {
         accessInstructions: 'Portón norte',
         supervisors: [{ user: { firstName: 'Ana', lastName: 'Paz' } }],
         rounds: [
-          { name: 'Perimetral', currentVersion: { _count: { checkpoints: 8 } } },
+          { name: 'Perimetral', currentVersion: { id: 'v1', _count: { checkpoints: 8 } } },
           { name: 'Interna', currentVersion: null },
         ],
         shifts: [{ startsAt: new Date('2026-11-14T01:00:00Z') }],
@@ -245,8 +245,8 @@ describe('sites for the guard', () => {
         accessInstructions: 'Portón norte',
         supervisors: ['Ana Paz'],
         rounds: [
-          { name: 'Perimetral', checkpoints: 8 },
-          { name: 'Interna', checkpoints: 0 },
+          { name: 'Perimetral', checkpoints: 8, versionId: 'v1' },
+          { name: 'Interna', checkpoints: 0, versionId: null },
         ],
         nextShiftAt: '2026-11-14T01:00:00.000Z',
       },
