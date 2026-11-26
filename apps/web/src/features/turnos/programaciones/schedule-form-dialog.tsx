@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import {
   scheduleOperationSchema,
@@ -50,12 +50,17 @@ export function WeekdaySelector({
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-semibold">Días en que empieza el turno</legend>
+      <legend className="text-sm font-semibold">
+        Días en que empieza el turno{' '}
+        <span role="status" className="font-normal text-muted-foreground">
+          · {value.length} {value.length === 1 ? 'elegido' : 'elegidos'}
+        </span>
+      </legend>
       <div className="grid grid-cols-7 gap-1.5">
         {WEEK_ORDER.map((day) => (
           <Label
             key={day}
-            className="relative flex min-h-11 cursor-pointer items-center justify-center rounded-md border-[1.5px] border-input px-1 py-1.5 text-sm font-semibold has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary has-[[data-state=checked]]:text-primary-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2"
+            className="relative flex min-h-10 cursor-pointer items-center justify-center rounded-md border-[1.5px] border-input px-1 py-1.5 text-sm font-semibold has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary has-[[data-state=checked]]:text-primary-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2"
           >
             <Checkbox
               aria-label={WEEKDAYS[day]?.long}
@@ -70,9 +75,6 @@ export function WeekdaySelector({
           </Label>
         ))}
       </div>
-      <p role="status" className="text-sm text-muted-foreground">
-        {value.length} días seleccionados.
-      </p>
     </fieldset>
   );
 }
@@ -246,7 +248,6 @@ function ScheduleForm({
         inputSchema,
         schedulePreviewSchema,
       ),
-    onError: fail,
   });
   const save = useMutation({
     mutationFn: (input: ShiftScheduleInput) =>
@@ -283,21 +284,34 @@ function ScheduleForm({
   const roundNames = new Map((rounds.data ?? []).map((round) => [round.id, round.name]));
   const activeRounds = (rounds.data ?? []).filter((round) => round.status === 'active');
 
+  // La vista previa se pide sola cuando los datos están completos, con una pausa para no
+  // consultar en cada tecla.
+  const previewKey = parsed.success ? JSON.stringify(parsed.data) : '';
+  useEffect(() => {
+    if (!parsed.success) return;
+    const input = parsed.data;
+    const timer = setTimeout(() => {
+      preview.mutate(input);
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+    };
+    // Solo depende de los datos: `parsed` y `preview` cambian en cada render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey]);
+  const previewHint = preview.isError
+    ? `No se pudo calcular: ${preview.error instanceof Error ? preview.error.message : 'revisá los datos'}.`
+    : parsed.success
+      ? 'Calculando los turnos…'
+      : 'Se calcula sola al completar predio, vigilador, días, vigencia y una ronda.';
+
   return (
     <form
-      className="space-y-5"
+      className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
         setError('');
-        if (current && parsed.success) {
-          save.mutate(parsed.data);
-          return;
-        }
-        if (!parsed.success) {
-          fail(new Error(parsed.error.issues[0]?.message ?? 'Revisá los campos'));
-          return;
-        }
-        preview.mutate(parsed.data);
+        if (current && parsed.success) save.mutate(parsed.data);
       }}
     >
       <div className="space-y-1">
@@ -309,25 +323,25 @@ function ScheduleForm({
           como turnos sueltos.
         </DialogDescription>
       </div>
+      {(sites.isError || guards.isError || rounds.isError) && (
+        <Alert>
+          No se pudieron cargar las opciones del formulario.{' '}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void sites.refetch();
+              void guards.refetch();
+              if (form.siteId) void rounds.refetch();
+            }}
+          >
+            Reintentar opciones
+          </Button>
+        </Alert>
+      )}
       <div className="grid gap-6 text-base lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-5">
-          {(sites.isError || guards.isError || rounds.isError) && (
-            <Alert>
-              No se pudieron cargar las opciones del formulario.{' '}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  void sites.refetch();
-                  void guards.refetch();
-                  if (form.siteId) void rounds.refetch();
-                }}
-              >
-                Reintentar opciones
-              </Button>
-            </Alert>
-          )}
-          <div className="grid gap-4 sm:grid-cols-2">
+        <div className="min-w-0 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="schedule-site">Predio</Label>
               <NativeSelect
@@ -374,7 +388,7 @@ function ScheduleForm({
               set({ weekdays });
             }}
           />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="schedule-startTime">Hora de inicio</Label>
               <Input
@@ -394,17 +408,12 @@ function ScheduleForm({
                 type="time"
                 required
                 value={form.endTime}
-                aria-describedby="schedule-time-hint"
+                aria-describedby="schedule-hint"
                 onChange={(event) => {
                   set({ endTime: event.target.value });
                 }}
               />
             </div>
-            <p id="schedule-time-hint" className="text-sm text-muted-foreground sm:col-span-2">
-              {crossesMidnight(form.startTime, form.endTime)
-                ? 'Termina al día siguiente.'
-                : 'Termina el mismo día.'}
-            </p>
             <div className="space-y-1.5">
               <Label htmlFor="schedule-startDate">Desde</Label>
               <Input
@@ -424,16 +433,21 @@ function ScheduleForm({
                 type="date"
                 required
                 value={form.endDate}
-                aria-describedby="schedule-period-hint"
+                aria-describedby="schedule-hint"
                 onChange={(event) => {
                   set({ endDate: event.target.value });
                 }}
               />
             </div>
-            <p id="schedule-period-hint" className="text-sm text-muted-foreground sm:col-span-2">
+            <p id="schedule-hint" className="text-sm text-muted-foreground sm:col-span-2">
+              {crossesMidnight(form.startTime, form.endTime)
+                ? 'Termina al día siguiente.'
+                : 'Termina el mismo día.'}{' '}
               Hasta tres meses por período; después se puede extender.
             </p>
           </div>
+        </div>
+        <div className="min-w-0 space-y-4">
           <fieldset className="space-y-2">
             <legend className="text-sm font-semibold">Rondas (al menos una)</legend>
             {!form.siteId ? (
@@ -443,9 +457,12 @@ function ScheduleForm({
                 Este predio no tiene rondas activas.
               </Alert>
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
                 {activeRounds.map((round) => (
-                  <Label key={round.id} className="min-h-10 gap-2 text-base font-normal">
+                  <label
+                    key={round.id}
+                    className="flex min-h-8 cursor-pointer items-center gap-2 text-base"
+                  >
                     <Checkbox
                       name="roundIds"
                       aria-label={round.name}
@@ -458,55 +475,46 @@ function ScheduleForm({
                         });
                       }}
                     />
-                    {round.name}
-                  </Label>
+                    <span className="truncate">{round.name}</span>
+                  </label>
                 ))}
               </div>
             )}
           </fieldset>
-          {error && (
-            <div
-              ref={errorRef}
-              role="alert"
-              tabIndex={-1}
-              className="rounded-md border border-danger bg-danger-soft p-4 text-danger"
-            >
-              {error}
-            </div>
-          )}
-        </div>
-        {/* La vista previa ocupa la columna derecha; hasta pedirla, explica qué va a mostrar. */}
-        <div className="min-w-0">
           {current ? (
             <SchedulePreviewTable preview={current} roundNames={roundNames} />
           ) : (
-            <div className="flex h-full min-h-48 flex-col justify-center gap-1 rounded-md border-[1.5px] border-dashed border-input p-5 text-muted-foreground">
-              <p className="text-base font-semibold text-foreground">Vista previa</p>
-              <p>
-                Completá los datos y tocá Previsualizar: vas a ver cuántos turnos se generan, si
-                alguno choca con otro del vigilador y qué ventanas quedan sin cubrir.
-              </p>
+            <div
+              role="status"
+              className="rounded-md border-[1.5px] border-dashed border-input p-4 text-muted-foreground"
+            >
+              <p className="font-semibold text-foreground">Vista previa</p>
+              <p>{previewHint}</p>
             </div>
           )}
         </div>
       </div>
+      {error && (
+        <div
+          ref={errorRef}
+          role="alert"
+          tabIndex={-1}
+          className="rounded-md border border-danger bg-danger-soft p-4 text-danger"
+        >
+          {error}
+        </div>
+      )}
       <footer className="flex flex-wrap justify-end gap-2 border-t-[1.5px] border-input pt-4">
         <Button type="button" variant="outline" onClick={onClose}>
           Cerrar
         </Button>
-        {current ? (
-          <Button type="submit" disabled={pending}>
-            {save.isPending
-              ? 'Confirmando…'
-              : editing
-                ? 'Confirmar modificación'
-                : 'Confirmar programación'}
-          </Button>
-        ) : (
-          <Button type="submit" disabled={pending}>
-            {preview.isPending ? 'Previsualizando…' : 'Previsualizar'}
-          </Button>
-        )}
+        <Button type="submit" disabled={!current || pending}>
+          {save.isPending
+            ? 'Confirmando…'
+            : editing
+              ? 'Confirmar modificación'
+              : 'Confirmar programación'}
+        </Button>
       </footer>
     </form>
   );

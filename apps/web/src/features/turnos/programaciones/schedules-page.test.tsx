@@ -111,7 +111,7 @@ it('el selector anuncia días y selección, con Tab y Espacio', async () => {
   expect(screen.getByRole('checkbox', { name: 'Lunes' })).toHaveFocus();
   await user.keyboard(' ');
   expect(screen.getByRole('checkbox', { name: 'Lunes' })).toBeChecked();
-  expect(screen.getByRole('status')).toHaveTextContent('1 días seleccionados');
+  expect(screen.getByRole('status')).toHaveTextContent('1 elegido');
   await user.keyboard(' ');
   expect(screen.getByRole('checkbox', { name: 'Lunes' })).not.toBeChecked();
 });
@@ -160,7 +160,7 @@ it('filtra por vencer desde el resumen y guarda el filtro en la URL', async () =
   });
 });
 
-it('abre el modal, previsualiza, invalida la vista al cambiar datos y confirma', async () => {
+it('abre el modal, calcula la vista previa sola, la invalida al cambiar datos y confirma', async () => {
   jest.mocked(apiPost).mockResolvedValue({
     ...preview,
     shifts: preview.shifts.map((shift) => ({ ...shift, conflicts: [] })),
@@ -170,9 +170,12 @@ it('abre el modal, previsualiza, invalida la vista al cambiar datos y confirma',
   await openMenu(user);
   await user.click(screen.getByRole('menuitem', { name: 'Modificar' }));
   const panel = await screen.findByRole('dialog', { name: 'Modificar programación' });
-  expect(within(panel).getByText('Termina al día siguiente.')).toBeInTheDocument();
-  await user.click(within(panel).getByRole('button', { name: 'Previsualizar' }));
-  await within(panel).findByRole('button', { name: 'Confirmar modificación' });
+  expect(within(panel).getByText(/Termina al día siguiente/)).toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: 'Previsualizar' })).not.toBeInTheDocument();
+  const confirm = within(panel).getByRole('button', { name: 'Confirmar modificación' });
+  await waitFor(() => {
+    expect(confirm).toBeEnabled();
+  });
   expect(apiPost).toHaveBeenCalledWith(
     '/programaciones-turnos/previsualizar?programacion=schedule',
     expect.objectContaining({ siteId: 'site' }),
@@ -182,12 +185,20 @@ it('abre el modal, previsualiza, invalida la vista al cambiar datos y confirma',
   fireEvent.change(within(panel).getByLabelText('Hora de inicio'), {
     target: { value: '21:00' },
   });
-  expect(
-    within(panel).queryByRole('button', { name: 'Confirmar modificación' }),
-  ).not.toBeInTheDocument();
-  await user.click(within(panel).getByRole('button', { name: 'Previsualizar' }));
+  expect(confirm).toBeDisabled();
+  await waitFor(() => {
+    expect(apiPost).toHaveBeenLastCalledWith(
+      '/programaciones-turnos/previsualizar?programacion=schedule',
+      expect.objectContaining({ startTime: '21:00' }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+  await waitFor(() => {
+    expect(confirm).toBeEnabled();
+  });
   jest.mocked(apiPatch).mockResolvedValue(result);
-  await user.click(await within(panel).findByRole('button', { name: 'Confirmar modificación' }));
+  await user.click(confirm);
   await waitFor(() => {
     expect(apiPatch).toHaveBeenCalledWith(
       '/programaciones-turnos/schedule',
