@@ -261,6 +261,10 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const completedWindows = closureRows.filter(
     (row) => row.status === 'ontime' || row.status === 'late',
   ).length;
+  // Solo las rondas con versión vigente se pueden ver en el mapa.
+  const scheduledVersionIds = (scheduled?.rounds ?? []).flatMap(
+    ({ round }) => round.currentVersionId ?? [],
+  );
   return (
     <Screen scroll>
       <Text variant="heading" accessibilityRole="header">
@@ -332,19 +336,12 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
             />
           ) : null,
         )}
-      {!data && (scheduled?.rounds?.length ?? 0) > 1 && (
+      {!data && scheduledVersionIds.length > 1 && (
         <Button
           variant="outline"
           label="Ver todos los recorridos"
           onPress={() =>
-            router.push({
-              pathname: '/recorridos',
-              params: {
-                ids: (scheduled?.rounds ?? [])
-                  .flatMap(({ round }) => round.currentVersionId ?? [])
-                  .join(','),
-              },
-            })
+            router.push({ pathname: '/recorridos', params: { ids: scheduledVersionIds.join(',') } })
           }
         />
       )}
@@ -436,6 +433,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
                           router.push({
                             pathname: '/recorridos',
                             params: {
+                              enCurso: '1',
                               ids: definition.roundVersionId,
                               hechos: points
                                 .filter((p) => p.status === 'done' || p.status === 'late')

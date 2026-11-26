@@ -56,6 +56,10 @@ it('con recorrido dibuja cada sección por calles y encuadra también sus desví
   expect(bounds).toEqual([-64.3, -31.5, -64.1, -31.4]);
 });
 
-it('sin coordenadas no hay encuadre', () => {
+it('sin coordenadas no hay encuadre, y con un solo punto el encuadre no queda en cero', () => {
   expect(boundsOf([])).toBeNull();
+  const [west, south, east, north] = boundsOf([[-64.1, -31.4]]) ?? [];
+  expect((east ?? 0) - (west ?? 0)).toBeCloseTo(0.002);
+  expect((north ?? 0) - (south ?? 0)).toBeCloseTo(0.002);
+  expect(((west ?? 0) + (east ?? 0)) / 2).toBeCloseTo(-64.1);
 });

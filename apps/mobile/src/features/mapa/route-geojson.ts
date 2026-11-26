@@ -50,6 +50,9 @@ export function routeGeoJson(
   };
 }
 
+/** Lado mínimo del encuadre (~200 m): con un solo punto, la cámara no hace un zoom extremo. */
+const MIN_SPAN = 0.002;
+
 /** [oeste, sur, este, norte] que encierra todas las coordenadas, o null si no hay ninguna. */
 export function boundsOf(coords: LngLat[]): [number, number, number, number] | null {
   const [first] = coords;
@@ -62,5 +65,11 @@ export function boundsOf(coords: LngLat[]): [number, number, number, number] | n
     south = Math.min(south, lat);
     north = Math.max(north, lat);
   }
+  const widen = (low: number, high: number) =>
+    high - low >= MIN_SPAN
+      ? [low, high]
+      : [(low + high - MIN_SPAN) / 2, (low + high + MIN_SPAN) / 2];
+  [west, east] = widen(west, east) as [number, number];
+  [south, north] = widen(south, north) as [number, number];
   return [west, south, east, north];
 }

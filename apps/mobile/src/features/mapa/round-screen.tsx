@@ -20,10 +20,13 @@ export function RoundScreen({
   versionIds,
   done = [],
   next,
+  live = false,
 }: {
   versionIds: string[];
   done?: string[];
   next?: string;
+  /** Abierto desde la Ronda en curso: muestra la ubicación del vigilador. */
+  live?: boolean;
 }) {
   const { versions: found, loading, error } = useRoundVersions(versionIds);
   const versions = versionIds.flatMap((id) => found.get(id) ?? []);
@@ -52,7 +55,13 @@ export function RoundScreen({
       ) : (
         <Text color="mutedForeground">{summary(versions[0])}</Text>
       )}
+      {versions.length < versionIds.length && (
+        <Banner tone="warning">
+          Algún recorrido no se pudo cargar sin señal. Se muestran los que están en el celular.
+        </Banner>
+      )}
       <RouteMap
+        live={live}
         versions={versions}
         stateOf={stateOf}
         label={`Mapa con ${many ? 'los recorridos' : 'el recorrido'} ${names}, puntos numerados en orden`}

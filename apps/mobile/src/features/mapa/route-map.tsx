@@ -8,8 +8,7 @@ import {
   NativeUserLocation,
 } from '@maplibre/maplibre-react-native';
 import type { GuardRoundVersion } from '@garita/shared';
-import { space, type ColorToken } from '@garita/tokens';
-import { useTheme } from '@/ui';
+import { colors as palettes, space, type ColorToken } from '@garita/tokens';
 import { env } from '@/config/env';
 import { ensureOfflineArea } from './offline-area';
 import { routeGeoJson, type PointState } from './route-geojson';
@@ -46,12 +45,16 @@ export function RouteMap({
   versions,
   stateOf,
   label,
+  live = false,
 }: {
   versions: GuardRoundVersion[];
   stateOf?: (checkpointId: string) => PointState;
   label: string;
+  /** Muestra la ubicación del vigilador: solo durante el turno (finalidad Ley 25.326). */
+  live?: boolean;
 }) {
-  const { colors } = useTheme();
+  // El mapa base (Positron) es claro en los dos temas: se dibuja con la tinta del tema claro.
+  const colors = palettes.light;
   const { line, points, bounds } = routeGeoJson(versions, stateOf);
   // Una descarga por ronda: las versiones de la misma ronda cubren casi la misma zona.
   useEffect(() => {
@@ -60,9 +63,27 @@ export function RouteMap({
       if (area) void ensureOfflineArea(`round:${version.roundId}`, area);
     }
   }, [versions]);
+  if (!versions.length) return null;
+  const strokeByRound =
+    versions.length === 1
+      ? colors[roundStyle(0).color]
+      : // El tipo de `match` no admite pares armados con un spread; el valor es válido.
+        ([
+          'match',
+          ['get', 'round'],
+          ...versions.flatMap((_, n) => [n, colors[roundStyle(n).color]]),
+          colors.foreground,
+        ] as never);
   return (
-    <View style={styles.frame} accessible accessibilityRole="image" accessibilityLabel={label}>
-      <Map style={styles.fill} mapStyle={env.EXPO_PUBLIC_MAP_STYLE_URL} logo={false} compass>
+    // Sin `accessible` en el contenedor: la atribución de OpenStreetMap y la brújula siguen al alcance.
+    <View style={styles.frame}>
+      <Map
+        style={styles.fill}
+        mapStyle={env.EXPO_PUBLIC_MAP_STYLE_URL}
+        logo={false}
+        compass
+        accessibilityLabel={label}
+      >
         {bounds && <Camera initialViewState={{ bounds, padding: PADDING }} />}
         <GeoJSONSource id="route" data={line}>
           {versions.map((version, i) => {
@@ -100,13 +121,7 @@ export function RouteMap({
                 colors.card,
               ],
               'circle-stroke-width': 2,
-              // El tipo de `match` no admite pares armados con un spread; el valor es válido.
-              'circle-stroke-color': [
-                'match',
-                ['get', 'round'],
-                ...versions.flatMap((_, n) => [n, colors[roundStyle(n).color]]),
-                colors.foreground,
-              ] as never,
+              'circle-stroke-color': strokeByRound,
             }}
           />
           <Layer
@@ -129,7 +144,7 @@ export function RouteMap({
             }}
           />
         </GeoJSONSource>
-        <NativeUserLocation androidPreferredFramesPerSecond={10} />
+        {live && <NativeUserLocation androidPreferredFramesPerSecond={10} />}
       </Map>
     </View>
   );
