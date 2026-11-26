@@ -15,6 +15,8 @@ import {
   buildShiftNotification,
   previousAssignmentResult,
   GUARD_SHIFTS_PAGE_SIZE,
+  SHIFT_LIST_STATES,
+  type ShiftListQuery,
   type GuardShiftsPage,
   type GuardShiftsQuery,
   type ReassignShiftRequest,
@@ -34,14 +36,6 @@ import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.po
 /** Ventanas de ronda que cuentan como cumplidas en el resumen del vigilador. */
 const DONE_WINDOW = new Set(['complete', 'complete_late']);
 
-interface ShiftListQuery {
-  predio?: string;
-  vigilador?: string;
-  desde?: string;
-  hasta?: string;
-  sinVigilador?: 'true' | 'false';
-}
-
 /** Motivo de los turnos reemplazados al modificar una programación (HU-32): no se listan. */
 export const SCHEDULE_REGENERATION_REASON = 'Regeneración de programación';
 
@@ -60,28 +54,53 @@ export class ShiftsService {
   async list(query: ShiftListQuery) {
     if (query.predio) await this.resources.findOwnedOrThrow('Site', query.predio);
     if (query.vigilador) await this.assertGuard(query.vigilador);
-    return this.prisma.tenantPrisma.shift.findMany({
-      where: {
-        ...(query.predio ? { siteId: query.predio } : {}),
-        ...(query.vigilador
-          ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
-          : {}),
-        NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
-        ...(query.sinVigilador === 'true' ? { status: 'unassigned' } : {}),
-        ...(query.sinVigilador === 'false' ? { status: { not: 'unassigned' } } : {}),
-        ...(query.desde || query.hasta
-          ? {
-              startsAt: {
-                ...(query.desde ? { gte: new Date(query.desde) } : {}),
-                ...(query.hasta ? { lte: new Date(query.hasta) } : {}),
+    const search = { contains: query.q, mode: 'insensitive' as const };
+    const where: Prisma.ShiftWhereInput = {
+      ...(query.predio ? { siteId: query.predio } : {}),
+      ...(query.vigilador
+        ? { assignments: { some: { guardId: query.vigilador, isCurrent: true } } }
+        : {}),
+      NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
+      ...(query.estado ? { status: { in: [...SHIFT_LIST_STATES[query.estado]] } } : {}),
+      ...(query.q
+        ? {
+            OR: [
+              { site: { name: search } },
+              {
+                assignments: {
+                  some: {
+                    isCurrent: true,
+                    guard: { OR: [{ firstName: search }, { lastName: search }] },
+                  },
+                },
               },
-            }
-          : {}),
-      },
-      include: this.shiftInclude(),
-      orderBy: { startsAt: 'asc' },
-      take: 500,
-    });
+            ],
+          }
+        : {}),
+      ...(query.desde || query.hasta
+        ? {
+            startsAt: {
+              ...(query.desde ? { gte: new Date(query.desde) } : {}),
+              ...(query.hasta ? { lte: new Date(query.hasta) } : {}),
+            },
+          }
+        : {}),
+    };
+    const [field, dir] = query.orden.split(':') as ['inicio' | 'predio', 'asc' | 'desc'];
+    const [items, total] = await Promise.all([
+      this.prisma.tenantPrisma.shift.findMany({
+        where,
+        include: this.shiftInclude(),
+        orderBy:
+          field === 'predio'
+            ? [{ site: { name: dir } }, { startsAt: 'desc' }]
+            : [{ startsAt: dir }, { id: 'asc' }],
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
+      }),
+      this.prisma.tenantPrisma.shift.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async get(id: string, user: AuthenticatedUser) {

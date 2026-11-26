@@ -36,5 +36,37 @@ export const shiftOutputSchema = z.object({
   status: z.enum(['scheduled', 'unassigned', 'cancelled', 'cancelled_by_suspension']),
 });
 
+/** Grupos de estado del listado de turnos: lo que el supervisor busca, no el enum crudo. */
+export const SHIFT_LIST_STATES = {
+  programado: ['scheduled'],
+  en_curso: ['in_progress'],
+  finalizado: ['closed', 'auto_closed'],
+  problema: ['unassigned', 'uncovered', 'no_show'],
+  cancelado: ['cancelled', 'cancelled_by_suspension'],
+} as const;
+export type ShiftListState = keyof typeof SHIFT_LIST_STATES;
+
+export const SHIFT_LIST_ORDERS = [
+  'inicio:asc',
+  'inicio:desc',
+  'predio:asc',
+  'predio:desc',
+] as const;
+
+export const shiftListQuerySchema = z.object({
+  predio: z.string().min(1).optional(),
+  vigilador: z.string().min(1).optional(),
+  desde: isoDateTime.optional(),
+  hasta: isoDateTime.optional(),
+  estado: z
+    .enum(Object.keys(SHIFT_LIST_STATES) as [ShiftListState, ...ShiftListState[]])
+    .optional(),
+  q: z.string().trim().max(100).optional(),
+  orden: z.enum(SHIFT_LIST_ORDERS).default('inicio:desc'),
+  pagina: z.coerce.number().int().min(1).default(1),
+  porPagina: z.coerce.number().int().min(1).max(100).default(25),
+});
+export type ShiftListQuery = z.infer<typeof shiftListQuerySchema>;
+
 export type ShiftInput = z.infer<typeof shiftInputSchema>;
 export type ShiftOutput = z.infer<typeof shiftOutputSchema>;

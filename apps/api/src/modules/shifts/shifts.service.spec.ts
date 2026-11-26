@@ -86,24 +86,46 @@ it.each([
 describe('audit shift list filters', () => {
   const now = new Date('2030-05-10T22:30:00Z');
   const findMany = jest.fn().mockResolvedValue([]);
+  const count = jest.fn().mockResolvedValue(0);
   const service = new ShiftsService(
-    { tenantPrisma: { shift: { findMany } } } as unknown as PrismaService,
+    { tenantPrisma: { shift: { findMany, count } } } as unknown as PrismaService,
     {} as TenantResourceService,
     { now: () => now },
     { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
     { resolve: jest.fn(), raise: jest.fn() },
     { emitToSite: jest.fn() },
   );
-  it('excludes only unassigned shifts when sinVigilador is false', async () => {
-    await service.list({ sinVigilador: 'false' });
+  it('filters by state group, searches site or guard and paginates', async () => {
+    const result = await service.list({
+      estado: 'problema',
+      q: 'ferre',
+      orden: 'predio:asc',
+      pagina: 3,
+      porPagina: 10,
+    });
+    const search = { contains: 'ferre', mode: 'insensitive' };
+    const where = {
+      NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
+      status: { in: ['unassigned', 'uncovered', 'no_show'] },
+      OR: [
+        { site: { name: search } },
+        {
+          assignments: {
+            some: { isCurrent: true, guard: { OR: [{ firstName: search }, { lastName: search }] } },
+          },
+        },
+      ],
+    };
     expect(findMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        where: {
-          NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
-          status: { not: 'unassigned' },
-        },
+        where,
+        orderBy: [{ site: { name: 'asc' } }, { startsAt: 'desc' }],
+        skip: 20,
+        take: 10,
       }),
     );
+    expect(count).toHaveBeenLastCalledWith({ where });
+    expect(result).toEqual({ items: [], total: 0 });
   });
   it('includes current running assignments even after scheduled end', async () => {
     await service.mine({ userId: 'guard', companyId: 'company', role: 'guard', status: 'active' });

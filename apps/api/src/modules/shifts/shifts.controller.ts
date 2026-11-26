@@ -19,21 +19,15 @@ import {
 import {
   guardShiftsQuerySchema,
   reassignShiftRequestSchema,
+  shiftListQuerySchema,
   shiftReplacementsQuerySchema,
   shiftInputSchema,
+  SHIFT_LIST_ORDERS,
+  SHIFT_LIST_STATES,
 } from '@garita/shared';
-import { z } from 'zod';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ShiftsService } from './shifts.service';
-
-const listQuerySchema = z.object({
-  predio: z.string().optional(),
-  vigilador: z.string().optional(),
-  desde: z.iso.datetime({ offset: true }).optional(),
-  hasta: z.iso.datetime({ offset: true }).optional(),
-  sinVigilador: z.enum(['true', 'false']).optional(),
-});
 
 @ApiTags('Turnos')
 @ApiBearerAuth()
@@ -48,9 +42,13 @@ export class ShiftsController {
   @ApiQuery({ name: 'vigilador', required: false, type: String })
   @ApiQuery({ name: 'desde', required: false, type: String, format: 'date-time' })
   @ApiQuery({ name: 'hasta', required: false, type: String, format: 'date-time' })
-  @ApiQuery({ name: 'sinVigilador', required: false, enum: ['true', 'false'] })
+  @ApiQuery({ name: 'estado', required: false, enum: Object.keys(SHIFT_LIST_STATES) })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'orden', required: false, enum: SHIFT_LIST_ORDERS })
+  @ApiQuery({ name: 'pagina', required: false, type: Number })
+  @ApiQuery({ name: 'porPagina', required: false, type: Number })
   list(@Query() query: unknown) {
-    const parsed = listQuerySchema.safeParse(query);
+    const parsed = shiftListQuerySchema.safeParse(query);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
     return this.shifts.list(parsed.data);
   }
