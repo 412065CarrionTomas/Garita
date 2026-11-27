@@ -288,6 +288,10 @@ it('shows only the window owner readings, with flag details and the guard histor
     distanceMeters: 400,
   });
   expect(detail.records[0]).not.toHaveProperty('location');
+  // Antecedentes por hora del servidor, no del celular.
+  expect(db.checkpointRecord.count).toHaveBeenCalledWith({
+    where: expect.objectContaining({ receivedAt: { gte: expect.any(Date) as unknown } }) as unknown,
+  });
   expect(detail.guardHistory).toEqual({
     days: 30,
     records: 50,

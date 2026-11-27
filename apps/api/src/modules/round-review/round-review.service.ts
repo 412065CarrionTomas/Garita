@@ -197,8 +197,11 @@ export class RoundReviewService {
         })
       : [];
     const byShift = new Map<string, typeof flagged>();
-    for (const record of flagged)
-      byShift.set(record.shiftId, [...(byShift.get(record.shiftId) ?? []), record]);
+    for (const record of flagged) {
+      const list = byShift.get(record.shiftId);
+      if (list) list.push(record);
+      else byShift.set(record.shiftId, [record]);
+    }
     const items = windows.map((item) => {
       const owner = windowAssignment(item.endsAt, item.shift.assignments);
       const flags = (byShift.get(item.shiftId) ?? [])
@@ -294,12 +297,13 @@ export class RoundReviewService {
     });
     if (!window) throw new NotFoundException('Ventana no encontrada');
     const owner = windowAssignment(window.endsAt, window.shift.assignments);
-    // Antecedentes: lecturas que cuentan, hechas en los últimos 30 días; marcas e invalidaciones
-    // de esas mismas lecturas, para que las tres cifras hablen de lo mismo.
+    // Antecedentes: lecturas que cuentan, recibidas en los últimos 30 días; marcas e invalidaciones
+    // de esas mismas lecturas, para que las tres cifras hablen de lo mismo. Se usa la hora del
+    // servidor: la del celular puede estar alterada justo en quien tiene antecedentes.
     const recent = {
       assignment: { guardId: owner?.guardId ?? '' },
       countsForCompliance: true,
-      occurredAtDevice: { gte: new Date(this.clock.now().getTime() - LOOKBACK_DAYS * DAY) },
+      receivedAt: { gte: new Date(this.clock.now().getTime() - LOOKBACK_DAYS * DAY) },
     };
     const [timezone, records, history] = await Promise.all([
       this.companyTimezone(user),
