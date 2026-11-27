@@ -54,7 +54,9 @@ function setup(now = graceEndsAt, shiftOverrides: Record<string, unknown> = {}) 
       findUnique: jest.fn().mockResolvedValue({ status: 'complete_late' }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       update: jest.fn(),
+      count: jest.fn().mockResolvedValue(1),
     },
+    company: { findUniqueOrThrow: jest.fn().mockResolvedValue({ timezone: 'UTC' }) },
     checkpointRecord: {
       findFirst: jest.fn().mockResolvedValue(record),
       findMany: jest.fn().mockImplementation(() => Promise.resolve([record])),
@@ -139,5 +141,59 @@ it.each([
   await service.recordDecision('record', 'invalidate', user, 'Registro inválido');
   expect(db.roundWindowState.update).toHaveBeenCalledWith(
     expect.objectContaining({ data: expect.objectContaining({ status }) as unknown }),
+  );
+});
+
+it('lists the queue with guard, live flags and counters', async () => {
+  const { service, db, window } = setup();
+  const owner = {
+    id: 'owner',
+    startsAt,
+    result: 'started',
+    guard: { firstName: 'Ana', lastName: 'Paz' },
+  };
+  const item = {
+    ...window,
+    shift: { id: 'shift', site: { id: 'site', name: 'Norte' }, assignments: [owner] },
+    round: { name: 'Perimetral' },
+    decisions: [],
+  };
+  db.roundWindowState.findMany.mockResolvedValue([item]);
+  db.checkpointRecord.findMany.mockResolvedValue([
+    {
+      shiftId: 'shift',
+      countedFor: [{ roundId: 'round', windowIndex: 0 }],
+      flags: [
+        { type: 'simulated_location', severity: 'grave' },
+        { type: 'out_of_range', severity: 'media' },
+      ],
+    },
+    // Otra ventana del mismo turno: no suma.
+    {
+      shiftId: 'shift',
+      countedFor: [{ roundId: 'round', windowIndex: 1 }],
+      flags: [{ type: 'time_altered', severity: 'grave' }],
+    },
+  ]);
+  const queue = await service.queue(user, { estado: 'pendientes' });
+  expect(queue).toMatchObject({ timezone: 'UTC', count: 1, overdue: 1 });
+  expect(queue.items[0]).toMatchObject({
+    guardName: 'Ana Paz',
+    flags: { grave: 1, media: 1, leve: 0, types: ['simulated_location', 'out_of_range'] },
+    resolution: null,
+  });
+});
+
+it('filters the queue by the round dates in the company timezone, end day included', async () => {
+  const { service, db } = setup();
+  db.roundWindowState.findMany.mockResolvedValue([]);
+  await service.queue(user, { estado: 'resueltas', desde: '2026-11-20', hasta: '2026-11-22' });
+  expect(db.roundWindowState.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({
+        status: { not: 'in_review' },
+        startsAt: { gte: new Date('2026-11-20T00:00:00Z'), lt: new Date('2026-11-23T00:00:00Z') },
+      }) as unknown,
+    }),
   );
 });

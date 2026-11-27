@@ -6,7 +6,17 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { RoundReviewService } from './round-review.service';
 
 const idSchema = z.string().min(1).max(100);
-const queueSchema = z.object({ predio: idSchema.optional() }).strict();
+const queueSchema = z
+  .object({
+    predio: idSchema.optional(),
+    estado: z.enum(['pendientes', 'resueltas']).default('pendientes'),
+    desde: z.iso.date().optional(),
+    hasta: z.iso.date().optional(),
+  })
+  .strict()
+  .refine((q) => !q.desde || !q.hasta || q.desde <= q.hasta, {
+    message: 'La fecha inicial debe ser anterior a la final',
+  });
 const decisionSchema = z.object({ comment: z.string().trim().min(5).max(500) }).strict();
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -22,16 +32,19 @@ export class RoundReviewController {
   constructor(private readonly reviews: RoundReviewService) {}
 
   @Get('ventanas-ronda/en-revision')
-  @ApiOperation({ summary: 'Lista ventanas en revisión y devuelve el contador' })
+  @ApiOperation({ summary: 'Lista ventanas pendientes o resueltas (30 días) y los contadores' })
   @ApiQuery({ name: 'predio', required: false })
-  queue(@Query() raw: unknown) {
-    return this.reviews.queue(parse(queueSchema, raw).predio);
+  @ApiQuery({ name: 'estado', required: false, enum: ['pendientes', 'resueltas'] })
+  @ApiQuery({ name: 'desde', required: false, type: String, format: 'date' })
+  @ApiQuery({ name: 'hasta', required: false, type: String, format: 'date' })
+  queue(@Query() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
+    return this.reviews.queue(user, parse(queueSchema, raw));
   }
 
   @Get('ventanas-ronda/:id')
   @ApiOperation({ summary: 'Consulta registros, marcas e historial de una ventana' })
-  detail(@Param('id') id: string) {
-    return this.reviews.detail(parse(idSchema, id));
+  detail(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.reviews.detail(parse(idSchema, id), user);
   }
 
   @Post('ventanas-ronda/:id/validar')
