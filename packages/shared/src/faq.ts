@@ -11,8 +11,10 @@ export interface FaqEntry {
   /** Párrafos de la respuesta; un paso numerado por párrafo. `**texto**` marca botones y pantallas. */
   answer: readonly string[];
   audiences: readonly FaqAudience[];
-  /** Pantalla del panel web donde se resuelve. La app no la muestra. */
+  /** Pantalla del panel web donde se resuelve. La app no la muestra; lo público no la lleva. */
   link?: { path: string; label: string };
+  /** Para administrador y supervisor: aplica a la app móvil, que solo gestiona etiquetas NFC. */
+  inApp?: true;
 }
 
 /**
@@ -90,10 +92,9 @@ export const faqEntries: readonly FaqEntry[] = [
     answer: [
       '1. En **Iniciar sesión** (web o app), tocá **Olvidé mi contraseña**.',
       '2. Ingresá tu **Correo electrónico** y tocá **Enviar enlace**.',
-      '3. Abrí el enlace que te llega (revisá también spam), creá la contraseña nueva y tocá **Volver a ingresar**.',
+      '3. Abrí el enlace que te llega (revisá también spam), creá la contraseña nueva y volvé a **Iniciar sesión**.',
     ],
     audiences: ['public'],
-    link: { path: '/recuperar', label: 'Recuperar contraseña' },
   },
   {
     id: 'cannot-sign-in',
@@ -114,7 +115,6 @@ export const faqEntries: readonly FaqEntry[] = [
       `Por consultas sobre privacidad o tus datos, escribí a ${LEGAL_OWNER.email}.`,
     ],
     audiences: ['public'],
-    link: { path: '/terminos', label: 'Términos y Condiciones' },
   },
   {
     id: 'accept-updated-terms',
@@ -432,6 +432,17 @@ export const faqEntries: readonly FaqEntry[] = [
       'En un punto ya etiquetado podés usar **Reemplazar etiqueta** o **Quitar etiqueta**; para saber de qué punto es una etiqueta suelta, usá **Identificar etiqueta**.',
     ],
     audiences: ['admin', 'supervisor'],
+    inApp: true,
+  },
+  {
+    id: 'staff-mobile-scope',
+    topic: 'Puntos y etiquetas',
+    question: '¿Qué puedo hacer en la app móvil como administrador o supervisor?',
+    answer: [
+      'Solo gestionar las etiquetas NFC de los puntos desde **Etiquetas NFC**. Turnos, alertas, incidentes y reportes se manejan desde el panel web.',
+    ],
+    audiences: ['admin', 'supervisor'],
+    inApp: true,
   },
   {
     id: 'rounds-and-time-windows',
@@ -976,7 +987,19 @@ export function faqForRole(
   entries: readonly FaqEntry[] = faqEntries,
 ): FaqEntry[] {
   const own = role === null ? [] : entries.filter((entry) => entry.audiences.includes(role));
-  return [...own, ...entries.filter((entry) => entry.audiences.includes('public'))];
+  // Una entrada pública y del rol a la vez aparece una sola vez (las claves deben ser únicas).
+  return [...own, ...entries.filter((e) => e.audiences.includes('public') && !own.includes(e))];
+}
+
+/** En la app, administrador y supervisor solo ven lo que aplica a la app (etiquetas NFC). */
+export function faqForApp(
+  role: UserRole | null,
+  entries: readonly FaqEntry[] = faqEntries,
+): FaqEntry[] {
+  if (role !== 'admin' && role !== 'supervisor') return faqForRole(role, entries);
+  return faqForRole(role, entries).filter(
+    (entry) => entry.audiences.includes('public') || entry.inApp,
+  );
 }
 
 function normalize(text: string) {
@@ -991,7 +1014,10 @@ export function searchFaq(entries: readonly FaqEntry[], query: string): FaqEntry
   const words = normalize(query).split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...entries];
   return entries.filter((entry) => {
-    const haystack = normalize([entry.topic, entry.question, ...entry.answer].join(' '));
+    const haystack = normalize([entry.topic, entry.question, ...entry.answer].join(' ')).replaceAll(
+      '**',
+      '',
+    );
     return words.every((word) => haystack.includes(word));
   });
 }

@@ -1,4 +1,4 @@
-import { faqEntries, faqForRole, groupFaqByTopic, searchFaq } from './faq';
+import { faqEntries, faqForApp, faqForRole, groupFaqByTopic, searchFaq } from './faq';
 import type { FaqEntry } from './faq';
 import { USER_ROLES } from './roles';
 
@@ -35,6 +35,40 @@ describe('faqForRole', () => {
     expect(faqForRole('guard', sample).map((entry) => entry.id)).toEqual(['c', 'a']);
     expect(faqForRole('client', sample).map((entry) => entry.id)).toEqual(['a']);
   });
+
+  it('no repite una entrada que es pública y del rol a la vez', () => {
+    const both: FaqEntry = {
+      id: 'd',
+      topic: 'Acceso',
+      question: '¿Para quién es?',
+      answer: ['Para todos.'],
+      audiences: ['public', 'admin'],
+    };
+    expect(faqForRole('admin', [both]).map((entry) => entry.id)).toEqual(['d']);
+  });
+});
+
+describe('faqForApp', () => {
+  it('a administrador y supervisor solo les muestra lo de la app y lo público', () => {
+    const inApp: FaqEntry = {
+      id: 'e',
+      topic: 'Etiquetas',
+      question: '¿Cómo asocio una etiqueta?',
+      answer: ['Desde la app.'],
+      audiences: ['admin', 'supervisor'],
+      inApp: true,
+    };
+    expect(faqForApp('admin', [...sample, inApp]).map((entry) => entry.id)).toEqual(['e', 'a']);
+  });
+
+  it('al vigilador le muestra todo lo suyo', () => {
+    expect(faqForApp('guard', sample).map((entry) => entry.id)).toEqual(['c', 'a']);
+  });
+
+  it('cada rol del personal tiene preguntas para la app', () => {
+    for (const role of ['admin', 'supervisor'] as const)
+      expect(faqForApp(role).some((entry) => entry.inApp)).toBe(true);
+  });
 });
 
 describe('searchFaq', () => {
@@ -42,6 +76,7 @@ describe('searchFaq', () => {
     expect(searchFaq(sample, 'PANICO').map((entry) => entry.id)).toEqual(['c']);
     expect(searchFaq(sample, 'crear turno').map((entry) => entry.id)).toEqual(['b']);
     expect(searchFaq(sample, 'turno inexistente')).toEqual([]);
+    expect(searchFaq(sample, '**')).toEqual([]);
   });
 
   it('sin texto devuelve todo', () => {
@@ -77,6 +112,8 @@ describe('contenido', () => {
       expect(entry.question).toMatch(/^¿.+\?$/);
       expect(entry.answer.length).toBeLessThanOrEqual(4);
       if (entry.link) expect(entry.link.path).toMatch(/^\/[^/]/);
+      // Con sesión, un enlace público sacaría al usuario del panel.
+      if (entry.audiences.includes('public')) expect(entry.link).toBeUndefined();
     }
   });
 
