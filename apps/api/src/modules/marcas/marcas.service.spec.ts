@@ -225,6 +225,28 @@ describe('MarcasService', () => {
       expect(impossible()).toBe(false);
     });
 
+    it('no consulta las rondas del par si los puntos están a menos de 100 m', async () => {
+      checkpointFindUnique.mockResolvedValue({
+        id: 'cp-1',
+        latitude: -34.6037,
+        longitude: -58.3816,
+        toleranceRadiusMeters: 30,
+        isIndoor: false,
+        site: { maxSpeedKmh: 10 },
+        nfcTags: [],
+      });
+      checkpointRecordFindFirst.mockResolvedValue({
+        occurredAtDevice: new Date('2026-10-14T09:59:30.000Z'),
+        countedFor: [{ roundId: 'a-pie', windowIndex: 0 }],
+        checkpoint: { id: 'cp-prev', latitude: -34.6037 - 50 / 111195, longitude: -58.3816 },
+      });
+      await service.evaluateRecord({
+        ...baseInput,
+        countedFor: [{ roundId: 'a-pie', windowIndex: 0 }],
+      });
+      expect(shiftRoundFindMany).not.toHaveBeenCalled();
+    });
+
     it('si el checkpoint no existe, no falla ni crea marcas', async () => {
       checkpointFindUnique.mockResolvedValue(null);
 

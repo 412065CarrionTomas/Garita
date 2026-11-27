@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   evaluateRecordFlags,
+  haversineMeters,
+  IMPOSSIBLE_TIME_MIN_METERS,
   DEFAULT_SPEEDS_KMH,
   type RecordFlagSeverity,
   type ShiftRecordsResponse,
@@ -144,8 +146,17 @@ export class MarcasService {
       const currentRounds = roundIdsOf(record.countedFor);
       const previousRounds = roundIdsOf(previousRecord?.countedFor);
       const pairRounds = [...new Set([...currentRounds, ...previousRounds])];
+      // Pares a menos del mínimo no se evalúan por tiempo imposible: no hace falta la consulta.
+      const evaluatesSpeed =
+        previousRecord !== undefined &&
+        haversineMeters(
+          Number(previousRecord.checkpoint.latitude),
+          Number(previousRecord.checkpoint.longitude),
+          Number(checkpoint.latitude),
+          Number(checkpoint.longitude),
+        ) >= IMPOSSIBLE_TIME_MIN_METERS;
       const shiftRounds =
-        previousRecord && pairRounds.length > 0
+        evaluatesSpeed && pairRounds.length > 0
           ? await this.prisma.tenantPrisma.shiftRound.findMany({
               where: { shiftId: record.shiftId, roundId: { in: pairRounds } },
               select: { roundId: true, roundVersion: { select: { maxSpeedKmh: true } } },
@@ -194,7 +205,7 @@ export class MarcasService {
               },
             }
           : null,
-        site: { maxSpeedKmh },
+        speed: { maxSpeedKmh },
       });
 
       const secureTag = checkpoint.nfcTags[0];

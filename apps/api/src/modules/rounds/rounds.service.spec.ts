@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+import { defaultRouteInput } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
@@ -82,53 +84,51 @@ describe('round versions for the guard', () => {
 });
 
 describe('round speed', () => {
-  it('saves the round speed in the new version and routes with its profile', async () => {
-    const versionCreate = jest.fn().mockResolvedValue({ id: 'v2' });
-    const tx = {
-      roundVersion: {
-        findFirstOrThrow: jest.fn().mockResolvedValue({ versionNumber: 1 }),
-        create: versionCreate,
-      },
-      round: { update: jest.fn().mockResolvedValue({ id: 'r1' }) },
-    };
-    const tenantPrisma = {
-      checkpoint: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: 'p1',
-            latitude: new Prisma.Decimal('-31.4'),
-            longitude: new Prisma.Decimal('-64.1'),
-          },
-        ]),
-      },
-      site: {
-        findFirstOrThrow: jest.fn().mockResolvedValue({
-          latitude: new Prisma.Decimal('-31.4'),
-          longitude: new Prisma.Decimal('-64.1'),
-          maxSpeedProfile: 'walking',
-        }),
-      },
-      $transaction: (run: (client: typeof tx) => Promise<unknown>) => run(tx),
-    };
-    const build = jest.fn().mockResolvedValue({ route: { closed: true, legs: [] }, failures: [] });
-    const service = new RoundsService(
-      { tenantPrisma } as unknown as PrismaService,
-      {
-        findOwnedOrThrow: jest.fn().mockResolvedValue({ siteId: 's1' }),
-      } as unknown as TenantResourceService,
-      { build } as unknown as RouteBuilder,
-      { now: () => new Date() },
-    );
-    const user = { userId: 'u', companyId: 'c', role: 'admin', status: 'active' } as const;
-    const input = {
-      name: 'Perímetro',
-      checkpointIds: ['p1'],
-      frequencyMinutes: 120,
-      windowStartLocal: '22:00',
-      windowEndLocal: '06:00',
-      graceMinutes: 15,
-    };
+  const versionCreate = jest.fn().mockResolvedValue({ id: 'v2' });
+  const roundCreate = jest.fn().mockResolvedValue({ id: 'r1' });
+  const tx = {
+    roundVersion: {
+      findFirstOrThrow: jest.fn().mockResolvedValue({ id: 'v1', versionNumber: 1 }),
+      create: versionCreate,
+    },
+    round: { create: roundCreate, update: jest.fn().mockResolvedValue({ id: 'r1' }) },
+  };
+  const point = (id: string) => ({
+    id,
+    latitude: new Prisma.Decimal('-31.4'),
+    longitude: new Prisma.Decimal('-64.1'),
+  });
+  const tenantPrisma = {
+    checkpoint: { findMany: jest.fn().mockResolvedValue([point('p1'), point('p2')]) },
+    site: {
+      findFirstOrThrow: jest.fn().mockResolvedValue({
+        latitude: new Prisma.Decimal('-31.4'),
+        longitude: new Prisma.Decimal('-64.1'),
+        maxSpeedProfile: 'walking',
+      }),
+    },
+    $transaction: (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+  };
+  const build = jest.fn().mockResolvedValue({ route: { closed: true, legs: [] }, failures: [] });
+  const service = new RoundsService(
+    { tenantPrisma } as unknown as PrismaService,
+    {
+      findOwnedOrThrow: jest.fn().mockResolvedValue({ siteId: 's1', status: 'active' }),
+    } as unknown as TenantResourceService,
+    { build } as unknown as RouteBuilder,
+    { now: () => new Date() },
+  );
+  const user = { userId: 'u', companyId: 'c', role: 'admin', status: 'active' } as const;
+  const input = {
+    name: 'Perímetro',
+    checkpointIds: ['p1'],
+    frequencyMinutes: 120,
+    windowStartLocal: '22:00',
+    windowEndLocal: '06:00',
+    graceMinutes: 15,
+  };
 
+  it('saves the round speed in the new version and routes with its profile', async () => {
     await service.update('r1', { ...input, speedProfile: 'vehicle' }, user);
     expect(build).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'vehicle');
     expect(versionCreate).toHaveBeenLastCalledWith({
@@ -141,6 +141,36 @@ describe('round speed', () => {
     expect(versionCreate).toHaveBeenLastCalledWith({
       data: expect.objectContaining({ speedProfile: null, maxSpeedKmh: null }) as unknown,
     });
+  });
+
+  it('a custom speed keeps its km/h; without them it fails before routing', async () => {
+    await service.update('r1', { ...input, speedProfile: 'custom', maxSpeedKmh: 40 }, user);
+    expect(versionCreate).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ speedProfile: 'custom', maxSpeedKmh: 40 }) as unknown,
+    });
+    build.mockClear();
+    await expect(
+      service.update('r1', { ...input, speedProfile: 'custom', maxSpeedKmh: null }, user),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(build).not.toHaveBeenCalled();
+  });
+
+  it('creates the first version with the speed and previews with the round profile', async () => {
+    await service.create('s1', { ...input, speedProfile: 'bicycle' }, user);
+    expect(roundCreate).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({
+        versions: {
+          create: expect.objectContaining({ speedProfile: 'bicycle', maxSpeedKmh: 25 }) as unknown,
+        },
+      }) as unknown,
+    });
+    await service.previewRoute({
+      siteId: 's1',
+      checkpointIds: ['p1', 'p2'],
+      route: defaultRouteInput(2),
+      speedProfile: 'vehicle',
+    });
+    expect(build).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'vehicle');
   });
 });
 

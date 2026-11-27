@@ -19,6 +19,7 @@ import {
   type RoundRoute,
   type RouteInput,
   type RoundRoutePreviewInput,
+  type RoundInput,
   type RoundRoutePreviewResponse,
   type SpeedProfile,
 } from '@garita/shared';
@@ -27,19 +28,6 @@ import { CLOCK, type Clock } from '../../common/clock';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { RouteBuilder } from '../routing/route-builder';
-
-interface RoundInput {
-  name: string;
-  checkpointIds: string[];
-  frequencyMinutes: number;
-  windowStartLocal: string;
-  windowEndLocal: string;
-  graceMinutes: number;
-  route?: RouteInput;
-  allowStraight?: boolean;
-  speedProfile?: SpeedProfile | null;
-  maxSpeedKmh?: number | null;
-}
 
 /** Velocidad que se guarda en la versión: sin perfil, ninguna (se usa la del predio). */
 function roundSpeed(input: RoundInput) {
