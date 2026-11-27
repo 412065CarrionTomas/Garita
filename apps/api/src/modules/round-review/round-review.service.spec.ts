@@ -65,6 +65,7 @@ function setup(now = graceEndsAt, shiftOverrides: Record<string, unknown> = {}) 
         record.invalidatedAt = now;
         return Promise.resolve({ count: 1 });
       }),
+      count: jest.fn().mockResolvedValue(0),
     },
     roundReviewDecision: { create: jest.fn() },
   };
@@ -270,9 +271,7 @@ it('shows only the window owner readings, with flag details and the guard histor
     reading,
     { ...reading, id: 'other-window', countedFor: [{ roundId: 'round', windowIndex: 1 }] },
   ]);
-  Object.assign(db.checkpointRecord, {
-    count: jest.fn().mockResolvedValueOnce(50).mockResolvedValueOnce(2),
-  });
+  db.checkpointRecord.count.mockResolvedValueOnce(50).mockResolvedValueOnce(2);
   db.recordFlag.count.mockResolvedValue(3);
   const detail = await service.detail('window', user);
   // Solo las lecturas de la asignación dueña, y solo las de esta ventana.
