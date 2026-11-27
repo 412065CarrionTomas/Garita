@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithQueryClient } from '@/test/render';
-import { apiPost } from '@/lib/api-client';
+import { apiGet, apiPost } from '@/lib/api-client';
 import { ClientsPage } from './clients-page';
 
 jest.mock('@/lib/api-client', () => {
@@ -23,17 +23,24 @@ jest.mock('@/lib/api-client', () => {
               { id: 'shift-1', startsAt: '2026-10-20T10:00:00Z', endsAt: '2026-10-20T18:00:00Z' },
             ],
           })
-        : Promise.resolve([
-            {
-              id: 'client-1',
-              name: 'Cliente Norte',
-              contactName: 'Ana',
-              phone: '+541112345678',
-              email: 'ana@example.invalid',
-              taxId: null,
-              status: 'active',
-            },
-          ]),
+        : Promise.resolve({
+            items: [
+              {
+                id: 'client-1',
+                name: 'Cliente Norte',
+                contactName: 'Ana',
+                phone: '+541112345678',
+                email: 'ana@example.invalid',
+                taxId: null,
+                status: path.includes('estado=inactive') ? 'inactive' : 'active',
+                _count: { sites: 3 },
+              },
+            ],
+            pagina: 1,
+            total: 1,
+            paginas: 1,
+            resumen: { active: 1, inactive: 2 },
+          }),
     ),
     apiPost: jest.fn(() => Promise.reject(new ApiError('HTTP 409', 409))),
     apiPatch: jest.fn(() => Promise.resolve({ id: 'client' })),
@@ -41,7 +48,41 @@ jest.mock('@/lib/api-client', () => {
   };
 });
 
+const rowAction = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+  await user.click(await screen.findByRole('button', { name: 'Más acciones de Cliente Norte' }));
+  await user.click(await screen.findByRole('menuitem', { name }));
+};
+
 describe('ClientsPage', () => {
+  it('muestra contacto, predios y busca y filtra en el backend sin botón', async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<ClientsPage />);
+    expect(await screen.findByText('ana@example.invalid')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '3 predios de Cliente Norte' })).toHaveAttribute(
+      'href',
+      '/clientes/client-1',
+    );
+    await user.type(screen.getByRole('searchbox', { name: 'Buscar clientes' }), 'norte');
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenLastCalledWith(
+        expect.stringContaining('buscar=norte'),
+        expect.anything(),
+      );
+    });
+    const summary = screen.getByRole('group', { name: 'Resumen de clientes' });
+    await user.click(within(summary).getByRole('button', { name: /Inactivos/ }));
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenLastCalledWith(
+        expect.stringContaining('estado=inactive'),
+        expect.anything(),
+      );
+    });
+    // Un cliente ya dado de baja no ofrece darlo de baja otra vez.
+    await user.click(await screen.findByRole('button', { name: 'Más acciones de Cliente Norte' }));
+    expect(await screen.findByRole('menuitem', { name: 'Editar' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Dar de baja' })).not.toBeInTheDocument();
+  });
+
   it('abre el alta desde el encabezado y permite cancelar sin enviar', async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<ClientsPage />);
@@ -90,7 +131,7 @@ describe('ClientsPage', () => {
   it('abre la edición completa y permite validar, guardar, cancelar y cerrar con Escape', async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<ClientsPage />);
-    await user.click(await screen.findByRole('button', { name: 'Editar' }));
+    await rowAction(user, 'Editar');
     expect(screen.getByRole('dialog', { name: 'Editar cliente' })).toBeInTheDocument();
     const dialog = screen.getByRole('dialog');
     const email = within(dialog).getByLabelText('Correo');
@@ -107,7 +148,7 @@ describe('ClientsPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
-    await user.click(await screen.findByRole('button', { name: 'Editar' }));
+    await rowAction(user, 'Editar');
     await user.click(screen.getByRole('button', { name: 'Cancelar' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -115,7 +156,7 @@ describe('ClientsPage', () => {
   it('muestra la baja en cascada en una confirmación accesible', async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<ClientsPage />);
-    await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
+    await rowAction(user, 'Dar de baja');
     const dialog = screen.getByRole('alertdialog', { name: 'Dar de baja al cliente' });
     expect(dialog).toHaveTextContent('Se cancelarán 4 turnos');
     expect(

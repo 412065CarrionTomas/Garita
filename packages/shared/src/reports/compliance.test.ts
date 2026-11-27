@@ -1,4 +1,9 @@
-import { computeCompliance, complianceOwner, type ComplianceWindow } from './compliance';
+import {
+  computeCompliance,
+  complianceOwner,
+  computeSiteDayGrid,
+  type ComplianceWindow,
+} from './compliance';
 
 const window = (
   status: ComplianceWindow['status'],
@@ -142,5 +147,62 @@ describe('computeCompliance', () => {
       expect(result.bySite[0]?.totals.not_done).toBe(1);
       expect(result.byGuard).toMatchObject([{ id: null, name: 'Sin vigilador' }]);
     }
+  });
+});
+
+describe('computeSiteDayGrid', () => {
+  const period = { desde: '2026-10-01', hasta: '2026-10-05' };
+  const at = (
+    day: string,
+    status: ComplianceWindow['status'],
+    site = { id: 's1', name: 'Depósito' },
+  ) => window(status, { startsAt: `${day}T12:00:00Z`, endsAt: `${day}T14:00:00Z`, site });
+
+  it('una falla manda sobre la demora y la demora sobre lo cumplido', () => {
+    const grid = computeSiteDayGrid(
+      [
+        at('2026-10-01', 'complete'),
+        at('2026-10-01', 'not_done'),
+        at('2026-10-02', 'complete'),
+        at('2026-10-02', 'complete_late'),
+        at('2026-10-03', 'complete'),
+        at('2026-10-04', 'pending_sync'),
+      ],
+      'UTC',
+      period,
+    );
+    expect(grid.days).toEqual(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']);
+    expect(grid.sites[0]?.cells.map((cell) => cell.status)).toEqual([
+      'failed',
+      'late',
+      'ok',
+      'pending',
+    ]);
+    expect(grid.sites[0]?.cells[0]).toMatchObject({ evaluated: 2, percentage: 50 });
+  });
+
+  it('ignora ventanas abiertas o canceladas y marca los días sin rondas', () => {
+    const grid = computeSiteDayGrid(
+      [
+        at('2026-10-02', 'in_progress'),
+        window('not_done', { startsAt: '2026-10-03T12:00:00Z', shiftStatus: 'cancelled' }),
+        at('2026-10-04', 'complete', { id: 's2', name: 'Barrio' }),
+      ],
+      'UTC',
+      period,
+    );
+    expect(grid.sites.map((site) => site.name)).toEqual(['Barrio']);
+    expect(grid.sites[0]?.cells.map((cell) => cell.status)).toEqual(['none', 'none', 'none', 'ok']);
+  });
+
+  it('agrupa por el día local de la empresa', () => {
+    // 01:00 UTC del 2 es todavía el 1 en Buenos Aires.
+    const grid = computeSiteDayGrid(
+      [window('complete', { startsAt: '2026-10-02T01:00:00Z' })],
+      'America/Argentina/Buenos_Aires',
+      period,
+    );
+    expect(grid.sites[0]?.cells[0]?.status).toBe('ok');
+    expect(grid.sites[0]?.cells[1]?.status).toBe('none');
   });
 });

@@ -1,0 +1,113 @@
+LICENCIA DE SOFTWARE PROPIETARIO — GARITA
+Copyright (c) 2026 Tomás Carrión. Todos los derechos reservados.
+
+1. TITULARIDAD
+   Este software, incluyendo el código fuente y objeto de la aplicación móvil,
+   el panel web, el backend, la documentación, los diseños, los diagramas, los
+   modelos de datos, las interfaces, los recursos gráficos y el nombre y marca
+   "Garita" (en adelante, "el Software"), es una obra protegida por la Ley
+   11.723 de Propiedad Intelectual de la República Argentina (modificada por la
+   Ley 25.036) y por los tratados internacionales aplicables, incluido el
+   Convenio de Berna.
+
+   Tomás Carrión (en adelante, "el Titular") es el único y exclusivo titular de
+   todos los derechos patrimoniales y morales sobre el Software. Ninguna
+   disposición de este documento transfiere la propiedad del Software ni de
+   ninguna de sus partes.
+
+2. USO PERMITIDO
+   La publicación de este repositorio tiene únicamente fines de exhibición
+   (portfolio o evaluación profesional). Sin autorización
+   previa y por escrito del Titular, solo se permite:
+   a) ver y leer el código fuente desde la plataforma donde está alojado;
+   b) las acciones que los Términos de Servicio de esa plataforma otorgan
+      obligatoriamente a sus usuarios, sin que ello implique otorgar ningún
+      otro derecho.
+
+3. USOS PROHIBIDOS
+   Sin autorización previa y por escrito del Titular, queda prohibido:
+   a) copiar, reproducir o descargar el Software, total o parcialmente, para
+      un uso distinto de la sola lectura;
+   b) modificar, adaptar, traducir o crear obras derivadas del Software;
+   c) distribuir, publicar, sublicenciar, vender, alquilar o ceder el Software;
+   d) usar el Software, o cualquier parte de él, con fines comerciales, para
+      prestar servicios a terceros o en un entorno de producción;
+   e) aplicar ingeniería inversa, descompilar o desensamblar los componentes
+      compilados o distribuidos;
+   f) quitar, ocultar o alterar este aviso de copyright o cualquier otra
+      indicación de autoría;
+   g) usar el nombre "Garita", los logotipos o la identidad visual del
+      Software para identificar otro producto o servicio;
+   h) usar el Software o partes de él para entrenar, ajustar o evaluar modelos
+      de inteligencia artificial o aprendizaje automático.
+
+   Cualquier uso no autorizado expresamente en este documento está prohibido.
+
+4. AUTORIZACIONES
+   Las solicitudes de permiso o de licencia (comercial o de otro tipo)
+   deben dirigirse al Titular a la dirección de contacto indicada al
+   final. Solo es válida una autorización otorgada por escrito y firmada por
+   el Titular, que puede fijar las condiciones que considere.
+
+5. COMPONENTES DE TERCEROS
+   El Software usa bibliotecas y componentes de terceros que se rigen por sus
+   propias licencias, indicadas en los archivos de dependencias del proyecto
+   (por ejemplo, package.json) o en los propios componentes. Esta licencia no
+   modifica esas licencias ni reclama derechos sobre esos componentes.
+
+6. CONTRIBUCIONES
+   Este repositorio no acepta contribuciones externas salvo acuerdo previo por
+   escrito. Quien, aun así, envíe una contribución (pull request, parche,
+   sugerencia de código u otro aporte) declara que es su autor o que tiene
+   derecho a aportarla, y cede al Titular, en forma gratuita, exclusiva,
+   irrevocable y por todo el plazo legal, los derechos patrimoniales sobre
+   ella, con facultad de usarla, modificarla y explotarla sin restricciones.
+
+7. AUSENCIA DE GARANTÍAS
+   EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍAS DE NINGÚN TIPO, YA
+   SEAN EXPRESAS O IMPLÍCITAS, INCLUIDAS, SIN LIMITARSE A ELLAS, LAS DE
+   COMERCIABILIDAD, IDONEIDAD PARA UN FIN DETERMINADO, EXACTITUD,
+   DISPONIBILIDAD, SEGURIDAD Y NO INFRACCIÓN. EL SOFTWARE PUEDE ESTAR EN
+   DESARROLLO Y CONTENER ERRORES. EL TITULAR NO GARANTIZA QUE EL SOFTWARE
+   CUMPLA REQUISITOS PARTICULARES NI QUE SU FUNCIONAMIENTO SEA ININTERRUMPIDO.
+
+8. LIMITACIÓN DE RESPONSABILIDAD
+   EN LA MEDIDA MÁXIMA PERMITIDA POR LA LEY APLICABLE, EL TITULAR NO SERÁ
+   RESPONSABLE POR NINGÚN DAÑO DIRECTO, INDIRECTO, INCIDENTAL, ESPECIAL,
+   EMERGENTE O LUCRO CESANTE, NI POR PÉRDIDA DE DATOS, INTERRUPCIÓN DE
+   ACTIVIDADES, FALLAS DE SEGURIDAD, INCIDENTES OCURRIDOS EN SERVICIOS DE
+   VIGILANCIA O RECLAMOS DE TERCEROS, DERIVADOS DEL USO, MAL USO O
+   IMPOSIBILIDAD DE USO DEL SOFTWARE, AUN CUANDO SE HUBIERA ADVERTIDO DE LA
+   POSIBILIDAD DE TALES DAÑOS. QUIEN USE EL SOFTWARE SIN AUTORIZACIÓN LO HACE
+   BAJO SU EXCLUSIVO RIESGO Y RESPONSABILIDAD.
+
+   El Software es una herramienta de apoyo para el registro y la
+   verificación de tareas. No sustituye los controles, protocolos ni
+   obligaciones legales propios de las empresas de seguridad, sus clientes o
+   su personal, que siguen siendo responsabilidad exclusiva de ellos.
+
+9. DATOS PERSONALES
+   Quien despliegue u opere el Software con autorización es el único
+   responsable del tratamiento de los datos personales que se recolecten con
+   él (incluidos datos de ubicación, imágenes y registros de actividad) y del
+   cumplimiento de la Ley 25.326 de Protección de los Datos Personales y de
+   cualquier otra norma aplicable.
+
+10. INCUMPLIMIENTO
+    Cualquier uso que viole esta licencia extingue de forma automática e
+    inmediata cualquier permiso otorgado y faculta al Titular a ejercer todas
+    las acciones civiles y penales previstas por la Ley 11.723 y demás normas
+    aplicables, incluido el reclamo de daños y perjuicios.
+
+11. LEY APLICABLE Y JURISDICCIÓN
+    Esta licencia se rige por las leyes de la República Argentina. Para
+    cualquier controversia, las partes se someten a los tribunales ordinarios
+    de la ciudad de Córdoba, Provincia de Córdoba, con renuncia a cualquier
+    otro fuero o jurisdicción, en la medida en que la ley lo permita.
+
+12. DIVISIBILIDAD
+    Si alguna cláusula de esta licencia se declara inválida o inaplicable, las
+    demás seguirán vigentes.
+
+Contacto: Tomás Carrión — soporte.app.garita@gmail.com
+Repositorio: https://github.com/412065CarrionTomas/Garita

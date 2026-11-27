@@ -62,6 +62,9 @@ export const noticesQuerySchema = z.object({
   status: z.enum(NOTICE_STATUSES).optional(),
   kind: z.enum(NOTICE_KINDS).optional(),
   siteId: z.string().min(1).optional(),
+  /** Sin `pageSize` vienen todos (el contador del menú y el tiempo real los usan así). */
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).optional(),
 });
 export type NoticesQuery = z.infer<typeof noticesQuerySchema>;
 
@@ -85,6 +88,8 @@ export const noticeSchema = z.object({
 });
 export const noticesListResponseSchema = z.object({
   items: z.array(noticeSchema),
+  /** Total con los filtros aplicados (para paginar). */
+  total: z.number().int().nonnegative().optional(),
   openCount: z.number().int().nonnegative(),
   unseenOpenCount: z.number().int().nonnegative(),
 });

@@ -1,4 +1,9 @@
-import { defaultReportPeriod, reportDetailQuerySchema, reportQuerySchema } from './schemas';
+import {
+  defaultReportPeriod,
+  reportDetailQuerySchema,
+  reportQuerySchema,
+  siteDayGridQuerySchema,
+} from './schemas';
 
 describe('report periods', () => {
   it.each([
@@ -28,4 +33,17 @@ describe('report periods', () => {
       defaultReportPeriod(new Date('2026-11-01T01:00:00Z'), 'America/Argentina/Buenos_Aires'),
     ).toEqual({ desde: '2026-09-30', hasta: '2026-10-31' });
   });
+});
+
+it('limita los casilleros a 31 días en orden', () => {
+  expect(
+    siteDayGridQuerySchema.safeParse({ desde: '2026-10-01', hasta: '2026-11-01' }).success,
+  ).toBe(true);
+  expect(
+    siteDayGridQuerySchema.safeParse({ desde: '2026-10-01', hasta: '2026-11-02' }).success,
+  ).toBe(false);
+  expect(
+    siteDayGridQuerySchema.safeParse({ desde: '2026-10-02', hasta: '2026-10-01' }).success,
+  ).toBe(false);
+  expect(siteDayGridQuerySchema.safeParse({ desde: '2026-10-01' }).success).toBe(false);
 });

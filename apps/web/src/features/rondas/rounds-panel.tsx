@@ -1,30 +1,73 @@
 import { useQuery } from '@tanstack/react-query';
-import { defaultGraceMinutes, previewWindows, roundInputSchema } from '@garita/shared';
-import { useState } from 'react';
+import {
+  defaultRouteInput,
+  previewWindows,
+  roundRouteSchema,
+  speedProfileSchema,
+  type LngLat,
+} from '@garita/shared';
+import { Copy, EllipsisVertical, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useCallback, useRef, useState, type CSSProperties } from 'react';
 import { z } from 'zod';
-import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
-import { useBusy } from '@/lib/use-busy';
-import { useAuth } from '../auth/auth-context';
-
+import { ColumnResizer } from '@/components/column-resizer';
+import { EmptyState } from '@/components/empty-state';
+import { FloatingNotice } from '@/components/floating-notice';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { apiGet, apiPost } from '@/lib/api-client';
+import { useAuth } from '../auth/auth-context';
+import { cn } from '@/lib/utils';
+import { useColumnWidth } from '@/lib/use-column-width';
+import { useFillHeight } from '@/lib/use-fill-height';
+import { useFloatingNotice } from '@/lib/use-floating-notice';
+import { RoundEditor } from './round-editor';
+import { RouteEditor } from './route-editor';
+import {
+  formatMeters,
+  legMeters,
+  resolveRoute,
+  storedRoute,
+  storedRouteInput,
+} from './route-draft';
 
-const checkpointsSchema = z.array(z.looseObject({ id: z.string(), name: z.string() }));
+const checkpointsSchema = z.array(
+  z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    latitude: z.coerce.number().optional(),
+    longitude: z.coerce.number().optional(),
+  }),
+);
 const roundsSchema = z.array(
   z.looseObject({
     id: z.string(),
     name: z.string(),
     status: z.enum(['active', 'inactive']),
+    scheduledShifts: z.number().optional(),
     currentVersion: z
       .looseObject({
         frequencyMinutes: z.number(),
         windowStartLocal: z.string(),
         windowEndLocal: z.string(),
         graceMinutes: z.number(),
+        route: z.unknown().optional(),
+        speedProfile: speedProfileSchema.nullish(),
+        maxSpeedKmh: z.number().nullish(),
         checkpoints: z.array(
           z.looseObject({
             position: z.number(),
@@ -37,9 +80,11 @@ const roundsSchema = z.array(
 );
 const idSchema = z.looseObject({ id: z.string() });
 
+/** Rondas del predio: la lista y, al crear o editar una, el editor con el mapa. */
 export function RoundsPanel({ site }: { site: { id: string; status: 'active' | 'inactive' } }) {
   const { user } = useAuth();
-  const canWrite = user?.role === 'admin' || user?.role === 'supervisor';
+  const canWrite =
+    (user?.role === 'admin' || user?.role === 'supervisor') && site.status === 'active';
   const rounds = useQuery({
     queryKey: ['rondas', site.id],
     queryFn: () => apiGet(`/predios/${site.id}/rondas`, roundsSchema),
@@ -48,410 +93,318 @@ export function RoundsPanel({ site }: { site: { id: string; status: 'active' | '
     queryKey: ['puntos', site.id],
     queryFn: () => apiGet(`/predios/${site.id}/puntos`, checkpointsSchema),
   });
-  const [name, setName] = useState('');
-  const { busy, run } = useBusy();
-  const [frequency, setFrequency] = useState(120);
-  const [start, setStart] = useState('22:00');
-  const [end, setEnd] = useState('06:00');
-  const [grace, setGrace] = useState(15);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [editingId, setEditingId] = useState<string>();
-  const [confirmId, setConfirmId] = useState<string>();
-  const [message, setMessage] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
-  const labels = previewWindows({
-    windowStartLocal: start,
-    windowEndLocal: end,
-    frequencyMinutes: frequency,
-  });
-  const save = () => run(saveNow);
-  const saveNow = async () => {
-    const parsed = roundInputSchema.safeParse({
-      name,
-      checkpointIds: selected,
-      frequencyMinutes: frequency,
-      windowStartLocal: start,
-      windowEndLocal: end,
-      graceMinutes: grace,
-    });
-    if (!parsed.success) {
-      const nextErrors = parsed.error.issues.reduce<Record<string, string[]>>((errors, issue) => {
-        const field = String(issue.path[0] ?? 'form');
-        errors[field] = [...(errors[field] ?? []), issue.message];
-        return errors;
-      }, {});
-      setFieldErrors(nextErrors);
-      setMessage('');
-      return;
-    }
-    setFieldErrors({});
-    try {
-      if (editingId)
-        await apiPatch(`/rondas/${editingId}`, parsed.data, roundInputSchema, idSchema);
-      else await apiPost(`/predios/${site.id}/rondas`, parsed.data, roundInputSchema, idSchema);
-      setMessage(
-        editingId
-          ? 'Ronda actualizada. Los cambios aplican a los turnos futuros.'
-          : 'Ronda creada.',
-      );
-      setEditingId(undefined);
-      await rounds.refetch();
-    } catch {
-      setMessage('No se pudo guardar la ronda. Verificá los puntos y el nombre.');
-    }
+  // undefined = lista; null = ronda nueva; string = ronda que se edita.
+  const [editingId, setEditingId] = useState<string | null>();
+  // Con `editingId`: crea una ronda nueva con los datos de esa (Duplicar).
+  const [copying, setCopying] = useState(false);
+  const edit = (id: string | null | undefined, copy = false) => {
+    setEditingId(id);
+    setCopying(copy);
   };
+  // Ancho de la lista en % del panel; el mapa toma el resto.
+  const sectionRef = useRef<HTMLElement>(null);
+  const listColumn = useColumnWidth('garita.rondas.ancho-lista', 50, 25, 75);
+  const [confirmId, setConfirmId] = useState<string>();
+  const { notice, notify, close: closeNotice } = useFloatingNotice();
+  const [previewId, setPreviewId] = useState<string>();
+  const [measureFill, fillHeight] = useFillHeight<HTMLElement>();
+  // Estable: un ref nuevo en cada render volvería a medir en cada movimiento del separador.
+  const setSection = useCallback(
+    (element: HTMLElement | null) => {
+      sectionRef.current = element;
+      measureFill(element);
+    },
+    [measureFill],
+  );
+
+  if (editingId !== undefined) {
+    const round = rounds.data?.find((item) => item.id === editingId);
+    const sharedIds = new Set(
+      rounds.data
+        // Al duplicar, los puntos de la original también quedan compartidos con la copia.
+        ?.filter((item) => (copying || item.id !== editingId) && item.status === 'active')
+        .flatMap(
+          (item) => item.currentVersion?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [],
+        ),
+    );
+    return points.isPending ? (
+      <p role="status">Cargando puntos…</p>
+    ) : (
+      <RoundEditor
+        key={`${editingId ?? 'nueva'}-${String(copying)}`}
+        siteId={site.id}
+        points={points.data ?? []}
+        round={round}
+        copy={copying}
+        sharedIds={sharedIds}
+        onClose={(saved) => {
+          edit(undefined);
+          if (saved) {
+            notify(saved);
+            void rounds.refetch();
+          }
+        }}
+      />
+    );
+  }
+
+  const located = (points.data ?? []).flatMap((p) =>
+    p.latitude !== undefined && p.longitude !== undefined
+      ? [{ id: p.id, name: p.name, lat: p.latitude, lng: p.longitude }]
+      : [],
+  );
+  // Activas primero: las dadas de baja quedan al final, atenuadas.
+  const ordered = [...(rounds.data ?? [])].sort(
+    (a, b) => Number(a.status !== 'active') - Number(b.status !== 'active'),
+  );
+  const preview = ordered.find((round) => round.id === previewId) ?? ordered[0];
+  const previewIds =
+    preview?.currentVersion?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [];
+  const previewCoords = previewIds.flatMap((id) => {
+    const point = located.find((p) => p.id === id);
+    return point ? [[point.lng, point.lat] as LngLat] : [];
+  });
+  const previewRoute =
+    storedRouteInput(preview?.currentVersion?.route) ?? defaultRouteInput(previewIds.length);
+  const previewStored = storedRoute(preview?.currentVersion?.route);
+  const previewDisplay =
+    previewStored ?? resolveRoute(previewRoute, previewCoords, new Map()).display;
+
+  const routeMeters = previewStored
+    ? legMeters(previewStored).reduce((sum, m) => sum + m, 0)
+    : undefined;
+  const confirming = rounds.data?.find((round) => round.id === confirmId);
+
   return (
-    <section className="mt-4" aria-labelledby={`rounds-${site.id}`}>
-      <Card className="border-0 py-0">
-        <CardHeader>
+    <section
+      ref={setSection}
+      aria-labelledby={`rounds-${site.id}`}
+      // En pantalla ancha el panel ocupa justo hasta el borde de abajo: scrollea la lista, no la página.
+      style={
+        {
+          '--list': `${String(listColumn.width)}%`,
+          '--fill': fillHeight === undefined ? undefined : `${String(fillHeight)}px`,
+        } as CSSProperties
+      }
+      className="grid items-start gap-4 xl:h-(--fill) xl:grid-cols-[minmax(0,var(--list))_auto_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch xl:gap-x-1"
+    >
+      <div className="grid content-start gap-3 xl:flex xl:min-h-0 xl:flex-col">
+        <div className="flex flex-wrap items-center gap-3">
           <h3
             id={`rounds-${site.id}`}
-            className="font-cond text-xl font-semibold uppercase tracking-wider"
+            className="font-cond text-lg font-semibold tracking-wider uppercase"
           >
             Rondas
+            {rounds.data && (
+              <span className="ml-2 text-muted-foreground tabular-nums">{rounds.data.length}</span>
+            )}
           </h3>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {rounds.isPending ? (
-            <p role="status">Cargando rondas…</p>
-          ) : (
-            rounds.data?.map((round) => (
-              <article key={round.id} className="space-y-3 border-b border-border pb-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h4 className="font-medium">{round.name}</h4>
-                  <StatusBadge tone={round.status === 'active' ? 'success' : 'neutral'}>
-                    {round.status === 'active' ? 'Activo' : 'Inactivo'}
-                  </StatusBadge>
-                </div>
-                <p className="tabular-nums text-muted-foreground">
-                  {round.currentVersion?.windowStartLocal}–{round.currentVersion?.windowEndLocal} ·
-                  cada {round.currentVersion?.frequencyMinutes} min
-                </p>
-                <ol>
-                  {round.currentVersion?.checkpoints.map(({ checkpoint }) => (
-                    <li key={checkpoint.id}>{checkpoint.name}</li>
-                  ))}
-                </ol>
-                {round.status === 'active' && canWrite && (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingId(round.id);
-                        setName(round.name);
-                        setFrequency(round.currentVersion?.frequencyMinutes ?? 120);
-                        setStart(round.currentVersion?.windowStartLocal ?? '22:00');
-                        setEnd(round.currentVersion?.windowEndLocal ?? '06:00');
-                        setGrace(round.currentVersion?.graceMinutes ?? 15);
-                        setSelected(
-                          round.currentVersion?.checkpoints.map(
-                            ({ checkpoint }) => checkpoint.id,
-                          ) ?? [],
-                        );
-                      }}
-                    >
-                      Editar
-                    </Button>
-                    <Button
-                      variant="ghostDestructive"
-                      size="sm"
-                      onClick={() => {
-                        setConfirmId(round.id);
-                      }}
-                    >
-                      Dar de baja
-                    </Button>
-                  </div>
-                )}
-                {confirmId === round.id && (
-                  <Alert
-                    role="alertdialog"
-                    aria-label="Confirmar baja"
-                    className="space-y-3 border-warning bg-warning-soft text-warning"
-                  >
-                    <p>¿Dar de baja {round.name}?</p>
-                    <Button
-                      variant="destructive"
-                      onClick={() => {
-                        void apiPost(`/rondas/${round.id}/baja`, {}, z.object({}), idSchema).then(
-                          () => rounds.refetch(),
-                        );
-                        setConfirmId(undefined);
-                      }}
-                    >
-                      Confirmar baja
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setConfirmId(undefined);
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                  </Alert>
-                )}
-              </article>
-            ))
-          )}
-          {canWrite && site.status === 'active' && (
-            <form
-              className="grid gap-3"
-              noValidate
-              onSubmit={(event) => {
-                event.preventDefault();
-                void save();
+          {canWrite && (
+            <Button
+              size="sm"
+              className="ml-auto"
+              onClick={() => {
+                edit(null);
               }}
             >
-              <h4 className="font-cond text-xl font-semibold uppercase tracking-wider">
-                {editingId ? 'Editar ronda' : 'Nueva ronda'}
-              </h4>
-              <Label className="grid min-w-0 gap-2" htmlFor="round-name">
-                Nombre
-                <Input
-                  id="round-name"
-                  aria-invalid={Boolean(fieldErrors.name)}
-                  aria-describedby={fieldErrors.name ? 'round-name-error' : undefined}
-                  className="w-full"
-                  value={name}
-                  onChange={(event) => {
-                    setName(event.target.value);
-                  }}
-                  required
-                />
-              </Label>
-              {fieldErrors.name?.map((error) => (
-                <p className="text-sm text-danger" id="round-name-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-frequency">
-                Frecuencia (minutos)
-                <Input
-                  id="round-frequency"
-                  aria-invalid={Boolean(fieldErrors.frequencyMinutes)}
-                  aria-describedby={
-                    fieldErrors.frequencyMinutes ? 'round-frequency-error' : undefined
-                  }
-                  className="w-full"
-                  type="number"
-                  min="15"
-                  max="1440"
-                  value={frequency}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    setFrequency(next);
-                    setGrace(defaultGraceMinutes(next));
-                  }}
-                />
-              </Label>
-              {fieldErrors.frequencyMinutes?.map((error) => (
-                <p className="text-sm text-danger" id="round-frequency-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-start">
-                Inicio de franja
-                <Input
-                  id="round-start"
-                  aria-invalid={Boolean(fieldErrors.windowStartLocal)}
-                  aria-describedby={fieldErrors.windowStartLocal ? 'round-start-error' : undefined}
-                  className="w-full"
-                  type="time"
-                  value={start}
-                  onChange={(event) => {
-                    setStart(event.target.value);
-                  }}
-                />
-              </Label>
-              {fieldErrors.windowStartLocal?.map((error) => (
-                <p className="text-sm text-danger" id="round-start-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-end">
-                Fin de franja
-                <Input
-                  id="round-end"
-                  aria-invalid={Boolean(fieldErrors.windowEndLocal)}
-                  aria-describedby={fieldErrors.windowEndLocal ? 'round-end-error' : undefined}
-                  className="w-full"
-                  type="time"
-                  value={end}
-                  onChange={(event) => {
-                    setEnd(event.target.value);
-                  }}
-                />
-              </Label>
-              {fieldErrors.windowEndLocal?.map((error) => (
-                <p className="text-sm text-danger" id="round-end-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              {start === end && <p>Todo el día (24 h)</p>}
-              <Label className="grid min-w-0 gap-2" htmlFor="round-grace">
-                Gracia (minutos; predeterminada {defaultGraceMinutes(frequency)}, máximo{' '}
-                {Math.min(60, frequency / 2)})
-                <Input
-                  id="round-grace"
-                  aria-invalid={Boolean(fieldErrors.graceMinutes)}
-                  aria-describedby={fieldErrors.graceMinutes ? 'round-grace-error' : undefined}
-                  className="w-full"
-                  type="number"
-                  min="0"
-                  max="60"
-                  value={grace}
-                  onChange={(event) => {
-                    setGrace(Number(event.target.value));
-                  }}
-                />
-              </Label>
-              {fieldErrors.graceMinutes?.map((error) => (
-                <p className="text-sm text-danger" id="round-grace-error" key={error}>
-                  {error}
-                </p>
-              ))}
-              <fieldset className="space-y-3">
-                <legend className="mb-3 font-medium">Puntos en orden de recorrido</legend>
-                {fieldErrors.checkpointIds?.map((error) => (
-                  <p className="text-sm text-danger" id="round-checkpoints-error" key={error}>
-                    {error}
-                  </p>
-                ))}
-                {points.data?.map((point) => (
-                  <Label key={point.id} className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(point.id)}
-                      onChange={(event) => {
-                        setSelected(
-                          event.target.checked
-                            ? [...selected, point.id]
-                            : selected.filter((id) => id !== point.id),
-                        );
-                      }}
-                    />{' '}
-                    {point.name}
-                  </Label>
-                ))}
-              </fieldset>
-              <ol
-                aria-label="Orden de puntos"
-                onDragOver={(event) => {
-                  event.preventDefault();
-                }}
-              >
-                {selected.map((pointId, index) => {
-                  const point = points.data?.find(({ id }) => id === pointId);
-                  const shared = rounds.data?.some(
-                    (round) =>
-                      round.id !== editingId &&
-                      round.currentVersion?.checkpoints.some(
-                        ({ checkpoint }) => checkpoint.id === pointId,
-                      ),
-                  );
-                  return (
-                    <li
-                      key={pointId}
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData('text/plain', pointId);
-                      }}
-                      onDrop={(event) => {
-                        const source = event.dataTransfer.getData('text/plain');
-                        setSelected((items) => {
-                          const reordered = [...items];
-                          const from = reordered.indexOf(source);
-                          if (from >= 0) {
-                            reordered.splice(from, 1);
-                            reordered.splice(index, 0, source);
-                          }
-                          return reordered;
-                        });
-                      }}
-                      className="flex flex-wrap items-center gap-2"
-                    >
-                      {point?.name}
-                      {shared && (
-                        <span>Compartido con otra ronda (un registro cuenta para ambas).</span>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        type="button"
-                        aria-label={`Subir ${point?.name}`}
-                        disabled={index === 0}
-                        onClick={() => {
-                          setSelected((items) => {
-                            const copy = [...items];
-                            const current = copy[index];
-                            const previous = copy[index - 1];
-                            if (current !== undefined && previous !== undefined) {
-                              copy[index - 1] = current;
-                              copy[index] = previous;
-                            }
-                            return copy;
-                          });
-                        }}
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        type="button"
-                        aria-label={`Bajar ${point?.name}`}
-                        disabled={index === selected.length - 1}
-                        onClick={() => {
-                          setSelected((items) => {
-                            const copy = [...items];
-                            const current = copy[index];
-                            const next = copy[index + 1];
-                            if (current !== undefined && next !== undefined) {
-                              copy[index] = next;
-                              copy[index + 1] = current;
-                            }
-                            return copy;
-                          });
-                        }}
-                      >
-                        ↓
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ol>
-              <div>
-                <h5 className="mb-2 font-medium">Vista previa de ventanas</h5>
-                <ol
-                  className="grid gap-2 tabular-nums text-muted-foreground sm:grid-cols-2"
-                  aria-label="Vista previa de ventanas"
-                >
-                  {labels.map((label) => (
-                    <li key={label}>{label}</li>
-                  ))}
-                </ol>
-              </div>
-              {(Object.keys(fieldErrors).length > 1 || Boolean(fieldErrors.form ?? message)) && (
-                <Alert variant="destructive" role="alert" aria-label="Errores del formulario">
-                  {message && <p>{message}</p>}
-                  {Object.keys(fieldErrors).length > 1 &&
-                    Object.values(fieldErrors)
-                      .flat()
-                      .map((error) => <p key={error}>{error}</p>)}
-                  {fieldErrors.form?.map((error) => (
-                    <p key={error}>{error}</p>
-                  ))}
-                </Alert>
-              )}
-              <Button type="submit" disabled={busy}>
-                Guardar ronda
-              </Button>
-            </form>
+              <Plus aria-hidden="true" />
+              Nueva ronda
+            </Button>
           )}
-        </CardContent>
-      </Card>
+        </div>
+        {rounds.isPending ? (
+          <p role="status">Cargando rondas…</p>
+        ) : rounds.isError ? (
+          <Alert variant="destructive">No se pudieron cargar las rondas.</Alert>
+        ) : rounds.data.length === 0 ? (
+          <EmptyState
+            title="Todavía no hay rondas"
+            description="Creá una ronda para elegir sus puntos y trazar el recorrido en el mapa."
+          />
+        ) : (
+          <ul
+            aria-label="Rondas del predio"
+            className="grid content-start gap-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1"
+          >
+            {ordered.map((round) => {
+              const version = round.currentVersion;
+              const traced = roundRouteSchema.safeParse(version?.route).success;
+              const active = round.status === 'active';
+              const chosen = round.id === preview?.id;
+              const windows = version
+                ? previewWindows({
+                    windowStartLocal: version.windowStartLocal,
+                    windowEndLocal: version.windowEndLocal,
+                    frequencyMinutes: version.frequencyMinutes,
+                  }).length
+                : 0;
+              const count = version?.checkpoints.length ?? 0;
+              return (
+                <li
+                  key={round.id}
+                  className={cn(
+                    'flex items-start rounded-md border-[1.5px] bg-card',
+                    chosen ? 'border-primary' : 'border-border',
+                  )}
+                >
+                  {/* Elegir la ronda la muestra en el mapa; la barra marca cuál es, no solo el color. */}
+                  <button
+                    type="button"
+                    aria-pressed={chosen}
+                    className={cn(
+                      'min-w-0 flex-1 rounded-l-sm border-l-4 px-4 py-3 text-left hover:bg-muted',
+                      chosen ? 'border-l-primary' : 'border-l-transparent',
+                    )}
+                    onClick={() => {
+                      setPreviewId(round.id);
+                    }}
+                  >
+                    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className={cn('font-semibold', !active && 'text-muted-foreground')}>
+                        {round.name}
+                      </span>
+                      {!active && <StatusBadge tone="neutral">Inactiva</StatusBadge>}
+                    </span>
+                    {version && (
+                      <span className="mt-1 block text-sm text-muted-foreground tabular-nums">
+                        {version.windowStartLocal === version.windowEndLocal
+                          ? 'Todo el día'
+                          : `${version.windowStartLocal}–${version.windowEndLocal}`}{' '}
+                        · cada {version.frequencyMinutes} min · {windows}{' '}
+                        {windows === 1 ? 'ventana' : 'ventanas'}
+                      </span>
+                    )}
+                    <span className="block text-sm text-muted-foreground tabular-nums">
+                      {count} {count === 1 ? 'punto' : 'puntos'} ·{' '}
+                      {traced ? 'Con recorrido' : 'Sin recorrido'}
+                    </span>
+                  </button>
+                  {/* Una inactiva solo se puede duplicar: así se recupera con otro nombre. */}
+                  {canWrite && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Acciones de ${round.name}`}
+                          className="m-2"
+                        >
+                          <EllipsisVertical aria-hidden="true" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {active && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              edit(round.id);
+                            }}
+                          >
+                            <Pencil aria-hidden="true" />
+                            Editar
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            edit(round.id, true);
+                          }}
+                        >
+                          <Copy aria-hidden="true" />
+                          Duplicar
+                        </DropdownMenuItem>
+                        {active && (
+                          <DropdownMenuItem
+                            className="text-danger focus:text-danger"
+                            onSelect={() => {
+                              setConfirmId(round.id);
+                            }}
+                          >
+                            <Trash2 aria-hidden="true" />
+                            Dar de baja
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      <ColumnResizer
+        label="Ancho de la lista de rondas"
+        container={sectionRef}
+        column={listColumn}
+        className="hidden xl:flex"
+      />
+      {/* El recorrido de la ronda elegida, a la vista sin entrar al editor. */}
+      <div className="flex h-(--fill) flex-col overflow-hidden rounded-md border border-border bg-card xl:h-auto">
+        <div className="flex items-baseline gap-3 border-b border-border px-4 py-2">
+          <h4 className="t-label min-w-0 truncate">
+            {preview ? `Recorrido · ${preview.name}` : 'Puntos del predio'}
+          </h4>
+          {routeMeters !== undefined && (
+            <span className="ml-auto t-stamp tabular-nums">{formatMeters(routeMeters)}</span>
+          )}
+        </div>
+        <div
+          aria-label={preview ? `Recorrido de ${preview.name}` : 'Puntos del predio'}
+          className="relative min-h-0 flex-1"
+        >
+          {/* Con el recorrido guardado se dibuja aunque falte algún punto (dado de baja después). */}
+          {located.length > 0 &&
+            (previewStored !== null || previewCoords.length === previewIds.length) && (
+              <RouteEditor
+                scope={preview?.id}
+                points={located}
+                selected={previewIds}
+                route={previewRoute}
+                display={previewDisplay}
+              />
+            )}
+        </div>
+      </div>
+      <AlertDialog
+        open={confirming !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setConfirmId(undefined);
+        }}
+      >
+        <AlertDialogContent className="space-y-4">
+          <AlertDialogTitle className="text-lg font-semibold">
+            Dar de baja la ronda
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-sm text-muted-foreground">
+            ¿Dar de baja {confirming?.name}? Deja de programarse en los turnos futuros.
+          </AlertDialogDescription>
+          <div className="flex flex-wrap justify-end gap-2">
+            <AlertDialogCancel asChild>
+              <Button variant="outline">Cancelar</Button>
+            </AlertDialogCancel>
+            <AlertDialogAction
+              asChild
+              onClick={() => {
+                if (!confirming) return;
+                void apiPost(`/rondas/${confirming.id}/baja`, {}, z.object({}), idSchema)
+                  .then(() => rounds.refetch())
+                  .catch(() => {
+                    notify('No se pudo dar de baja la ronda. Intentá de nuevo.', 'danger');
+                  });
+              }}
+            >
+              <Button variant="destructive">Confirmar baja</Button>
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+      {notice && (
+        <FloatingNotice
+          key={notice.id}
+          text={notice.text}
+          tone={notice.tone}
+          onClose={closeNotice}
+        />
+      )}
     </section>
   );
 }

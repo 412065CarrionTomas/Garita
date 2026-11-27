@@ -11,7 +11,7 @@ import {
 import { Prisma } from '../../generated/prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import type { CreateClientUserRequest, CreateUserRequest, UpdateUserRequest } from '@garita/shared';
-import { LEGAL_VERSION } from '@garita/shared';
+import { LEGAL_VERSION, searchTerms } from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { FIREBASE_IDENTITY_PROVIDER } from '../auth/auth.types';
@@ -25,6 +25,13 @@ import { WEEKLY_SCHEDULE_DERIVATION_PORT } from './weekly-schedule-derivation.po
 import type { WeeklyScheduleDerivationPort } from './weekly-schedule-derivation.port';
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 import { ACCOUNT_STATE_PORT, type AccountStatePort } from '../../common/ports/account-state.port';
+
+/** La invitación vigente: una reemplazada (p. ej. al desactivar) ya no cuenta como envío fallido. */
+const CURRENT_INVITATION = {
+  where: { replacedAt: null },
+  orderBy: { createdAt: 'desc' as const },
+  take: 1,
+};
 
 @Injectable()
 export class UsersService {
@@ -44,28 +51,84 @@ export class UsersService {
 
   async list(query: {
     rol?: 'supervisor' | 'guard';
-    estado?: 'invitation_pending' | 'active' | 'deactivated';
+    estado?: 'invitation_pending' | 'active' | 'deactivated' | 'invitation_failed';
+    buscar?: string;
+    orden?: 'recientes' | 'nombre' | 'telefono' | 'legajo' | 'rol' | 'estado';
+    sentido?: 'asc' | 'desc';
     pagina: number;
+    porPagina: number;
   }) {
     const roleFilter: 'supervisor' | 'guard' | { in: ('supervisor' | 'guard')[] } = query.rol ?? {
       in: ['supervisor', 'guard'],
     };
-    const where = { role: roleFilter, status: query.estado };
-    const [total, users] = await Promise.all([
-      this.prisma.tenantPrisma.user.count({ where }),
+    // Cada palabra tiene que aparecer en algún campo: "bruno paz" encuentra a Bruno Paz.
+    const terms = searchTerms(query.buscar);
+    const base = {
+      role: roleFilter,
+      AND: terms.map((term) => ({
+        OR: (['firstName', 'lastName', 'email', 'employeeNumber'] as const).map((field) => ({
+          [field]: { contains: term, mode: 'insensitive' as const },
+        })),
+      })),
+    };
+    const failed = {
+      status: 'invitation_pending' as const,
+      invitations: { some: { sendStatus: 'failed' as const, usedAt: null, replacedAt: null } },
+    };
+    const where =
+      query.estado === 'invitation_failed'
+        ? { ...base, ...failed }
+        : { ...base, status: query.estado };
+    // El id desempata: con OFFSET, un orden con empates puede repetir o saltear filas entre páginas.
+    const dir = query.sentido ?? 'asc';
+    // El nombre desempata siempre A–Z; el sentido elegido solo invierte la columna pedida.
+    const byName = [
+      { firstName: 'asc' as const },
+      { lastName: 'asc' as const },
+      { id: 'asc' as const },
+    ];
+    // Los que no tienen teléfono o legajo van al final en los dos sentidos.
+    const orderBy =
+      query.orden === 'nombre'
+        ? [{ firstName: dir }, { lastName: dir }, { id: 'asc' as const }]
+        : query.orden === 'telefono'
+          ? [{ phone: { sort: dir, nulls: 'last' as const } }, ...byName]
+          : query.orden === 'legajo'
+            ? [{ employeeNumber: { sort: dir, nulls: 'last' as const } }, ...byName]
+            : query.orden === 'rol'
+              ? [{ role: dir }, ...byName]
+              : query.orden === 'estado'
+                ? [{ status: dir }, ...byName]
+                : [{ createdAt: 'desc' as const }, { id: 'asc' as const }];
+    const count = (extra: object) =>
+      this.prisma.tenantPrisma.user.count({ where: { ...base, ...extra } });
+    const [users, active, pending, invitationFailed, deactivated] = await Promise.all([
       this.prisma.tenantPrisma.user.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
-        skip: (query.pagina - 1) * 20,
-        take: 20,
-        include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+        orderBy,
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
+        include: { invitations: CURRENT_INVITATION },
       }),
+      count({ status: 'active' }),
+      count({ status: 'invitation_pending' }),
+      count(failed),
+      count({ status: 'deactivated' }),
     ]);
+    const resumen = {
+      active,
+      invitation_pending: pending,
+      invitation_failed: invitationFailed,
+      deactivated,
+    };
+    // Los de envío fallido ya cuentan como invitación pendiente.
+    const total = query.estado ? resumen[query.estado] : active + pending + deactivated;
     return {
       items: users.map((user) => this.present(user)),
       pagina: query.pagina,
       total,
-      paginas: Math.ceil(total / 20),
+      paginas: Math.ceil(total / query.porPagina),
+      resumen,
     };
   }
 
@@ -73,7 +136,7 @@ export class UsersService {
     await this.getUser(id);
     const user = await this.prisma.tenantPrisma.user.findUniqueOrThrow({
       where: { id },
-      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      include: { invitations: CURRENT_INVITATION },
     });
     return this.present(user);
   }
@@ -83,7 +146,7 @@ export class UsersService {
     const users = await this.prisma.tenantPrisma.user.findMany({
       where: { clientId, role: 'client' },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-      include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      include: { invitations: CURRENT_INVITATION },
     });
     return users.map((user) => this.present(user));
   }
@@ -160,7 +223,7 @@ export class UsersService {
               },
             },
           },
-          include: { invitations: { orderBy: { createdAt: 'desc' }, take: 1 } },
+          include: { invitations: CURRENT_INVITATION },
         });
       })
       .catch(async (error: unknown) => {

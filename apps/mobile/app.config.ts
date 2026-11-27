@@ -53,6 +53,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withNfcFeature',
     'expo-audio',
     'expo-sqlite',
+    '@maplibre/maplibre-react-native',
     'expo-secure-store',
     'expo-notifications',
     ['./modules/garita-native/app.plugin.js', {}],

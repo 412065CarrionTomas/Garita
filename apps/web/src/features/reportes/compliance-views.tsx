@@ -4,25 +4,22 @@ import { Stamp } from '@/components/stamp';
 import { WindowBar, type WindowStatus } from '@/components/window-bar';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { DataTable, type DataColumn } from '@/components/data-table';
 import { COMPLIANCE_THRESHOLD } from './charts/compliance-tone';
 
 type Totals = ComplianceReport['totals'];
+type Site = ComplianceReport['bySite'][number];
 
 /** Barra de cumplimiento: tinta; bajo el umbral, rayada en rojo (la forma avisa además del color). */
-function ComplianceBar({ value }: { value: number }) {
+export function ComplianceBar({ value }: { value: number }) {
   const low = value < COMPLIANCE_THRESHOLD;
   return (
     <span
       aria-hidden="true"
-      className={cn('block h-2.5 w-32 border-[1.5px]', low ? 'border-danger' : 'border-foreground')}
+      className={cn(
+        'block h-2.5 w-20 shrink-0 border-[1.5px]',
+        low ? 'border-danger' : 'border-foreground',
+      )}
     >
       <span
         className="block h-full bg-foreground"
@@ -53,65 +50,77 @@ export function SiteComplianceTable({
         description="Probá con otro período o quitá algún filtro."
       />
     );
+  const percent = (value: number) =>
+    `${value.toLocaleString('es-AR', { maximumFractionDigits: 1 })} %`;
+  const columns: DataColumn<Site>[] = [
+    { id: 'name', header: 'Predio', value: (s) => s.name, className: 'font-semibold' },
+    ...(
+      [
+        ['evaluated', 'Programadas', (t: Totals) => t.evaluated],
+        ['ontime', 'A tiempo', (t: Totals) => t.complete - t.complete_late],
+        ['late', 'Tardías', (t: Totals) => t.complete_late],
+        ['incomplete', 'Incompletas', (t: Totals) => t.incomplete],
+        ['not_done', 'No realizadas', (t: Totals) => t.not_done],
+      ] as const
+    ).map(([id, header, read]): DataColumn<Site> => ({
+      id,
+      header,
+      type: 'number',
+      align: 'right',
+      width: 112,
+      value: (s) => read(s.totals),
+      className: 't-numeral',
+    })),
+    {
+      id: 'percentage',
+      header: 'Cumplimiento',
+      type: 'number',
+      width: 248,
+      value: (s) => s.totals.percentage,
+      cell: ({ totals: { percentage } }) =>
+        percentage === null ? (
+          <span className="text-muted-foreground">Sin datos</span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <ComplianceBar value={percentage} />
+            <span className={cn('t-numeral', percentage < COMPLIANCE_THRESHOLD && 'text-danger')}>
+              {percent(percentage)}
+            </span>
+            {percentage < COMPLIANCE_THRESHOLD && (
+              <Stamp variant="fail" className="m-0 rotate-0 px-1.5 py-0">
+                REVISAR
+              </Stamp>
+            )}
+          </span>
+        ),
+    },
+    {
+      id: 'detail',
+      header: 'Detalle',
+      hideHeader: true,
+      width: 128,
+      align: 'right',
+      cell: (s) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            onSelect(s.id);
+          }}
+          aria-label={`Ver ventanas: ${s.name}`}
+        >
+          Ver ventanas
+        </Button>
+      ),
+    },
+  ];
   return (
-    <Table aria-label="Cumplimiento por predio">
-      <TableHeader>
-        <TableRow>
-          <TableHead>Predio</TableHead>
-          <TableHead className="text-right">Programadas</TableHead>
-          <TableHead className="text-right">A tiempo</TableHead>
-          <TableHead className="text-right">Tardías</TableHead>
-          <TableHead className="text-right">Incompletas</TableHead>
-          <TableHead className="text-right">No realizadas</TableHead>
-          <TableHead>Cumplimiento</TableHead>
-          <TableHead>
-            <span className="sr-only">Detalle</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sites.map(({ id, name, totals }) => {
-          const value = totals.percentage;
-          return (
-            <TableRow key={id}>
-              <TableCell className="font-semibold">{name}</TableCell>
-              <TableCell className="t-numeral text-right">{totals.evaluated}</TableCell>
-              <TableCell className="t-numeral text-right">
-                {totals.complete - totals.complete_late}
-              </TableCell>
-              <TableCell className="t-numeral text-right">{totals.complete_late}</TableCell>
-              <TableCell className="t-numeral text-right">{totals.incomplete}</TableCell>
-              <TableCell className="t-numeral text-right">{totals.not_done}</TableCell>
-              <TableCell>
-                {value === null ? (
-                  <span className="text-muted-foreground">Sin datos</span>
-                ) : (
-                  <span className="flex items-center gap-3">
-                    <ComplianceBar value={value} />
-                    <span className="t-numeral">
-                      {value.toLocaleString('es-AR', { maximumFractionDigits: 1 })} %
-                    </span>
-                    {value < COMPLIANCE_THRESHOLD && <Stamp variant="fail">REVISAR</Stamp>}
-                  </span>
-                )}
-              </TableCell>
-              <TableCell>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    onSelect(id);
-                  }}
-                  aria-label={`Ver ventanas: ${name}`}
-                >
-                  Ver ventanas
-                </Button>
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <DataTable
+      label="Cumplimiento por predio"
+      rows={sites}
+      columns={columns}
+      getRowId={(s) => s.id}
+    />
   );
 }
 
@@ -150,14 +159,16 @@ export function WindowGrid({ days }: { days: ComplianceReport['daily'] }) {
       />
     );
   return (
-    <div className="space-y-4">
-      <ul className="space-y-2" aria-label="Ventanas por día">
+    <div className="space-y-4 p-4">
+      <ul className="space-y-1.5" aria-label="Ventanas por día">
         {rows.map(({ id, name, totals }) => (
           <li key={id} className="flex items-center gap-4">
-            <span className="t-numeral w-14 shrink-0">{dayLabel(name)}</span>
-            <div className="min-w-0 flex-1 overflow-x-auto">
-              <WindowBar size="grid" windows={dayWindows(totals)} />
-            </div>
+            <span className="w-12 shrink-0 font-semibold tabular-nums">{dayLabel(name)}</span>
+            <WindowBar
+              size="grid"
+              windows={dayWindows(totals)}
+              className="min-w-0 flex-1 gap-0.5 [&>span]:h-5 [&>span]:min-w-1"
+            />
           </li>
         ))}
       </ul>

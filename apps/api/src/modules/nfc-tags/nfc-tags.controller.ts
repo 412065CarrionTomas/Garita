@@ -1,6 +1,16 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Put } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { associateNfcTagSchema } from '@garita/shared';
+import { associateNfcTagSchema, identifyNfcTagSchema } from '@garita/shared';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { NfcTagsService } from './nfc-tags.service';
@@ -18,6 +28,20 @@ export class NfcTagsController {
   @ApiResponse({ status: 403, description: 'El rol no puede configurar etiquetas.' })
   sites(@CurrentUser() user: AuthenticatedUser) {
     return this.tags.configurationSites(user);
+  }
+
+  @Post('etiquetas-nfc/identificar')
+  @HttpCode(200)
+  @Roles('admin', 'supervisor')
+  @ApiResponse({ status: 200, description: 'Punto y predio de la etiqueta leída.' })
+  @ApiResponse({ status: 400, description: 'UID inválido.' })
+  @ApiResponse({ status: 401, description: 'Falta autenticación.' })
+  @ApiResponse({ status: 403, description: 'El rol no puede configurar etiquetas.' })
+  @ApiResponse({ status: 404, description: 'La etiqueta no está asociada a ningún punto visible.' })
+  identify(@Body() body: unknown) {
+    const parsed = identifyNfcTagSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('El identificador NFC no es válido');
+    return this.tags.identify(parsed.data.uid);
   }
 
   @Put('puntos/:id/etiqueta-nfc')

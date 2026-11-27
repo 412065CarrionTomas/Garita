@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, router } from 'expo-router';
+import { Link, Redirect, router } from 'expo-router';
 import { z } from 'zod';
 import { StyleSheet } from 'react-native';
 import { space } from '@garita/tokens';
@@ -26,10 +26,7 @@ export function LoginScreen() {
       </Screen>
     );
   }
-  if (user) {
-    router.replace(roleHome(user));
-    return null;
-  }
+  if (user) return <Redirect href={roleHome(user)} />;
   async function submit() {
     const result = schema.safeParse({ email, password });
     if (!result.success) {

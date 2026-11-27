@@ -14,6 +14,7 @@ export const SUSPENSION_ENDPOINTS = {
   'GET planes': 'always', // Plan selection remains admin only.
   'GET supervision/turnos': 'shift', // Only the started shifts still receiving data.
   'GET mis-turnos': 'shift', // Only the guard's started assignments.
+  'GET rondas/versiones': 'shift', // The pinned round versions of those started shifts.
   'GET turnos/:id': 'shift', // Existing role and site permissions still apply.
   'GET turnos/:id/detalle': 'shift', // Live supervision detail.
   'GET turnos/:id/estado': 'shift', // Live execution state.

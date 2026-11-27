@@ -77,6 +77,25 @@ enum IncidentClassificationStatus {
   internal
 }
 
+enum IncidentSeverity {
+  low
+  medium
+  high
+}
+
+/// none: no requiere seguimiento; open: la empresa tiene acciones pendientes; closed: resuelto.
+enum IncidentFollowUpStatus {
+  none
+  open
+  closed
+}
+
+enum IncidentFollowUpActionKind {
+  note
+  close
+  reopen
+}
+
 enum AccountStatus {
   trial
   active
@@ -120,8 +139,11 @@ model Company {
   panicAlerts PanicAlert[]
   panicSmsDeliveries PanicSmsDelivery[]
   incidentClassifications IncidentClassification[]
+  incidentFollowUpActions IncidentFollowUpAction[]
   roundReviewDecisions RoundReviewDecision[]
   notificationPreferences NotificationPreference[]
+  viewPreferences UserViewPreference[]
+  favorites UserFavorite[]
   noticeViews NoticeView[]
   notices Notice[]
   subscriptions Subscription[]
@@ -166,10 +188,13 @@ model User {
   resolvedPanicAlerts PanicAlert[] @relation("PanicResolver")
   panicSmsDeliveries PanicSmsDelivery[]
   incidentClassifications IncidentClassification[] @relation("IncidentDecider")
+  incidentFollowUpActions IncidentFollowUpAction[] @relation("IncidentFollowUpAuthor")
   roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
   notificationPreferences NotificationPreference[]
+  viewPreferences UserViewPreference[]
+  favorites UserFavorite[]
   noticeViews NoticeView[]
   cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
   planChangePayments PlanChangePayment[]
@@ -287,7 +312,11 @@ model Checkpoint {
   longitude             Decimal                  @db.Decimal(10, 6)
   toleranceRadiusMeters Int                      @default(30)
   stickerLocation       String?
+  // Calle y número si hay un domicilio dentro del radio del punto; si no, null (se muestran las coordenadas).
+  address               String?
   isIndoor              Boolean                  @default(false)
+  // N° del punto en el predio (1 = primero); orden sugerido al armar una ronda.
+  position              Int                      @default(0)
   qrVersion             Int                      @default(1)
   status                RecordStatus             @default(active)
   createdAt             DateTime                 @default(now())
@@ -369,6 +398,11 @@ model RoundVersion {
   windowStartLocal String
   windowEndLocal   String
   graceMinutes     Int
+  /// Recorrido ideal (roundRouteSchema de @garita/shared). Null: rondas previas, se dibujan rectas.
+  route            Json?
+  /// Velocidad de la ronda (recorrido por calles y tiempo imposible). Null: la del predio.
+  speedProfile     SpeedProfile?
+  maxSpeedKmh      Int?
   createdById      String
   createdAt        DateTime                 @default(now())
   round            Round                    @relation(fields: [roundId], references: [id], onDelete: Restrict)
@@ -778,6 +812,8 @@ model CheckpointRecord {
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([companyId, occurredAtDevice])
+  // Antecedentes del vigilador en revisión: últimos 30 días por hora del servidor.
+  @@index([companyId, receivedAt])
   @@index([companyId, checkpointId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
   @@index([checkpointId, occurredAtDevice])
@@ -833,6 +869,9 @@ model Incident {
   simulation           ShiftEventSimulation
   countsForCompliance  Boolean                     @default(true)
   classificationStatus IncidentClassificationStatus @default(pending)
+  severity             IncidentSeverity?
+  followUpStatus       IncidentFollowUpStatus      @default(none)
+  followUpClosedAt     DateTime?                   @db.Timestamptz(3)
   createdAt            DateTime                    @default(now())
   company              Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   site                 Site                        @relation(fields: [siteId], references: [id], onDelete: Restrict)
@@ -842,6 +881,7 @@ model Incident {
   photos               IncidentPhoto[]
   photoAuthorizations  IncidentPhotoAuthorization[]
   classifications      IncidentClassification[]
+  followUpActions      IncidentFollowUpAction[]
 
   @@index([companyId, siteId, createdAt])
   @@index([companyId, classificationStatus, createdAt])
@@ -851,6 +891,7 @@ model Incident {
   @@index([companyId, trustedAt])
   @@index([companyId, occurredAtDevice])
   @@index([companyId, receivedAt])
+  @@index([companyId, followUpStatus])
 }
 
 enum PanicAlertStatus {
@@ -967,6 +1008,8 @@ model IncidentClassification {
   internalComment String                       @db.VarChar(1000)
   clientNote      String?                      @db.VarChar(500)
   reason          String?                      @db.VarChar(500)
+  severity        IncidentSeverity?
+  requiresFollowUp Boolean                     @default(false)
   decidedById     String
   decidedAt       DateTime                     @default(now()) @db.Timestamptz(3)
   company         Company                      @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -974,6 +1017,22 @@ model IncidentClassification {
   decidedBy       User                         @relation("IncidentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
 
   @@index([companyId, incidentId, decidedAt])
+}
+
+/// Bitácora de seguimiento: solo se agrega, nunca se edita.
+model IncidentFollowUpAction {
+  id         String                     @id @default(cuid())
+  companyId  String
+  incidentId String
+  kind       IncidentFollowUpActionKind
+  text       String                     @db.VarChar(1000)
+  authorId   String
+  createdAt  DateTime                   @default(now()) @db.Timestamptz(3)
+  company    Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  incident   Incident                   @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  author     User                       @relation("IncidentFollowUpAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, incidentId, createdAt])
 }
 
 model IncidentPhoto {
@@ -1128,6 +1187,43 @@ model NotificationPreference {
 
   @@unique([userId, kind])
   @@index([companyId, kind, push])
+}
+
+// --- Vistas personalizables: diseño de bloques y favoritos por usuario y pantalla ---
+
+/// Layout of a customizable screen (viewKey from @garita/shared VIEW_KEYS), validated with Zod on write and reconciled on read.
+model UserViewPreference {
+  id        String   @id @default(cuid())
+  companyId String
+  userId    String
+  viewKey   String
+  /// Catalog version the layout was saved with.
+  version   Int
+  layout    Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, viewKey])
+  @@index([companyId])
+}
+
+/// Entities pinned to the top of a screen's lists, in the user's order. entityId points to Site, User (guard) or Client by entityType; visibility is checked on write and read.
+model UserFavorite {
+  id         String   @id @default(cuid())
+  companyId  String
+  userId     String
+  viewKey    String
+  entityType String
+  entityId   String
+  position   Int
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, viewKey, entityType, entityId])
+  @@index([userId, viewKey, entityType, position])
+  @@index([companyId])
 }
 
 // --- Suscripciones con Mercado Pago (HU-29) ---

@@ -28,6 +28,8 @@ import {
   SOCKET_NAMESPACE,
   panicAlertStateResponseSchema,
   panicAlertDetailSchema,
+  incidentDetailSchema,
+  incidentQueueResponseSchema,
 } from '@garita/shared';
 import {
   Controller,
@@ -1439,7 +1441,7 @@ describe('Aplicación (e2e)', () => {
     expect(
       z
         .array(z.looseObject({ id: z.string() }))
-        .parse(queue.body)
+        .parse(z.object({ items: z.unknown() }).parse(queue.body).items)
         .some((row) => row.id === incident.id),
     ).toBe(true);
     const count = await client
@@ -1455,47 +1457,100 @@ describe('Aplicación (e2e)', () => {
     await client
       .post(`/api/v1/incidentes/${incident.id}/clasificar`)
       .set('Authorization', 'Bearer token-client')
-      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .send({
+        classification: 'internal',
+        severity: 'medium',
+        internalComment: 'Comentario interno',
+      })
       .expect(403);
     await client
       .post(`/api/v1/incidentes/${incident.id}/clasificar`)
       .set('Authorization', 'Bearer token-supervisor')
-      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .send({
+        classification: 'internal',
+        severity: 'high',
+        requiresFollowUp: true,
+        internalComment: 'Comentario interno',
+      })
       .expect(201);
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
-        .body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      ).items,
     ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: incident.id })]));
     await client
       .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
       .set('Authorization', 'Bearer token-supervisor')
-      .send({ classification: 'client_visible', internalComment: 'Segundo comentario', reason: '' })
+      .send({
+        classification: 'client_visible',
+        severity: 'high',
+        internalComment: 'Segundo comentario',
+        reason: '',
+      })
       .expect(400);
     await client
       .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
       .set('Authorization', 'Bearer token-supervisor')
       .send({
         classification: 'client_visible',
+        severity: 'medium',
         internalComment: 'Segundo comentario',
         clientNote: 'Nota pública',
         reason: 'El cliente pidió detalles',
       })
       .expect(201);
-    const detail = await client
-      .get(`/api/v1/incidentes/${incident.id}`)
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/reabrir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'No está cerrado' })
+      .expect(409);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/acciones`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Se avisó al encargado' })
+      .expect(201);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/cerrar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Cerco reparado' })
+      .expect(201);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/reabrir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Volvieron a forzar el cerco' })
+      .expect(201);
+    const followUpFiltered = await client
+      .get(`/api/v1/incidentes?gravedad=medium&seguimiento=open&orden=gravedad:desc&porPagina=100`)
       .set('Authorization', 'Bearer token-supervisor')
       .expect(200);
     expect(
       z
-        .object({
-          classificationStatus: z.literal('client_visible'),
-          classifications: z.array(
-            z.looseObject({ decidedById: z.string(), decidedAt: z.string() }),
-          ),
-        })
-        .loose()
-        .parse(detail.body).classifications,
-    ).toHaveLength(2);
+        .object({ items: z.array(z.looseObject({ id: z.string() })) })
+        .parse(followUpFiltered.body)
+        .items.some((row) => row.id === incident.id),
+    ).toBe(true);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/cerrar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Cerco reparado de nuevo' })
+      .expect(201);
+    const detail = await client
+      .get(`/api/v1/incidentes/${incident.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const parsedDetail = incidentDetailSchema.parse(detail.body);
+    expect(parsedDetail.classificationStatus).toBe('client_visible');
+    expect(parsedDetail.severity).toBe('medium');
+    expect(parsedDetail.followUpStatus).toBe('closed');
+    expect(parsedDetail.timeline.map((entry) => entry.kind)).toEqual([
+      'classification',
+      'classification',
+      'note',
+      'close',
+      'reopen',
+      'close',
+    ]);
     const filtered = await client
       .get(
         `/api/v1/incidentes?predio=${northAssignedSiteId}&tipo=intrusion&clasificacion=client_visible&desde=2020-10-20&hasta=2030-10-20&pagina=1`,
@@ -1546,11 +1601,15 @@ describe('Aplicación (e2e)', () => {
       },
     });
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-admin').expect(200)).body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-admin').expect(200)).body,
+      ).items,
     ).toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
-        .body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      ).items,
     ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
     await client
       .get(`/api/v1/incidentes/${fallbackIncident.id}`)
@@ -2524,6 +2583,7 @@ describe('Aplicación (e2e)', () => {
         '/api/v1/rondas/{id}/baja',
         '/api/v1/rondas/previsualizar-ventanas',
         '/api/v1/configuracion/predios',
+        '/api/v1/etiquetas-nfc/identificar',
         '/api/v1/predios/{id}/puntos',
         '/api/v1/puntos/{id}/etiqueta-nfc',
         '/api/v1/turnos',
@@ -2948,12 +3008,14 @@ describe('Aplicación (e2e)', () => {
 
   it('no expone el total de predios no asignados en el conteo del cliente al supervisor', async () => {
     const list = await request(app.getHttpServer())
-      .get('/api/v1/clientes')
+      .get('/api/v1/clientes?buscar=Cliente%20norte')
       .set('Authorization', 'Bearer token-supervisor')
       .expect(200);
     const clients = z
-      .array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) }))
-      .parse(list.body);
+      .object({
+        items: z.array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) })),
+      })
+      .parse(list.body).items;
     const northClient = await app.get(PrismaService).systemPrisma.client.findUniqueOrThrow({
       where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
     });
@@ -3617,6 +3679,117 @@ describe('Aplicación (e2e)', () => {
       .expect(404);
   });
 
+  it('identifica a qué punto pertenece una etiqueta y cuenta el avance por predio', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const point = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Identificar NFC ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdNfcCheckpointIds.push(point.id);
+    const uid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    const auth = { Authorization: 'Bearer token-admin' };
+    const client = request(app.getHttpServer());
+    const path = '/api/v1/etiquetas-nfc/identificar';
+    await client.post(path).send({ uid }).expect(401);
+    await client.post(path).set('Authorization', 'Bearer token-guard').send({ uid }).expect(403);
+    await client.post(path).set(auth).send({ uid: 'xx' }).expect(400);
+    await client.post(path).set(auth).send({ uid }).expect(404);
+    await client.put(`/api/v1/puntos/${point.id}/etiqueta-nfc`).set(auth).send({ uid }).expect(200);
+    await client
+      .post(path)
+      .set(auth)
+      .send({ uid })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          status: 'active',
+          kind: 'basic',
+          checkpoint: { id: point.id, name: point.name },
+          site: { id: northAssignedSiteId },
+          lastReadAt: null,
+        });
+      });
+    // Otra empresa no ve la etiqueta.
+    await client
+      .post(path)
+      .set('Authorization', 'Bearer token-south-admin')
+      .send({ uid })
+      .expect(404);
+    await client.post(path).set('Authorization', 'Bearer token-client').send({ uid }).expect(403);
+    const supervisor = { Authorization: 'Bearer token-supervisor' };
+    await client.post(path).set(supervisor).send({ uid }).expect(200);
+    // El supervisor no ve etiquetas de predios que no tiene asignados.
+    const outside = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        name: `Identificar fuera ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdNfcCheckpointIds.push(outside.id);
+    const outsideUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    await client
+      .put(`/api/v1/puntos/${outside.id}/etiqueta-nfc`)
+      .set(auth)
+      .send({ uid: outsideUid })
+      .expect(200);
+    await client.post(path).set(supervisor).send({ uid: outsideUid }).expect(404);
+    // Reemplazada por otra: deja de estar vigente y no informa lecturas.
+    const newUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    await client
+      .put(`/api/v1/puntos/${point.id}/etiqueta-nfc`)
+      .set(auth)
+      .send({ uid: newUid })
+      .expect(200);
+    await client
+      .post(path)
+      .set(auth)
+      .send({ uid })
+      .expect(200)
+      .expect(({ body }) => {
+        const replaced = z
+          .object({ status: z.string(), endedAt: z.string().nullable(), lastReadAt: z.null() })
+          .parse(body);
+        expect(replaced.status).toBe('replaced');
+        expect(replaced.endedAt).not.toBeNull();
+      });
+    // Una configuración segura a medias no cuenta como asociación.
+    const incompleteUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    await prisma.nfcTag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointId: point.id,
+        uid: incompleteUid,
+        status: 'removed',
+        configurationStatus: 'incomplete',
+        associatedById: actor.id,
+      },
+    });
+    await client.post(path).set(auth).send({ uid: incompleteUid }).expect(404);
+    await client
+      .get('/api/v1/configuracion/predios')
+      .set(auth)
+      .expect(200)
+      .expect(({ body }) => {
+        const site = z
+          .array(z.object({ id: z.string(), total: z.number(), tagged: z.number() }))
+          .parse(body)
+          .find(({ id }) => id === northAssignedSiteId);
+        expect(site?.tagged).toBeGreaterThanOrEqual(1);
+        expect(site?.total).toBeGreaterThanOrEqual(site?.tagged ?? 0);
+      });
+  });
+
   it('configura por APDU una etiqueta simulada, exige prueba SUN y aísla sesiones', async () => {
     const prisma = app.get(PrismaService).systemPrisma;
     const actor = await prisma.user.findUniqueOrThrow({
@@ -3724,7 +3897,8 @@ describe('Aplicación (e2e)', () => {
       const ctr = Buffer.alloc(2);
       ctr.writeUInt16LE(counter + 1);
       const response =
-        counter === 6
+        // write_ndef (0) es plano y key_0 (6) cierra la sesión: ambas responden 9100 sin MAC.
+        counter === 0 || counter === 6
           ? '9100'
           : Buffer.concat([
               truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),
@@ -4048,7 +4222,8 @@ describe('Aplicación (e2e)', () => {
       const ctr = Buffer.alloc(2);
       ctr.writeUInt16LE(counter + 1);
       const response =
-        counter === 6
+        // write_ndef (0) es plano y key_0 (6) cierra la sesión: ambas responden 9100 sin MAC.
+        counter === 0 || counter === 6
           ? '9100'
           : Buffer.concat([
               truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),

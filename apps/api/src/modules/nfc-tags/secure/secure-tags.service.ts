@@ -204,7 +204,7 @@ export class SecureTagsService {
           step = previous.resumeStep ?? STEPS[0];
           command =
             step === 'write_ndef'
-              ? writeNdef(0, state as Ev2State, authKey)
+              ? writeNdef()
               : this.nextCommand(step, state, authKey, session.tagUid);
         }
       } else {
@@ -225,13 +225,18 @@ export class SecureTagsService {
           step = 'auth_1';
           command = authFirst();
         } else {
-          checkFullResponse(
-            response,
-            previous.counter,
-            state as Ev2State,
-            authKey,
-            session.step === 'key_0',
-          );
+          if (session.step === 'write_ndef') {
+            // Respuesta plana sin MAC; el CmdCtr igual avanza.
+            if (response.toString('hex') !== '9100') throw new Error('Escritura NDEF rechazada');
+          } else {
+            checkFullResponse(
+              response,
+              previous.counter,
+              state as Ev2State,
+              authKey,
+              session.step === 'key_0',
+            );
+          }
           state = { ...previous, counter: previous.counter + 1, oldKeyKind: 'factory' };
           delete state.resumeStep;
           if (index === STEPS.length - 1) {

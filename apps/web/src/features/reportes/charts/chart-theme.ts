@@ -95,3 +95,7 @@ export const tooltipProps = {
   cursor: { fill: 'var(--muted)' },
   isAnimationActive: false,
 } as const;
+
+/** Trama diagonal roja de las fallas: no depende solo del color para distinguirlas. */
+export const FAILURE_HATCH =
+  'repeating-linear-gradient(45deg, var(--danger) 0 3px, transparent 3px 7px)';

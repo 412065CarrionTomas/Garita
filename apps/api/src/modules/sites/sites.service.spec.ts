@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { Prisma } from '../../generated/prisma/client';
 import { SitesService } from './sites.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
@@ -14,7 +15,11 @@ function setup() {
       updateMany: jest.fn(),
       create: jest.fn(),
     },
-    client: { update: jest.fn().mockResolvedValue({ id: 'client' }) },
+    client: {
+      update: jest.fn().mockResolvedValue({ id: 'client' }),
+      count: jest.fn().mockResolvedValue(7),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     user: {
       count: jest.fn().mockResolvedValue(2),
       findMany: jest.fn().mockResolvedValue([
@@ -78,6 +83,39 @@ function setup() {
   return { service, db, resources, firebase };
 }
 describe('SitesService audit regressions', () => {
+  it('pagina clientes buscando cada palabra y no ordena por predios al supervisor', async () => {
+    const { service, db } = setup();
+    db.client.count.mockResolvedValueOnce(4).mockResolvedValueOnce(3);
+    const page = await service.listClients(
+      { buscar: ' ferreyra  peralta ', orden: 'predios', pagina: 2, porPagina: 5 },
+      { role: 'supervisor', userId: 'sup' } as never,
+    );
+    const args = (db.client.findMany.mock.calls as unknown[][])[0]?.[0] as {
+      where: { AND: { OR: object[] }[] };
+      orderBy: object[];
+      skip: number;
+      take: number;
+    };
+    expect(args.where.AND).toHaveLength(2);
+    expect(args.where.AND[1]?.OR).toContainEqual({
+      contactName: { contains: 'peralta', mode: 'insensitive' },
+    });
+    expect(args.orderBy).toEqual([{ name: 'asc' }, { id: 'asc' }]);
+    expect(args).toMatchObject({ skip: 5, take: 5 });
+    expect(page).toMatchObject({ total: 7, paginas: 2, resumen: { active: 4, inactive: 3 } });
+  });
+
+  it('ordena por predios descendente desempatando A–Z, y al supervisor solo por nombre', async () => {
+    const { service, db } = setup();
+    const query = { orden: 'predios', sentido: 'desc', pagina: 1, porPagina: 20 } as const;
+    await service.listClients(query, { role: 'admin', userId: 'admin' } as never);
+    await service.listClients(query, { role: 'supervisor', userId: 'sup' } as never);
+    const orderBy = (call: number) =>
+      ((db.client.findMany.mock.calls as unknown[][])[call]?.[0] as { orderBy: object[] }).orderBy;
+    expect(orderBy(0)).toEqual([{ sites: { _count: 'desc' } }, { name: 'asc' }, { id: 'asc' }]);
+    expect(orderBy(1)).toEqual([{ name: 'asc' }, { id: 'asc' }]);
+  });
+
   it('impacto y cancelacion incluyen no iniciados vencidos y uncovered, y todos los in_progress', async () => {
     const { service, db } = setup();
     const impact = await service.impactSiteDeactivation('site');
@@ -151,5 +189,73 @@ describe('SitesService audit regressions', () => {
     });
     expect(db.site.create).not.toHaveBeenCalled();
     expect(db.site.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('sites for the guard', () => {
+  it('lists own sites with next shift, rounds and supervisor names only', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: 'site',
+        name: 'Parque',
+        address: 'Ruta 9 km 4',
+        latitude: new Prisma.Decimal('-31.4'),
+        longitude: new Prisma.Decimal('-64.1'),
+        accessInstructions: 'Portón norte',
+        supervisors: [{ user: { firstName: 'Ana', lastName: 'Paz' } }],
+        rounds: [
+          { name: 'Perimetral', currentVersion: { id: 'v1', _count: { checkpoints: 8 } } },
+          { name: 'Interna', currentVersion: null },
+        ],
+        shifts: [
+          {
+            startsAt: new Date('2026-11-14T01:00:00Z'),
+            assignments: [{ startsAt: new Date('2026-11-14T03:00:00Z') }],
+          },
+        ],
+      },
+    ]);
+    const service = new SitesService(
+      { tenantPrisma: { site: { findMany } } } as unknown as PrismaService,
+      {} as TenantResourceService,
+      { now: () => new Date('2026-11-13T12:00:00Z') },
+      {} as never,
+      {} as never,
+      {} as ShiftExecutionService,
+      {} as FirebaseIdentityProvider,
+    );
+    const sites = await service.listForGuard({
+      userId: 'guard',
+      companyId: 'company',
+      role: 'guard',
+      status: 'active',
+    });
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      where: {
+        status: 'active',
+        shifts: {
+          some: {
+            assignments: { some: { guardId: 'guard', isCurrent: true, active: true } },
+            endsAt: { gte: new Date('2026-08-15T12:00:00Z') },
+          },
+        },
+      },
+    });
+    expect(sites).toEqual([
+      {
+        id: 'site',
+        name: 'Parque',
+        address: 'Ruta 9 km 4',
+        latitude: -31.4,
+        longitude: -64.1,
+        accessInstructions: 'Portón norte',
+        supervisors: ['Ana Paz'],
+        rounds: [
+          { name: 'Perimetral', checkpoints: 8, versionId: 'v1' },
+          { name: 'Interna', checkpoints: 0, versionId: null },
+        ],
+        nextShiftAt: '2026-11-14T03:00:00.000Z',
+      },
+    ]);
   });
 });

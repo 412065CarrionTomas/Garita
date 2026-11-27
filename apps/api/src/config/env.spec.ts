@@ -45,6 +45,7 @@ describe('validateEnv', () => {
       FIREBASE_PRIVATE_KEY: REQUIRED.FIREBASE_PRIVATE_KEY,
       QR_SIGNING_SECRET: REQUIRED.QR_SIGNING_SECRET,
       SHIFT_CREDENTIAL_SECRET: REQUIRED.SHIFT_CREDENTIAL_SECRET,
+      ORS_URL: 'https://api.heigit.org/openrouteservice',
     });
   });
 

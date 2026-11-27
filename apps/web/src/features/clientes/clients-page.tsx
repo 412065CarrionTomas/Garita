@@ -1,7 +1,10 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { clientInputSchema, clientsResponseSchema, clientResponseSchema } from '@garita/shared';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { clientListItemSchema } from '@garita/shared';
+import { clientInputSchema, clientsPageSchema, clientResponseSchema } from '@garita/shared';
+import { EllipsisVertical, Search } from 'lucide-react';
 import { useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
+import { lastPage } from '@/lib/page-items';
 import { apiGet, apiPost, apiPatch, ApiError } from '@/lib/api-client';
 import { useAuth } from '../auth/auth-context';
 import { ClientUsersPanel } from './client-users-panel';
@@ -26,7 +29,19 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+import { DataTable, type DataSort } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
+import { Pagination } from '@/components/pagination';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { useDebouncedSearch } from '@/lib/use-debounced-search';
+import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -45,15 +60,48 @@ import {
 } from '@/components/ui/table';
 
 const response = z.looseObject({ id: z.string() });
+const SUMMARY = [
+  { value: 'active', label: 'Activos' },
+  { value: 'inactive', label: 'Inactivos' },
+] as const;
+
 export function ClientsPage() {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const { busy, run } = useBusy();
   const [form, setForm] = useState({ name: '', contactName: '', phone: '', email: '', taxId: '' });
-  const clients = useQuery({
-    queryKey: ['clientes'],
-    queryFn: () => apiGet('/clientes', clientsResponseSchema),
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [status, setStatus] = useState('');
+  // Arranca como lo ordena la API por defecto (nombre A–Z): el primer clic ya invierte.
+  const [sort, setSort] = useState<DataSort>({ id: 'nombre', dir: 'asc' });
+  // Busca solo cuando se deja de tipear, sin botón de buscar.
+  const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
+  const params = new URLSearchParams({
+    pagina: String(page),
+    porPagina: String(pageSize),
   });
+  if (status) params.set('estado', status);
+  if (search) params.set('buscar', search);
+  if (sort) {
+    params.set('orden', sort.id);
+    params.set('sentido', sort.dir);
+  }
+  const clients = useQuery({
+    queryKey: ['clientes', 'listado', status, search, sort, page, pageSize],
+    queryFn: () => apiGet(`/clientes?${params.toString()}`, clientsPageSchema),
+    // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
+    placeholderData: keepPreviousData,
+  });
+  // Se quitó lo último de la página (p. ej. una baja): volver a la última que tenga resultados.
+  const total = clients.data?.total;
+  if (total !== undefined && !clients.isPlaceholderData && page > lastPage(total, pageSize)) {
+    setPage(lastPage(total, pageSize));
+  }
+  const changeStatus = (value: string) => {
+    setStatus(value);
+    setPage(1);
+  };
   const create = useMutation({
     mutationFn: () => apiPost('/clientes', form, clientInputSchema, response),
     onSuccess: () => {
@@ -65,9 +113,7 @@ export function ClientsPage() {
   const [error, setError] = useState('');
   const [editError, setEditError] = useState('');
   const [actionError, setActionError] = useState('');
-  const [editing, setEditing] = useState<z.infer<typeof clientsResponseSchema>[number] | null>(
-    null,
-  );
+  const [editing, setEditing] = useState<z.infer<typeof clientListItemSchema> | null>(null);
   const [editForm, setEditForm] = useState({
     name: '',
     contactName: '',
@@ -170,21 +216,220 @@ export function ClientsPage() {
         </DialogContent>
       </Dialog>
       {actionError && <Alert variant="destructive">{actionError}</Alert>}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">Listado</h2>
-        </CardHeader>
-        <CardContent>
-          {clients.isPending ? (
-            <div role="status" className="space-y-3">
-              <span className="sr-only">Cargando clientes…</span>
-              {[0, 1, 2].map((row) => (
-                <Skeleton key={row} className="h-12 w-full" />
-              ))}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-80">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            type="search"
+            aria-label="Buscar clientes"
+            placeholder="Buscar por nombre, contacto, correo o CUIT"
+            className="pl-9"
+            value={searchInput}
+            onChange={(event) => {
+              setSearchInput(event.target.value);
+            }}
+          />
+        </div>
+        <NativeSelect
+          aria-label="Filtrar por estado"
+          value={status}
+          onChange={(event) => {
+            changeStatus(event.target.value);
+          }}
+        >
+          <NativeSelectOption value="">Todos los estados</NativeSelectOption>
+          <NativeSelectOption value="active">Activo</NativeSelectOption>
+          <NativeSelectOption value="inactive">Inactivo</NativeSelectOption>
+        </NativeSelect>
+        {clients.data && (
+          <div role="group" aria-label="Resumen de clientes" className="flex flex-wrap gap-2">
+            {SUMMARY.map(({ value, label }) => {
+              const pressed = status === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={pressed}
+                  onClick={() => {
+                    changeStatus(pressed ? '' : value);
+                  }}
+                  className={cn(
+                    'flex min-h-9 items-baseline gap-2 rounded-md border-[1.5px] px-3 py-1.5 text-sm transition-colors',
+                    pressed
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-input bg-card hover:bg-muted',
+                  )}
+                >
+                  <span className="text-base font-semibold tabular-nums">
+                    {clients.data.resumen[value]}
+                  </span>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {clients.isPending ? (
+        <div role="status" className="space-y-3">
+          <span className="sr-only">Cargando clientes…</span>
+          {[0, 1, 2].map((row) => (
+            <Skeleton key={row} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : clients.isError ? (
+        <Alert variant="destructive">No se pudieron cargar los clientes.</Alert>
+      ) : (
+        <div className="space-y-4">
+          {clients.data.items.length > 0 ? (
+            <div className="overflow-x-auto border-[1.5px] border-input">
+              <DataTable
+                label="Clientes"
+                sort={sort}
+                onSortChange={(next) => {
+                  setSort(next);
+                  setPage(1);
+                }}
+                rows={clients.data.items}
+                getRowId={(client) => client.id}
+                columns={[
+                  {
+                    id: 'nombre',
+                    value: (client) => client.name,
+                    header: 'Cliente',
+                    cell: (client) => (
+                      <>
+                        <Link
+                          className="block truncate font-semibold hover:underline"
+                          to={`/clientes/${client.id}`}
+                        >
+                          {client.name}
+                        </Link>
+                        <span className="block truncate text-sm text-muted-foreground tabular-nums">
+                          {client.taxId ? `CUIT ${client.taxId}` : 'Sin CUIT'}
+                        </span>
+                      </>
+                    ),
+                  },
+                  {
+                    id: 'contacto',
+                    value: (client) => client.contactName,
+                    header: 'Contacto',
+                    cell: (client) => (
+                      <>
+                        <span className="block truncate">{client.contactName}</span>
+                        <span className="block truncate text-sm text-muted-foreground">
+                          {client.email}
+                        </span>
+                      </>
+                    ),
+                  },
+                  {
+                    id: 'telefono',
+                    value: (client) => client.phone,
+                    header: 'Teléfono',
+                    width: 176,
+                    cell: (client) => (
+                      <a
+                        href={`tel:${client.phone.replace(/[^+\d]/g, '')}`}
+                        className="tabular-nums hover:underline"
+                      >
+                        {client.phone}
+                      </a>
+                    ),
+                  },
+                  {
+                    id: 'predios',
+                    value: (client) => client._count.sites,
+                    header: 'Predios',
+                    width: 112,
+                    align: 'right',
+                    cell: (client) => (
+                      <Link
+                        to={`/clientes/${client.id}`}
+                        className="tabular-nums hover:underline"
+                        aria-label={`${String(client._count.sites)} predios de ${client.name}`}
+                      >
+                        {client._count.sites}
+                      </Link>
+                    ),
+                  },
+                  {
+                    id: 'estado',
+                    value: (client) => client.status,
+                    header: 'Estado',
+                    width: 128,
+                    cell: (client) => (
+                      <StatusBadge tone={client.status === 'active' ? 'success' : 'neutral'}>
+                        {client.status === 'active' ? 'Activo' : 'Inactivo'}
+                      </StatusBadge>
+                    ),
+                  },
+                  {
+                    id: 'actions',
+                    header: 'Acciones',
+                    hideHeader: true,
+                    width: 64,
+                    align: 'right',
+                    cell: (client) => (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Más acciones de ${client.name}`}
+                          >
+                            <EllipsisVertical aria-hidden="true" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-auto">
+                          <DropdownMenuItem asChild>
+                            <Link to={`/clientes/${client.id}`}>Ver predios</Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setEditError('');
+                              setEditing(client);
+                              setEditForm({
+                                name: client.name,
+                                contactName: client.contactName,
+                                phone: client.phone,
+                                email: client.email,
+                                taxId: client.taxId ?? '',
+                              });
+                            }}
+                          >
+                            Editar
+                          </DropdownMenuItem>
+                          {client.status === 'active' && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => {
+                                  setDeleting({ id: client.id, name: client.name });
+                                }}
+                              >
+                                Dar de baja
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ),
+                  },
+                ]}
+              />
             </div>
-          ) : clients.isError ? (
-            <Alert variant="destructive">No se pudieron cargar los clientes.</Alert>
-          ) : clients.data.length === 0 ? (
+          ) : status || search ? (
+            <EmptyState
+              title="No hay clientes para mostrar"
+              description="Revisá la búsqueda o los filtros."
+            />
+          ) : (
             <EmptyState
               title="Todavía no hay clientes"
               description="Registrá un cliente para empezar a organizar sus predios."
@@ -199,74 +444,21 @@ export function ClientsPage() {
                 </Button>
               }
             />
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {clients.data.map((client) => (
-                    <TableRow key={client.id}>
-                      <TableCell className="whitespace-normal">
-                        <div className="min-w-40">
-                          <strong>
-                            <a className="underline" href={`/clientes/${client.id}`}>
-                              {client.name}
-                            </a>
-                          </strong>
-                          <p>
-                            {client.contactName} · {client.phone} · {client.email}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge tone={client.status === 'active' ? 'success' : 'neutral'}>
-                          {client.status === 'active' ? 'Activo' : 'Inactivo'}
-                        </StatusBadge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setEditError('');
-                              setEditing(client);
-                              setEditForm({
-                                name: client.name,
-                                contactName: client.contactName,
-                                phone: client.phone,
-                                email: client.email,
-                                taxId: client.taxId ?? '',
-                              });
-                            }}
-                          >
-                            Editar
-                          </Button>
-                          <Button
-                            variant="ghostDestructive"
-                            size="sm"
-                            onClick={() => {
-                              setDeleting({ id: client.id, name: client.name });
-                            }}
-                          >
-                            Dar de baja
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
           )}
-        </CardContent>
-      </Card>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={clients.data.total}
+            shown={clients.data.items.length}
+            label="clientes"
+            onPage={setPage}
+            onPageSize={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </div>
+      )}
       <Dialog
         open={editing !== null}
         onOpenChange={(open) => {
@@ -435,7 +627,7 @@ export function ClientDetailPage() {
   return (
     <section aria-labelledby="client-title" className="space-y-6">
       <Button variant="link" asChild>
-        <a href="/clientes">Volver a Clientes</a>
+        <Link to="/clientes">Volver a Clientes</Link>
       </Button>
       <PageHeader
         id="client-title"

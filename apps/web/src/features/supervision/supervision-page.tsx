@@ -78,6 +78,7 @@ function RowsSkeleton() {
 
 export function SupervisionPage() {
   const [filter, setFilter] = useState<Filter>('all');
+  // Por turno, no por predio: un predio puede tener varios turnos en la lista.
   const [hovered, setHovered] = useState<string | null>(null);
   const navigate = useNavigate();
   const coordinates = useSiteCoordinates();
@@ -173,10 +174,10 @@ export function SupervisionPage() {
                 return (
                   <TableRow
                     key={row.id}
-                    data-state={hovered === row.site.id ? 'selected' : undefined}
+                    data-state={hovered === row.id ? 'selected' : undefined}
                     className="relative"
                     onMouseEnter={() => {
-                      setHovered(row.site.id);
+                      setHovered(row.id);
                     }}
                     onMouseLeave={() => {
                       setHovered(null);
@@ -233,8 +234,10 @@ export function SupervisionPage() {
       map={
         <LiveMap
           sites={sites}
-          hoveredSiteId={hovered}
-          onHoverSite={setHovered}
+          hoveredSiteId={visible.find((row) => row.id === hovered)?.site.id ?? null}
+          onHoverSite={(siteId) => {
+            setHovered(siteId ? (shiftBySite.get(siteId)?.id ?? null) : null);
+          }}
           onSelectSite={(siteId) => {
             const shift = shiftBySite.get(siteId);
             if (shift) void navigate(`/supervision/turnos/${shift.id}`);

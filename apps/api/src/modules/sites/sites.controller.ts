@@ -50,7 +50,7 @@ export class SitesController {
   @Roles('admin', 'supervisor')
   clients(@Query() query: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = parse(clientListQuerySchema, query);
-    return this.sites.listClients(parsed.estado, parsed.pagina, user);
+    return this.sites.listClients(parsed, user);
   }
   @Post('clientes')
   @Roles('admin')
@@ -93,6 +93,13 @@ export class SitesController {
   @Roles('admin', 'supervisor')
   getClient(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.sites.getClient(id, user);
+  }
+
+  @Get('mis-predios')
+  @Roles('guard')
+  @ApiOperation({ summary: 'Predios del vigilador: por venir o con turnos en los últimos 90 días' })
+  listForGuard(@CurrentUser() user: AuthenticatedUser) {
+    return this.sites.listForGuard(user);
   }
 
   @Get('predios')

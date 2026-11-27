@@ -50,12 +50,16 @@ export function complianceOwner(window: ComplianceWindow): ComplianceGuard | nul
   return window.assignments.find((assignment) => assignment.id === id)?.guard ?? null;
 }
 export function localReportDay(instant: string | Date, timezone: string): string {
+  return reportDayFormatter(timezone).format(new Date(instant));
+}
+/** Formatea instantes como día local `YYYY-MM-DD`; crearlo una vez por cálculo, no por ventana. */
+function reportDayFormatter(timezone: string): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date(instant));
+  });
 }
 function addWindow(totals: ComplianceTotals, window: ComplianceWindow) {
   switch (window.status) {
@@ -90,12 +94,7 @@ export function computeCompliance(
     string | null,
     { id: string | null; name: string; deactivated: boolean; totals: ComplianceTotals }
   >();
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
+  const formatter = reportDayFormatter(timezone);
   for (const window of windows) {
     if (
       window.shiftStatus === 'cancelled' ||
@@ -133,5 +132,78 @@ export function computeCompliance(
       .map(([id, totals]) => ({ id, name: id, totals })),
     bySite: [...sites.values()].sort((a, b) => a.name.localeCompare(b.name)),
     byGuard: [...guards.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/**
+ * Estado de un predio en un día, en el orden de importancia: una sola ventana con falla manda.
+ * `pending`: solo hubo ventanas en revisión o sin sincronizar (todavía fuera del porcentaje).
+ */
+export const SITE_DAY_STATUSES = ['failed', 'late', 'ok', 'pending', 'none'] as const;
+export type SiteDayStatus = (typeof SITE_DAY_STATUSES)[number];
+
+export function siteDayStatus(totals: ComplianceTotals): SiteDayStatus {
+  if (totals.incomplete + totals.not_done > 0) return 'failed';
+  if (totals.complete_late > 0) return 'late';
+  if (totals.evaluated > 0) return 'ok';
+  if (totals.in_review + totals.pending_sync > 0) return 'pending';
+  return 'none';
+}
+
+/**
+ * Cumplimiento de cada predio día por día (los "casilleros"). Usa las mismas reglas que
+ * computeCompliance: las ventanas canceladas o todavía abiertas no cuentan. Todos los días del
+ * período aparecen, con `none` si el predio no tuvo rondas.
+ */
+export function computeSiteDayGrid(
+  windows: readonly ComplianceWindow[],
+  timezone: string,
+  period: { desde: string; hasta: string },
+) {
+  const days: string[] = [];
+  const date = new Date(`${period.desde}T00:00:00Z`);
+  while (date.toISOString().slice(0, 10) < period.hasta) {
+    days.push(date.toISOString().slice(0, 10));
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  const sites = new Map<
+    string,
+    { id: string; name: string; byDay: Map<string, ComplianceTotals> }
+  >();
+  const formatter = reportDayFormatter(timezone);
+  for (const window of windows) {
+    if (
+      window.shiftStatus === 'cancelled' ||
+      window.shiftStatus === 'cancelled_by_suspension' ||
+      ['pending', 'in_progress', 'late'].includes(window.status)
+    )
+      continue;
+    const day = formatter.format(new Date(window.startsAt));
+    const site = sites.get(window.site.id) ?? {
+      ...window.site,
+      byDay: new Map<string, ComplianceTotals>(),
+    };
+    sites.set(site.id, site);
+    const totals = site.byDay.get(day) ?? emptyComplianceTotals();
+    site.byDay.set(day, totals);
+    addWindow(totals, window);
+  }
+  return {
+    days,
+    sites: [...sites.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((site) => ({
+        id: site.id,
+        name: site.name,
+        cells: days.map((day) => {
+          const totals = site.byDay.get(day) ?? emptyComplianceTotals();
+          return {
+            day,
+            status: siteDayStatus(totals),
+            evaluated: totals.evaluated,
+            percentage: totals.percentage,
+          };
+        }),
+      })),
   };
 }

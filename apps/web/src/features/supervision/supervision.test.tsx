@@ -60,6 +60,7 @@ const detail = {
     closeReason: 'Me descompuse',
     closedBy: null,
   },
+  syncStatus: row.syncStatus,
   phoneWithoutNfc: true,
   assignments: [
     {
@@ -153,6 +154,23 @@ it('muestra estados, hora de contacto y filtros operables con teclado', async ()
   );
 });
 
+it('al pasar el mouse marca solo ese turno aunque el predio tenga otro', async () => {
+  jest
+    .mocked(apiGet)
+    .mockResolvedValue([row, { ...row, id: 's2', startsAt: '2030-01-02T08:00:00Z' }] as never);
+  renderWithQueryClient(
+    <MemoryRouter>
+      <SupervisionPage />
+    </MemoryRouter>,
+  );
+  await screen.findAllByRole('link', { name: 'Depósito Ruta 9' });
+  const [, first, second] = screen.getAllByRole('row');
+  if (!first || !second) throw new Error('faltan filas');
+  fireEvent.mouseEnter(first);
+  expect(first).toHaveAttribute('data-state', 'selected');
+  expect(second).not.toHaveAttribute('data-state');
+});
+
 it.each([
   ['without_guard', 'Sin vigilador'],
   ['no_show', 'No presentado'],
@@ -186,6 +204,23 @@ it.each([
     </MemoryRouter>,
   );
   expect(await screen.findByText(expected)).toBeInTheDocument();
+});
+
+it('resume arriba vigilador, inicio real, señal, puntos y ventana actual', async () => {
+  renderWithQueryClient(
+    <MemoryRouter initialEntries={['/supervision/turnos/s1']}>
+      <Routes>
+        <Route path="/supervision/turnos/:id" element={<ShiftDetailPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText(new RegExp(`inició ${time(row.startsAt)}`))).toBeInTheDocument();
+  expect(
+    screen.getByText(`Sin contacto desde ${time(row.syncStatus.since)} (quedan 2 eventos)`),
+  ).toBeInTheDocument();
+  expect(screen.getByText('Puntos').parentElement).toHaveTextContent('1 de 2');
+  expect(screen.getByText('0/1')).toBeInTheDocument();
+  expect(screen.getByText(/Sin cobertura desde/)).toBeInTheDocument();
 });
 
 it('muestra ventanas, recorrido, rechazos y filtra marcas por gravedad', async () => {

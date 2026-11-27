@@ -1,5 +1,7 @@
 # Guía de contribución
 
+> **Este proyecto no acepta contribuciones externas.** Esta guía describe el flujo de trabajo interno del autor. Ver [LICENSE](LICENSE).
+
 Reglas de trabajo con Git para el repositorio de Garita. Las convenciones de código están en [AGENTS.md](AGENTS.md).
 
 ## Ramas (Git Flow)

@@ -22,7 +22,10 @@ import {
   portalIncidentsSchema,
   portalEmergenciesSchema,
   PORTAL_STATUS_LABELS,
+  INCIDENT_FOLLOW_UP_LABELS,
+  INCIDENT_SEVERITY_LABELS,
   INCIDENT_TYPE_LABELS,
+  WEEKDAY_LABELS,
   type ReportQuery,
   type ResponseTimesReport,
 } from '@garita/shared';
@@ -388,10 +391,10 @@ export class ReportExportsService {
         'Escaladas',
       ],
       rows: group.rows.flatMap((row) =>
+        // Rondas incumplidas se reporta en Cumplimiento.
         (
           [
             ['panic', 'Pánico'],
-            ['missedRound', 'Rondas incumplidas'],
             ['classification', 'Clasificación de incidentes'],
           ] as const
         ).map(([key, label]) => {
@@ -431,26 +434,23 @@ export class ReportExportsService {
         columns: ['Indicador', 'Valor'],
         rows: [
           ['Total', String(report.total)],
-          ['Pendientes de clasificar', String(report.pending.count)],
-          [
-            'Más antiguo',
-            report.pending.oldestAt
-              ? this.date(report.pending.oldestAt, report.timezone)
-              : 'Sin datos',
-          ],
-          [
-            'Antigüedad',
-            number(
-              report.pending.oldestAgeMs === null ? null : report.pending.oldestAgeMs / 3600000,
-              ' h',
-            ),
-          ],
+          ['Total del período anterior', String(report.previous.total)],
+          ['Gravedad alta', String(report.highSeverity)],
+          ['Gravedad alta del período anterior', String(report.previous.highSeverity)],
+          ['Con seguimiento abierto hoy', String(report.openFollowUpsTotal)],
         ],
       },
       countSection('Incidentes por tipo', report.byType),
-      countSection('Incidentes por franja de dos horas', report.byTimeBand),
+      countSection('Incidentes por gravedad', report.bySeverity),
+      {
+        title: 'Incidentes por día y franja de dos horas',
+        columns: ['Día', ...report.byTimeBand.map((band) => band.name.slice(0, 2))],
+        rows: report.byWeekdayTimeBand.map((counts, day) => [
+          WEEKDAY_LABELS[day] ?? '',
+          ...counts.map(String),
+        ]),
+      },
       countSection('Incidentes por predio', report.bySite),
-      countSection('Incidentes por clasificación', report.byClassification),
       ...this.timeSections(times),
       countSection('Pánico por resultado', panic.byOutcome),
       countSection('Pánico por canal', panic.byChannel),
@@ -470,7 +470,7 @@ export class ReportExportsService {
       },
       {
         title: 'Listado de incidentes del período',
-        columns: ['Predio', 'Tipo', 'Ocurrencia', 'Clasificación'],
+        columns: ['Predio', 'Tipo', 'Ocurrencia', 'Clasificación', 'Gravedad', 'Seguimiento'],
         rows: incidents.map((row) => [
           row.site.name,
           INCIDENT_TYPE_LABELS[row.type],
@@ -478,6 +478,22 @@ export class ReportExportsService {
           { pending: 'Pendiente', client_visible: 'Visible para el cliente', internal: 'Interno' }[
             row.classificationStatus
           ],
+          row.severity ? INCIDENT_SEVERITY_LABELS[row.severity] : 'Sin clasificar',
+          INCIDENT_FOLLOW_UP_LABELS[row.followUpStatus],
+        ]),
+      },
+      {
+        title:
+          report.openFollowUpsTotal > report.openFollowUps.length
+            ? `Seguimiento abierto hoy: los ${String(report.openFollowUps.length)} más prioritarios de ${String(report.openFollowUpsTotal)}`
+            : `Seguimiento abierto hoy (${String(report.openFollowUpsTotal)})`,
+        columns: ['Predio', 'Tipo', 'Gravedad', 'Abierto desde', 'Última acción'],
+        rows: report.openFollowUps.map((row) => [
+          row.site.name,
+          INCIDENT_TYPE_LABELS[row.type],
+          row.severity ? INCIDENT_SEVERITY_LABELS[row.severity] : 'Sin clasificar',
+          this.date(row.openedAt, report.timezone),
+          row.lastAction ?? 'Sin acciones',
         ]),
       },
       {

@@ -6,14 +6,8 @@ import { EmptyState } from '@/components/empty-state';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Panel } from './panel';
+import { DataTable } from '@/components/data-table';
 
 const SHOWN = 8;
 
@@ -38,18 +32,29 @@ export function NotDoneList({ query, timezone }: { query: string; timezone: stri
       hourCycle: 'h23',
     });
   return (
-    <section aria-labelledby="not-done-title" className="space-y-3">
-      <h2 id="not-done-title" className="t-headline text-foreground">
-        No realizadas
-      </h2>
+    <Panel
+      title={
+        <>
+          No realizadas
+          {result.data && result.data.total > 0 && (
+            <span className="ml-2 font-sans text-sm font-normal tracking-normal normal-case text-muted-foreground">
+              {items.length < result.data.total
+                ? `las ${items.length} más recientes de ${result.data.total}`
+                : `${result.data.total} en el período`}
+            </span>
+          )}
+        </>
+      }
+      bodyClassName="max-h-80"
+    >
       {result.isPending && (
-        <div role="status" aria-label="Cargando no realizadas" className="space-y-2">
+        <div role="status" aria-label="Cargando no realizadas" className="space-y-2 p-4">
           <Skeleton className="h-9 w-full" />
           <Skeleton className="h-12 w-full" />
         </div>
       )}
       {result.isError && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="m-4">
           No pudimos cargar las ventanas no realizadas.{' '}
           <Button variant="outline" size="sm" onClick={() => void result.refetch()}>
             Reintentar
@@ -63,52 +68,74 @@ export function NotDoneList({ query, timezone }: { query: string; timezone: stri
         />
       )}
       {items.length > 0 && (
-        <Table aria-labelledby="not-done-title">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Ventana</TableHead>
-              <TableHead>Predio</TableHead>
-              <TableHead>Vigilador</TableHead>
-              <TableHead>
-                <span className="sr-only">Detalle</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell className="t-numeral">
-                  {new Date(item.startsAt).toLocaleDateString('es-AR', {
-                    timeZone: timezone,
-                    day: '2-digit',
-                    month: '2-digit',
-                  })}
-                </TableCell>
-                <TableCell className="t-numeral">
-                  {hour(item.startsAt)}–{hour(item.endsAt)}
-                </TableCell>
-                <TableCell className="font-semibold">{item.site.name}</TableCell>
-                <TableCell>
-                  {item.guard
-                    ? `${item.guard.name}${item.guard.deactivated ? ' (desactivado)' : ''}`
-                    : 'Sin vigilador'}
-                </TableCell>
-                <TableCell>
-                  {/* TODO(foja): falta el motivo ("Sin señal: sin registros" / "Sin explicación"); la API no lo trae. */}
-                  <Link
-                    className="underline"
-                    to={`/supervision/turnos/${item.shiftId}`}
-                    aria-label={`Ver foja: ${item.site.name} ${hour(item.startsAt)}`}
-                  >
-                    Ver foja
-                  </Link>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <DataTable
+          label="No realizadas"
+          rows={items}
+          getRowId={(item) => item.id}
+          columns={[
+            {
+              id: 'date',
+              header: 'Fecha',
+              type: 'date',
+              width: 96,
+              value: (item) => item.startsAt,
+              cell: (item) =>
+                new Date(item.startsAt).toLocaleDateString('es-AR', {
+                  timeZone: timezone,
+                  day: '2-digit',
+                  month: '2-digit',
+                }),
+              className: 'tabular-nums',
+            },
+            {
+              id: 'window',
+              header: 'Ventana',
+              width: 128,
+              // Por horario del día ("08:00" < "22:00"), no por fecha: para eso está "Fecha".
+              value: (item) => hour(item.startsAt),
+              cell: (item) => `${hour(item.startsAt)}–${hour(item.endsAt)}`,
+              className: 'tabular-nums',
+            },
+            {
+              id: 'site',
+              header: 'Predio',
+              value: (item) => item.site.name,
+              className: 'font-semibold',
+            },
+            {
+              id: 'guard',
+              header: 'Vigilador',
+              value: (item) =>
+                item.guard
+                  ? `${item.guard.name}${item.guard.deactivated ? ' (desactivado)' : ''}`
+                  : 'Sin vigilador',
+              cell: (item) =>
+                item.guard ? (
+                  `${item.guard.name}${item.guard.deactivated ? ' (desactivado)' : ''}`
+                ) : (
+                  <span className="text-danger">Sin vigilador</span>
+                ),
+            },
+            {
+              id: 'detail',
+              header: 'Detalle',
+              hideHeader: true,
+              width: 112,
+              align: 'right',
+              // TODO(foja): falta el motivo ("Sin señal: sin registros" / "Sin explicación"); la API no lo trae.
+              cell: (item) => (
+                <Link
+                  className="font-semibold underline-offset-4 hover:underline"
+                  to={`/supervision/turnos/${item.shiftId}`}
+                  aria-label={`Ver foja: ${item.site.name} ${hour(item.startsAt)}`}
+                >
+                  Ver foja →
+                </Link>
+              ),
+            },
+          ]}
+        />
       )}
-    </section>
+    </Panel>
   );
 }

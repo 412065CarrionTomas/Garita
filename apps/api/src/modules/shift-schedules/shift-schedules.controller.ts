@@ -6,6 +6,7 @@ import {
   shiftSchedulePatchSchema,
   shiftScheduleExtensionSchema,
   shiftScheduleQuerySchema,
+  SCHEDULE_LIST_STATES,
 } from '@garita/shared';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -38,9 +39,15 @@ const scheduleBody = {
 export class ShiftSchedulesController {
   constructor(private readonly schedules: ShiftSchedulesService) {}
   @Get()
-  @ApiOperation({ summary: 'Lista programaciones vigentes; filtros predio y vigilador' })
+  @ApiOperation({
+    summary: 'Lista programaciones con su vigencia y sus turnos; vigentes si no se pide estado',
+  })
   @ApiQuery({ name: 'predio', required: false, type: String })
   @ApiQuery({ name: 'vigilador', required: false, type: String })
+  @ApiQuery({ name: 'estado', required: false, enum: SCHEDULE_LIST_STATES })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'pagina', required: false, type: Number })
+  @ApiQuery({ name: 'porPagina', required: false, type: Number })
   list(@Query() query: unknown) {
     return this.schedules.list(parseOrBadRequest(shiftScheduleQuerySchema, query));
   }

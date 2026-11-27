@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { z } from 'zod';
 
 /**
@@ -10,6 +11,8 @@ const envSchema = z.object({
   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: z.string().min(1),
   EXPO_PUBLIC_FIREBASE_PROJECT_ID: z.string().min(1),
   EXPO_PUBLIC_FIREBASE_APP_ID: z.string().min(1),
+  /** Estilo del mapa, el mismo que el panel web (OpenFreeMap, sin clave). */
+  EXPO_PUBLIC_MAP_STYLE_URL: z.url().default('https://tiles.openfreemap.org/styles/positron'),
 });
 
 const result = envSchema.safeParse({
@@ -18,10 +21,27 @@ const result = envSchema.safeParse({
   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
   EXPO_PUBLIC_FIREBASE_PROJECT_ID: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
   EXPO_PUBLIC_FIREBASE_APP_ID: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  EXPO_PUBLIC_MAP_STYLE_URL: process.env.EXPO_PUBLIC_MAP_STYLE_URL,
 });
 
 if (!result.success) {
   throw new Error(`Variables de entorno inválidas:\n${z.prettifyError(result.error)}`);
 }
 
-export const env = result.data;
+/**
+ * En desarrollo, una API en localhost se busca en el host por el que el celular
+ * llegó a Metro: por USB (adb reverse) sigue siendo localhost; por Wi-Fi o
+ * hotspot pasa a ser la IP de la PC. Cualquier otra URL se respeta tal cual.
+ */
+export function resolveApiUrl(configured: string, metroHostUri: string | undefined) {
+  const metroHost = metroHostUri?.split(':')[0];
+  if (!metroHost) return configured;
+  return configured.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/, `$1${metroHost}`);
+}
+
+export const env = {
+  ...result.data,
+  EXPO_PUBLIC_API_URL: __DEV__
+    ? resolveApiUrl(result.data.EXPO_PUBLIC_API_URL, Constants.expoConfig?.hostUri)
+    : result.data.EXPO_PUBLIC_API_URL,
+};

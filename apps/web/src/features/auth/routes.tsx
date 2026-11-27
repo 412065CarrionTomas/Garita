@@ -10,7 +10,6 @@ import type { UserRole } from '@garita/shared';
 
 import { AppShell } from '@/components/app-shell';
 import type { NavSection } from '@/components/app-shell';
-import { PageHeader } from '@/components/page-header';
 import { useAuth } from './auth-context';
 import { LoginPage } from './login-page';
 import { RecoveryPage } from './recovery-page';
@@ -19,17 +18,17 @@ import { PersonalPage } from '../personal/personal-page';
 import { ActivationPage } from '../activacion/activation-page';
 import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
 import { SitesPage } from '../predios/sites-page';
-import { ShiftsPanel } from '../turnos/shifts-panel';
+import { ShiftsPage } from '../turnos/shifts-page';
 import { SchedulesPage } from '../turnos/programaciones/schedules-page';
 import {
-  IncidentsListPage,
-  IncidentsQueuePage,
+  IncidentsPage,
+  IncidentsQueueRedirect,
   IncidentDetailPage,
   useIncidentPendingCount,
 } from '../incidentes/incidents-page';
 import { SupervisionPage } from '../supervision/supervision-page';
 import { ShiftDetailPage } from '../supervision/shift-detail-page';
-import { ReviewPage, ReviewDetailPage, useReviewCount } from '../revision/review-page';
+import { ReviewPage, useReviewCount } from '../revision/review-page';
 import { NoticesPage } from '../avisos/notices-page';
 import { NoticeDetailPage } from '../avisos/notice-detail-page';
 import { useOpenNotices } from '../avisos/queries';
@@ -46,6 +45,7 @@ import { SubscriptionPage } from '../suscripcion/subscription-page';
 import { PrivacyPage, TermsPage } from '../legal/legal-pages';
 import { LegalAcceptanceGate } from '../legal/legal-acceptance-gate';
 import { FaqPage, PublicFaqPage } from '../ayuda/faq-page';
+import { SummaryPage } from '../resumen/summary-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -93,13 +93,12 @@ function staffSections(admin: boolean, counts: PendingCounts): NavSection[] {
       ],
     },
     {
-      // Todo lo de incidentes vive en un solo lugar: el listado, la cola y su reporte.
+      // Bandeja y archivo comparten pantalla; el reporte analiza el período.
       title: 'Incidentes',
       children: [
-        { path: '/incidentes', title: 'Listado' },
         {
-          path: '/incidentes/cola',
-          title: 'Por clasificar',
+          path: '/incidentes',
+          title: 'Bandeja y archivo',
           count: counts.incidents,
           tone: 'warning',
         },
@@ -197,10 +196,6 @@ export function RoleLayout() {
       </LegalAcceptanceGate>
     </AppShell>
   );
-}
-
-function HomePlaceholder({ title, role }: { title: string; role: string }) {
-  return <PageHeader title={title} description={role} />;
 }
 
 /**
@@ -339,7 +334,7 @@ export function AppRoutes() {
           path="/revision/:id"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <ReviewDetailPage />
+              <ReviewPage />
             </Protected>
           }
         />
@@ -355,7 +350,7 @@ export function AppRoutes() {
           path="/resumen"
           element={
             <Protected roles={['admin']}>
-              <HomePlaceholder role="Administrador" title="Resumen de la empresa" />
+              <SummaryPage />
             </Protected>
           }
         />
@@ -363,7 +358,7 @@ export function AppRoutes() {
           path="/turnos"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <ShiftsPanel />
+              <ShiftsPage />
             </Protected>
           }
         />
@@ -419,7 +414,7 @@ export function AppRoutes() {
           path="/incidentes/cola"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <IncidentsQueuePage />
+              <IncidentsQueueRedirect />
             </Protected>
           }
         />
@@ -427,7 +422,7 @@ export function AppRoutes() {
           path="/incidentes"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <IncidentsListPage />
+              <IncidentsPage />
             </Protected>
           }
         />

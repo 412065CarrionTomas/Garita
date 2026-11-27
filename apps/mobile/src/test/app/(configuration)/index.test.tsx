@@ -1,262 +1,113 @@
-import { Alert } from 'react-native';
-import { ThemeProvider } from '@/ui';
-import { render, userEvent, waitFor } from '@testing-library/react-native';
+import type React from 'react';
+import { render, screen, userEvent, waitFor } from '@testing-library/react-native';
 import type { AuthMeResponse } from '@garita/shared';
+import { ThemeProvider } from '@/ui';
 import { useAuth } from '@/features/auth/auth-context';
-import { ApiError, apiDelete, apiGet, apiRequest } from '@/lib/api-client';
-import { nfcAvailability, openNfcSettings, readFactoryUid, readNfcTag } from '@/lib/nfc';
-import { NotSecureNfcTag, withSecureNfcTag } from '@/lib/nfc-secure';
-import * as Network from 'expo-network';
+import { apiGet } from '@/lib/api-client';
+import { nfcAvailability, openNfcSettings } from '@/lib/nfc';
 import ConfigurationHome from '@/app/(configuration)/index';
 
-jest.mock('@/features/auth/auth-context', () => ({ useAuth: jest.fn() }));
-jest.mock('@/lib/api-client', () => ({
-  ApiError: class extends Error {
-    status: number;
-    payload: unknown;
-    constructor(message: string, status: number, payload?: unknown) {
-      super(message);
-      this.status = status;
-      this.payload = payload;
-    }
-  },
-  apiGet: jest.fn(),
-  apiRequest: jest.fn(),
-  apiDelete: jest.fn(),
-}));
-jest.mock('@/lib/nfc', () => ({
-  nfcAvailability: jest.fn(),
-  openNfcSettings: jest.fn(),
-  readFactoryUid: jest.fn(),
-  readNfcTag: jest.fn(),
-  cancelNfcRead: jest.fn(),
-}));
-jest.mock('@/lib/nfc-secure', () => {
-  const actual = jest.requireActual<{ NotSecureNfcTag: new (uid: string) => Error }>(
-    '@/lib/nfc-secure',
-  );
+const mockPush = jest.fn();
+jest.mock('expo-router', () => {
+  const { useEffect } = jest.requireActual<{ useEffect: typeof React.useEffect }>('react');
   return {
-    NotSecureNfcTag: actual.NotSecureNfcTag,
-    withSecureNfcTag: jest.fn(),
+    router: { push: (...args: unknown[]) => mockPush(...args) },
+    useRouter: () => ({ push: mockPush }),
+    useFocusEffect: (effect: () => void) => useEffect(effect, [effect]),
   };
 });
-jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({ play: jest.fn(), seekTo: jest.fn() }) }));
-jest.mock('expo-haptics', () => ({
-  notificationAsync: jest.fn(),
-  NotificationFeedbackType: { Success: 'success' },
-}));
-jest.mock('expo-network', () => ({ getNetworkStateAsync: jest.fn() }));
+jest.mock('@/features/auth/auth-context', () => ({ useAuth: jest.fn() }));
+jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn() }));
+jest.mock('@/lib/nfc', () => ({ nfcAvailability: jest.fn(), openNfcSettings: jest.fn() }));
+jest.mock('@/lib/cola', () => ({ getSyncSnapshot: jest.fn() }));
 
-const authMock = jest.mocked(useAuth);
-const getMock = jest.mocked(apiGet);
-const putMock = jest.mocked(apiRequest);
-const deleteMock = jest.mocked(apiDelete);
-const availabilityMock = jest.mocked(nfcAvailability);
-const readMock = jest.mocked(readFactoryUid);
-const secureMock = jest.mocked(withSecureNfcTag);
-const networkMock = jest.mocked(Network.getNetworkStateAsync);
-const site = { id: 'site-a', name: 'Predio A' };
-const point = { id: 'point-a', name: 'Portón trasero', etiquetaNfc: null };
+const logout = jest.fn();
+const sites = [
+  { id: 'done', name: 'Alfa completo', total: 3, tagged: 3 },
+  { id: 'pending', name: 'Zeta pendiente', total: 5, tagged: 2 },
+  { id: 'empty', name: 'Beta vacío', total: 0, tagged: 0 },
+];
 
-function setUser(role: 'admin' | 'supervisor' = 'supervisor') {
-  const user: AuthMeResponse = {
-    id: 'u1',
+beforeEach(() => {
+  jest.clearAllMocks();
+  const user = {
+    role: 'admin',
     firstName: 'Ana',
     lastName: 'García',
-    email: 'ana@example.com',
-    role,
-    status: 'active',
-    company: { id: 'c1', name: 'Seguridad Norte' },
-    allowedChannels: ['web', 'mobile'],
-  };
-  authMock.mockReturnValue({
-    user,
-    loading: false,
-    login: jest.fn(),
-    logout: jest.fn(),
-    recover: jest.fn(),
-    acceptLegal: jest.fn(),
-    error: '',
-  });
-}
+    company: { name: 'Seguridad Norte' },
+  } as AuthMeResponse;
+  jest.mocked(useAuth).mockReturnValue({ user, logout } as unknown as ReturnType<typeof useAuth>);
+  jest.mocked(apiGet).mockResolvedValue(sites as never);
+  jest.mocked(nfcAvailability).mockResolvedValue('ready');
+});
 
-async function mount(
-  points: { id: string; name: string; etiquetaNfc: { status: string } | null }[] = [point],
-) {
-  getMock.mockImplementation(((path: string) =>
-    Promise.resolve(path.includes('configuracion') ? [site] : points)) as never);
-  return await render(
+const mount = () =>
+  render(
     <ThemeProvider>
       <ConfigurationHome />
     </ThemeProvider>,
   );
-}
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  setUser();
-  availabilityMock.mockResolvedValue('ready');
-  networkMock.mockResolvedValue({
-    isConnected: true,
-    isInternetReachable: true,
-  } as Network.NetworkState);
-  secureMock.mockImplementation(async () => {
-    throw new NotSecureNfcTag('04A1B2C3');
-  });
-  readMock.mockResolvedValue('04A1B2C3');
-  putMock.mockResolvedValue({ id: 'tag-a', status: 'active' } as never);
-});
-
-it('informa cuando el celular no tiene NFC y no ofrece asociar', async () => {
-  availabilityMock.mockResolvedValue('unsupported');
-  const view = await mount();
-  expect(await view.findByText('Tu celular no puede leer etiquetas NFC')).toBeTruthy();
-  expect(view.queryByLabelText('Asociar etiqueta NFC a Portón trasero')).toBeNull();
-}, 30000);
-
-it('informa que NFC está apagado y permite abrir ajustes', async () => {
-  availabilityMock.mockResolvedValue('disabled');
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Abrir ajustes de NFC'));
-  expect(openNfcSettings).toHaveBeenCalled();
-});
-
-it('confirma una asociación exitosa con el mensaje visible', async () => {
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  expect(await view.findByText('Etiqueta asociada a Portón trasero')).toBeTruthy();
-  expect(putMock).toHaveBeenCalledWith('PUT', '/puntos/point-a/etiqueta-nfc', expect.anything(), {
-    uid: '04A1B2C3',
-    confirmMove: false,
-  });
-});
-
-it('pide confirmación y reintenta el movimiento ante un 409', async () => {
-  putMock.mockRejectedValueOnce(
-    new ApiError('conflict', 409, { checkpointName: 'Punto anterior' }),
-  );
-  const alert = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
-    buttons?.find((button) => button.text === 'Mover etiqueta')?.onPress?.();
-  });
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  await waitFor(() => expect(putMock).toHaveBeenCalledTimes(2));
-  expect(alert).toHaveBeenCalledWith(
-    'La etiqueta está asociada a Punto anterior. ¿Moverla a Portón trasero?',
-    '',
-    expect.any(Array),
-  );
-  expect(putMock).toHaveBeenLastCalledWith(
-    'PUT',
-    '/puntos/point-a/etiqueta-nfc',
-    expect.anything(),
-    { uid: '04A1B2C3', confirmMove: true },
-  );
-  alert.mockRestore();
-});
-
-it('muestra Etiqueta no disponible ante un 422', async () => {
-  putMock.mockRejectedValue(new ApiError('unavailable', 422));
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  expect(await view.findByText('Etiqueta no disponible')).toBeTruthy();
-});
-
-it('avisa si está sin conexión y no inicia la lectura NFC', async () => {
-  networkMock.mockResolvedValue({
-    isConnected: false,
-    isInternetReachable: false,
-  } as Network.NetworkState);
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  expect(await view.findByText('Se necesita conexión para asociar una etiqueta.')).toBeTruthy();
-  expect(readMock).not.toHaveBeenCalled();
-});
-
-it('muestra al supervisor solo los predios entregados por la API', async () => {
-  const view = await mount();
-  expect(await view.findByText('Predio A')).toBeTruthy();
-  expect(view.queryByText('Predio B')).toBeNull();
-});
-
-it('mantiene disponible cerrar sesión en el modo de configuración', async () => {
-  setUser('admin');
-  const view = await mount();
-  await waitFor(() => expect(view.getByText('Modo de configuración')).toBeTruthy());
-  expect(view.getByLabelText('Cerrar sesión')).toBeTruthy();
-  expect(deleteMock).not.toHaveBeenCalled();
-});
-
-it('muestra el predio seleccionado y permite cambiar la apariencia', async () => {
-  const user = userEvent.setup();
-  const view = await mount();
-  expect(await view.findByText('Seleccionado')).toBeOnTheScreen();
-  expect(
-    view.getByRole('button', { name: 'Seleccionar predio Predio A', selected: true }),
-  ).toBeOnTheScreen();
-  await user.press(view.getByRole('radio', { name: 'Oscuro' }));
-  expect(view.getByRole('radio', { name: 'Oscuro' })).toBeChecked();
-  await user.press(view.getByRole('radio', { name: 'Claro' }));
-  expect(view.getByRole('radio', { name: 'Claro' })).toBeChecked();
-});
-
-it('conserva el estado y las acciones de una etiqueta asociada', async () => {
-  const user = userEvent.setup();
-  const view = await mount([{ ...point, etiquetaNfc: { status: 'active' } }]);
-  expect(await view.findByText('Etiqueta NFC asociada')).toBeOnTheScreen();
-  expect(view.getByLabelText('Reemplazar etiqueta NFC a Portón trasero')).toBeOnTheScreen();
-  await user.press(view.getByLabelText('Quitar etiqueta NFC de Portón trasero'));
-  expect(deleteMock).toHaveBeenCalledWith('/puntos/point-a/etiqueta-nfc', expect.anything());
-  expect(await view.findByText('Etiqueta quitada de Portón trasero')).toBeOnTheScreen();
-});
-
-it('configura una etiqueta NTAG 424 DNA mediante relevo y lectura de prueba', async () => {
-  secureMock.mockResolvedValueOnce('session-1');
-  jest.mocked(readNfcTag).mockResolvedValueOnce({
-    uid: '04DE5F1EACC040',
-    sdmMessage: 'garita:nfc?e=EF963FF7828658A599F3041510671E88&c=94EED9EE65337086',
-  });
-  putMock.mockResolvedValueOnce({ id: 'tag-sec', status: 'active', kind: 'secure' } as never);
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  expect(await view.findByText('Etiqueta segura asociada a Portón trasero')).toBeTruthy();
-});
-
-it('muestra advertencia cuando la configuración se interrumpe', async () => {
-  secureMock.mockRejectedValueOnce(new Error('Tag disconnected'));
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  expect(
-    await view.findByText('La configuración no se completó. Volvé a acercar el celular'),
-  ).toBeTruthy();
-});
-
-it('permite asociar cuando internetReachable es desconocido', async () => {
-  networkMock.mockResolvedValue({
-    isConnected: true,
-    isInternetReachable: null,
-  } as unknown as Network.NetworkState);
-  const user = userEvent.setup();
-  const view = await mount();
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  expect(await view.findByText('Etiqueta asociada a Portón trasero')).toBeTruthy();
-});
-it('bloquea todos los puntos y el cambio de predio durante una lectura', async () => {
-  secureMock.mockReturnValueOnce(new Promise(() => undefined));
-  const user = userEvent.setup();
-  const view = await mount([
-    point,
-    { id: 'point-b', name: 'Segundo', etiquetaNfc: { status: 'active' } },
+it('pone primero los predios con puntos sin etiqueta y dice cuántos faltan', async () => {
+  await mount();
+  const rows = await screen.findAllByLabelText(/^(Alfa|Zeta|Beta)/);
+  expect(rows.map((row) => row.props.accessibilityLabel)).toEqual([
+    'Zeta pendiente. Faltan 3 de 5 puntos',
+    'Alfa completo. Completo: 3 puntos con etiqueta',
+    'Beta vacío. Sin puntos cargados',
   ]);
-  await user.press(await view.findByLabelText('Asociar etiqueta NFC a Portón trasero'));
-  expect(view.getByLabelText('Reemplazar etiqueta NFC a Segundo')).toBeDisabled();
-  expect(view.getByLabelText('Quitar etiqueta NFC de Segundo')).toBeDisabled();
-  expect(view.getByLabelText('Seleccionar predio Predio A')).toBeDisabled();
+});
+
+it('abre el predio con su nombre', async () => {
+  const user = userEvent.setup();
+  await mount();
+  await user.press(await screen.findByLabelText(/^Zeta pendiente/));
+  expect(mockPush).toHaveBeenCalledWith({
+    pathname: '/(configuration)/predio/[id]',
+    params: { id: 'pending', nombre: 'Zeta pendiente' },
+  });
+});
+
+it('con NFC apagado avisa, ofrece activarlo y no deja identificar', async () => {
+  jest.mocked(nfcAvailability).mockResolvedValue('disabled');
+  const user = userEvent.setup();
+  await mount();
+  await user.press(await screen.findByLabelText('Abrir ajustes de NFC'));
+  expect(openNfcSettings).toHaveBeenCalled();
+  expect(screen.getByLabelText('Identificar etiqueta: ver de qué punto es')).toBeDisabled();
+});
+
+it('avisa si no pudo cargar los predios', async () => {
+  jest.mocked(apiGet).mockRejectedValue(new Error('offline'));
+  await mount();
+  expect(await screen.findByText(/No se pudieron cargar los predios/)).toBeOnTheScreen();
+});
+
+it('el menú deja cambiar el tema y cerrar sesión sin pasar por envíos', async () => {
+  const user = userEvent.setup();
+  await mount();
+  await user.press(await screen.findByRole('button', { name: 'Abrir menú' }));
+  expect(screen.getByText('Administrador · Seguridad Norte')).toBeOnTheScreen();
+  expect(screen.queryByText('Envíos')).toBeNull();
+  await user.press(await screen.findByRole('radio', { name: 'Oscuro' }));
+  expect(screen.getByRole('radio', { name: 'Oscuro' })).toBeChecked();
+  await user.press(screen.getByRole('button', { name: 'Cerrar sesión' }));
+  await waitFor(() => expect(logout).toHaveBeenCalled());
+});
+
+it('filtra los predios por nombre sin importar mayúsculas ni tildes', async () => {
+  jest
+    .mocked(apiGet)
+    .mockResolvedValue([
+      ...sites,
+      { id: 'al', name: 'Campo Los Álamos', total: 1, tagged: 0 },
+    ] as never);
+  const user = userEvent.setup();
+  await mount();
+  await user.type(await screen.findByLabelText('Buscar predio'), 'alamos');
+  expect(screen.getByLabelText(/^Campo Los Álamos/)).toBeOnTheScreen();
+  expect(screen.queryByLabelText(/^Zeta pendiente/)).toBeNull();
+  await user.clear(screen.getByLabelText('Buscar predio'));
+  await user.type(screen.getByLabelText('Buscar predio'), 'xyz');
+  expect(screen.getByText('Ningún predio coincide con "xyz".')).toBeOnTheScreen();
 });

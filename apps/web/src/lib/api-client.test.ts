@@ -24,4 +24,12 @@ describe('apiRequest', () => {
     expect(requestInit?.method).toBe('POST');
     expect(requestInit?.body).toBe('{"name":"Ana"}');
   });
+
+  it('acepta respuestas 204 sin cuerpo sin intentar leer JSON', async () => {
+    const json = jest.fn().mockRejectedValue(new SyntaxError('sin cuerpo'));
+    globalThis.fetch = () =>
+      Promise.resolve({ ok: true, status: 204, json } as unknown as Response);
+    await expect(apiRequest('DELETE', '/recurso', z.undefined())).resolves.toBeUndefined();
+    expect(json).not.toHaveBeenCalled();
+  });
 });

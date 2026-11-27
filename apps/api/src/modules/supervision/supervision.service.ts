@@ -1,5 +1,10 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { computeSyncStatus, type RecordFlagSeverity } from '@garita/shared';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  computeSyncStatus,
+  roundRouteSchema,
+  type RecordFlagSeverity,
+  type RoundRoute,
+} from '@garita/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { MarcasService } from '../marcas/marcas.service';
 import { CLOCK, type Clock } from '../../common/clock';
@@ -8,6 +13,7 @@ import { suspendedVisibleShiftWhere } from '../auth/account-suspension.policy';
 
 @Injectable()
 export class SupervisionService {
+  private readonly logger = new Logger(SupervisionService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly marcas: MarcasService,
@@ -27,9 +33,21 @@ export class SupervisionService {
       day: '2-digit',
     }).format(now);
     const serviceDate = new Date(`${input.fecha ?? localToday}T00:00:00.000Z`);
+    // Default "today" view keeps overnight shifts started before midnight visible while they still
+    // matter: running, or still inside their scheduled hours (closed early and now uncovered, or
+    // never started / without a guard).
+    const dateWhere = input.fecha
+      ? { serviceDate }
+      : {
+          OR: [
+            { serviceDate },
+            { status: 'in_progress' as const },
+            { startsAt: { lte: now }, endsAt: { gt: now } },
+          ],
+        };
     const shifts = await this.prisma.tenantPrisma.shift.findMany({
       where: {
-        ...(user.suspension ? {} : { serviceDate }),
+        ...(user.suspension ? {} : dateWhere),
         ...suspendedVisibleShiftWhere(user),
         ...(input.predio ? { siteId: input.predio } : {}),
       },
@@ -114,6 +132,7 @@ export class SupervisionService {
           },
         },
         events: { orderBy: { occurredAt: 'asc' } },
+        syncState: true,
         rounds: {
           include: {
             round: {
@@ -244,9 +263,40 @@ export class SupervisionService {
         closeReason: shift.closeReason,
         closedBy: shift.closedBy,
       },
+      // Mismo cálculo que la lista: el cierre cuenta solo si es de la asignación vigente.
+      syncStatus: shift.startedAt
+        ? computeSyncStatus({
+            now: this.clock.now(),
+            lastContactAt: shift.syncState?.lastContactAt ?? null,
+            pendingCount: shift.syncState?.lastPendingCount ?? 0,
+            syncedUntil: shift.syncState?.syncedUntil ?? null,
+            scheduledEndAt: shift.endsAt,
+            syncDeadlineAt: shift.syncDeadlineAt,
+            withoutSignal: shift.connectivityType === 'without_signal',
+            closed:
+              shift.status === 'closed' ||
+              shift.events.some(
+                (event) =>
+                  (event.type === 'close' || event.type === 'admin_close') &&
+                  event.assignmentId ===
+                    shift.assignments.find((assignment) => assignment.isCurrent)?.id,
+              ),
+            closedWithoutData: Boolean(shift.closedWithoutDataAt),
+          })
+        : null,
       phoneWithoutNfc: records.phoneWithoutNfc,
       assignments: shift.assignments,
       rounds: shift.rounds.map((round) => ({ id: round.roundId, name: round.round.name })),
+      // Recorrido ideal de cada ronda, de la misma versión que los puntos del turno.
+      routes: shift.rounds.map((round) => {
+        const version = round.roundVersion ?? round.round.currentVersion;
+        return {
+          roundId: round.roundId,
+          roundName: round.round.name,
+          checkpointIds: version?.checkpoints.map(({ checkpoint }) => checkpoint.id) ?? [],
+          route: this.storedRoute(version?.route, round.roundId),
+        };
+      }),
       windows: shift.roundWindowStates,
       points,
       route: orderedRecords
@@ -267,5 +317,14 @@ export class SupervisionService {
             shift.closedEarly &&
             shift.closeReason !== 'baja del predio')),
     };
+  }
+
+  /** Lo que sale de la base también se valida: un recorrido inválido se dibuja recto. */
+  private storedRoute(value: unknown, roundId: string): RoundRoute | null {
+    if (value === null || value === undefined) return null;
+    const parsed = roundRouteSchema.safeParse(value);
+    if (parsed.success) return parsed.data;
+    this.logger.warn({ event: 'supervision.invalid_round_route', roundId });
+    return null;
   }
 }

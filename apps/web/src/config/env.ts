@@ -12,6 +12,12 @@ const envSchema = z.object({
   // Opcionales: solo se cargan para cambiar de proveedor (MapTiler, hosting propio, IGN).
   VITE_MAP_STYLE_URL: z.url().default('https://tiles.openfreemap.org/styles/positron'),
   VITE_GEOCODER_URL: z.url().default('https://photon.komoot.io/api/'),
+  // Esri World Imagery sin clave: válido para demo. Para venderlo hace falta cuenta de Esri.
+  VITE_SATELLITE_TILES_URL: z
+    .url()
+    .default(
+      'https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    ),
 });
 
 const result = envSchema.safeParse(import.meta.env);

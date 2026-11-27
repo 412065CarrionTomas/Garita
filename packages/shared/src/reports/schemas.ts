@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ROUND_WINDOW_STATUSES } from '../supervision/window-status';
-import { localReportDay } from './compliance';
+import { localReportDay, SITE_DAY_STATUSES } from './compliance';
 
 const id = z.string().min(1).max(100);
 const day = z.iso.date();
@@ -116,3 +116,37 @@ export const reportPointsResponseSchema = z.object({
     }),
   ),
 });
+
+/** Casilleros predio × día: como mucho 31 días, para acotar el tamaño de la respuesta. */
+export const SITE_DAY_GRID_MAX_DAYS = 31;
+export const siteDayGridQuerySchema = z
+  .object({ desde: day, hasta: day, predio: id.optional(), cliente: id.optional() })
+  .strict()
+  .refine(
+    ({ desde, hasta }) => {
+      const days =
+        (Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / 86_400_000;
+      return days >= 1 && days <= SITE_DAY_GRID_MAX_DAYS;
+    },
+    { message: `Ingresá un período en orden y de hasta ${SITE_DAY_GRID_MAX_DAYS} días.` },
+  );
+export type SiteDayGridQuery = z.infer<typeof siteDayGridQuerySchema>;
+export const siteDayGridResponseSchema = z.object({
+  desde: day,
+  hasta: day,
+  timezone: z.string(),
+  days: z.array(day),
+  sites: z.array(
+    named.extend({
+      cells: z.array(
+        z.object({
+          day,
+          status: z.enum(SITE_DAY_STATUSES),
+          evaluated: count,
+          percentage: z.number().min(0).max(100).nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+export type SiteDayGrid = z.infer<typeof siteDayGridResponseSchema>;

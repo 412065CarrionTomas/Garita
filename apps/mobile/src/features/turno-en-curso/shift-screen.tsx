@@ -33,6 +33,13 @@ const shiftsSchema = z.array(
     endsAt: z.string(),
     site: z.looseObject({ name: z.string() }),
     assignments: z.array(z.looseObject({ startsAt: z.string() })),
+    rounds: z
+      .array(
+        z.looseObject({
+          round: z.looseObject({ name: z.string(), currentVersionId: z.string().nullable() }),
+        }),
+      )
+      .optional(),
   }),
 );
 type ScheduledShift = z.infer<typeof shiftsSchema>[number];
@@ -254,6 +261,10 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const completedWindows = closureRows.filter(
     (row) => row.status === 'ontime' || row.status === 'late',
   ).length;
+  // Solo las rondas con versión vigente se pueden ver en el mapa.
+  const scheduledVersionIds = (scheduled?.rounds ?? []).flatMap(
+    ({ round }) => round.currentVersionId ?? [],
+  );
   return (
     <Screen scroll>
       <Text variant="heading" accessibilityRole="header">
@@ -307,6 +318,31 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           size="lg"
           disabled={busy || !startAllowed}
           onPress={() => void start()}
+        />
+      )}
+      {!data &&
+        scheduled?.rounds?.map(({ round }) =>
+          round.currentVersionId ? (
+            <Button
+              key={round.currentVersionId}
+              variant="outline"
+              label={`Ver recorrido: ${round.name}`}
+              onPress={() =>
+                router.push({
+                  pathname: '/recorridos',
+                  params: { ids: round.currentVersionId ?? '' },
+                })
+              }
+            />
+          ) : null,
+        )}
+      {!data && scheduledVersionIds.length > 1 && (
+        <Button
+          variant="outline"
+          label="Ver todos los recorridos"
+          onPress={() =>
+            router.push({ pathname: '/recorridos', params: { ids: scheduledVersionIds.join(',') } })
+          }
         />
       )}
       {!data && !scheduled && (
@@ -389,6 +425,27 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
                       points={points}
                       currentIndex={currentIndex === -1 ? Math.max(0, done - 1) : currentIndex}
                     />
+                    {definition && (
+                      <Button
+                        variant="outline"
+                        label="Ver recorrido en el mapa"
+                        onPress={() =>
+                          router.push({
+                            pathname: '/recorridos',
+                            params: {
+                              enCurso: '1',
+                              ids: definition.roundVersionId,
+                              hechos: points
+                                .filter((p) => p.status === 'done' || p.status === 'late')
+                                .map((p) => p.id)
+                                .join(','),
+                              siguiente:
+                                currentIndex === -1 ? '' : (points[currentIndex]?.id ?? ''),
+                            },
+                          })
+                        }
+                      />
+                    )}
                   </View>
                 );
               })}

@@ -25,6 +25,8 @@ export async function playSuccessFeedback(): Promise<void> {
     if (!audioPlayer) {
       audioPlayer = createAudioPlayer(require('../../../assets/sounds/nfc-confirmation.wav'));
     }
+    // El reproductor se reutiliza y queda al final del sonido: sin rebobinar, suena una sola vez.
+    await audioPlayer.seekTo(0);
     audioPlayer.play();
   } catch {
     // Audio not available or mocked

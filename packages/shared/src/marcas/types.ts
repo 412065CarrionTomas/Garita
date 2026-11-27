@@ -33,6 +33,50 @@ export const FLAG_SEVERITY: Record<RecordFlagType, RecordFlagSeverity> = {
   replayed_read: 'grave',
 };
 
+/** Nombre de cada marca para el panel, y qué significa para quien decide si el registro vale. */
+export const RECORD_FLAG_LABELS: Record<RecordFlagType, { label: string; meaning: string }> = {
+  time_altered: {
+    label: 'Hora del celular alterada',
+    meaning: 'El reloj del celular se movió respecto de la hora confiable.',
+  },
+  time_unverifiable: {
+    label: 'Hora sin verificar',
+    meaning: 'El celular se reinició sin señal y no hubo hora de referencia.',
+  },
+  out_of_range: {
+    label: 'Fuera del radio',
+    meaning: 'El GPS ubicó la lectura más lejos que el radio de tolerancia del punto.',
+  },
+  simulated_location: {
+    label: 'Ubicación simulada',
+    meaning: 'El celular informó una ubicación falsa (app de GPS simulado).',
+  },
+  impossible_time: {
+    label: 'Tiempo imposible',
+    meaning: 'Llegó al punto más rápido de lo que permite la distancia desde el anterior.',
+  },
+  location_disabled: {
+    label: 'Ubicación desactivada',
+    meaning: 'El vigilador tenía la ubicación apagada al leer el punto.',
+  },
+  qr_on_tagged_point: {
+    label: 'QR en punto con NFC',
+    meaning: 'Leyó el QR en un punto que tiene etiqueta NFC: el QR puede ser una foto.',
+  },
+  location_unverifiable: {
+    label: 'Ubicación imprecisa',
+    meaning: 'No hubo GPS o la precisión superó los 100 m.',
+  },
+  tag_not_authentic: {
+    label: 'Etiqueta NFC no auténtica',
+    meaning: 'La firma de la etiqueta no coincide: puede ser una copia.',
+  },
+  replayed_read: {
+    label: 'Lectura repetida',
+    meaning: 'La lectura NFC ya se había usado: puede ser un reenvío.',
+  },
+};
+
 export const SPEED_PROFILES = ['walking', 'bicycle', 'vehicle', 'custom'] as const;
 export type SpeedProfile = (typeof SPEED_PROFILES)[number];
 export const speedProfileSchema = z.enum(SPEED_PROFILES);
@@ -112,7 +156,8 @@ export interface EvaluateRecordFlagsInput {
       longitude: number;
     };
   } | null;
-  site: {
+  /** Máximo del par de lecturas: el de sus rondas o, si no tienen, el del predio. */
+  speed: {
     maxSpeedKmh: number;
   };
 }
