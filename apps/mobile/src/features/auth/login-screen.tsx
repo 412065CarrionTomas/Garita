@@ -83,6 +83,9 @@ export function LoginScreen() {
       <Link href="/(auth)/recuperar" asChild>
         <Button variant="ghost" label="Olvidé mi contraseña" accessibilityRole="link" />
       </Link>
+      <Link href="/ayuda" asChild>
+        <Button variant="ghost" label="Preguntas frecuentes" accessibilityRole="link" />
+      </Link>
       <LegalLinks />
     </Screen>
   );

@@ -83,3 +83,11 @@ it('nombra un solo pendiente en singular', async () => {
   await renderMenu(1);
   expect(screen.getByText('1 pendiente')).toBeOnTheScreen();
 });
+
+it('abre las preguntas frecuentes desde el menú', async () => {
+  const onClose = jest.fn();
+  await renderMenu(0, onClose);
+  await fireEvent.press(screen.getByText('Preguntas frecuentes'));
+  expect(onClose).toHaveBeenCalled();
+  expect(mockPush).toHaveBeenCalledWith('/ayuda');
+});

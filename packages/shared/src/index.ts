@@ -47,4 +47,5 @@ export * from './reports/export';
 export * from './suspension';
 export * from './shifts/schedules';
 export * from './legal';
+export * from './faq';
 export * from './view-layouts';

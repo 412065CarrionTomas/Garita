@@ -44,6 +44,7 @@ import { IncidentReportsPage } from '../reportes/incidentes/incident-reports-pag
 import { SubscriptionPage } from '../suscripcion/subscription-page';
 import { PrivacyPage, TermsPage } from '../legal/legal-pages';
 import { LegalAcceptanceGate } from '../legal/legal-acceptance-gate';
+import { FaqPage, PublicFaqPage } from '../ayuda/faq-page';
 import { SummaryPage } from '../resumen/summary-page';
 
 function Protected({ roles, children }: { roles: UserRole[]; children: ReactNode }) {
@@ -156,6 +157,7 @@ export function RoleLayout() {
       accountLinks={[
         ...(staff ? [{ path: '/avisos/preferencias', title: 'Preferencias de notificación' }] : []),
         ...(user.role === 'admin' ? [{ path: '/suscripcion', title: 'Suscripción y cobros' }] : []),
+        { path: '/ayuda', title: 'Preguntas frecuentes' },
       ]}
       alert={staff ? { path: '/alertas-panico', title: 'Pánico', count: panicCount } : undefined}
       notice={staff && !realtime.connected ? 'Reconectando…' : undefined}
@@ -196,6 +198,21 @@ export function RoleLayout() {
   );
 }
 
+/**
+ * La ayuda sin sesión. Espera a verificar la sesión para no mostrar la vista pública a quien ya
+ * ingresó; con sesión, `/ayuda` vive dentro del layout del panel (ver `AppRoutes`).
+ */
+export function PublicFaqRoute() {
+  const { loading } = useAuth();
+  if (loading)
+    return (
+      <p role="status" className="p-6">
+        Verificando sesión…
+      </p>
+    );
+  return <PublicFaqPage />;
+}
+
 /** Las rutas de cada sección quedan protegidas por rol dentro del layout autenticado. */
 export function AppRoutes() {
   const { user } = useAuth();
@@ -206,6 +223,8 @@ export function AppRoutes() {
       <Route path="/activar" element={<ActivationPage />} />
       <Route path="/terminos" element={<TermsPage />} />
       <Route path="/privacidad" element={<PrivacyPage />} />
+      {/* Con sesión va dentro del layout: una segunda instancia cortaría el pánico y el tiempo real. */}
+      {!user && <Route path="/ayuda" element={<PublicFaqRoute />} />}
       <Route
         path="/"
         element={<Navigate to={user ? homePathForRole(user.role) : '/ingresar'} replace />}
@@ -217,6 +236,7 @@ export function AppRoutes() {
           </Protected>
         }
       >
+        {user && <Route path="/ayuda" element={<FaqPage />} />}
         <Route
           path="/supervision"
           element={

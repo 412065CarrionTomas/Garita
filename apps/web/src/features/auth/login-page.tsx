@@ -57,6 +57,9 @@ export function LoginPage() {
           <Button variant="link" asChild className="w-full">
             <Link to="/recuperar">Olvidé mi contraseña</Link>
           </Button>
+          <Button variant="link" asChild className="w-full">
+            <Link to="/ayuda">Preguntas frecuentes</Link>
+          </Button>
           <LegalLinks />
         </>
       }

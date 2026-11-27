@@ -80,6 +80,7 @@ export function GuardMenu({
               onPress={() => go('/envio')}
             />
           )}
+          <ListItem title="Preguntas frecuentes" onPress={() => go('/ayuda')} />
           <ListItem title="Términos y condiciones" onPress={() => go('/legal/terminos')} />
           <ListItem title="Política de privacidad" onPress={() => go('/legal/privacidad')} />
           <View style={styles.fill} />
