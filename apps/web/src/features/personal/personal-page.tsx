@@ -1,7 +1,9 @@
-import { Children, useEffect, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { EllipsisVertical, Search } from 'lucide-react';
 import { z } from 'zod';
 import {
+  GUARD_LIMIT_REACHED_CODE,
   createUserRequestSchema,
   emptyRequestSchema,
   emptyResponseSchema,
@@ -11,8 +13,14 @@ import {
   usersPageSchema,
 } from '@garita/shared';
 import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { lastPage } from '@/lib/page-items';
+import { useBusy } from '@/lib/use-busy';
+import { useDebouncedSearch } from '@/lib/use-debounced-search';
+import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
+import { DataTable, type DataSort } from '@/components/data-table';
 import { PageHeader } from '@/components/page-header';
+import { Pagination } from '@/components/pagination';
 import { SegmentedFilter } from '@/components/segmented-filter';
 import { StatusBadge } from '@/components/status-badge';
 import { Alert } from '@/components/ui/alert';
@@ -21,23 +29,16 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card } from '@/components/ui/card';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@/components/ui/table';
 import { useAuth } from '../auth/auth-context';
+import { loadAvailableGuards } from './available-guards';
 
 type Person = ReturnType<typeof personnelUserSchema.parse>;
 
@@ -69,6 +70,13 @@ const guardHasShiftInProgressConflictSchema = z.looseObject({
   shift: inProgressShiftSchema.optional(),
 });
 
+const SUMMARY = [
+  { value: 'active', label: 'Activos' },
+  { value: 'invitation_pending', label: 'Invitaciones pendientes' },
+  { value: 'invitation_failed', label: 'Envíos fallidos' },
+  { value: 'deactivated', label: 'Desactivados' },
+] as const;
+
 const ROLE_FILTERS = [
   { value: '', label: 'Todos' },
   { value: 'guard', label: 'Vigiladores' },
@@ -89,7 +97,13 @@ export function PersonalPage() {
   const [role, setRole] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  // Busca solo cuando se deja de tipear, sin botón de buscar.
+  const { input: searchInput, setInput: setSearchInput, search } = useDebouncedSearch(setPage);
+  // Orden elegido en el encabezado; sin elegir, el de la API por defecto.
+  const [sort, setSort] = useState<DataSort>(null);
   const [creating, setCreating] = useState(false);
+  const { busy, run } = useBusy();
   const [editing, setEditing] = useState<Person | null>(null);
   const [deactivating, setDeactivating] = useState<Person | null>(null);
   const [deriveToUserId, setDeriveToUserId] = useState('');
@@ -101,6 +115,20 @@ export function PersonalPage() {
   const [dialogError, setDialogError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
+  const [guardLimitTrial, setGuardLimitTrial] = useState<boolean | null>(null);
+  const handleGuardLimit = (error: unknown): boolean => {
+    const parsed = z
+      .object({
+        code: z.literal(GUARD_LIMIT_REACHED_CODE),
+        message: z.string(),
+        status: z.string(),
+      })
+      .safeParse(error instanceof ApiError ? error.body : null);
+    if (!(error instanceof ApiError) || error.status !== 409 || !parsed.success) return false;
+    setFormError(parsed.data.message);
+    setGuardLimitTrial(parsed.data.status === 'trial');
+    return true;
+  };
   const reasonInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const futureShifts = useQuery({
@@ -122,15 +150,34 @@ export function PersonalPage() {
   const guardOptions = useQuery({
     queryKey: ['personal', 'vigiladores', 'derivacion'],
     enabled: deactivating?.role === 'guard',
-    queryFn: () => apiGet('/usuarios?rol=guard&pagina=1', usersPageSchema),
+    queryFn: loadAvailableGuards,
   });
-  const params = new URLSearchParams({ pagina: String(page) });
+  const params = new URLSearchParams({
+    pagina: String(page),
+    porPagina: String(pageSize),
+  });
   if (role) params.set('rol', role);
   if (status) params.set('estado', status);
+  if (search) params.set('buscar', search);
+  if (sort) {
+    params.set('orden', sort.id);
+    params.set('sentido', sort.dir);
+  }
   const result = useQuery({
-    queryKey: ['personal', role, status, page],
+    queryKey: ['personal', role, status, search, sort, page, pageSize],
     queryFn: () => apiGet(`/usuarios?${params.toString()}`, usersPageSchema),
+    // Mantiene la tabla mientras llega la página nueva: buscar no parpadea.
+    placeholderData: keepPreviousData,
   });
+  // Se quitó lo último de la página (p. ej. una baja): volver a la última que tenga resultados.
+  const total = result.data?.total;
+  if (total !== undefined && !result.isPlaceholderData && page > lastPage(total, pageSize)) {
+    setPage(lastPage(total, pageSize));
+  }
+  const changeStatus = (value: string) => {
+    setStatus(value);
+    setPage(1);
+  };
   useEffect(() => {
     if (inProgressShift && reasonInputRef.current) {
       reasonInputRef.current.focus();
@@ -248,17 +295,26 @@ export function PersonalPage() {
       await handleDeactivateError(error, 'No se pudo desactivar el usuario.');
     }
   };
-  const runAction = async (path: string, failure: string) => {
+  const runAction = async (
+    path: string,
+    failure: string,
+    responseSchema: z.ZodType = emptyResponseSchema,
+  ) => {
     try {
-      await apiPost(path, {}, emptyRequestSchema, emptyResponseSchema);
+      setGuardLimitTrial(null);
+      await apiPost(path, {}, emptyRequestSchema, responseSchema);
       setFormError('');
       await refresh();
-    } catch {
+    } catch (error: unknown) {
+      if (handleGuardLimit(error)) return;
       setFormError(failure);
     }
   };
-  const saveEdit = async (event: React.SyntheticEvent<HTMLFormElement>) => {
+  const saveEdit = (event: React.SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
+    return run(() => saveEditNow(event));
+  };
+  const saveEditNow = async (event: React.SyntheticEvent<HTMLFormElement>) => {
     if (!editing) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const parsed = updateUserRequestSchema.safeParse(values);
@@ -285,12 +341,6 @@ export function PersonalPage() {
       setFormError('No se pudo editar el registro.');
     }
   };
-  const renderErrors = () =>
-    Object.entries(errors).map(([field, message]) => (
-      <span id={`${field}-error`} className="text-sm text-danger" key={field}>
-        {message}
-      </span>
-    ));
   return (
     <section aria-labelledby="personal-title" className="min-w-0 space-y-6">
       <PageHeader
@@ -311,7 +361,23 @@ export function PersonalPage() {
           )
         }
       />
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-72">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            type="search"
+            aria-label="Buscar personal"
+            placeholder="Buscar por nombre, correo o legajo"
+            className="pl-9"
+            value={searchInput}
+            onChange={(event) => {
+              setSearchInput(event.target.value);
+            }}
+          />
+        </div>
         <SegmentedFilter
           ariaLabel="Filtrar por rol"
           options={ROLE_FILTERS}
@@ -321,23 +387,50 @@ export function PersonalPage() {
             setPage(1);
           }}
         />
-        <Label className="grid gap-2">
-          Estado
-          <NativeSelect
-            aria-label="Filtrar por estado"
-            className="w-full"
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value);
-              setPage(1);
-            }}
-          >
-            <NativeSelectOption value="">Todos</NativeSelectOption>
-            <NativeSelectOption value="invitation_pending">Invitación enviada</NativeSelectOption>
-            <NativeSelectOption value="active">Activo</NativeSelectOption>
-            <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
-          </NativeSelect>
-        </Label>
+        <NativeSelect
+          aria-label="Filtrar por estado"
+          value={status}
+          onChange={(event) => {
+            changeStatus(event.target.value);
+          }}
+        >
+          <NativeSelectOption value="">Todos los estados</NativeSelectOption>
+          <NativeSelectOption value="active">Activo</NativeSelectOption>
+          <NativeSelectOption value="invitation_pending">Invitación pendiente</NativeSelectOption>
+          <NativeSelectOption value="invitation_failed">Envío fallido</NativeSelectOption>
+          <NativeSelectOption value="deactivated">Desactivado</NativeSelectOption>
+        </NativeSelect>
+        {result.data && (
+          <div role="group" aria-label="Resumen del personal" className="flex flex-wrap gap-2">
+            {SUMMARY.map(({ value, label }) => {
+              const count = result.data.resumen[value];
+              const pressed = status === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={pressed}
+                  onClick={() => {
+                    changeStatus(pressed ? '' : value);
+                  }}
+                  className={cn(
+                    'flex min-h-9 items-baseline gap-2 rounded-md border-[1.5px] px-3 py-1.5 text-sm transition-colors',
+                    pressed
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-input bg-card hover:bg-muted',
+                    !pressed &&
+                      value === 'invitation_failed' &&
+                      count > 0 &&
+                      'border-danger text-danger',
+                  )}
+                >
+                  <span className="text-base font-semibold tabular-nums">{count}</span>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="space-y-4">
@@ -362,19 +455,23 @@ export function PersonalPage() {
                 return;
               }
               setErrors({});
+              setGuardLimitTrial(null);
               setFormError('');
-              void apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
-                .then(async () => {
-                  await refresh();
-                  setCreating(false);
-                })
-                .catch((error: unknown) => {
-                  setFormError(
-                    error instanceof ApiError && error.status === 409
-                      ? 'Ese correo ya está en uso'
-                      : 'No se pudo crear la invitación.',
-                  );
-                });
+              void run(() =>
+                apiPost('/usuarios', parsed.data, createUserRequestSchema, personnelUserSchema)
+                  .then(async () => {
+                    await refresh();
+                    setCreating(false);
+                  })
+                  .catch((error: unknown) => {
+                    if (handleGuardLimit(error)) return;
+                    setFormError(
+                      error instanceof ApiError && error.status === 409
+                        ? 'Ese correo ya está en uso'
+                        : 'No se pudo crear la invitación.',
+                    );
+                  }),
+              );
             }}
           >
             {(['firstName', 'lastName', 'email', 'phone', 'employeeNumber'] as const).map(
@@ -416,6 +513,11 @@ export function PersonalPage() {
               {formError && (
                 <Alert variant="destructive" role="alert">
                   {formError}
+                  {guardLimitTrial !== null && user?.role === 'admin' && (
+                    <a href="/suscripcion" className="font-semibold underline">
+                      {guardLimitTrial ? 'Suscribirme' : 'Cambiar de plan'}
+                    </a>
+                  )}
                 </Alert>
               )}
               <Button
@@ -427,7 +529,9 @@ export function PersonalPage() {
               >
                 Cancelar
               </Button>
-              <Button type="submit">Enviar invitación</Button>
+              <Button type="submit" disabled={busy}>
+                Enviar invitación
+              </Button>
             </div>
           </form>
         </DialogContent>
@@ -444,7 +548,7 @@ export function PersonalPage() {
           No se pudo cargar el personal.
         </Alert>
       ) : (
-        <>
+        <div className="space-y-4">
           {result.data.items.length === 0 ? (
             <EmptyState
               title="No hay personal para mostrar"
@@ -463,182 +567,196 @@ export function PersonalPage() {
               }
             />
           ) : (
-            <Card className="min-w-0 overflow-hidden py-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {['Nombre', 'Correo', 'Rol', 'Estado', 'Acciones'].map((heading) => (
-                      <TableHead key={heading} className="text-muted-foreground">
-                        {heading}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {result.data.items.map((person) => {
-                    const actions: React.ReactElement<{ children: React.ReactNode }> = (
+            <div className="overflow-x-auto border-[1.5px] border-input">
+              <DataTable
+                label="Personal"
+                sort={sort}
+                onSortChange={(next) => {
+                  setSort(next);
+                  setPage(1);
+                }}
+                rows={result.data.items}
+                getRowId={(p) => p.id}
+                columns={[
+                  {
+                    id: 'nombre',
+                    value: (p) => `${p.firstName} ${p.lastName}`,
+                    header: 'Nombre',
+                    cell: (p) => (
                       <>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setEditing(person);
-                            setErrors({});
-                            setFormError('');
-                          }}
-                        >
-                          Editar
-                        </Button>
-                        {person.status === 'deactivated' ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              void runAction(
-                                `/usuarios/${person.id}/reactivar`,
-                                'No se pudo reactivar el usuario.',
-                              )
-                            }
-                          >
-                            Reactivar
-                          </Button>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="ghostDestructive"
-                            size="sm"
-                            onClick={() => {
-                              setDeactivating(person);
-                              setDeriveToUserId('');
-                              setLeaveUnassigned(false);
-                              setNotDerived([]);
-                              setInProgressShift(null);
-                              setForceReason('');
-                              setForceReasonError('');
-                              setDialogError('');
-                              setFormError('');
-                            }}
-                          >
-                            Desactivar
-                          </Button>
-                        )}
-                        {person.status === 'invitation_pending' && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              void runAction(
-                                `/usuarios/${person.id}/reenviar-invitacion`,
-                                'No se pudo reenviar la invitación.',
-                              )
-                            }
-                          >
-                            Reenviar invitación
-                          </Button>
-                        )}
+                        <strong className="block truncate font-semibold">
+                          {p.firstName} {p.lastName}
+                        </strong>
+                        <span className="block truncate text-sm text-muted-foreground">
+                          {p.email}
+                        </span>
                       </>
-                    );
-                    return (
-                      <TableRow key={person.id}>
-                        <TableCell className="font-medium">
-                          <strong>
-                            {person.firstName} {person.lastName}
-                          </strong>
-                        </TableCell>
-                        <TableCell>{person.email}</TableCell>
-                        <TableCell>
-                          {person.role === 'guard' ? 'Vigilador' : 'Supervisor'}
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge
-                            tone={
-                              person.status === 'active'
-                                ? 'success'
-                                : person.status === 'invitation_pending'
-                                  ? person.invitationStatus === 'failed'
-                                    ? 'danger'
-                                    : 'warning'
-                                  : 'neutral'
-                            }
-                          >
-                            {person.status === 'invitation_pending'
-                              ? person.invitationStatus === 'failed'
-                                ? 'Envío fallido'
-                                : 'Invitación enviada'
-                              : person.status === 'active'
-                                ? 'Activo'
-                                : 'Desactivado'}
-                          </StatusBadge>
-                        </TableCell>
-                        <TableCell>
-                          {user?.role === 'admin' && (
-                            <>
-                              {person.status === 'invitation_pending' ? (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm">
-                                      Acciones
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    {Children.map(
-                                      actions.props.children,
-                                      (action) =>
-                                        action && (
-                                          <DropdownMenuItem asChild>{action}</DropdownMenuItem>
-                                        ),
-                                    )}
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              ) : (
-                                <div className="flex gap-2">{actions}</div>
-                              )}
-                            </>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </Card>
+                    ),
+                  },
+                  {
+                    id: 'telefono',
+                    value: (p) => p.phone,
+                    header: 'Teléfono',
+                    width: 176,
+                    cell: (p) =>
+                      p.phone ? (
+                        <a
+                          href={`tel:${p.phone.replaceAll(' ', '')}`}
+                          className="tabular-nums hover:underline"
+                        >
+                          {p.phone}
+                        </a>
+                      ) : (
+                        '—'
+                      ),
+                  },
+                  {
+                    id: 'legajo',
+                    value: (p) => p.employeeNumber,
+                    header: 'Legajo',
+                    width: 112,
+                    className: 'tabular-nums',
+                    cell: (p) => p.employeeNumber ?? '—',
+                  },
+                  {
+                    id: 'rol',
+                    value: (p) => p.role,
+                    header: 'Rol',
+                    width: 128,
+                    cell: (p) => (p.role === 'guard' ? 'Vigilador' : 'Supervisor'),
+                  },
+                  {
+                    id: 'estado',
+                    value: (p) => p.status,
+                    header: 'Estado',
+                    width: 176,
+                    cell: (p) => (
+                      <StatusBadge
+                        tone={
+                          p.status === 'active'
+                            ? 'success'
+                            : p.status === 'invitation_pending'
+                              ? p.invitationStatus === 'failed'
+                                ? 'danger'
+                                : 'warning'
+                              : 'neutral'
+                        }
+                      >
+                        {p.status === 'invitation_pending'
+                          ? p.invitationStatus === 'failed'
+                            ? 'Envío fallido'
+                            : 'Invitación enviada'
+                          : p.status === 'active'
+                            ? 'Activo'
+                            : 'Desactivado'}
+                      </StatusBadge>
+                    ),
+                  },
+                  // Solo el administrador gestiona al personal.
+                  ...(user?.role === 'admin'
+                    ? [
+                        {
+                          id: 'actions',
+                          header: 'Acciones',
+                          hideHeader: true,
+                          width: 64,
+                          align: 'right' as const,
+                          cell: (p: (typeof result.data.items)[number]) => (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={`Más acciones de ${p.firstName} ${p.lastName}`}
+                                >
+                                  <EllipsisVertical aria-hidden="true" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-auto">
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    setEditing(p);
+                                    setErrors({});
+                                    setFormError('');
+                                  }}
+                                >
+                                  Editar
+                                </DropdownMenuItem>
+                                {p.status === 'invitation_pending' && (
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      void runAction(
+                                        `/usuarios/${p.id}/reenviar-invitacion`,
+                                        'No se pudo reenviar la invitación.',
+                                        personnelUserSchema,
+                                      )
+                                    }
+                                  >
+                                    Reenviar invitación
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                {p.status === 'deactivated' ? (
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      void runAction(
+                                        `/usuarios/${p.id}/reactivar`,
+                                        'No se pudo reactivar el usuario.',
+                                      )
+                                    }
+                                  >
+                                    Reactivar
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem
+                                    variant="destructive"
+                                    onSelect={() => {
+                                      setDeactivating(p);
+                                      setDeriveToUserId('');
+                                      setLeaveUnassigned(false);
+                                      setNotDerived([]);
+                                      setInProgressShift(null);
+                                      setForceReason('');
+                                      setForceReasonError('');
+                                      setDialogError('');
+                                      setFormError('');
+                                    }}
+                                  >
+                                    Desactivar
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            </div>
           )}
-          <nav
-            aria-label="Paginación"
-            className="flex flex-wrap items-center gap-3 text-sm tabular-nums"
-          >
-            <Button
-              type="button"
-              variant="outline"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((value) => value - 1);
-              }}
-            >
-              Anterior
-            </Button>
-            <span>
-              Página {result.data.pagina} de {Math.max(1, result.data.paginas)}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={page >= result.data.paginas}
-              onClick={() => {
-                setPage((value) => value + 1);
-              }}
-            >
-              Siguiente
-            </Button>
-          </nav>
-        </>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={result.data.total}
+            shown={result.data.items.length}
+            label="personal"
+            onPage={setPage}
+            onPageSize={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </div>
       )}
       {formError && !creating && !editing && (
         <Alert variant="destructive" role="alert">
           {formError}
+          {guardLimitTrial !== null && user?.role === 'admin' && (
+            <a href="/suscripcion" className="font-semibold underline">
+              {guardLimitTrial ? 'Suscribirme' : 'Cambiar de plan'}
+            </a>
+          )}
         </Alert>
       )}
       <Dialog
@@ -695,6 +813,11 @@ export function PersonalPage() {
               {formError && (
                 <Alert variant="destructive" role="alert">
                   {formError}
+                  {guardLimitTrial !== null && user?.role === 'admin' && (
+                    <a href="/suscripcion" className="font-semibold underline">
+                      {guardLimitTrial ? 'Suscribirme' : 'Cambiar de plan'}
+                    </a>
+                  )}
                 </Alert>
               )}
               <div className="flex flex-wrap justify-end gap-3 sm:col-span-2">
@@ -707,7 +830,9 @@ export function PersonalPage() {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit">Guardar cambios</Button>
+                <Button type="submit" disabled={busy}>
+                  Guardar cambios
+                </Button>
               </div>
             </form>
           </DialogContent>
@@ -1016,7 +1141,6 @@ export function PersonalPage() {
           </DialogContent>
         )}
       </Dialog>
-      {renderErrors()}
     </section>
   );
 }

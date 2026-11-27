@@ -4,6 +4,7 @@ import { PanicJobsService } from './panic-jobs.service';
 import { buildStaffPanicSms } from './panic-sms-message';
 import { PanicEscalationProcessor, PanicSmsProcessor } from './panic.processors';
 import type { Job } from 'bullmq';
+import { NoopSms } from '../../common/ports/sms.port';
 
 const input = { companyId: 'company', alertId: '019cbfe6-bdb0-7000-8000-123456789012' };
 
@@ -123,6 +124,18 @@ it('encola SMS inicial y escalamiento a los 120 segundos con claves estables', a
   );
 });
 
+it('HU-43 conserva SMS, push y escalamiento con la empresa suspendida', async () => {
+  const f = fixture();
+  Object.assign(f.alert.company, { accountStatus: 'suspended' });
+  await f.jobs.schedule(input, f.alert.receivedAt);
+  jest.advanceTimersByTime(120000);
+  await f.jobs.escalate(input);
+  expect(f.smsQueue.add).toHaveBeenCalled();
+  expect(f.notifications.notifySiteStaff).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'panic', priority: 'high' }),
+  );
+});
+
 it('a los 120 segundos escala una sola vez, reenvía push alta y encola SMS de escalamiento', async () => {
   const f = fixture();
   jest.advanceTimersByTime(119000);
@@ -205,16 +218,16 @@ it('en escalamiento incluye supervisores y administradores, omite teléfonos inv
   expect(f.sms.sendPanicAlert).toHaveBeenCalledTimes(2);
 });
 
-it('sin teléfono válido recurre al administrador y registra false como skipped', async () => {
+it('sin teléfono válido recurre al administrador y reintenta un rechazo del proveedor', async () => {
   const f = fixture();
   f.tx.user.findMany
     .mockResolvedValueOnce([{ id: 'supervisor', phone: '' }])
     .mockResolvedValueOnce([{ id: 'admin', phone: '+5493517654321' }]);
   f.sms.sendPanicAlert.mockResolvedValue({ sent: false });
-  await f.jobs.sendSms({ ...input, reason: 'initial' });
+  await expect(f.jobs.sendSms({ ...input, reason: 'initial' })).rejects.toThrow('SMS');
   expect(f.sms.sendPanicAlert).toHaveBeenCalledTimes(1);
   expect(f.deliveries.get('supervisor')?.status).toBe('skipped');
-  expect(f.deliveries.get('admin')?.status).toBe('skipped');
+  expect(f.deliveries.get('admin')?.status).toBe('failed');
 });
 
 it('guarda failed al lanzar el puerto y reintenta solamente los destinatarios fallidos', async () => {
@@ -224,6 +237,14 @@ it('guarda failed al lanzar el puerto y reintenta solamente los destinatarios fa
   expect(f.deliveries.get('supervisor')?.status).toBe('failed');
   await f.jobs.sendSms({ ...input, reason: 'initial' });
   expect(f.deliveries.get('supervisor')?.status).toBe('accepted');
+});
+
+it('el proveedor log sigue omitiendo envíos sin disparar reintentos', async () => {
+  const f = fixture();
+  Object.setPrototypeOf(f.sms, NoopSms.prototype);
+  f.sms.sendPanicAlert.mockResolvedValue({ sent: false });
+  await f.jobs.sendSms({ ...input, reason: 'initial' });
+  expect(f.deliveries.get('supervisor')?.status).toBe('skipped');
 });
 
 it('los procesadores rechazan payloads de cola inválidos', async () => {

@@ -1,4 +1,5 @@
 import { PrismaPg } from '@prisma/adapter-pg';
+import { trialEndsAt } from '@garita/shared';
 import { PrismaClient } from '../src/generated/prisma/client';
 
 if (!process.env.DATABASE_URL) {
@@ -16,9 +17,19 @@ const prisma = new PrismaClient({ adapter });
 const roles = ['admin', 'supervisor', 'guard', 'client'] as const;
 
 async function seedCompany(name: string, prefix: string): Promise<string> {
+  const createdAt = new Date();
+  const timezone = 'America/Argentina/Buenos_Aires';
   const company = await prisma.company.upsert({
     where: { id: `${prefix}-company` },
-    create: { id: `${prefix}-company`, name, guardPhone: '+541100000000' },
+    create: {
+      id: `${prefix}-company`,
+      name,
+      guardPhone: '+541100000000',
+      createdAt,
+      timezone,
+      accountStatus: 'trial',
+      trialEndsAt: trialEndsAt(createdAt, timezone),
+    },
     update: { name, guardPhone: '+541100000000' },
   });
   for (const role of roles) {
@@ -39,7 +50,21 @@ async function seedCompany(name: string, prefix: string): Promise<string> {
   return company.id;
 }
 
+// shortcut: test prices, set the real ones before going to production (Sprint 6).
+const plans = [
+  { code: 'hasta-10', name: 'Hasta 10 vigiladores', monthlyPrice: '45000.00', maxGuards: 10 },
+  { code: 'hasta-25', name: 'Hasta 25 vigiladores', monthlyPrice: '95000.00', maxGuards: 25 },
+  { code: 'hasta-50', name: 'Hasta 50 vigiladores', monthlyPrice: '170000.00', maxGuards: 50 },
+] as const;
+
+async function seedPlans(): Promise<void> {
+  for (const plan of plans) {
+    await prisma.plan.upsert({ where: { code: plan.code }, create: plan, update: plan });
+  }
+}
+
 async function main(): Promise<void> {
+  await seedPlans();
   const north = await seedCompany('Seguridad Norte', 'norte');
   const south = await seedCompany('Custodia Sur', 'sur');
   for (const [companyId, prefix] of [
@@ -80,18 +105,20 @@ async function main(): Promise<void> {
           'Depósito central',
           'Acceso perimetral',
         ].entries()) {
-          await prisma.checkpoint.upsert({
-            where: { siteId_name: { siteId: site.id, name: checkpointName } },
-            create: {
-              companyId,
-              siteId: site.id,
-              name: checkpointName,
-              latitude: -34.6 + index * 0.01 + checkpointIndex * 0.0001,
-              longitude: -58.4 + index * 0.01 + checkpointIndex * 0.0001,
-              isIndoor: checkpointIndex === 1,
-            },
-            update: {},
+          const existingCheckpoint = await prisma.checkpoint.findFirst({
+            where: { siteId: site.id, name: checkpointName, status: 'active' },
           });
+          if (!existingCheckpoint)
+            await prisma.checkpoint.create({
+              data: {
+                companyId,
+                siteId: site.id,
+                name: checkpointName,
+                latitude: -34.6 + index * 0.01 + checkpointIndex * 0.0001,
+                longitude: -58.4 + index * 0.01 + checkpointIndex * 0.0001,
+                isIndoor: checkpointIndex === 1,
+              },
+            });
         }
       }
     }

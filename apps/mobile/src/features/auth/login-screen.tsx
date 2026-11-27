@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Link, router } from 'expo-router';
+import { Link, Redirect, router } from 'expo-router';
 import { z } from 'zod';
 import { StyleSheet } from 'react-native';
 import { space } from '@garita/tokens';
 import { Banner, Button, Input, Loading, Screen, Text } from '@/ui';
 import { AuthFlowError, useAuth } from './auth-context';
+import { LegalLinks, roleHome } from '../legal/legal-screens';
 
 const schema = z.object({
   email: z.email('Ingresá un correo válido'),
@@ -25,10 +26,7 @@ export function LoginScreen() {
       </Screen>
     );
   }
-  if (user) {
-    router.replace(user.role === 'guard' ? '/(guard)' : '/(configuration)');
-    return null;
-  }
+  if (user) return <Redirect href={roleHome(user)} />;
   async function submit() {
     const result = schema.safeParse({ email, password });
     if (!result.success) {
@@ -39,7 +37,7 @@ export function LoginScreen() {
     setBusy(true);
     try {
       const profile = await login(result.data.email, result.data.password);
-      router.replace(profile.role === 'guard' ? '/(guard)' : '/(configuration)');
+      router.replace(roleHome(profile));
     } catch (reason) {
       setMessage(reason instanceof AuthFlowError ? reason.message : 'No pudimos iniciar sesión');
     } finally {
@@ -85,6 +83,7 @@ export function LoginScreen() {
       <Link href="/(auth)/recuperar" asChild>
         <Button variant="ghost" label="Olvidé mi contraseña" accessibilityRole="link" />
       </Link>
+      <LegalLinks />
     </Screen>
   );
 }

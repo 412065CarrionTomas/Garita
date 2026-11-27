@@ -28,7 +28,6 @@ export class NoopSms implements SmsPort {
     guardId: string;
     message: string;
   }): Promise<void> {
-    // TODO(HU-24-proveedor): replace this placeholder with the real SMS provider.
     this.logger.log({
       event: 'shift_closed_sms_pending',
       shiftId: input.shiftId,
@@ -38,7 +37,7 @@ export class NoopSms implements SmsPort {
   }
 
   sendPanicAlert(input: { companyId: string; alertId: string }): Promise<{ sent: boolean }> {
-    // shortcut: log only (user decision 28/10), wire a real provider in Sprint 5.
+    // Default log provider: no credentials and no external delivery.
     this.logger.log({
       event: 'panic_sms_skipped',
       companyId: input.companyId,

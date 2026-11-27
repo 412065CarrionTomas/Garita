@@ -44,6 +44,8 @@ export function useRealtime(enabled: boolean) {
         void queryClient.invalidateQueries({ queryKey: ['revision'] });
         void queryClient.invalidateQueries({ queryKey: ['panico'] });
         void queryClient.invalidateQueries({ queryKey: ['avisos'] });
+        void queryClient.invalidateQueries({ queryKey: ['incidents'] });
+        void queryClient.invalidateQueries({ queryKey: ['turnos'] });
       }
       connectedOnce = true;
       setAnnouncement('Supervisión conectada');
@@ -55,6 +57,7 @@ export function useRealtime(enabled: boolean) {
     socket.on(REALTIME_EVENTS.shiftUpdated, (raw: unknown) => {
       const event = shiftUpdatedEventSchema.safeParse(raw);
       if (!event.success) return;
+      void queryClient.invalidateQueries({ queryKey: ['turnos'] });
       void queryClient.invalidateQueries({ queryKey: ['supervision'] });
       void queryClient.invalidateQueries({ queryKey: ['revision'] });
       setAnnouncement(`Turno actualizado`);
@@ -104,6 +107,7 @@ export function useRealtime(enabled: boolean) {
     socket.on(REALTIME_EVENTS.incidentNew, (raw: unknown) => {
       const event = incidentNewEventSchema.safeParse(raw);
       if (!event.success) return;
+      void queryClient.invalidateQueries({ queryKey: ['incidents'] });
       const rows = queryClient.getQueryData<ShiftRow[]>(['supervision', 'turnos']);
       let site = rows?.find((row) => row.site.id === event.data.siteId)?.site.name;
       if (!site) {

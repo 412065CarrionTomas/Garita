@@ -1,6 +1,7 @@
 import { CoverageNoticesService } from './coverage-notices.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { RaiseNoticeInput, NoticesPort } from '../../common/ports/notices.port';
+import type { AccountStatePort } from '../../common/ports/account-state.port';
 
 function setup() {
   let now = new Date('2030-01-01T22:14:00Z');
@@ -46,7 +47,12 @@ function setup() {
   const prisma = {
     systemPrisma: {
       site: { findMany: jest.fn().mockResolvedValue([site]) },
-      shift: { findMany: findShifts, findUnique: jest.fn().mockResolvedValue(closed) },
+      shift: {
+        findMany: findShifts,
+        findUnique: jest.fn().mockResolvedValue(closed),
+        updateMany: jest.fn(),
+      },
+      shiftAssignment: { updateMany: jest.fn() },
       shiftEvent: { findFirst: jest.fn().mockResolvedValue(event) },
       user: { findFirst: jest.fn().mockResolvedValue({ firstName: 'Pedro', lastName: 'Díaz' }) },
     },
@@ -55,6 +61,7 @@ function setup() {
     prisma as unknown as PrismaService,
     { now: () => now },
     { raise } as unknown as NoticesPort,
+    { get: () => Promise.resolve({ status: 'active' }) } as unknown as AccountStatePort,
   );
   return {
     service,

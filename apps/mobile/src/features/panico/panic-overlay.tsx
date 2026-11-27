@@ -15,6 +15,9 @@ import { triggerPanic } from './actions';
 const HOLD_MS = 2000;
 // Anillo de 112 con trazo de 6: piezas de tamaño fijo, como los casilleros de `src/ui`.
 const RING = 112;
+/** Alto que tapa el anillo sobre el contenido: las pantallas lo reservan abajo. */
+// Anillo, márgenes y una línea de estado (alerta activa) debajo.
+export const PANIC_OVERLAY_SPACE = RING + space[5] * 2 + space[6];
 const STROKE = 6;
 const RADIUS = (RING - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -55,7 +58,7 @@ export function PanicOverlay({ bottomOffset = 0 }: { bottomOffset?: number }) {
         (alert) => alert.request.shiftId === shift?.shift.id && !alert.blockedReason,
       );
       const resolved = shiftAlerts.findIndex((alert) => alert.state?.status === 'resolved');
-      const alerts = resolved > 0 ? shiftAlerts.slice(0, resolved) : shiftAlerts;
+      const alerts = resolved >= 0 ? shiftAlerts.slice(0, resolved) : shiftAlerts;
       const latest = alerts.find((alert) => alert.state !== null);
       if (!latest?.state) {
         const sms = alerts.find(
@@ -76,7 +79,11 @@ export function PanicOverlay({ bottomOffset = 0 }: { bottomOffset?: number }) {
           if (JSON.stringify(state) !== JSON.stringify(latest.state))
             await repository.patchPanicAlert(latest.request.alertId, { state });
           setStatus(
-            state.confirmedAt ? 'Confirmada por el supervisor' : 'Alerta recibida por la central',
+            state.status === 'resolved'
+              ? null
+              : state.confirmedAt
+                ? 'Confirmada por el supervisor'
+                : 'Alerta recibida por la central',
           );
         }
       }

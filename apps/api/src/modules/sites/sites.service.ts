@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CLOCK, type Clock } from '../../common/clock';
+import { GUARD_SITES_LOOKBACK_DAYS, searchTerms, type GuardSite } from '@garita/shared';
 import {
   IN_PROGRESS_SHIFT_CLOSURE_PORT,
   WEEKLY_SCHEDULE_TERMINATION_PORT,
@@ -12,6 +13,7 @@ import type {
   InProgressShiftClosurePort,
   WeeklyScheduleTerminationPort,
 } from './deactivation-ports';
+import { FIREBASE_IDENTITY_PROVIDER, type FirebaseIdentityProvider } from '../auth/auth.types';
 import { ShiftExecutionService } from '../shift-execution/shift-execution.service';
 
 /** Datos mínimos de un supervisor visibles en las respuestas de predios. */
@@ -29,25 +31,83 @@ export class SitesService {
     @Inject(IN_PROGRESS_SHIFT_CLOSURE_PORT)
     private readonly inProgress: InProgressShiftClosurePort,
     private readonly shiftExecution: ShiftExecutionService,
+    @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly firebase: FirebaseIdentityProvider,
   ) {}
 
-  async listClients(status?: 'active' | 'inactive', page = 1, user?: AuthenticatedUser) {
-    return this.prisma.tenantPrisma.client.findMany({
-      where: status ? { status } : undefined,
-      orderBy: { name: 'asc' },
-      skip: (page - 1) * 50,
-      take: 50,
-      include: {
-        _count: {
-          select: {
-            sites:
-              user?.role === 'supervisor'
-                ? { where: { supervisors: { some: { userId: user.userId } } } }
-                : true,
+  async listClients(
+    query: {
+      estado?: 'active' | 'inactive';
+      buscar?: string;
+      orden: 'nombre' | 'recientes' | 'contacto' | 'telefono' | 'predios' | 'estado';
+      sentido?: 'asc' | 'desc';
+      pagina: number;
+      porPagina: number;
+    },
+    user?: AuthenticatedUser,
+  ) {
+    const supervisor = user?.role === 'supervisor';
+    // Cada palabra tiene que aparecer en algún campo: "ferreyra peralta" encuentra al cliente.
+    const terms = searchTerms(query.buscar);
+    const base = {
+      AND: terms.map((term) => ({
+        OR: (['name', 'contactName', 'email', 'taxId'] as const).map((field) => ({
+          [field]: { contains: term, mode: 'insensitive' as const },
+        })),
+      })),
+    };
+    const where = { ...base, status: query.estado };
+    // Al supervisor no se lo ordena por el total de predios: delataría los que no supervisa.
+    const dir = query.sentido ?? 'asc';
+    // El nombre desempata siempre A–Z; el sentido elegido solo invierte la columna pedida.
+    const byName = [{ name: 'asc' as const }, { id: 'asc' as const }];
+    const orderBy =
+      query.orden === 'recientes'
+        ? [{ createdAt: 'desc' as const }, { id: 'asc' as const }]
+        : query.orden === 'predios' && !supervisor
+          ? [{ sites: { _count: dir } }, ...byName]
+          : query.orden === 'contacto'
+            ? [{ contactName: dir }, ...byName]
+            : query.orden === 'telefono'
+              ? [{ phone: dir }, ...byName]
+              : query.orden === 'estado'
+                ? [{ status: dir }, ...byName]
+                : query.orden === 'nombre'
+                  ? [{ name: dir }, { id: 'asc' as const }]
+                  : byName;
+    const client = this.prisma.tenantPrisma.client;
+    const [items, active, inactive] = await Promise.all([
+      client.findMany({
+        where,
+        orderBy,
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
+        include: {
+          _count: {
+            select: {
+              sites:
+                user?.role === 'supervisor'
+                  ? { where: { supervisors: { some: { userId: user.userId } } } }
+                  : true,
+            },
           },
         },
-      },
-    });
+      }),
+      client.count({ where: { ...base, status: 'active' } }),
+      client.count({ where: { ...base, status: 'inactive' } }),
+    ]);
+    const total =
+      query.estado === 'active'
+        ? active
+        : query.estado === 'inactive'
+          ? inactive
+          : active + inactive;
+    return {
+      items,
+      pagina: query.pagina,
+      total,
+      paginas: Math.ceil(total / query.porPagina),
+      resumen: { active, inactive },
+    };
   }
 
   async createClient(data: Prisma.ClientUncheckedCreateInput) {
@@ -94,16 +154,18 @@ export class SitesService {
       })
     ).map((site) => site.id);
     const guardsToNotify = await this.guardsInProgress(siteIds);
-    const client = await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
+    const { client, users } = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      // Antes de cancelar: el conteo de turnos de programaciones no depende del instante de la baja.
       await this.weeklySchedules.terminateForSites(tx, siteIds);
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
       await this.inProgress.closeForSites(tx, siteIds, adminId);
       // La actualización del cliente bloquea altas concurrentes hasta terminar la cascada.
       await tx.client.update({ where: { id }, data: { status: 'inactive' } });
       const users = await tx.user.findMany({
         where: { clientId: id, status: { not: 'deactivated' } },
-        select: { id: true },
+        select: { id: true, firebaseUid: true },
       });
+      await tx.notificationDevice.deleteMany({ where: { user: { clientId: id } } });
       await tx.user.updateMany({ where: { clientId: id }, data: { status: 'deactivated' } });
       await tx.invitation.updateMany({
         where: { user: { clientId: id }, usedAt: null, replacedAt: null },
@@ -119,8 +181,27 @@ export class SitesService {
         });
       await tx.siteSupervisor.deleteMany({ where: { site: { clientId: id } } });
       await tx.site.updateMany({ where: { clientId: id }, data: { status: 'inactive' } });
-      return tx.client.update({ where: { id }, data: { status: 'inactive' } });
+      await this.removeSiteTags(tx as unknown as Prisma.TransactionClient, siteIds, adminId);
+      return {
+        client: await tx.client.update({ where: { id }, data: { status: 'inactive' } }),
+        users,
+      };
     });
+    for (const user of users) {
+      const results = await Promise.allSettled([
+        this.firebase.setDisabled(user.firebaseUid, true),
+        this.firebase.revokeRefreshTokens(user.firebaseUid),
+      ]);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected')
+          this.logger.error({
+            event: 'client_user_firebase_deactivation_failed',
+            userId: user.id,
+            clientId: id,
+            operation: index === 0 ? 'disable' : 'revoke_sessions',
+          });
+      });
+    }
     await this.notifyClosedGuards(guardsToNotify);
     return client;
   }
@@ -144,6 +225,69 @@ export class SitesService {
     return user.role === 'supervisor'
       ? { ...client, _count: { sites: client.sites.length } }
       : client;
+  }
+
+  /**
+   * Predios donde el vigilador tiene turnos por venir o tuvo en los últimos 90 días, con lo que
+   * necesita en el campo. Supervisores solo por nombre: los datos de contacto no se exponen.
+   */
+  async listForGuard(user: AuthenticatedUser): Promise<GuardSite[]> {
+    const now = this.clock.now();
+    const mine = { some: { guardId: user.userId, isCurrent: true, active: true } };
+    const since = new Date(now.getTime() - GUARD_SITES_LOOKBACK_DAYS * 86_400_000);
+    const sites = await this.prisma.tenantPrisma.site.findMany({
+      where: { status: 'active', shifts: { some: { assignments: mine, endsAt: { gte: since } } } },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        latitude: true,
+        longitude: true,
+        accessInstructions: true,
+        supervisors: {
+          where: { user: { status: 'active' } },
+          select: { user: { select: { firstName: true, lastName: true } } },
+          orderBy: { user: { firstName: 'asc' } },
+        },
+        rounds: {
+          where: { status: 'active' },
+          select: {
+            name: true,
+            currentVersion: { select: { id: true, _count: { select: { checkpoints: true } } } },
+          },
+          orderBy: { name: 'asc' },
+        },
+        shifts: {
+          where: {
+            assignments: mine,
+            endsAt: { gte: now },
+            status: { in: ['scheduled', 'in_progress'] },
+          },
+          select: {
+            startsAt: true,
+            assignments: { where: mine.some, select: { startsAt: true }, take: 1 },
+          },
+          orderBy: { startsAt: 'asc' },
+          take: 1,
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+    return sites.map(({ supervisors, rounds, shifts, latitude, longitude, ...site }) => ({
+      ...site,
+      latitude: latitude.toNumber(),
+      longitude: longitude.toNumber(),
+      supervisors: supervisors.map(({ user: u }) => `${u.firstName} ${u.lastName}`),
+      rounds: rounds.map((round) => ({
+        name: round.name,
+        checkpoints: round.currentVersion?._count.checkpoints ?? 0,
+        versionId: round.currentVersion?.id ?? null,
+      })),
+      // En un relevo, la hora en que entra este vigilador, no la del turno.
+      nextShiftAt: shifts[0]
+        ? (shifts[0].assignments[0] ?? shifts[0]).startsAt.toISOString()
+        : null,
+    }));
   }
 
   async listSites(clientId?: string, status?: 'active' | 'inactive', user?: AuthenticatedUser) {
@@ -182,7 +326,7 @@ export class SitesService {
   }
 
   async createSite(data: Prisma.SiteUncheckedCreateInput) {
-    await this.resources.findOwnedOrThrow('Client', data.clientId);
+    await this.assertActiveClient(data.clientId);
     try {
       return await this.prisma.tenantPrisma.site.create({ data });
     } catch (error) {
@@ -193,9 +337,10 @@ export class SitesService {
   }
 
   async updateSite(id: string, data: Prisma.SiteUncheckedUpdateInput) {
-    await this.resources.findOwnedOrThrow('Site', id);
-    if (typeof data.clientId === 'string')
-      await this.resources.findOwnedOrThrow('Client', data.clientId);
+    const site = await this.resources.findOwnedOrThrow('Site', id);
+    await this.assertActiveClient(
+      typeof data.clientId === 'string' ? data.clientId : String(site.clientId),
+    );
     try {
       return await this.prisma.tenantPrisma.site.update({ where: { id }, data });
     } catch (error) {
@@ -215,10 +360,12 @@ export class SitesService {
     this.requireConfirmation(impact, confirm);
     const guardsToNotify = await this.guardsInProgress([id]);
     const site = await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
+      // Antes de cancelar: el conteo de turnos de programaciones no depende del instante de la baja.
       await this.weeklySchedules.terminateForSites(tx, [id]);
+      await this.cancelShifts(tx as unknown as Prisma.TransactionClient, [id], adminId);
       await this.inProgress.closeForSites(tx, [id], adminId);
       await tx.siteSupervisor.deleteMany({ where: { siteId: id } });
+      await this.removeSiteTags(tx as unknown as Prisma.TransactionClient, [id], adminId);
       return tx.site.update({ where: { id }, data: { status: 'inactive' } });
     });
     await this.notifyClosedGuards(guardsToNotify);
@@ -244,13 +391,11 @@ export class SitesService {
   }
 
   private async deactivationImpact(siteIds: string[]) {
-    const now = this.clock.now();
     const shifts = siteIds.length
       ? await this.prisma.tenantPrisma.shift.findMany({
           where: {
             siteId: { in: siteIds },
-            status: { in: ['scheduled', 'unassigned'] },
-            OR: [{ startsAt: { gt: now } }, { endsAt: { lte: now } }],
+            status: { in: ['scheduled', 'unassigned', 'uncovered'] },
           },
           select: { id: true, siteId: true, startsAt: true, endsAt: true, status: true },
           orderBy: { startsAt: 'asc' },
@@ -263,8 +408,6 @@ export class SitesService {
             where: {
               siteId: { in: siteIds },
               status: 'in_progress',
-              startsAt: { lte: now },
-              endsAt: { gt: now },
             },
           })
         : Promise.resolve(0),
@@ -296,8 +439,7 @@ export class SitesService {
     const shifts = await transaction.shift.findMany({
       where: {
         siteId: { in: siteIds },
-        status: { in: ['scheduled', 'unassigned'] },
-        OR: [{ startsAt: { gt: this.clock.now() } }, { endsAt: { lte: this.clock.now() } }],
+        status: { in: ['scheduled', 'unassigned', 'uncovered'] },
       },
       select: { id: true },
     });
@@ -315,6 +457,18 @@ export class SitesService {
         cancelledById: adminId,
         cancellationReason: 'Baja del predio',
       },
+    });
+  }
+
+  private async assertActiveClient(id: string) {
+    const client = await this.resources.findOwnedOrThrow('Client', id);
+    if (client.status !== 'active') throw new ConflictException('El cliente está dado de baja');
+  }
+
+  private async removeSiteTags(tx: Prisma.TransactionClient, siteIds: string[], adminId: string) {
+    await tx.nfcTag.updateMany({
+      where: { checkpoint: { siteId: { in: siteIds } }, status: 'active' },
+      data: { status: 'removed', endedAt: this.clock.now(), endedById: adminId },
     });
   }
 

@@ -122,7 +122,16 @@ describe('ExpoFieldDatabase with real SQLite engine (H-5)', () => {
     };
     await repository.saveShiftData(data);
     expect((await repository.getShiftData())?.shift.panicSms).toEqual(data.shift.panicSms);
+    await repository.setSyncMeta('synced_until', '2035-01-01T12:00:00Z');
+    await repository.setSyncMeta('last_sync_at', '2035-01-01T12:00:01Z');
+    await repository.saveShiftData({ ...data, shift: { ...data.shift, id: 'next-shift' } });
+    expect(await repository.getSyncMeta('synced_until')).toBeNull();
+    expect(await repository.getSyncMeta('last_sync_at')).toBeNull();
+    await repository.setSyncMeta('synced_until', '2035-01-01T13:00:00Z');
+    await repository.setSyncMeta('last_sync_at', '2035-01-01T13:00:01Z');
     await repository.clearShiftData();
+    expect(await repository.getSyncMeta('synced_until')).toBeNull();
+    expect(await repository.getSyncMeta('last_sync_at')).toBeNull();
     expect(await repository.getShiftData()).toBeNull();
     expect(rawDb.prepare('SELECT * FROM current_shift').all()).toEqual([]);
   });

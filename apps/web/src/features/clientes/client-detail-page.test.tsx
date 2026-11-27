@@ -7,7 +7,10 @@ import { ClientDetailPage } from './clients-page';
 jest.mock('../auth/auth-context', () => ({
   useAuth: jest.fn(() => ({ user: { role: 'admin' } })),
 }));
-jest.mock('react-router', () => ({ useParams: () => ({ id: 'client-1' }) }));
+jest.mock('react-router', () => ({
+  ...jest.requireActual<object>('react-router'),
+  useParams: () => ({ id: 'client-1' }),
+}));
 jest.mock('@/lib/api-client', () => ({ apiGet: jest.fn(), apiPost: jest.fn() }));
 beforeEach(() => {
   jest.clearAllMocks();

@@ -177,7 +177,10 @@ describe('SyncService (HU-13)', () => {
             : (e.payload as { eventId: string }).eventId,
         outcome: {
           result: 'recorded' as const,
-          recordId: 'rec-1',
+          recordId:
+            e.type === 'checkpoint_record'
+              ? e.payload.recordId
+              : '00000000-0000-4000-8000-000000000001',
           checkpointId: 'cp-1',
           countedFor: [],
           outOfWindow: false,
@@ -637,7 +640,7 @@ describe('SyncService (HU-13)', () => {
           simulation: 'unavailable',
           takenAt: null,
         },
-        phoneNfc: 'unavailable',
+        phoneNfc: 'unsupported',
       },
       occurredAtDevice: '2026-10-14T08:10:00.000Z',
       createdAt: '2026-10-14T08:10:00.000Z',
@@ -660,7 +663,7 @@ describe('SyncService (HU-13)', () => {
           simulation: 'unavailable',
           takenAt: null,
         },
-        phoneNfc: 'unavailable',
+        phoneNfc: 'unsupported',
       },
       occurredAtDevice: '2026-10-14T08:20:00.000Z',
       createdAt: '2026-10-14T08:20:00.000Z',
@@ -1006,4 +1009,46 @@ describe('SyncService (HU-13)', () => {
     expect(deleteCredentialMock).toHaveBeenCalled();
     expect(await repo.getShiftData()).toBeNull();
   });
+  it.each(['recorded', 'not_generated'] as const)(
+    'reconciles server %s with local compliance',
+    async (result) => {
+      const id = '00000000-0000-4000-8000-000000000001';
+      await addCheckpointEvent(id, '2026-10-14T08:30:00.000Z');
+      await repo.saveCheckpointRecord({
+        recordId: id,
+        shiftId: 'shift-100',
+        checkpointId: 'cp-1',
+        checkpointName: 'Punto',
+        occurredAtUtc: '2026-10-14T08:30:00.000Z',
+        countedFor: [{ roundId: 'r', windowIndex: 0, late: false }],
+        outOfWindow: false,
+        createdAt: '2026-10-14T08:30:00.000Z',
+      });
+      sendBatchMock.mockResolvedValueOnce({
+        receivedAt: '2026-10-14T10:00:00.000Z',
+        results: [
+          {
+            status: 'accepted',
+            eventId: id,
+            outcome:
+              result === 'recorded'
+                ? {
+                    result,
+                    recordId: id,
+                    checkpointId: 'cp-1',
+                    countedFor: [{ roundId: 'r', windowIndex: 1, late: true }],
+                    outOfWindow: false,
+                  }
+                : { result, recordId: id, cause: 'already_recorded', retryAfterUtc: null },
+          },
+        ],
+      });
+      await processSyncQueue();
+      expect(db.records[0]).toMatchObject(
+        result === 'recorded'
+          ? { countedFor: [{ roundId: 'r', windowIndex: 1, late: true }], serverResult: 'recorded' }
+          : { serverResult: 'rejected', serverReason: 'already_recorded' },
+      );
+    },
+  );
 });

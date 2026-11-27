@@ -4,16 +4,27 @@ import type { Prisma } from '../../generated/prisma/client';
 import type { ShiftCredentialPayload } from '../sync/shift-credential.service';
 
 export interface PanicSmsTwinFinder {
-  find(input: {
-    companyId: string;
-    shiftId: string;
-    shortId: string;
-  }): Promise<{ id: string } | null>;
+  find(
+    input: {
+      companyId: string;
+      shiftId: string;
+      shortId: string;
+    },
+    tx: Prisma.TransactionClient,
+  ): Promise<{ id: string } | null>;
 }
 
 export const panicSmsTwinFinder: PanicSmsTwinFinder = {
-  // TODO(HU-37): query authenticated SMS arrivals when the platform receiver exists.
-  find: () => Promise.resolve(null),
+  find: (input, tx) =>
+    tx.panicAlert.findFirst({
+      where: {
+        companyId: input.companyId,
+        shiftId: input.shiftId,
+        shortId: input.shortId,
+        channel: 'sms',
+      },
+      select: { id: true },
+    }),
 };
 
 export async function completePanicSmsTwin(
@@ -22,11 +33,14 @@ export async function completePanicSmsTwin(
   credential: ShiftCredentialPayload,
   now: Date,
 ) {
-  const twin = await panicSmsTwinFinder.find({
-    companyId: credential.companyId,
-    shiftId: credential.shiftId,
-    shortId: panicShortId(input.alertId),
-  });
+  const twin = await panicSmsTwinFinder.find(
+    {
+      companyId: credential.companyId,
+      shiftId: credential.shiftId,
+      shortId: panicShortId(input.alertId),
+    },
+    tx,
+  );
   if (!twin) return null;
   // This transaction is a system transaction; the finder never grants tenant access.
   const sms = await tx.panicAlert.findFirst({
@@ -64,5 +78,5 @@ export async function completePanicSmsTwin(
       events: { create: { id: input.alertId, type: 'internet_completed', occurredAt: now } },
     },
   });
-  return { alert, changed: true as const, siteName: undefined };
+  return { alert, changed: true as const, notify: alert.status === 'active', siteName: undefined };
 }

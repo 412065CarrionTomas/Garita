@@ -1,54 +1,57 @@
 import { Pressable, StyleSheet, View } from 'react-native';
-import { radius, touch } from '@garita/tokens';
+import { radius, space, touch } from '@garita/tokens';
 
+import { Icon } from './icon';
 import { Text } from './text';
 import { useTheme } from './theme';
-import type { ThemeMode } from './theme';
 
-const OPTIONS: { mode: ThemeMode; label: string }[] = [
-  { mode: 'light', label: 'Claro' },
-  { mode: 'dark', label: 'Oscuro' },
-  { mode: 'system', label: 'Sistema' },
-];
+const OPTIONS = [
+  { scheme: 'light', label: 'Claro', icon: 'sun' },
+  { scheme: 'dark', label: 'Oscuro', icon: 'moon' },
+] as const;
 
-/** Selector de apariencia de tres opciones. Va en Configuración / inicio. */
+/**
+ * Interruptor de tema como el del panel web: sol | luna. Sin elección guardada manda el sistema,
+ * y el interruptor marca el tema que se está viendo.
+ */
 export function ThemeSwitch() {
-  const { colors, mode, setMode } = useTheme();
+  const { colors, scheme, setMode } = useTheme();
   return (
-    <View
-      accessibilityRole="radiogroup"
-      accessibilityLabel="Apariencia"
-      style={[styles.group, { borderColor: colors.input }]}
-    >
-      {OPTIONS.map((option) => {
-        const selected = mode === option.mode;
-        return (
-          <Pressable
-            key={option.mode}
-            accessibilityRole="radio"
-            accessibilityLabel={option.label}
-            accessibilityState={{ selected, checked: selected }}
-            onPress={() => {
-              setMode(option.mode);
-            }}
-            style={[styles.option, selected && { backgroundColor: colors.primary }]}
-          >
-            <Text variant="label" color={selected ? 'primaryForeground' : 'foreground'}>
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <View style={styles.row}>
+      <Text variant="label">Tema</Text>
+      <View
+        accessibilityRole="radiogroup"
+        accessibilityLabel="Tema"
+        style={[styles.pill, { borderColor: colors.input }]}
+      >
+        {OPTIONS.map((option) => {
+          const selected = scheme === option.scheme;
+          return (
+            <Pressable
+              key={option.scheme}
+              accessibilityRole="radio"
+              accessibilityLabel={option.label}
+              accessibilityState={{ selected, checked: selected }}
+              onPress={() => setMode(option.scheme)}
+              style={[styles.side, selected && { backgroundColor: colors.primary }]}
+            >
+              <Icon name={option.icon} color={selected ? 'primaryForeground' : 'foreground'} />
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  group: { flexDirection: 'row', borderWidth: 1.5, borderRadius: radius.lg, overflow: 'hidden' },
-  option: {
-    flex: 1,
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pill: { flexDirection: 'row', borderWidth: 1.5, borderRadius: radius.full, overflow: 'hidden' },
+  side: {
+    minWidth: touch.min,
+    minHeight: touch.min,
+    paddingHorizontal: space[2],
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: touch.min,
   },
 });

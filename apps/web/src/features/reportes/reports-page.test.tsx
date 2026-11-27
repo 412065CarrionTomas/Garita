@@ -97,23 +97,25 @@ it('cada gráfico tiene título y tabla equivalente, aviso y pendientes con acce
       <ReportsPage />
     </MemoryRouter>,
   );
+  expect(await screen.findByText('2 en revisión · 0 sin sincronizar')).toBeInTheDocument();
+  // La aclaración para el cliente va al pie de los pendientes.
   expect(
-    await screen.findByText('2 rondas en revisión: el cliente las ve como en verificación'),
+    await screen.findByText(/El cliente ve las rondas en revisión como en verificación/),
   ).toBeInTheDocument();
+  // El porcentaje del período va en la franja de indicadores, no en un gráfico de una sola barra.
+  const kpi = screen.getByText('Cumplimiento', { selector: 'dt' }).parentElement;
+  if (!kpi) throw new Error('Falta el indicador de cumplimiento');
+  expect(within(kpi).getByText('90 %')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Gráficos' }));
   for (const title of [
-    'Porcentaje de cumplimiento',
     'Rondas por estado',
     'Evolución diaria del cumplimiento',
-    'Comparación de cumplimiento por predio',
-    'Comparación de cumplimiento por vigilador',
+    'Cumplimiento por predio',
+    'Cumplimiento por vigilador',
   ]) {
     expect(screen.getByRole('heading', { name: title })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: title })).toBeInTheDocument();
   }
-  expect(
-    within(screen.getByRole('table', { name: 'Porcentaje de cumplimiento' })).getByText('90 %'),
-  ).toBeInTheDocument();
   expect(await screen.findByText(/Repartidas entre 4 vigiladores/)).toBeInTheDocument();
   expect(screen.getByRole('link', { name: '1 turnos sin sincronizar' })).toHaveAttribute(
     'href',
@@ -145,7 +147,7 @@ it('selecciona un segmento con teclado y muestra las ventanas y el enlace al tur
     expect.anything(),
   );
 });
-it('envía filtros nativos usando teclado', async () => {
+it('cada filtro consulta solo, sin botón, con el "hasta" incluido', async () => {
   const user = userEvent.setup();
   renderWithQueryClient(
     <MemoryRouter>
@@ -153,21 +155,28 @@ it('envía filtros nativos usando teclado', async () => {
     </MemoryRouter>,
   );
   await screen.findByText(/18 completas de 20/);
-  screen.getByLabelText('Predio').focus();
-  await user.selectOptions(screen.getByLabelText('Predio'), 'p1');
-  await user.selectOptions(screen.getByLabelText('Cliente'), 'c1');
-  await user.selectOptions(screen.getByLabelText('Vigilador'), 'g1');
-  screen.getByRole('button', { name: 'Consultar cumplimiento' }).focus();
-  await user.keyboard('{Enter}');
+  expect(screen.queryByRole('button', { name: /Consultar/ })).not.toBeInTheDocument();
+  // La API devuelve el fin sin incluir; en pantalla se ve el último día incluido.
+  expect(screen.getByLabelText('Hasta')).toHaveValue('2026-10-31');
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Predio' }), 'p1');
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Vigilador' }), 'g1');
   await waitFor(() => {
     expect(apiGet).toHaveBeenCalledWith(
-      expect.stringContaining('predio=p1&cliente=c1&vigilador=g1'),
+      expect.stringContaining('predio=p1&vigilador=g1'),
+      expect.anything(),
+    );
+  });
+  // Los filtros en "Todos" no viajan a ninguna consulta.
+  for (const [path] of jest.mocked(apiGet).mock.calls) expect(path).not.toContain('undefined');
+  fireEvent.change(screen.getByLabelText('Hasta'), { target: { value: '2026-10-15' } });
+  await waitFor(() => {
+    expect(apiGet).toHaveBeenCalledWith(
+      expect.stringContaining('desde=2026-10-01&hasta=2026-10-16'),
       expect.anything(),
     );
   });
 });
 it('rechaza un período invertido antes de consultar la API', async () => {
-  const user = userEvent.setup();
   renderWithQueryClient(
     <MemoryRouter>
       <ReportsPage />
@@ -176,8 +185,6 @@ it('rechaza un período invertido antes de consultar la API', async () => {
   await screen.findByText(/18 completas de 20/);
   jest.mocked(apiGet).mockClear();
   fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-12-01' } });
-  screen.getByRole('button', { name: 'Consultar cumplimiento' }).focus();
-  await user.keyboard('{Enter}');
   expect(await screen.findByRole('alert')).toHaveTextContent('Ingresá un período válido');
   expect(apiGet).not.toHaveBeenCalled();
 });
@@ -255,5 +262,8 @@ describe('vistas del cumplimiento', () => {
       );
     });
     expect(screen.getByRole('button', { name: '7 días' })).toHaveAttribute('aria-pressed', 'true');
+    // Tocarlo de nuevo lo desmarca y vuelve al período por defecto.
+    await user.click(screen.getByRole('button', { name: '7 días' }));
+    expect(screen.getByRole('button', { name: '7 días' })).toHaveAttribute('aria-pressed', 'false');
   });
 });

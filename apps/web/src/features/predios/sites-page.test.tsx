@@ -27,6 +27,7 @@ jest.mock('@/lib/api-client', () => ({
         {
           id: 'site-1',
           clientId: 'client-1',
+          client: { id: 'client-1', name: 'Cliente desde predio' },
           name: 'Sede',
           address: 'Calle 1',
           latitude: -34,
@@ -36,7 +37,8 @@ jest.mock('@/lib/api-client', () => ({
           supervisors: [{ user: { id: 'supervisor-1' } }],
         },
       ];
-    if (path === '/clientes') return [{ id: 'client-1', name: 'Cliente' }];
+    if (path.startsWith('/clientes?estado=active&porPagina=50&pagina='))
+      return { items: [{ id: 'client-1', name: 'Cliente' }], paginas: 1 };
     if (path === '/predios/supervisores-disponibles')
       return [{ id: 'supervisor-1', firstName: 'Ana', lastName: 'Gómez' }];
     return [];
@@ -70,6 +72,7 @@ const profile = (role: 'admin' | 'supervisor') =>
     login: jest.fn(),
     logout: jest.fn(),
     recover: jest.fn(),
+    acceptLegal: jest.fn(),
     clearError: jest.fn(),
   }) as ReturnType<typeof useAuth>;
 
@@ -79,7 +82,7 @@ describe('SitesPage', () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
     expect(screen.queryByRole('button', { name: 'Guardar predio' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+    await user.click(await screen.findByRole('button', { name: 'Nuevo predio' }));
     const dialog = screen.getByRole('dialog', { name: 'Alta de predio' });
     expect(within(dialog).getByLabelText('Cliente')).toBeRequired();
     expect(within(dialog).getByLabelText('Nombre')).toBeRequired();
@@ -97,24 +100,36 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('supervisor'));
     renderWithQueryClient(<SitesPage />);
     expect(await screen.findByRole('heading', { name: 'Sede' })).toBeInTheDocument();
-    expect(screen.getByText('Supervisión')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Guardar predio' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Supervisores de Sede')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Nuevo predio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editar predio' })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Configuración' }));
+    expect(screen.queryByRole('group', { name: 'Supervisores asignados' })).not.toBeInTheDocument();
   });
 
-  it('permite seleccionar y asignar supervisores con el selector múltiple', async () => {
+  it('pliega la lista al elegir un predio y la vuelve a mostrar con la flecha', async () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
-    const select = await screen.findByRole('listbox', { name: 'Supervisores de Sede' });
-    await waitFor(() => {
-      expect(select).not.toBeDisabled();
-    });
-    await user.selectOptions(select, 'supervisor-1');
+    await user.click(await screen.findByRole('button', { name: /^Sede/ }));
+    expect(screen.queryByRole('navigation', { name: 'Lista de predios' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Nuevo predio' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Mostrar lista de predios' }));
+    expect(screen.getByRole('navigation', { name: 'Lista de predios' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo predio' })).toBeInTheDocument();
+  });
+
+  it('asigna y quita supervisores desde la pestaña Configuración', async () => {
+    jest.mocked(useAuth).mockReturnValue(profile('admin'));
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
+    const ana = await screen.findByRole('checkbox', { name: 'Ana Gómez' });
+    expect(ana).toBeChecked();
+    await user.click(ana);
     await waitFor(() => {
       expect(apiPut).toHaveBeenCalledWith(
         '/predios/site-1/supervisores',
-        { supervisorIds: ['supervisor-1'] },
+        { supervisorIds: [] },
         expect.anything(),
         expect.anything(),
       );
@@ -136,6 +151,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
     await user.click(await screen.findByRole('button', { name: 'Editar predio' }));
     const dialog = screen.getByRole('dialog', { name: 'Editar predio' });
     expect(dialog).toBeInTheDocument();
@@ -160,6 +176,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Dar de baja el predio' });
     expect(dialog).toHaveTextContent('Se cancelarán 3 turnos');
@@ -176,6 +193,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
     await user.click(await screen.findByRole('button', { name: 'Dar de baja' }));
     expect(await screen.findByText(/Se cancelarán 3 turnos/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Confirmar baja' }));
@@ -193,6 +211,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(profile('admin'));
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
 
     expect(await screen.findByText('Velocidad máxima de recorrido')).toBeInTheDocument();
     const select = screen.getByRole('combobox', {
@@ -241,6 +260,7 @@ describe('SitesPage', () => {
     jest.mocked(useAuth).mockReturnValue(supervisorProfile);
     const user = userEvent.setup();
     renderWithQueryClient(<SitesPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }));
 
     const select = await screen.findByRole('combobox', {
       name: 'Velocidad máxima de recorrido para Sede',
@@ -258,4 +278,55 @@ describe('SitesPage', () => {
       );
     });
   });
+});
+
+it('trae todas las paginas de clientes activos y muestra el cliente incluido en el predio', async () => {
+  jest.mocked(useAuth).mockReturnValue(profile('admin'));
+  const original = jest.mocked(apiGet).getMockImplementation();
+  jest.mocked(apiGet).mockImplementation(((path: string, schema: unknown) => {
+    if (path === '/clientes?estado=active&porPagina=50&pagina=1')
+      return Promise.resolve({
+        items: Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, name: `Cliente ${i}` })),
+        paginas: 2,
+      });
+    if (path === '/clientes?estado=active&porPagina=50&pagina=2')
+      return Promise.resolve({ items: [{ id: 'last', name: 'Ultimo cliente' }], paginas: 2 });
+    return original?.(path, schema as never);
+  }) as typeof apiGet);
+  try {
+    const user = userEvent.setup();
+    renderWithQueryClient(<SitesPage />);
+    expect(await screen.findByText('Cliente: Cliente desde predio')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+    expect(await screen.findByRole('option', { name: 'Ultimo cliente' })).toBeInTheDocument();
+    expect(apiGet).toHaveBeenCalledWith(
+      '/clientes?estado=active&porPagina=50&pagina=2',
+      expect.anything(),
+    );
+  } finally {
+    jest.mocked(apiGet).mockImplementation(original);
+  }
+});
+it('no guarda en cero y limpia el formulario despues del alta', async () => {
+  jest.mocked(useAuth).mockReturnValue(profile('admin'));
+  jest.mocked(apiPost).mockClear();
+  const user = userEvent.setup();
+  renderWithQueryClient(<SitesPage />);
+  await user.click(await screen.findByRole('button', { name: 'Nuevo predio' }));
+  const dialog = screen.getByRole('dialog', { name: 'Alta de predio' });
+  await user.selectOptions(await within(dialog).findByLabelText('Cliente'), 'client-1');
+  await user.type(within(dialog).getByLabelText('Nombre'), 'Nuevo');
+  await user.type(within(dialog).getByLabelText('Dirección'), 'Calle');
+  await user.click(within(dialog).getByRole('button', { name: 'Guardar predio' }));
+  expect(await screen.findByText('Ubicá el predio antes de guardar')).toBeInTheDocument();
+  expect(apiPost).not.toHaveBeenCalled();
+  await user.clear(within(dialog).getByLabelText('Latitud'));
+  await user.type(within(dialog).getByLabelText('Latitud'), '-34');
+  await user.click(within(dialog).getByRole('button', { name: 'Guardar predio' }));
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+  await user.click(screen.getByRole('button', { name: 'Nuevo predio' }));
+  expect(screen.getByLabelText('Nombre')).toHaveValue('');
+  expect(screen.getByLabelText('Dirección')).toHaveValue('');
 });

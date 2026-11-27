@@ -2,6 +2,7 @@ import { fireEvent, render } from '@testing-library/react-native';
 import { LoginScreen } from './login-screen';
 import { AuthFlowError, useAuth } from './auth-context';
 import { router } from 'expo-router';
+import type { AuthMeResponse } from '@garita/shared';
 
 jest.mock('./auth-context', () => ({
   useAuth: jest.fn(),
@@ -17,6 +18,7 @@ describe('LoginScreen', () => {
       login: jest.fn(),
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const view = await render(<LoginScreen />);
@@ -32,6 +34,7 @@ describe('LoginScreen', () => {
       login,
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const view = await render(<LoginScreen />);
@@ -53,6 +56,7 @@ describe('LoginScreen', () => {
       login,
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const view = await render(<LoginScreen />);
@@ -80,6 +84,7 @@ describe('LoginScreen', () => {
       login,
       logout: jest.fn(),
       recover: jest.fn(),
+      acceptLegal: jest.fn(),
       error: '',
     });
     const replaceMock = jest.mocked(router.replace);
@@ -89,5 +94,32 @@ describe('LoginScreen', () => {
     await fireEvent.changeText(view.getByLabelText('Contraseña'), 'correcta');
     await fireEvent.press(view.getByLabelText('Ingresar'));
     expect(replaceMock).toHaveBeenCalledWith('/(configuration)');
+  });
+
+  it('con sesión abierta redirige sin navegar durante el render', async () => {
+    const guard: AuthMeResponse = {
+      id: 'u1',
+      firstName: 'Juan',
+      lastName: 'Pérez',
+      email: 'juan@example.com',
+      role: 'guard',
+      status: 'active',
+      company: { id: 'c1', name: 'Seguridad Norte' },
+      allowedChannels: ['mobile'],
+    };
+    useAuthMock.mockReturnValue({
+      user: guard,
+      loading: false,
+      login: jest.fn(),
+      logout: jest.fn(),
+      recover: jest.fn(),
+      acceptLegal: jest.fn(),
+      error: '',
+    });
+    const replaceMock = jest.mocked(router.replace);
+    replaceMock.mockClear();
+    const view = await render(<LoginScreen />);
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(view.queryByLabelText('Correo electrónico')).toBeNull();
   });
 });

@@ -12,7 +12,15 @@ import {
 } from '@/lib/nfc';
 import { processScan } from './scan-action';
 
-export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; onQr?: () => void }) {
+export function NfcReader({
+  shiftData,
+  onQr,
+  onSaved,
+}: {
+  shiftData: ShiftOfflineData;
+  onQr?: () => void;
+  onSaved?: () => void;
+}) {
   const [availability, setAvailability] =
     useState<Awaited<ReturnType<typeof nfcAvailability>>>('unsupported');
   const [message, setMessage] = useState('');
@@ -33,6 +41,7 @@ export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; on
           shiftData,
           'nfc',
           (saved) => {
+            onSaved?.();
             processing.current = false;
             if (active.current) {
               setMessage(saved.message);
@@ -41,6 +50,7 @@ export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; on
           },
           tag.sdmMessage,
         );
+        onSaved?.();
         if (active.current && scanId === latestScan.current) setMessage(result.message);
       } catch {
         if (active.current && scanId === latestScan.current)
@@ -52,7 +62,7 @@ export function NfcReader({ shiftData, onQr }: { shiftData: ShiftOfflineData; on
         }
       }
     },
-    [shiftData],
+    [shiftData, onSaved],
   );
 
   useFocusEffect(

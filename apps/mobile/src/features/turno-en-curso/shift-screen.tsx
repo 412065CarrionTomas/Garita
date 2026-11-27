@@ -28,10 +28,18 @@ import { LockedPanicPermissionNotice } from '@/features/panico/bloqueado/permiss
 const shiftsSchema = z.array(
   z.looseObject({
     id: z.string(),
+    status: z.string().optional(),
     startsAt: z.string(),
     endsAt: z.string(),
     site: z.looseObject({ name: z.string() }),
     assignments: z.array(z.looseObject({ startsAt: z.string() })),
+    rounds: z
+      .array(
+        z.looseObject({
+          round: z.looseObject({ name: z.string(), currentVersionId: z.string().nullable() }),
+        }),
+      )
+      .optional(),
   }),
 );
 type ScheduledShift = z.infer<typeof shiftsSchema>[number];
@@ -39,11 +47,12 @@ type ScheduledShift = z.infer<typeof shiftsSchema>[number];
 const WINDOW_STAMPS = {
   ontime: { tone: 'neutral', label: 'A tiempo', variant: 'solid' },
   late: { tone: 'warning', label: 'Tarde', variant: 'solid' },
+  overdue: { tone: 'warning', label: 'Atrasada', variant: 'solid' },
   missed: { tone: 'danger', label: 'No realizada', variant: 'solid' },
   current: { tone: 'neutral', label: 'En curso', variant: 'now' },
   pending: { tone: 'neutral', label: 'Pendiente', variant: 'dashed' },
 } as const satisfies Record<
-  WindowStatus,
+  WindowStatus | 'overdue',
   { tone: 'neutral' | 'warning' | 'danger'; label: string; variant: 'solid' | 'dashed' | 'now' }
 >;
 
@@ -216,12 +225,16 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const windowStatusOf = (
     window: ShiftOfflineData['windows'][number],
     required: number,
-  ): WindowStatus => {
+  ): WindowStatus | 'overdue' => {
     const at = now.getTime();
     if (at < Date.parse(window.startUtc)) return 'pending';
     if (at < Date.parse(window.endUtc)) return 'current';
     const key = `${window.roundId}:${window.index}`;
-    if ((recordedMap.get(key)?.size ?? 0) < required) return 'missed';
+    if ((recordedMap.get(key)?.size ?? 0) < required) {
+      const grace =
+        data?.rounds.find((round) => round.roundId === window.roundId)?.graceMinutes ?? 0;
+      return at < Date.parse(window.endUtc) + grace * 60_000 ? 'overdue' : 'missed';
+    }
     return lateWindows.has(key) ? 'late' : 'ontime';
   };
   const roundWindows = (roundId: string, required: number) =>
@@ -231,9 +244,10 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const nextPoint = progress
     .map((round) => round.pendingCheckpointIds[0])
     .find((id): id is string => id !== undefined);
+  const activeRounds = progress.filter((round) => round.currentWindow !== null);
   const roundComplete =
-    progress.length > 0 &&
-    progress.every((round) => round.currentWindow && round.pendingCheckpointIds.length === 0);
+    activeRounds.length > 0 &&
+    activeRounds.every((round) => round.pendingCheckpointIds.length === 0);
   const closureRows = (data?.windows ?? [])
     .map((window) => {
       const definition = data?.rounds.find((item) => item.roundId === window.roundId);
@@ -247,6 +261,10 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
   const completedWindows = closureRows.filter(
     (row) => row.status === 'ontime' || row.status === 'late',
   ).length;
+  // Solo las rondas con versión vigente se pueden ver en el mapa.
+  const scheduledVersionIds = (scheduled?.rounds ?? []).flatMap(
+    ({ round }) => round.currentVersionId ?? [],
+  );
   return (
     <Screen scroll>
       <Text variant="heading" accessibilityRole="header">
@@ -294,12 +312,37 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           )}
         </Card>
       )}
-      {!data && scheduled && (
+      {!data && scheduled && scheduled.status !== 'in_progress' && (
         <Button
           label="Iniciar turno"
           size="lg"
           disabled={busy || !startAllowed}
           onPress={() => void start()}
+        />
+      )}
+      {!data &&
+        scheduled?.rounds?.map(({ round }) =>
+          round.currentVersionId ? (
+            <Button
+              key={round.currentVersionId}
+              variant="outline"
+              label={`Ver recorrido: ${round.name}`}
+              onPress={() =>
+                router.push({
+                  pathname: '/recorridos',
+                  params: { ids: round.currentVersionId ?? '' },
+                })
+              }
+            />
+          ) : null,
+        )}
+      {!data && scheduledVersionIds.length > 1 && (
+        <Button
+          variant="outline"
+          label="Ver todos los recorridos"
+          onPress={() =>
+            router.push({ pathname: '/recorridos', params: { ids: scheduledVersionIds.join(',') } })
+          }
         />
       )}
       {!data && !scheduled && (
@@ -317,7 +360,7 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
           {!pendingClose && (
             <>
               <LockedPanicPermissionNotice shiftId={shiftId} />
-              <NfcReader shiftData={data} />
+              <NfcReader shiftData={data} onSaved={refreshLocal} />
               {progress.map((round) => {
                 const definition = data.rounds.find((item) => item.roundId === round.roundId);
                 const ids = definition?.checkpointIds ?? [];
@@ -373,13 +416,36 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
                         : 'Sin ventana activa'}
                     </Text>
                     <WindowBar
-                      windows={roundWindows(round.roundId, ids.length).map((item) => item.status)}
+                      windows={roundWindows(round.roundId, ids.length).map((item) =>
+                        item.status === 'overdue' ? 'current' : item.status,
+                      )}
                     />
                     {/* TODO(foja): la lista anidada en el scroll de la pantalla puede pelear con el gesto en Android. */}
                     <PointWindowList
                       points={points}
                       currentIndex={currentIndex === -1 ? Math.max(0, done - 1) : currentIndex}
                     />
+                    {definition && (
+                      <Button
+                        variant="outline"
+                        label="Ver recorrido en el mapa"
+                        onPress={() =>
+                          router.push({
+                            pathname: '/recorridos',
+                            params: {
+                              enCurso: '1',
+                              ids: definition.roundVersionId,
+                              hechos: points
+                                .filter((p) => p.status === 'done' || p.status === 'late')
+                                .map((p) => p.id)
+                                .join(','),
+                              siguiente:
+                                currentIndex === -1 ? '' : (points[currentIndex]?.id ?? ''),
+                            },
+                          })
+                        }
+                      />
+                    )}
                   </View>
                 );
               })}
@@ -460,6 +526,12 @@ export function ShiftScreen({ shiftId }: { shiftId: string }) {
             </>
           )}
         </>
+      )}
+      {!data && scheduled?.status === 'in_progress' && (
+        <Banner tone="warning" role="text">
+          Tu turno está en curso, pero faltan sus datos en este celular. Contactá a tu supervisor
+          para continuar.
+        </Banner>
       )}
       {!!message && (
         <Text accessibilityLiveRegion="polite" accessibilityRole="alert">

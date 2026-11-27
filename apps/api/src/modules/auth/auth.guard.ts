@@ -21,6 +21,8 @@ import { Optional } from '@nestjs/common';
 import { SYNC_ERROR_CODES } from '@garita/shared';
 import { TenantContext } from './tenant-context';
 import { ShiftCredentialService } from '../sync/shift-credential.service';
+import { CLOCK, type Clock } from '../../common/clock';
+import { enforceAccountSuspension } from './account-suspension.policy';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -31,6 +33,7 @@ export class AuthGuard implements CanActivate {
     @Inject(FIREBASE_IDENTITY_PROVIDER) private readonly identity: FirebaseIdentityProvider,
     private readonly tenantContext: TenantContext,
     @Optional() private readonly shiftCredentialService?: ShiftCredentialService,
+    @Optional() @Inject(CLOCK) private readonly clock?: Clock,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -64,6 +67,7 @@ export class AuthGuard implements CanActivate {
         clientId: true,
         lastLoginAt: true,
         client: { select: { status: true } },
+        company: { select: { accountStatus: true, suspendedAt: true } },
       },
     });
     if (!user) throw new UnauthorizedException();
@@ -103,6 +107,13 @@ export class AuthGuard implements CanActivate {
       this.deny(request, `rol ${user.role} no permitido`);
       throw new ForbiddenException();
     }
+    await enforceAccountSuspension(
+      this.prisma,
+      request,
+      request.user,
+      user.company,
+      this.clock?.now() ?? new Date(),
+    );
     if (user.role === 'client') {
       if (!user.clientId || user.client?.status !== 'active') throw new ForbiddenException();
       const today = new Date();

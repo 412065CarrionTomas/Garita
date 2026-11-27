@@ -8,16 +8,22 @@ import {
   signOut,
 } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { authMeResponseSchema } from '@garita/shared';
+import {
+  authMeResponseSchema,
+  emptyResponseSchema,
+  LEGAL_VERSION,
+  legalAcceptanceRequestSchema,
+} from '@garita/shared';
 import type { AuthMeResponse } from '@garita/shared';
 import { Alert } from 'react-native';
-import { ApiError, apiGet } from '@/lib/api-client';
+import { ApiError, apiGet, apiRequest } from '@/lib/api-client';
 import { auth } from '@/lib/firebase';
 import { registerGuardDevice, unregisterGuardDevice } from '@/features/notificaciones/guard-device';
 import {
   dismissPanicNotification,
   recordLockedPanicFailure,
 } from '@/features/panico/bloqueado/notification';
+import { clearRoundVersionsMemory } from '@/lib/round-versions';
 
 export const DISABLED_MESSAGE =
   'Tu usuario no está habilitado. Si recibiste una invitación, activala desde el enlace del correo; si no, contactá a tu administrador';
@@ -43,6 +49,7 @@ type AuthContextValue = {
   login(email: string, password: string): Promise<AuthMeResponse>;
   logout(): Promise<void>;
   recover(email: string): Promise<void>;
+  acceptLegal(): Promise<void>;
 };
 const AuthContext = createContext<AuthContextValue | null>(null);
 const profileKey = (uid: string) => `garita:auth-profile:${uid}`;
@@ -101,6 +108,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (reason) {
           if (reason instanceof ApiError && (reason.status === 401 || reason.status === 403)) {
             setError(firebaseErrorMessage(reason));
+            registeredUid = null;
+            setUser(null);
+            await AsyncStorage.removeItem(profileKey(firebaseUser.uid));
             await signOut(auth);
           } else setUser(await cachedProfile(firebaseUser.uid));
         } finally {
@@ -127,6 +137,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (reason instanceof AuthFlowError) throw reason;
       const message = firebaseErrorMessage(reason);
       setError(message);
+      if (
+        credential &&
+        reason instanceof ApiError &&
+        (reason.status === 401 || reason.status === 403)
+      ) {
+        registeredUid = null;
+        setUser(null);
+        await AsyncStorage.removeItem(profileKey(credential.user.uid));
+      }
       if (credential) await signOut(auth);
       throw new AuthFlowError(message);
     }
@@ -135,25 +154,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const uid = auth.currentUser?.uid;
     try {
       await unregisterGuardDevice();
-    } catch {
-      Alert.alert(
-        'No se pudo cerrar sesión',
-        'Conectate a internet para dar de baja las notificaciones de este celular y volvé a intentarlo.',
-      );
-      return;
+    } catch (reason) {
+      if (!(reason instanceof ApiError && (reason.status === 401 || reason.status === 403))) {
+        Alert.alert(
+          'No se pudo cerrar sesión',
+          'Conectate a internet para dar de baja las notificaciones de este celular y volvé a intentarlo.',
+        );
+        return;
+      }
     }
     await signOut(auth);
     await dismissPanicNotification().catch(recordLockedPanicFailure);
     registeredUid = null;
+    clearRoundVersionsMemory();
     if (uid) await AsyncStorage.removeItem(profileKey(uid));
     setUser(null);
   }, []);
   const recover = useCallback(async (email: string) => {
     await sendPasswordResetEmail(auth, email);
   }, []);
+  const acceptLegal = useCallback(async () => {
+    await apiRequest(
+      'POST',
+      '/auth/terminos',
+      emptyResponseSchema,
+      legalAcceptanceRequestSchema.parse({ version: LEGAL_VERSION }),
+    );
+    const uid = auth.currentUser?.uid;
+    if (!user) return;
+    const accepted = { ...user, legalAcceptanceRequired: false };
+    if (uid)
+      await AsyncStorage.setItem(profileKey(uid), JSON.stringify(accepted)).catch(() => undefined);
+    setUser(accepted);
+  }, [user]);
   const value = useMemo(
-    () => ({ user, loading, error, login, logout, recover }),
-    [user, loading, error, login, logout, recover],
+    () => ({ user, loading, error, login, logout, recover, acceptLegal }),
+    [user, loading, error, login, logout, recover, acceptLegal],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

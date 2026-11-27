@@ -18,12 +18,16 @@ export class NoticesController {
   @ApiQuery({ name: 'estado', required: false })
   @ApiQuery({ name: 'tipo', required: false })
   @ApiQuery({ name: 'predio', required: false })
+  @ApiQuery({ name: 'pagina', required: false })
+  @ApiQuery({ name: 'porPagina', required: false, description: 'Sin él vienen todos' })
   list(@Query() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
     const parsed = z
       .object({
         estado: z.string().optional(),
         tipo: z.string().optional(),
         predio: z.string().optional(),
+        pagina: z.string().optional(),
+        porPagina: z.string().optional(),
       })
       .strict()
       .safeParse(raw);
@@ -32,9 +36,11 @@ export class NoticesController {
       status: parsed.data.estado,
       kind: parsed.data.tipo,
       siteId: parsed.data.predio,
+      page: parsed.data.pagina,
+      pageSize: parsed.data.porPagina,
     });
     if (!query.success) throw new BadRequestException(query.error.issues);
-    return this.notices.list(query.data, user.userId);
+    return this.notices.list(query.data, user.userId, user);
   }
 
   @Post(':id/marcar-visto')

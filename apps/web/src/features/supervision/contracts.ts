@@ -1,4 +1,4 @@
-import { ASSIGNMENT_RESULTS, ROUND_WINDOW_STATUSES } from '@garita/shared';
+import { ASSIGNMENT_RESULTS, ROUND_WINDOW_STATUSES, roundRouteSchema } from '@garita/shared';
 import { z } from 'zod';
 import type { StatusTone } from '@/components/status-badge';
 import type { PathPoint } from '@/components/point-path';
@@ -54,6 +54,7 @@ export const shiftDetailSchema = z.object({
     closeReason: z.string().nullable(),
     closedBy: z.string().nullable(),
   }),
+  syncStatus: syncStatusSchema.nullable(),
   phoneWithoutNfc: z.boolean(),
   assignments: z.array(
     z.object({
@@ -68,6 +69,17 @@ export const shiftDetailSchema = z.object({
     }),
   ),
   rounds: z.array(z.object({ id: z.string(), name: z.string() })),
+  /** Recorrido ideal por ronda; null en rondas previas (se dibujan rectas). Default: API anterior. */
+  routes: z
+    .array(
+      z.object({
+        roundId: z.string(),
+        roundName: z.string(),
+        checkpointIds: z.array(z.string()),
+        route: roundRouteSchema.nullable(),
+      }),
+    )
+    .default([]),
   windows: z.array(
     z.object({
       id: z.string(),
@@ -103,7 +115,9 @@ export const shiftDetailSchema = z.object({
       id: z.string(),
       checkpointId: z.string(),
       occurredAtDevice: z.string(),
-      flags: z.array(z.object({ id: z.string(), reason: z.string(), severity: severitySchema })),
+      flags: z.array(
+        z.object({ id: z.string(), reason: z.string().nullable(), severity: severitySchema }),
+      ),
     }),
   ),
   rejectedAttempts: z.array(
@@ -163,6 +177,15 @@ export function time(value: string) {
     hourCycle: 'h23',
   }).format(new Date(value));
 }
+/** Demora legible entre dos instantes, ej. "12 min" o "1 h 05 min"; null si no hay demora. */
+export function delay(from: string, to: Date) {
+  const minutes = Math.floor((to.getTime() - new Date(from).getTime()) / 60_000);
+  // `!(> 0)` también descarta NaN: una fecha inválida no muestra «NaN min».
+  if (!(minutes > 0)) return null;
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours} h ${String(minutes % 60).padStart(2, '0')} min` : `${minutes} min`;
+}
+
 export function syncLabel(value: ShiftRow['syncStatus']) {
   if (!value) return null;
   switch (value.status) {

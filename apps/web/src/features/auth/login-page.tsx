@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+import { LegalLinks } from '../legal/legal-pages';
 import { AuthLayout } from './auth-layout';
 import { useAuth } from './auth-context';
 import { homePathForRole } from './role-routes';
@@ -52,9 +53,12 @@ export function LoginPage() {
       title="Iniciar sesión"
       description="Ingresá con el correo y la contraseña de tu cuenta."
       footer={
-        <Button variant="link" asChild className="w-full">
-          <Link to="/recuperar">Olvidé mi contraseña</Link>
-        </Button>
+        <>
+          <Button variant="link" asChild className="w-full">
+            <Link to="/recuperar">Olvidé mi contraseña</Link>
+          </Button>
+          <LegalLinks />
+        </>
       }
     >
       <form

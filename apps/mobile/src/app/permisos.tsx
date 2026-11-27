@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { space } from '@garita/tokens';
 import { Badge, Banner, Button, Card, Screen, Text } from '@/ui';
 import {
+  checkFieldPermissions,
   requestFieldPermissions,
   type FieldPermissionState,
 } from '../features/permisos/permissions';
@@ -13,7 +14,7 @@ const messages: Record<FieldPermissionState, string> = {
   location_denied: 'Necesitamos que permitas la ubicación precisa.',
   location_approximate:
     'La ubicación aproximada no alcanza; elegí ubicación precisa en los ajustes.',
-  location_services_off: 'Activá los servicios de ubicación del celular.',
+  location_services_off: 'Activá la ubicación del celular y tocá Siguiente.',
   camera_denied: 'Necesitamos acceso a la cámara para leer los códigos QR.',
 };
 
@@ -21,16 +22,40 @@ export default function PermissionsScreen() {
   const router = useRouter();
   const [state, setState] = useState<FieldPermissionState | null>(null);
   const [loading, setLoading] = useState(false);
-  const request = async () => {
+  // Si llega con los permisos ya dados (p. ej. solo apagó la ubicación), lo muestra de entrada.
+  // Sin permisos todavía no avisa nada: el aviso aparece recién al pedirlos.
+  useEffect(() => {
+    let mounted = true;
+    void checkFieldPermissions()
+      .then((current) => {
+        if (mounted && current !== 'location_denied') setState(current);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  const run = async (action: () => Promise<FieldPermissionState>) => {
     setLoading(true);
     try {
-      setState(await requestFieldPermissions());
+      const next = await action();
+      setState(next);
+      return next;
+    } catch {
+      // Un error de la API nativa deja la pantalla como estaba para reintentar.
+      return null;
     } finally {
       setLoading(false);
     }
   };
+  const request = () => run(requestFieldPermissions);
+  // Vuelve a revisar sin pedir nada: el vigilador pudo activar la ubicación desde el celular.
+  const next = async () => {
+    if ((await run(checkFieldPermissions)) === 'ok') router.replace('/(guard)');
+  };
   // location_* se evalúa antes que la cámara: sin ubicación no sabemos el estado de la cámara.
-  const locationOk = state === 'ok' || state === 'camera_denied';
+  const permissionsGranted = state === 'ok' || state === 'location_services_off';
+  const locationOk = permissionsGranted || state === 'camera_denied';
   const permissions = [
     {
       key: 'location',
@@ -42,7 +67,7 @@ export default function PermissionsScreen() {
     {
       key: 'camera',
       title: 'Cámara',
-      granted: state === 'ok',
+      granted: permissionsGranted,
       action: 'Permitir cámara',
       text: 'Se usa para leer los códigos QR de los puntos de control.',
     },
@@ -74,16 +99,8 @@ export default function PermissionsScreen() {
         </Card>
       ))}
       <Banner tone="info" role="text">
-        Sin señal el celular guarda todo y lo envía después. La hora se verifica contra el servidor.
+        Sin señal el celular guarda todo y lo envía después.
       </Banner>
-      {state === 'ok' && (
-        <Button
-          size="lg"
-          label="Continuar"
-          accessibilityLabel="Continuar a mis turnos"
-          onPress={() => router.replace('/(guard)')}
-        />
-      )}
       {state && (
         <Banner
           tone={state === 'ok' ? 'success' : 'danger'}
@@ -92,6 +109,15 @@ export default function PermissionsScreen() {
         >
           {messages[state]}
         </Banner>
+      )}
+      {permissionsGranted && (
+        <Button
+          size="lg"
+          label="Siguiente"
+          accessibilityLabel="Siguiente: ir a mis turnos"
+          onPress={next}
+          disabled={loading}
+        />
       )}
     </Screen>
   );

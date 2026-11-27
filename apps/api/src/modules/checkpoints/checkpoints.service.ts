@@ -1,4 +1,12 @@
-import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import type { CheckpointArrangementInput } from '@garita/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { TenantResourceService } from '../auth/tenant-resource.service';
@@ -13,6 +21,7 @@ interface CheckpointInput {
   longitude: number;
   toleranceRadiusMeters: number;
   stickerLocation?: string;
+  address?: string | null;
   isIndoor: boolean;
   confirmFarLocation?: boolean;
 }
@@ -41,37 +50,47 @@ export class CheckpointsService {
 
   async list(siteId: string, includeNfcTag = false, user?: AuthenticatedUser) {
     await this.resources.findOwnedOrThrow('Site', siteId);
-    if (!includeNfcTag)
-      return this.prisma.tenantPrisma.checkpoint.findMany({
+    const [checkpoints, rounds] = await Promise.all([
+      this.prisma.tenantPrisma.checkpoint.findMany({
         where: { siteId, status: 'active' },
-        orderBy: { name: 'asc' },
-      });
-    const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
-      where: { siteId, status: 'active' },
-      orderBy: { name: 'asc' },
-      include: {
-        nfcTags: {
-          where: { status: 'active' },
-          take: 1,
-          select: { status: true, associatedAt: true, uid: true },
+        orderBy: [{ position: 'asc' }, { name: 'asc' }],
+        include: {
+          nfcTags: {
+            where: { status: 'active' },
+            take: 1,
+            select: { status: true, associatedAt: true, uid: true, kind: true },
+          },
         },
-      },
+      }),
+      this.usage.countActiveRoundsBySite(siteId),
+    ]);
+    return checkpoints.map(({ nfcTags, ...checkpoint }) => {
+      const tag = nfcTags.at(0);
+      return {
+        ...checkpoint,
+        roundsCount: rounds.get(checkpoint.id) ?? 0,
+        tagType: !tag ? 'qr' : tag.kind === 'secure' ? 'nfc_secure' : 'nfc_basic',
+        ...(includeNfcTag && {
+          etiquetaNfc: tag
+            ? {
+                status: tag.status,
+                associatedAt: tag.associatedAt,
+                ...(user?.role === 'admin' ? { uid: tag.uid } : {}),
+              }
+            : null,
+        }),
+      };
     });
-    return checkpoints.map(({ nfcTags, ...checkpoint }) => ({
-      ...checkpoint,
-      etiquetaNfc: nfcTags[0]
-        ? {
-            status: nfcTags[0].status,
-            associatedAt: nfcTags[0].associatedAt,
-            ...(user?.role === 'admin' ? { uid: nfcTags[0].uid } : {}),
-          }
-        : null,
-    }));
   }
 
   async create(siteId: string, input: CheckpointInput, user: AuthenticatedUser) {
     const site = await this.sites.assertSiteIsActive(siteId, user);
     this.assertNearSite(input, site.latitude.toNumber(), site.longitude.toNumber());
+    // El punto nuevo va al final de la numeración del predio.
+    const last = await this.prisma.tenantPrisma.checkpoint.aggregate({
+      where: { siteId },
+      _max: { position: true },
+    });
     try {
       const checkpoint = await this.prisma.tenantPrisma.checkpoint.create({
         data: {
@@ -82,7 +101,9 @@ export class CheckpointsService {
           longitude: input.longitude,
           toleranceRadiusMeters: input.toleranceRadiusMeters,
           stickerLocation: input.stickerLocation,
+          address: input.address,
           isIndoor: input.isIndoor,
+          position: (last._max.position ?? 0) + 1,
           qrVersion: 1,
         },
       });
@@ -111,6 +132,7 @@ export class CheckpointsService {
           longitude: input.longitude,
           toleranceRadiusMeters: input.toleranceRadiusMeters,
           stickerLocation: input.stickerLocation,
+          address: input.address,
           isIndoor: input.isIndoor,
         },
       });
@@ -119,6 +141,60 @@ export class CheckpointsService {
     } catch (error) {
       this.handleUnique(error);
     }
+  }
+
+  /** Guarda de una vez el orden y la ubicación de todos los puntos activos del predio. */
+  async arrange(siteId: string, input: CheckpointArrangementInput, user: AuthenticatedUser) {
+    const site = await this.sites.assertSiteIsActive(siteId, user);
+    const outdated = () =>
+      new ConflictException({
+        code: 'CHECKPOINT_LIST_OUTDATED',
+        message: 'Los puntos del predio cambiaron. Recargá la página y volvé a intentar.',
+      });
+    // Leer, validar y escribir en la misma transacción: otro usuario pudo sumar o dar de baja
+    // puntos mientras tanto y no se pisa a ciegas.
+    await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      const current = await tx.checkpoint.findMany({
+        where: { siteId, status: 'active' },
+        select: { id: true, latitude: true, longitude: true },
+      });
+      const byId = new Map(current.map((point) => [point.id, point]));
+      const ids = new Set(input.puntos.map(({ id }) => id));
+      if (
+        ids.size !== input.puntos.length ||
+        ids.size !== byId.size ||
+        input.puntos.some(({ id }) => !byId.has(id))
+      )
+        throw outdated();
+      for (const point of input.puntos) {
+        const before = byId.get(point.id);
+        if (
+          before &&
+          (before.latitude.toNumber() !== point.latitude ||
+            before.longitude.toNumber() !== point.longitude)
+        )
+          this.assertNearSite(
+            { ...point, confirmFarLocation: input.confirmFarLocation },
+            site.latitude.toNumber(),
+            site.longitude.toNumber(),
+          );
+      }
+      for (const [index, point] of input.puntos.entries()) {
+        // Solo si sigue activo en este predio: si lo dieron de baja recién, la lista quedó vieja.
+        const { count } = await tx.checkpoint.updateMany({
+          where: { id: point.id, siteId, status: 'active' },
+          data: {
+            position: index + 1,
+            latitude: point.latitude,
+            longitude: point.longitude,
+            address: point.address,
+          },
+        });
+        if (count !== 1) throw outdated();
+      }
+    });
+    this.logger.log({ action: 'checkpoint.arranged', siteId, userId: user.userId });
+    return this.list(siteId);
   }
 
   async deactivate(id: string, user: AuthenticatedUser) {
@@ -130,9 +206,23 @@ export class CheckpointsService {
         message: 'Quitá el punto de las rondas activas antes de darlo de baja',
         rounds: rounds.map(({ id: roundId, name }) => ({ id: roundId, name })),
       });
-    const updated = await this.prisma.tenantPrisma.checkpoint.update({
-      where: { id },
-      data: { status: 'inactive' },
+    const pinned = await this.prisma.tenantPrisma.roundVersionCheckpoint.findFirst({
+      where: {
+        checkpointId: id,
+        roundVersion: { shifts: { some: { shift: { status: 'in_progress' } } } },
+      },
+    });
+    if (pinned)
+      throw new ConflictException({
+        code: 'CHECKPOINT_IN_PROGRESS_SHIFT',
+        message: 'El punto está incluido en una ronda de un turno en curso',
+      });
+    const updated = await this.prisma.tenantPrisma.$transaction(async (tx) => {
+      await tx.nfcTag.updateMany({
+        where: { checkpointId: id, status: 'active' },
+        data: { status: 'removed', endedAt: new Date(), endedById: user.userId },
+      });
+      return tx.checkpoint.update({ where: { id }, data: { status: 'inactive' } });
     });
     this.logger.log({ action: 'checkpoint.deactivated', checkpointId: id, userId: user.userId });
     return updated;
@@ -153,10 +243,11 @@ export class CheckpointsService {
     if (ids?.some((id) => !id)) throw new NotFoundException('Punto no encontrado');
     const checkpoints = await this.prisma.tenantPrisma.checkpoint.findMany({
       where: { siteId, status: 'active', ...(ids ? { id: { in: ids } } : {}) },
-      orderBy: { name: 'asc' },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
     });
     if (ids && checkpoints.length !== new Set(ids).size)
       throw new NotFoundException('Punto no encontrado');
+    if (!checkpoints.length) throw new BadRequestException('No hay puntos para imprimir');
     const PDFDocument = (await import('pdfkit')).default;
     const document = new PDFDocument({ size: 'A4', margin: 28 });
     const chunks: Buffer[] = [];
@@ -216,7 +307,11 @@ export class CheckpointsService {
     return finished;
   }
 
-  private assertNearSite(input: CheckpointInput, latitude: number, longitude: number): void {
+  private assertNearSite(
+    input: Pick<CheckpointInput, 'latitude' | 'longitude' | 'confirmFarLocation'>,
+    latitude: number,
+    longitude: number,
+  ): void {
     if (
       distanceMeters(latitude, longitude, input.latitude, input.longitude) > 1000 &&
       !input.confirmFarLocation

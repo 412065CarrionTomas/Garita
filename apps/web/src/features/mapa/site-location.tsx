@@ -4,10 +4,23 @@ import { Alert } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-interface Props {
+export interface Props {
   latitude: number;
   longitude: number;
   onChange: (latitude: number, longitude: number) => void;
+  /** Lugares ya cargados (por ejemplo, los demás puntos del predio), de referencia y sin arrastre. */
+  others?: {
+    id: string;
+    name: string;
+    latitude: number | string;
+    longitude: number | string;
+    /** Rótulo chico bajo el punto (por ejemplo, su número). */
+    label?: string;
+  }[];
+  /** false cuando el buscador va en otro lugar del formulario: el mapa queda solo. */
+  search?: boolean;
+  /** Alto del mapa; sin esto, una franja fija. */
+  mapClassName?: string;
 }
 
 const MapLocation = lazy(() =>

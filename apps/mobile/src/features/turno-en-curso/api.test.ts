@@ -28,6 +28,31 @@ const input = {
 };
 
 describe('HU-34 start errors', () => {
+  it('HU-43 preserves the validated suspension message', async () => {
+    const message = 'La cuenta de tu empresa está suspendida. Consultá a tu supervisor.';
+    jest.mocked(apiRequest).mockRejectedValue(
+      new ApiError('Suspendida', 402, {
+        code: 'ACCOUNT_SUSPENDED',
+        accountStatus: 'suspended',
+        message,
+      }),
+    );
+    await expect(startShift('shift', input)).rejects.toMatchObject({ message });
+  });
+  it('HU-43 uses fixed copy for malformed suspension and keeps other errors generic', async () => {
+    jest
+      .mocked(apiRequest)
+      .mockRejectedValue(
+        new ApiError('No mostrar', 402, { code: 'ACCOUNT_SUSPENDED', message: { secret: true } }),
+      );
+    await expect(startShift('shift', input)).rejects.toMatchObject({
+      message: 'La cuenta de tu empresa está suspendida. Consultá a tu supervisor.',
+    });
+    jest.mocked(apiRequest).mockRejectedValue(new ApiError('No mostrar', 409, { code: 'OTHER' }));
+    await expect(startShift('shift', input)).rejects.toMatchObject({
+      message: 'No se pudo completar la operación del turno.',
+    });
+  });
   it('preserves the validated start time and timezone from the API', async () => {
     const allowed = {
       startFrom: '2030-01-01T12:40:00Z',

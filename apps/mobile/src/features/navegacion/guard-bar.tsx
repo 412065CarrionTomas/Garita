@@ -9,28 +9,22 @@ import { Text, useTheme } from '@/ui';
 export const GUARD_BAR_HEIGHT = 64;
 
 /**
- * Barra inferior del vigilador durante un turno. En Android sigue el comportamiento de Material 3
- * (destinos fijos abajo, zonas de 48 dp o más, borde a borde con el inset del sistema) con la
- * estética de Foja: hoja plana, filete arriba y subrayado de tinta en el destino activo.
- * El cuarto destino, Pánico, es el anillo de mantener que flota sobre la barra.
+ * Barra inferior del vigilador. En Android sigue el comportamiento de Material 3 (destinos fijos
+ * abajo, zonas de 48 dp o más, borde a borde con el inset del sistema) con la estética de Foja:
+ * hoja plana, filete arriba y subrayado de tinta en el destino activo. Con un turno iniciado, Hoy
+ * pasa a ser la Ronda y el anillo de Pánico flota sobre la barra.
  */
-export function GuardBar({ shiftId }: { shiftId: string }) {
+export function GuardBar({ shiftId }: { shiftId: string | null }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const router = useRouter();
   const items: { label: string; href: Href; active: boolean }[] = [
-    {
-      label: 'Ronda',
-      href: `/turno/${shiftId}`,
-      active: pathname.endsWith(`/turno/${shiftId}`),
-    },
-    {
-      label: 'Incidente',
-      href: `/turno/${shiftId}/incidente`,
-      active: pathname.endsWith('/incidente'),
-    },
-    { label: 'Envío', href: '/envio', active: pathname.endsWith('/envio') },
+    shiftId
+      ? { label: 'Ronda', href: `/turno/${shiftId}`, active: pathname.startsWith('/turno/') }
+      : { label: 'Hoy', href: '/', active: pathname === '/' },
+    { label: 'Turnos', href: '/turnos', active: pathname.startsWith('/turnos') },
+    { label: 'Predios', href: '/predios', active: pathname.startsWith('/predios') },
   ];
   // El visor de la cámara ocupa toda la pantalla.
   if (pathname.includes('escaneo')) return null;

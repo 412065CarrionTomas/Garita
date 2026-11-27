@@ -1,4 +1,9 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
+import { PlanChangeProcessor } from '../src/modules/subscriptions/plan-change.processor';
 import { FcmMessaging } from '../src/modules/notifications/fcm-messaging';
+import { MercadoPagoClient } from '../src/modules/subscriptions/mercadopago.client';
+import { MercadoPagoNotificationsProcessor } from '../src/modules/subscriptions/mercadopago-notifications.processor';
+import { MercadoPagoReconciliationProcessor } from '../src/modules/subscriptions/mercadopago-reconciliation.processor';
 import { CoverageNoticesService } from '../src/modules/coverage-notices/coverage-notices.service';
 import { getQueueToken } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
@@ -23,6 +28,8 @@ import {
   SOCKET_NAMESPACE,
   panicAlertStateResponseSchema,
   panicAlertDetailSchema,
+  incidentDetailSchema,
+  incidentQueueResponseSchema,
 } from '@garita/shared';
 import {
   Controller,
@@ -228,11 +235,50 @@ import { AppModule } from '../src/app.module';
 import { setupApp } from '../src/setup-app';
 import { FIREBASE_IDENTITY_PROVIDER } from '../src/modules/auth/auth.types';
 import { CLOCK } from '../src/common/clock';
+import { AccountTrialProcessor } from '../src/modules/account/account-trial.processor';
 import { isShiftOverlapViolation } from '../src/modules/shifts/shift-overlap-error';
 
 // Requiere PostgreSQL y Redis en ejecución (docker compose up -d).
 describe('Aplicación (e2e)', () => {
+  it('HU-32: todos los endpoints requieren sesión y rol de planificación', async () => {
+    for (const [method, path] of [
+      ['get', ''],
+      ['post', ''],
+      ['post', '/previsualizar'],
+      ['patch', '/missing'],
+      ['post', '/missing/extender'],
+      ['post', '/missing/cancelar'],
+    ] as const) {
+      const url = `/api/v1/programaciones-turnos${path}`;
+      await request(app.getHttpServer())[method](url).expect(401);
+      for (const token of ['token-guard', 'token-client'])
+        await request(app.getHttpServer())
+          [method](url)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+    }
+    await request(app.getHttpServer())
+      .get('/api/v1/programaciones-turnos')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v1/programaciones-turnos?predio=${northUnassignedSiteId}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/v1/programaciones-turnos?predio=${southSiteId}`)
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+  });
   let app: INestApplication<App>;
+  it('HU-37: SMS recibidos solo admite administrador y el webhook exige firma', async () => {
+    const http = request(app.getHttpServer());
+    await http.get('/api/v1/sms-recibidos').expect(401);
+    for (const token of ['token-supervisor', 'token-guard', 'token-client'])
+      await http.get('/api/v1/sms-recibidos').set('Authorization', `Bearer ${token}`).expect(403);
+    await http.get('/api/v1/sms-recibidos').set('Authorization', 'Bearer token-admin').expect(200);
+    await http.post('/api/v1/webhooks/sms').send({}).expect(401);
+  });
   let northInvitationId: string;
   let southInvitationId: string;
   let northAssignedSiteId: string;
@@ -249,6 +295,28 @@ describe('Aplicación (e2e)', () => {
   let testNow = new Date('2026-10-13T12:00:00.000Z');
   const createdNfcCheckpointIds: string[] = [];
   const notificationTokens: string[] = [];
+
+  it('HU-29: gestión de suscripción requiere sesión y administrador', async () => {
+    for (const [method, path] of [
+      ['get', 'planes'],
+      ['get', 'suscripcion'],
+      ['post', 'suscripcion'],
+      ['post', 'suscripcion/cancelar'],
+      ['post', 'suscripcion/revertir-cancelacion'],
+      ['get', 'suscripcion/cambio-plan/simular?plan=plan-basico'],
+      ['post', 'suscripcion/cambio-plan'],
+      ['get', 'suscripcion/historial'],
+      ['get', 'suscripcion/medio-de-pago'],
+      ['post', 'suscripcion/reintentar-cobro'],
+    ] as const) {
+      await request(app.getHttpServer())[method](`/api/v1/${path}`).expect(401);
+      for (const token of ['token-supervisor', 'token-guard', 'token-client'])
+        await request(app.getHttpServer())
+          [method](`/api/v1/${path}`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+    }
+  });
 
   it('HU-35 preferencias personales: roles, default, persistencia, aislamiento y body estricto', async () => {
     const http = request(app.getHttpServer());
@@ -513,29 +581,77 @@ describe('Aplicación (e2e)', () => {
     }
   }, 30000);
 
-  it.each(['rondas', 'rondas/detalle', 'pendientes', 'puntos-marcas-frecuentes'])(
-    'HU-25 permisos de reportes/%s',
+  it.each([
+    'predios',
+    'rondas',
+    'rondas/dia?fecha=2026-10-01',
+    'incidentes',
+    'incidentes/inexistente/fotos',
+    'emergencias',
+  ])('HU-28 permisos de portal/%s: sin sesión 401 y roles internos 403', async (endpoint) => {
+    const path = `/api/v1/portal/${endpoint}`;
+    await request(app.getHttpServer()).get(path).expect(401);
+    for (const token of ['token-admin', 'token-supervisor', 'token-guard'])
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+  });
+
+  it.each([
+    'rondas',
+    'rondas/detalle',
+    'pendientes',
+    'puntos-marcas-frecuentes',
+    'incidentes',
+    'incidentes/detalle',
+    'tiempos-de-respuesta',
+    'panico',
+    'panico/detalle',
+  ])('HU-25 permisos de reportes/%s', async (endpoint) => {
+    const path = `/api/v1/reportes/${endpoint}`;
+    await request(app.getHttpServer()).get(path).expect(401);
+    for (const token of ['token-guard', 'token-client'])
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+    for (const siteId of [northUnassignedSiteId, southSiteId])
+      await request(app.getHttpServer())
+        .get(`${path}?predio=${siteId}`)
+        .set('Authorization', 'Bearer token-supervisor')
+        .expect(404);
+    await request(app.getHttpServer())
+      .get(`${path}?predio=${northAssignedSiteId}`)
+      .set('Authorization', 'Bearer token-other-supervisor')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`${path}?predio=${northAssignedSiteId}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+  });
+
+  it.each(['reportes/rondas/pdf', 'reportes/incidentes/pdf', 'portal/reporte/pdf'])(
+    'HU-40 permisos de %s',
     async (endpoint) => {
-      const path = `/api/v1/reportes/${endpoint}`;
+      const path = `/api/v1/${endpoint}`;
       await request(app.getHttpServer()).get(path).expect(401);
-      for (const token of ['token-guard', 'token-client'])
+      const denied = endpoint.startsWith('portal')
+        ? ['token-admin', 'token-supervisor', 'token-guard']
+        : ['token-client', 'token-guard'];
+      for (const token of denied)
         await request(app.getHttpServer())
           .get(path)
           .set('Authorization', `Bearer ${token}`)
           .expect(403);
-      for (const siteId of [northUnassignedSiteId, southSiteId])
+      const permitted = endpoint.startsWith('portal') ? 'token-client' : 'token-supervisor';
+      for (const siteId of [northUnassignedSiteId, southSiteId]) {
+        if (endpoint.startsWith('portal') && siteId === northUnassignedSiteId) continue;
         await request(app.getHttpServer())
           .get(`${path}?predio=${siteId}`)
-          .set('Authorization', 'Bearer token-supervisor')
+          .set('Authorization', `Bearer ${permitted}`)
           .expect(404);
-      await request(app.getHttpServer())
-        .get(`${path}?predio=${northAssignedSiteId}`)
-        .set('Authorization', 'Bearer token-other-supervisor')
-        .expect(404);
-      await request(app.getHttpServer())
-        .get(`${path}?predio=${northAssignedSiteId}`)
-        .set('Authorization', 'Bearer token-supervisor')
-        .expect(200);
+      }
     },
   );
 
@@ -546,6 +662,12 @@ describe('Aplicación (e2e)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule, TestOnlyModule],
     })
+      .overrideProvider(MercadoPagoClient)
+      .useValue({})
+      .overrideProvider(MercadoPagoNotificationsProcessor)
+      .useValue({})
+      .overrideProvider(MercadoPagoReconciliationProcessor)
+      .useValue({})
       .overrideProvider(FIREBASE_IDENTITY_PROVIDER)
       .useValue({
         verifyIdToken: (token: string) => {
@@ -575,6 +697,9 @@ describe('Aplicación (e2e)', () => {
         deleteUser: jest.fn(() => Promise.resolve()),
         generatePasswordResetLink: jest.fn((email: string) => Promise.resolve(email)),
       })
+      // El reloj simulado de permisos no debe disparar barridos reales de prueba sobre el seed.
+      .overrideProvider(AccountTrialProcessor)
+      .useValue({})
       .overrideProvider(CLOCK)
       .useValue({ now: () => testNow })
       .overrideProvider(FcmMessaging)
@@ -587,6 +712,10 @@ describe('Aplicación (e2e)', () => {
           }),
         ),
       })
+      .overrideProvider(PlanChangeProcessor)
+      .useValue({})
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -1312,7 +1441,7 @@ describe('Aplicación (e2e)', () => {
     expect(
       z
         .array(z.looseObject({ id: z.string() }))
-        .parse(queue.body)
+        .parse(z.object({ items: z.unknown() }).parse(queue.body).items)
         .some((row) => row.id === incident.id),
     ).toBe(true);
     const count = await client
@@ -1328,47 +1457,100 @@ describe('Aplicación (e2e)', () => {
     await client
       .post(`/api/v1/incidentes/${incident.id}/clasificar`)
       .set('Authorization', 'Bearer token-client')
-      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .send({
+        classification: 'internal',
+        severity: 'medium',
+        internalComment: 'Comentario interno',
+      })
       .expect(403);
     await client
       .post(`/api/v1/incidentes/${incident.id}/clasificar`)
       .set('Authorization', 'Bearer token-supervisor')
-      .send({ classification: 'internal', internalComment: 'Comentario interno' })
+      .send({
+        classification: 'internal',
+        severity: 'high',
+        requiresFollowUp: true,
+        internalComment: 'Comentario interno',
+      })
       .expect(201);
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
-        .body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      ).items,
     ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: incident.id })]));
     await client
       .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
       .set('Authorization', 'Bearer token-supervisor')
-      .send({ classification: 'client_visible', internalComment: 'Segundo comentario', reason: '' })
+      .send({
+        classification: 'client_visible',
+        severity: 'high',
+        internalComment: 'Segundo comentario',
+        reason: '',
+      })
       .expect(400);
     await client
       .post(`/api/v1/incidentes/${incident.id}/reclasificar`)
       .set('Authorization', 'Bearer token-supervisor')
       .send({
         classification: 'client_visible',
+        severity: 'medium',
         internalComment: 'Segundo comentario',
         clientNote: 'Nota pública',
         reason: 'El cliente pidió detalles',
       })
       .expect(201);
-    const detail = await client
-      .get(`/api/v1/incidentes/${incident.id}`)
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/reabrir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'No está cerrado' })
+      .expect(409);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/acciones`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Se avisó al encargado' })
+      .expect(201);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/cerrar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Cerco reparado' })
+      .expect(201);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/reabrir`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Volvieron a forzar el cerco' })
+      .expect(201);
+    const followUpFiltered = await client
+      .get(`/api/v1/incidentes?gravedad=medium&seguimiento=open&orden=gravedad:desc&porPagina=100`)
       .set('Authorization', 'Bearer token-supervisor')
       .expect(200);
     expect(
       z
-        .object({
-          classificationStatus: z.literal('client_visible'),
-          classifications: z.array(
-            z.looseObject({ decidedById: z.string(), decidedAt: z.string() }),
-          ),
-        })
-        .loose()
-        .parse(detail.body).classifications,
-    ).toHaveLength(2);
+        .object({ items: z.array(z.looseObject({ id: z.string() })) })
+        .parse(followUpFiltered.body)
+        .items.some((row) => row.id === incident.id),
+    ).toBe(true);
+    await client
+      .post(`/api/v1/incidentes/${incident.id}/seguimiento/cerrar`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .send({ text: 'Cerco reparado de nuevo' })
+      .expect(201);
+    const detail = await client
+      .get(`/api/v1/incidentes/${incident.id}`)
+      .set('Authorization', 'Bearer token-supervisor')
+      .expect(200);
+    const parsedDetail = incidentDetailSchema.parse(detail.body);
+    expect(parsedDetail.classificationStatus).toBe('client_visible');
+    expect(parsedDetail.severity).toBe('medium');
+    expect(parsedDetail.followUpStatus).toBe('closed');
+    expect(parsedDetail.timeline.map((entry) => entry.kind)).toEqual([
+      'classification',
+      'classification',
+      'note',
+      'close',
+      'reopen',
+      'close',
+    ]);
     const filtered = await client
       .get(
         `/api/v1/incidentes?predio=${northAssignedSiteId}&tipo=intrusion&clasificacion=client_visible&desde=2020-10-20&hasta=2030-10-20&pagina=1`,
@@ -1419,11 +1601,15 @@ describe('Aplicación (e2e)', () => {
       },
     });
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-admin').expect(200)).body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-admin').expect(200)).body,
+      ).items,
     ).toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
     expect(
-      (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
-        .body,
+      incidentQueueResponseSchema.parse(
+        (await client.get(queuePath).set('Authorization', 'Bearer token-supervisor').expect(200))
+          .body,
+      ).items,
     ).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: fallbackIncident.id })]));
     await client
       .get(`/api/v1/incidentes/${fallbackIncident.id}`)
@@ -1791,6 +1977,25 @@ describe('Aplicación (e2e)', () => {
     createdShiftIds.push(shift.id);
     const assignment = await prisma.shiftAssignment.findFirstOrThrow({
       where: { shiftId: shift.id },
+    });
+    // Un turno con registros tuvo inicio y sincronizó: la revisión evalúa con esa cobertura.
+    await prisma.shiftEvent.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: shift.id,
+        assignmentId: assignment.id,
+        type: 'start',
+        occurredAt: shift.startsAt,
+      },
+    });
+    await prisma.shiftSyncState.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId: shift.id,
+        lastContactAt: shift.endsAt,
+        lastPendingCount: 0,
+        syncedUntil: shift.endsAt,
+      },
     });
     const window = await prisma.roundWindowState.create({
       data: {
@@ -2802,12 +3007,14 @@ describe('Aplicación (e2e)', () => {
 
   it('no expone el total de predios no asignados en el conteo del cliente al supervisor', async () => {
     const list = await request(app.getHttpServer())
-      .get('/api/v1/clientes')
+      .get('/api/v1/clientes?buscar=Cliente%20norte')
       .set('Authorization', 'Bearer token-supervisor')
       .expect(200);
     const clients = z
-      .array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) }))
-      .parse(list.body);
+      .object({
+        items: z.array(z.object({ id: z.string(), _count: z.object({ sites: z.number() }) })),
+      })
+      .parse(list.body).items;
     const northClient = await app.get(PrismaService).systemPrisma.client.findUniqueOrThrow({
       where: { companyId_name: { companyId: 'norte-company', name: 'Cliente norte' } },
     });
@@ -3578,7 +3785,8 @@ describe('Aplicación (e2e)', () => {
       const ctr = Buffer.alloc(2);
       ctr.writeUInt16LE(counter + 1);
       const response =
-        counter === 6
+        // write_ndef (0) es plano y key_0 (6) cierra la sesión: ambas responden 9100 sin MAC.
+        counter === 0 || counter === 6
           ? '9100'
           : Buffer.concat([
               truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),
@@ -3902,7 +4110,8 @@ describe('Aplicación (e2e)', () => {
       const ctr = Buffer.alloc(2);
       ctr.writeUInt16LE(counter + 1);
       const response =
-        counter === 6
+        // write_ndef (0) es plano y key_0 (6) cierra la sesión: ambas responden 9100 sin MAC.
+        counter === 0 || counter === 6
           ? '9100'
           : Buffer.concat([
               truncateMac(aesCmac(keys.mac, Buffer.concat([Buffer.from([0]), ctr, ti]))),
@@ -4127,7 +4336,10 @@ describe('Aplicación (e2e)', () => {
       .parse(impactBody);
     expect(impact.shiftsToCancel).toBeGreaterThanOrEqual(2);
     expect(impact.weeklySchedulesToEnd).toBe(0);
-    expect(impact.inProgressShiftsToClose).toBe(0);
+    // El impacto cuenta todos los turnos en curso que la baja va a cerrar (F5-03).
+    expect(impact.inProgressShiftsToClose).toBe(
+      await prisma.shift.count({ where: { siteId: northAssignedSiteId, status: 'in_progress' } }),
+    );
     await client
       .post(`/api/v1/predios/${northAssignedSiteId}/baja`)
       .set(admin)
@@ -5975,7 +6187,9 @@ describe('Aplicación (e2e)', () => {
     const actor = await prisma.user.findUniqueOrThrow({
       where: { firebaseUid: 'seed-norte-admin' },
     });
-    const client = await prisma.client.findFirstOrThrow({ where: { companyId: 'norte-company' } });
+    const client = await prisma.client.findFirstOrThrow({
+      where: { companyId: 'norte-company', status: 'active' },
+    });
     const site = await prisma.site.create({
       data: {
         companyId: 'norte-company',
@@ -7058,4 +7272,28 @@ describe('Aplicación (e2e)', () => {
       }
     },
   );
+  it('HU-41: estado de cuenta requiere sesión y solo permite administrador de su empresa', async () => {
+    const http = request(app.getHttpServer());
+    await http.get('/api/v1/cuenta/estado').expect(401);
+    for (const token of ['token-supervisor', 'token-guard', 'token-client']) {
+      await http.get('/api/v1/cuenta/estado').set('Authorization', `Bearer ${token}`).expect(403);
+    }
+    const own = await http
+      .get('/api/v1/cuenta/estado')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    const attempted = await http
+      .get('/api/v1/cuenta/estado?companyId=sur-company')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(200);
+    expect(attempted.body).toEqual(own.body);
+    await http
+      .get('/api/v1/cuenta/estado')
+      .set('Authorization', 'Bearer token-south-admin')
+      .expect(200);
+    await http
+      .get('/api/v1/cuenta/sur-company/estado')
+      .set('Authorization', 'Bearer token-admin')
+      .expect(404);
+  });
 });

@@ -4,7 +4,7 @@ export interface ShiftWindowSource {
   id: string;
   startsAt: string;
   endsAt: string;
-  status?: 'scheduled' | 'unassigned' | 'cancelled';
+  status?: 'scheduled' | 'unassigned' | 'cancelled' | 'cancelled_by_suspension';
   roundIds?: readonly string[];
 }
 
@@ -25,7 +25,12 @@ export function assignWindowsToShifts(
       .filter((candidate) => {
         const start = Date.parse(candidate.startsAt);
         const finish = Date.parse(candidate.endsAt);
-        return candidate.status !== 'cancelled' && start <= end && end <= finish;
+        return (
+          candidate.status !== 'cancelled' &&
+          candidate.status !== 'cancelled_by_suspension' &&
+          start <= end &&
+          end <= finish
+        );
       })
       .sort((a, b) => {
         const aEndsHere = Date.parse(a.endsAt) === end ? 1 : 0;
@@ -47,6 +52,7 @@ export function findUncoveredWindows(
     const beginsDuringShift = shifts.some(
       (shift) =>
         shift.status !== 'cancelled' &&
+        shift.status !== 'cancelled_by_suspension' &&
         Date.parse(shift.startsAt) <= start &&
         start < Date.parse(shift.endsAt) &&
         (shift.roundIds ?? []).includes(window.roundId),
@@ -55,6 +61,7 @@ export function findUncoveredWindows(
     return !shifts.some(
       (shift) =>
         shift.status !== 'cancelled' &&
+        shift.status !== 'cancelled_by_suspension' &&
         (shift.roundIds ?? []).includes(window.roundId) &&
         Date.parse(shift.startsAt) < end &&
         end <= Date.parse(shift.endsAt),

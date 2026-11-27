@@ -9,7 +9,6 @@ import { IncidentsService } from './incidents.service';
 import { CloudinaryPhotoStorage, PHOTO_STORAGE_PORT } from './photo-storage.port';
 import { IncidentClassificationController } from './incident-classification.controller';
 import { IncidentClassificationService } from './incident-classification.service';
-import { ClientIncidentsReader } from './client-incidents.reader';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
@@ -25,10 +24,9 @@ import { AuthModule } from '../auth/auth.module';
   providers: [
     IncidentsService,
     IncidentClassificationService,
-    ClientIncidentsReader,
     CloudinaryPhotoStorage,
     { provide: PHOTO_STORAGE_PORT, useExisting: CloudinaryPhotoStorage },
   ],
-  exports: [IncidentsService, ClientIncidentsReader],
+  exports: [IncidentsService, PHOTO_STORAGE_PORT],
 })
 export class IncidentsModule {}

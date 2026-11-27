@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { Test } from '@nestjs/testing';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -55,6 +56,8 @@ describe('HU-25 cumplimiento por HTTP', () => {
       .useValue(notifications)
       .overrideProvider(REALTIME_PORT)
       .useValue({ emitToSite: jest.fn() })
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = module.createNestApplication();
     setupApp(app);
@@ -179,6 +182,25 @@ describe('HU-25 cumplimiento por HTTP', () => {
                 : 'in_review',
         inReviewSince: index >= 20 ? new Date('2026-10-02T00:00:00Z') : null,
       })),
+    });
+    // Un turno con registros tuvo inicio y sincronizó: la revisión evalúa con esa cobertura.
+    await db.shiftEvent.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId,
+        assignmentId,
+        type: 'start',
+        occurredAt: shift.startsAt,
+      },
+    });
+    await db.shiftSyncState.create({
+      data: {
+        companyId: 'norte-company',
+        shiftId,
+        lastContactAt: shift.endsAt,
+        lastPendingCount: 0,
+        syncedUntil: shift.endsAt,
+      },
     });
     // El primer segmento empieza después de la asignación, para probar el dueño de una ausencia.
     await db.shiftAssignment.update({

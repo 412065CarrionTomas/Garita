@@ -2,6 +2,8 @@ import { AppState, type AppStateStatus } from 'react-native';
 import * as Network from 'expo-network';
 import {
   computeSyncedUntil,
+  checkpointRecordResponseSchema,
+  checkpointRecordRequestSchema,
   CONNECTION_NOTICE_INTERVAL_SECONDS,
   SYNC_BATCH_MAX_EVENTS,
   syncEventId,
@@ -12,6 +14,7 @@ import {
 } from '@garita/shared';
 import {
   createDefaultFieldRepository,
+  applyCheckpointRecordResponse,
   type FieldRepository,
   type LocalPanicAlert,
 } from '@/lib/db/database';
@@ -100,7 +103,7 @@ let networkSubscribed = false;
 let appStateSubscribed = false;
 const listeners = new Set<() => void>();
 
-function notify(): void {
+export function notifySyncState(): void {
   for (const listener of listeners) {
     try {
       listener();
@@ -168,13 +171,13 @@ export async function processSyncQueue(): Promise<{
   const online = await d.online();
   if (!online) {
     isOffline = true;
-    notify();
+    notifySyncState();
     return { processed: 0, batchesSent: 0, success: false };
   }
 
   isOffline = false;
   isSyncing = true;
-  notify();
+  notifySyncState();
 
   let totalProcessed = 0;
   let batchesSent = 0;
@@ -297,6 +300,10 @@ export async function processSyncQueue(): Promise<{
       totalProcessed += batchSlice.length;
 
       const receivedEventIds = new Set<string>();
+      // Una sola lectura por lote: releer la tabla por evento vuelve cuadrático el envío.
+      const knownRecords = response.results.some((result) => result.status === 'accepted')
+        ? await repo.listCheckpointRecords()
+        : [];
 
       for (const result of response.results) {
         const matchingEvent = batchSlice.find(
@@ -305,7 +312,6 @@ export async function processSyncQueue(): Promise<{
 
         if (result.status === 'accepted') {
           receivedEventIds.add(result.eventId);
-          await repo.markPendingEventSent(result.eventId);
           if (matchingEvent?.type === 'shift_close') {
             await repo.setSyncMeta('shift_closed_done', 'true');
           }
@@ -314,17 +320,14 @@ export async function processSyncQueue(): Promise<{
             'outcome' in result &&
             result.outcome
           ) {
-            const outcome = result.outcome as { result?: string; reason?: string };
-            if (outcome.result === 'recorded') {
-              await repo.updateCheckpointRecordServerResult(result.eventId, 'recorded');
-            } else if (outcome.result === 'rejected') {
-              await repo.updateCheckpointRecordServerResult(
-                result.eventId,
-                'rejected',
-                outcome.reason,
-              );
-            }
+            await applyCheckpointRecordResponse(
+              repo,
+              checkpointRecordRequestSchema.parse(matchingEvent.payload),
+              checkpointRecordResponseSchema.parse(result.outcome),
+              knownRecords,
+            );
           }
+          await repo.markPendingEventSent(result.eventId);
         } else if (result.status === 'duplicate') {
           receivedEventIds.add(result.eventId);
           await repo.markPendingEventSent(result.eventId);
@@ -370,7 +373,7 @@ export async function processSyncQueue(): Promise<{
         await repo.setSyncMeta('shift_closed_done', 'false');
       }
 
-      notify();
+      notifySyncState();
 
       // If no more events remain for the next batch, break out
       if (remainingCount === 0) {
@@ -379,12 +382,17 @@ export async function processSyncQueue(): Promise<{
     }
   } finally {
     isSyncing = false;
-    notify();
+    notifySyncState();
   }
 
   void processIncidentPhotos();
 
   return { processed: totalProcessed, batchesSent, success: overallSuccess };
+}
+
+export function scheduleSyncRetry(): void {
+  notifySyncState();
+  scheduleRetry(0);
 }
 
 function scheduleRetry(seconds: number): void {
@@ -413,7 +421,7 @@ export async function sendConnectionNoticeIfNeeded(): Promise<boolean> {
   // Must be online
   if (!(await d.online())) {
     isOffline = true;
-    notify();
+    notifySyncState();
     return false;
   }
 
@@ -459,11 +467,11 @@ export function initSyncService(): () => void {
     Network.addNetworkStateListener((state) => {
       if (state.isConnected && state.isInternetReachable !== false) {
         isOffline = false;
-        notify();
+        notifySyncState();
         void processSyncQueue();
       } else {
         isOffline = true;
-        notify();
+        notifySyncState();
       }
     });
   }

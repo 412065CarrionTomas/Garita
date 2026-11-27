@@ -1,3 +1,4 @@
+import { SuspensionProcessor } from '../src/modules/subscriptions/suspension.processor';
 import { z } from 'zod';
 import { Test } from '@nestjs/testing';
 import { BadRequestException, type INestApplication, Logger } from '@nestjs/common';
@@ -16,6 +17,7 @@ import {
   authMeResponseSchema,
   invitationRedeemResponseSchema,
   type CreateUserRequest,
+  LEGAL_VERSION,
 } from '@garita/shared';
 
 describe('HU-27 usuarios del portal (e2e)', () => {
@@ -63,6 +65,8 @@ describe('HU-27 usuarios del portal (e2e)', () => {
       .useValue(identity)
       .overrideProvider(ResendInvitationMailer)
       .useValue(mailer)
+      .overrideProvider(SuspensionProcessor)
+      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);
@@ -194,7 +198,7 @@ describe('HU-27 usuarios del portal (e2e)', () => {
     ).searchParams.get('token');
     const redeemed = await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token })
+      .send({ token, acceptedLegalVersion: LEGAL_VERSION })
       .expect(201);
     expect(invitationRedeemResponseSchema.parse(redeemed.body).role).toBe('client');
     const profile = await request(app.getHttpServer())
@@ -207,7 +211,7 @@ describe('HU-27 usuarios del portal (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/api/v1/invitaciones/canjear')
-      .send({ token })
+      .send({ token, acceptedLegalVersion: LEGAL_VERSION })
       .expect(410);
     const sites = await request(app.getHttpServer())
       .get('/api/v1/predios')
@@ -279,10 +283,14 @@ describe('HU-27 usuarios del portal (e2e)', () => {
       .set(admin)
       .send({})
       .expect(201);
+    // Nunca ingresó: vuelve a invitación pendiente y necesita una invitación nueva.
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { status: true } }),
+    ).resolves.toEqual({ status: 'invitation_pending' });
     await request(app.getHttpServer())
       .get('/api/v1/auth/me')
       .set(auth(row.firebaseUid))
-      .expect(200);
+      .expect(403);
     const before = mailer.sendInvitation.mock.calls.length;
     await request(app.getHttpServer())
       .post(`/api/v1/usuarios/${user.id}/reenviar-invitacion`)

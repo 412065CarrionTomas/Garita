@@ -123,7 +123,8 @@ function crc32(data: Buffer): Buffer {
     for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
   }
   const result = Buffer.alloc(4);
-  result.writeUInt32LE((crc ^ 0xffffffff) >>> 0);
+  // AN12196 tabla 25: CRC32 sin complemento final.
+  result.writeUInt32LE(crc >>> 0);
   return result;
 }
 
@@ -134,11 +135,13 @@ export function changeKey(
   counter: number,
   state: Ev2State,
   authKey: Buffer,
+  oldKey: Buffer,
 ): string {
+  const masked = Buffer.from(newKey.map((byte, index) => byte ^ (oldKey[index] ?? 0)));
   const data =
     keyNumber === 0
       ? Buffer.concat([newKey, Buffer.from([version])])
-      : Buffer.concat([newKey, Buffer.from([version]), crc32(newKey)]);
+      : Buffer.concat([masked, Buffer.from([version]), crc32(newKey)]);
   return fullCommand(0xc4, Buffer.from([keyNumber]), data, counter, state, authKey);
 }
 
@@ -156,18 +159,12 @@ export function ndefTemplate(): { data: Buffer; piccOffset: number; macOffset: n
   };
 }
 
-export function writeNdef(counter: number, state: Ev2State, authKey: Buffer): string {
+// El archivo NDEF está en CommMode.Plain (de fábrica y con nuestro FileOption 0x40): cifrarlo da 917E.
+export function writeNdef(): string {
   const data = ndefTemplate().data;
   const size = Buffer.alloc(3);
   size.writeUIntLE(data.length, 0, 3);
-  return fullCommand(
-    0x8d,
-    Buffer.concat([Buffer.from([2, 0, 0, 0]), size]),
-    data,
-    counter,
-    state,
-    authKey,
-  );
+  return apdu(0x8d, Buffer.concat([Buffer.from([2, 0, 0, 0]), size, data]));
 }
 
 export function changeFileSettings(counter: number, state: Ev2State, authKey: Buffer): string {

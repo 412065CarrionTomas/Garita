@@ -29,6 +29,10 @@ export const envSchema = z
       .regex(/^\+[1-9]\d{1,14}$/)
       .optional(),
     RESEND_API_KEY: z.string().optional(),
+    SMS_PROVIDER: z.enum(['log', 'http']).default('log'),
+    SMS_GATEWAY_URL: z.url({ protocol: /^https?$/ }).optional(),
+    SMS_GATEWAY_TOKEN: z.string().min(1).optional(),
+    SMS_WEBHOOK_SECRET: z.string().min(32).optional(),
     RESEND_FROM: z.string().optional(),
     FIREBASE_PROJECT_ID: z.string().min(1).optional(),
     FIREBASE_CLIENT_EMAIL: z.email().optional(),
@@ -43,8 +47,21 @@ export const envSchema = z
     CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
     CLOUDINARY_API_KEY: z.string().min(1).optional(),
     CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+    MERCADOPAGO_ACCESS_TOKEN: z.string().min(1).optional(),
+    MERCADOPAGO_WEBHOOK_SECRET: z.string().min(1).optional(),
+    ORS_API_KEY: z.string().min(1).optional(),
+    ORS_URL: z.url({ protocol: /^https?$/ }).default('https://api.heigit.org/openrouteservice'),
   })
   .superRefine((env, context) => {
+    if (env.SMS_PROVIDER === 'http') {
+      for (const key of ['SMS_GATEWAY_URL', 'SMS_GATEWAY_TOKEN'] as const)
+        if (!env[key])
+          context.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} es obligatoria con SMS_PROVIDER=http`,
+          });
+    }
     if (env.NODE_ENV !== 'test') {
       for (const key of [
         'FIREBASE_PROJECT_ID',

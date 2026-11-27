@@ -110,7 +110,13 @@ export type CloseShiftResponse = z.infer<typeof closeShiftResponseSchema>;
 
 /** Response of `GET /turnos/:id/estado`: current window of each round and its pending points, in order. */
 export const shiftStateResponseSchema = z.object({
-  status: z.enum(['scheduled', 'unassigned', 'cancelled', ...SHIFT_EXECUTION_STATUSES]),
+  status: z.enum([
+    'scheduled',
+    'unassigned',
+    'cancelled',
+    'cancelled_by_suspension',
+    ...SHIFT_EXECUTION_STATUSES,
+  ]),
   rounds: z.array(
     z.object({
       roundId: z.string(),
@@ -148,13 +154,23 @@ export function currentRoundProgress(
 ): ShiftStateResponse['rounds'] {
   const now = Date.parse(nowUtc);
   return data.rounds.map((round) => {
+    const windows = data.windows
+      .filter((candidate) => candidate.roundId === round.roundId)
+      .sort((a, b) => a.index - b.index);
     const window =
-      data.windows.find(
-        (candidate) =>
-          candidate.roundId === round.roundId &&
-          Date.parse(candidate.startUtc) <= now &&
-          now < Date.parse(candidate.endUtc),
-      ) ?? null;
+      windows.find((candidate) => {
+        const end = Date.parse(candidate.endUtc);
+        const done = recorded.get(`${round.roundId}:${candidate.index}`);
+        return (
+          end <= now &&
+          now < end + round.graceMinutes * 60_000 &&
+          round.checkpointIds.some((id) => !done?.has(id))
+        );
+      }) ??
+      windows.find(
+        (candidate) => Date.parse(candidate.startUtc) <= now && now < Date.parse(candidate.endUtc),
+      ) ??
+      null;
     const done = window
       ? (recorded.get(`${round.roundId}:${window.index}`) ?? new Set<string>())
       : new Set<string>();

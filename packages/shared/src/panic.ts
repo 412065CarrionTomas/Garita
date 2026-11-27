@@ -63,6 +63,7 @@ export const panicAlertsQuerySchema = z
     estado: z.enum(PANIC_STATUSES).optional(),
     predio: z.string().min(1).max(100).optional(),
     pagina: z.coerce.number().int().min(1).max(100000).default(1),
+    porPagina: z.coerce.number().int().min(1).max(50).default(25),
   })
   .strict();
 
@@ -70,6 +71,8 @@ export const panicAlertSummarySchema = z.object({
   id: z.uuid(),
   status: z.enum(PANIC_STATUSES),
   channel: z.enum(PANIC_CHANNELS),
+  authenticated: z.boolean().default(true),
+  phoneMismatch: z.boolean().default(false),
   triggeredAt: isoDateTime,
   receivedAt: isoDateTime,
   site: z.object({ id: z.string(), name: z.string() }),
@@ -161,6 +164,11 @@ export function parsePanicSms(text: string): ParsedPanicSms | null {
   const match = PANIC_SMS_PATTERN.exec(text.trim());
   if (!match) return null;
   const [, shortId = '', shiftCode = '', time = '', lat, lng] = match;
+  if (
+    !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time) ||
+    (lat !== undefined && (Math.abs(Number(lat)) > 90 || Math.abs(Number(lng)) > 180))
+  )
+    return null;
   return {
     shortId,
     shiftCode,

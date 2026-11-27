@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
-import { authMeResponseSchema } from '@garita/shared';
+import { accountSuspendedResponseSchema, authMeResponseSchema } from '@garita/shared';
 
 import { env } from '@/config/env';
 
@@ -66,13 +66,16 @@ export async function apiRequest<TSchema extends z.ZodType>(
     } catch {
       errorBody = undefined;
     }
+    announceSuspension(response.status, errorBody, path);
     throw new ApiError(
       `La API respondió con el estado ${response.status}`,
       response.status,
       errorBody,
     );
   }
-  const result = schema.safeParse(await response.json());
+  // 204 No Content no trae cuerpo: se valida `undefined` contra el esquema del llamador.
+  const payload: unknown = response.status === 204 ? undefined : await response.json();
+  const result = schema.safeParse(payload);
   if (!result.success) throw new ApiError('La respuesta de la API no tiene el formato esperado');
   return result.data;
 }
@@ -83,9 +86,18 @@ export async function apiDownload(path: string): Promise<Blob> {
   const token = await auth.currentUser?.getIdToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(`${env.VITE_API_URL}${path}`, { headers });
-  if (!response.ok)
+  if (!response.ok) {
+    if (response.status === 401) await expireSession('Tu sesión venció. Ingresá nuevamente.');
+    const body: unknown = await response.json().catch(() => undefined);
+    announceSuspension(response.status, body, path);
     throw new ApiError(`La API respondió con el estado ${response.status}`, response.status);
+  }
   return response.blob();
+}
+
+function announceSuspension(status: number, body: unknown, path: string) {
+  if (status === 402 && accountSuspendedResponseSchema.safeParse(body).success)
+    window.dispatchEvent(new CustomEvent('garita:account-suspended', { detail: path }));
 }
 
 async function expireSession(message: string) {

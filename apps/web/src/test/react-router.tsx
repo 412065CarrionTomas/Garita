@@ -1,5 +1,5 @@
 /* eslint react-refresh/only-export-components: off */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 export function Link({
   children,
@@ -43,8 +43,22 @@ export function Navigate() {
 export function useNavigate() {
   return jest.fn();
 }
-export function useSearchParams(): [URLSearchParams] {
-  return [new URLSearchParams(window.location.search)];
+export function useLocation(): { pathname: string } {
+  return { pathname: window.location.pathname };
+}
+type SearchInit = URLSearchParams | Record<string, string>;
+/** Lee y escribe la query de window.location; cada componente vuelve a pintarse con lo que cambia. */
+export function useSearchParams(): [
+  URLSearchParams,
+  (next: SearchInit | ((old: URLSearchParams) => SearchInit), options?: unknown) => void,
+] {
+  const [params, setParams] = useState(() => new URLSearchParams(window.location.search));
+  const update = (next: SearchInit | ((old: URLSearchParams) => SearchInit)) => {
+    const value = new URLSearchParams(typeof next === 'function' ? next(params) : next);
+    window.history.replaceState({}, '', `${window.location.pathname}?${value.toString()}`);
+    setParams(value);
+  };
+  return [params, update];
 }
 export function Outlet() {
   return null;

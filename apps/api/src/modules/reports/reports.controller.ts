@@ -10,6 +10,8 @@ import {
   reportDetailResponseSchema,
   reportPendingResponseSchema,
   reportPointsResponseSchema,
+  siteDayGridQuerySchema,
+  siteDayGridResponseSchema,
 } from '@garita/shared';
 import { Roles, CurrentUser } from '../auth/auth.decorators';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -47,6 +49,20 @@ export class ReportsController {
     return this.reports.report(parse(reportQuerySchema, raw), user);
   }
 
+  @Get('rondas/casilleros')
+  @ApiOperation({
+    summary:
+      'Cumplimiento de cada predio día por día (casilleros). Período local [desde, hasta) de hasta 31 días.',
+  })
+  @ApiQuery({ name: 'desde', required: true, type: String, example: '2026-11-10' })
+  @ApiQuery({ name: 'hasta', required: true, type: String, example: '2026-11-24' })
+  @ApiQuery({ name: 'predio', required: false })
+  @ApiQuery({ name: 'cliente', required: false })
+  @ApiOkResponse({ standardSchema: siteDayGridResponseSchema })
+  siteDayGrid(@Query() raw: unknown, @CurrentUser() user: AuthenticatedUser) {
+    return this.reports.siteDayGrid(parse(siteDayGridQuerySchema, raw), user);
+  }
+
   @Get('rondas/detalle')
   @ApiOperation({
     summary: 'Lista las ventanas de un segmento con turno, ronda, predio y dueño histórico',
@@ -60,6 +76,12 @@ export class ReportsController {
   @ApiQuery({ name: 'dia', required: false, description: 'Fecha local YYYY-MM-DD' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiQuery({
+    name: 'orden',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Orden cronológico; asc por defecto',
+  })
   @ApiOkResponse({
     standardSchema: reportDetailResponseSchema,
   })

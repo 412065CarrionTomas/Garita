@@ -77,11 +77,54 @@ enum IncidentClassificationStatus {
   internal
 }
 
+enum IncidentSeverity {
+  low
+  medium
+  high
+}
+
+/// none: no requiere seguimiento; open: la empresa tiene acciones pendientes; closed: resuelto.
+enum IncidentFollowUpStatus {
+  none
+  open
+  closed
+}
+
+enum IncidentFollowUpActionKind {
+  note
+  close
+  reopen
+}
+
+enum AccountStatus {
+  trial
+  active
+  grace
+  suspended
+}
+
+enum SuspensionReason {
+  trial_expired
+  grace_expired
+  cancelled
+}
+
 model Company {
+  accountStatus AccountStatus @default(trial)
+  suspensionReason SuspensionReason?
+  graceEndsAt DateTime?
+  suspendedAt DateTime?
+  suspensionEffectsPending Boolean @default(false)
+  trialRemindersSent Int[] @default([])
+  graceRemindersSent Int[] @default([])
+  /// Originating monthly invoice; scalar so account does not depend on subscriptions.
+  graceChargeId String?
   guardPhone        String?
   id                String             @id @default(cuid())
   name              String
   timezone          String             @default("America/Argentina/Buenos_Aires")
+  /// Optional free trial (HU-41): null means the company never had one and pays from day one.
+  trialEndsAt       DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   users             User[]
@@ -89,16 +132,25 @@ model Company {
   sites             Site[]
   rounds            Round[]
   shifts            Shift[]
+  shiftSchedules    ShiftSchedule[]
   recordFlags       RecordFlag[]
   roundWindowStates RoundWindowState[]
   incidents   Incident[]
   panicAlerts PanicAlert[]
   panicSmsDeliveries PanicSmsDelivery[]
   incidentClassifications IncidentClassification[]
+  incidentFollowUpActions IncidentFollowUpAction[]
   roundReviewDecisions RoundReviewDecision[]
   notificationPreferences NotificationPreference[]
+  viewPreferences UserViewPreference[]
+  favorites UserFavorite[]
   noticeViews NoticeView[]
   notices Notice[]
+  subscriptions Subscription[]
+  planChangePayments PlanChangePayment[]
+  subscriptionChanges SubscriptionChange[]
+  subscriptionCharges SubscriptionCharge[]
+  reportExports ReportExport[]
 }
 
 model User {
@@ -113,6 +165,9 @@ model User {
   clientId         String?
   position         String?
   lastLoginAt      DateTime?
+  legalVersion     String?
+  legalAcceptedAt  DateTime?
+  legalAcceptedIp  String?
   client           Client?           @relation(fields: [clientId], references: [id], onDelete: Restrict)
   role             UserRole
   status           UserStatus        @default(invitation_pending)
@@ -122,6 +177,8 @@ model User {
   invitations      Invitation[]
   siteAssignments  SiteSupervisor[]
   createdShifts    Shift[]           @relation("ShiftCreator")
+  createdShiftSchedules ShiftSchedule[] @relation("ScheduleCreator")
+  guardedShiftSchedules ShiftSchedule[] @relation("ScheduleGuard")
   shiftAssignments ShiftAssignment[]
   assignedShifts    ShiftAssignment[] @relation("ShiftAssignmentAssigner")
   shiftCredentials ShiftCredential[]
@@ -131,11 +188,18 @@ model User {
   resolvedPanicAlerts PanicAlert[] @relation("PanicResolver")
   panicSmsDeliveries PanicSmsDelivery[]
   incidentClassifications IncidentClassification[] @relation("IncidentDecider")
+  incidentFollowUpActions IncidentFollowUpAction[] @relation("IncidentFollowUpAuthor")
   roundReviewDecisions RoundReviewDecision[] @relation("RoundReviewDecider")
   notificationDevices NotificationDevice[]
   closedWithoutDataShifts Shift[] @relation("ClosedWithoutDataBy")
   notificationPreferences NotificationPreference[]
+  viewPreferences UserViewPreference[]
+  favorites UserFavorite[]
   noticeViews NoticeView[]
+  cancelledSubscriptions Subscription[] @relation("SubscriptionCancelRequester")
+  planChangePayments PlanChangePayment[]
+  subscriptionChanges SubscriptionChange[]
+  reportExports ReportExport[]
 
   @@index([companyId])
   @@index([clientId])
@@ -192,6 +256,7 @@ enum ConnectivityType {
 }
 
 model Site {
+  shiftSchedules ShiftSchedule[]
   id                 String           @id @default(cuid())
   companyId          String
   clientId           String
@@ -247,7 +312,11 @@ model Checkpoint {
   longitude             Decimal                  @db.Decimal(10, 6)
   toleranceRadiusMeters Int                      @default(30)
   stickerLocation       String?
+  // Calle y número si hay un domicilio dentro del radio del punto; si no, null (se muestran las coordenadas).
+  address               String?
   isIndoor              Boolean                  @default(false)
+  // N° del punto en el predio (1 = primero); orden sugerido al armar una ronda.
+  position              Int                      @default(0)
   qrVersion             Int                      @default(1)
   status                RecordStatus             @default(active)
   createdAt             DateTime                 @default(now())
@@ -258,7 +327,7 @@ model Checkpoint {
   roundVersions         RoundVersionCheckpoint[]
   records               CheckpointRecord[]
 
-  @@unique([siteId, name])
+  // Nombre único entre puntos activos: índice parcial en la migración.
   @@index([companyId, status])
   @@index([siteId, status])
 }
@@ -329,6 +398,11 @@ model RoundVersion {
   windowStartLocal String
   windowEndLocal   String
   graceMinutes     Int
+  /// Recorrido ideal (roundRouteSchema de @garita/shared). Null: rondas previas, se dibujan rectas.
+  route            Json?
+  /// Velocidad de la ronda (recorrido por calles y tiempo imposible). Null: la del predio.
+  speedProfile     SpeedProfile?
+  maxSpeedKmh      Int?
   createdById      String
   createdAt        DateTime                 @default(now())
   round            Round                    @relation(fields: [roundId], references: [id], onDelete: Restrict)
@@ -378,6 +452,7 @@ enum ShiftStatus {
   in_progress
   closed
   auto_closed
+  cancelled_by_suspension
 }
 
 enum ShiftAssignmentResult {
@@ -484,6 +559,8 @@ enum ShiftClosedBy {
 }
 
 model Shift {
+  scheduleId String?
+  schedule ShiftSchedule? @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
   panicSmsCode        String?
   id                  String               @id @default(cuid())
   companyId           String
@@ -534,8 +611,39 @@ model Shift {
   closedWithoutDataBy User? @relation("ClosedWithoutDataBy", fields: [closedWithoutDataById], references: [id], onDelete: Restrict)
 
   @@index([companyId, startsAt])
+  @@index([scheduleId])
   @@index([siteId, serviceDate])
   @@index([status, startsAt])
+}
+
+enum ShiftScheduleStatus {
+  active
+  finished
+  cancelled
+}
+
+model ShiftSchedule {
+  id String @id @default(cuid())
+  companyId String
+  siteId String
+  guardId String
+  weekdays Int[]
+  startTime String
+  endTime String
+  roundIds String[]
+  startDate DateTime @db.Date
+  endDate DateTime @db.Date
+  status ShiftScheduleStatus @default(active)
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  guard User @relation("ScheduleGuard", fields: [guardId], references: [id], onDelete: Restrict)
+  createdBy User @relation("ScheduleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  shifts Shift[]
+
+  @@index([companyId, status])
 }
 
 model NoticeView {
@@ -572,6 +680,7 @@ model Notice {
 
   @@index([companyId, status, createdAt])
   @@index([companyId, kind, status, createdAt])
+  @@index([companyId, kind, createdAt])
   @@index([siteId, createdAt])
 }
 
@@ -758,6 +867,9 @@ model Incident {
   simulation           ShiftEventSimulation
   countsForCompliance  Boolean                     @default(true)
   classificationStatus IncidentClassificationStatus @default(pending)
+  severity             IncidentSeverity?
+  followUpStatus       IncidentFollowUpStatus      @default(none)
+  followUpClosedAt     DateTime?                   @db.Timestamptz(3)
   createdAt            DateTime                    @default(now())
   company              Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   site                 Site                        @relation(fields: [siteId], references: [id], onDelete: Restrict)
@@ -767,12 +879,17 @@ model Incident {
   photos               IncidentPhoto[]
   photoAuthorizations  IncidentPhotoAuthorization[]
   classifications      IncidentClassification[]
+  followUpActions      IncidentFollowUpAction[]
 
   @@index([companyId, siteId, createdAt])
   @@index([companyId, classificationStatus, createdAt])
   @@index([companyId, siteId, classificationStatus, createdAt])
   @@index([shiftId, occurredAtDevice])
   @@index([assignmentId])
+  @@index([companyId, trustedAt])
+  @@index([companyId, occurredAtDevice])
+  @@index([companyId, receivedAt])
+  @@index([companyId, followUpStatus])
 }
 
 enum PanicAlertStatus {
@@ -804,6 +921,10 @@ enum PanicSmsDeliveryStatus {
 }
 
 model PanicAlert {
+  shortId String? @db.VarChar(8)
+  unverified Boolean @default(false)
+  phoneMismatch Boolean @default(false)
+  inboundSms SmsInbound[]
   id             String            @id @db.Uuid
   companyId      String
   siteId         String
@@ -841,8 +962,10 @@ model PanicAlert {
 
   @@index([companyId, status])
   @@index([siteId, createdAt])
+  @@unique([shiftId, shortId])
   @@index([shiftId, status])
   @@index([companyId, receivedAt])
+  @@index([companyId, triggeredAt])
   @@index([siteId, status])
 }
 
@@ -883,6 +1006,8 @@ model IncidentClassification {
   internalComment String                       @db.VarChar(1000)
   clientNote      String?                      @db.VarChar(500)
   reason          String?                      @db.VarChar(500)
+  severity        IncidentSeverity?
+  requiresFollowUp Boolean                     @default(false)
   decidedById     String
   decidedAt       DateTime                     @default(now()) @db.Timestamptz(3)
   company         Company                      @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -890,6 +1015,22 @@ model IncidentClassification {
   decidedBy       User                         @relation("IncidentDecider", fields: [decidedById], references: [id], onDelete: Restrict)
 
   @@index([companyId, incidentId, decidedAt])
+}
+
+/// Bitácora de seguimiento: solo se agrega, nunca se edita.
+model IncidentFollowUpAction {
+  id         String                     @id @default(cuid())
+  companyId  String
+  incidentId String
+  kind       IncidentFollowUpActionKind
+  text       String                     @db.VarChar(1000)
+  authorId   String
+  createdAt  DateTime                   @default(now()) @db.Timestamptz(3)
+  company    Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  incident   Incident                   @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  author     User                       @relation("IncidentFollowUpAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, incidentId, createdAt])
 }
 
 model IncidentPhoto {
@@ -1044,4 +1185,267 @@ model NotificationPreference {
 
   @@unique([userId, kind])
   @@index([companyId, kind, push])
+}
+
+// --- Vistas personalizables: diseño de bloques y favoritos por usuario y pantalla ---
+
+/// Layout of a customizable screen (viewKey from @garita/shared VIEW_KEYS), validated with Zod on write and reconciled on read.
+model UserViewPreference {
+  id        String   @id @default(cuid())
+  companyId String
+  userId    String
+  viewKey   String
+  /// Catalog version the layout was saved with.
+  version   Int
+  layout    Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, viewKey])
+  @@index([companyId])
+}
+
+/// Entities pinned to the top of a screen's lists, in the user's order. entityId points to Site, User (guard) or Client by entityType; visibility is checked on write and read.
+model UserFavorite {
+  id         String   @id @default(cuid())
+  companyId  String
+  userId     String
+  viewKey    String
+  entityType String
+  entityId   String
+  position   Int
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, viewKey, entityType, entityId])
+  @@index([userId, viewKey, entityType, position])
+  @@index([companyId])
+}
+
+// --- Suscripciones con Mercado Pago (HU-29) ---
+
+/// Platform plans, loaded by seed; there is no edit screen.
+model Plan {
+  id            String         @id @default(cuid())
+  code          String         @unique
+  name          String
+  monthlyPrice  Decimal        @db.Decimal(12, 2)
+  maxGuards     Int
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  subscriptions Subscription[] @relation("CurrentPlan")
+  pendingSubscriptions Subscription[] @relation("PendingPlan")
+  previousPayments PlanChangePayment[] @relation("PreviousPlan")
+  newPayments PlanChangePayment[] @relation("NewPlan")
+  changes SubscriptionChange[]
+}
+
+/// Mirrors Mercado Pago preapproval statuses.
+enum SubscriptionStatus {
+  pending
+  authorized
+  paused
+  cancelled
+}
+
+model Subscription {
+  suspensionPausedAt DateTime?
+  suspensionPlanId String?
+  id                String               @id @default(cuid())
+  companyId         String
+  planId            String
+  status            SubscriptionStatus   @default(pending)
+  mpPreapprovalId   String?              @unique
+  /// Email of the Mercado Pago account that pays; may differ from the admin's Garita email.
+  payerEmail        String
+  /// First charge date: now, or the end of the trial when the admin keeps it.
+  startsAt          DateTime
+  nextChargeAt      DateTime?
+  lastFailureReason String?
+  /// Scheduled cancellation (HU-42): service runs until this date, then the debit is cancelled in Mercado Pago.
+  cancelAt            DateTime?
+  cancelReason        String?
+  cancelRequestedAt   DateTime?
+  cancelRequestedById String?
+  cancelRequestedBy   User?     @relation("SubscriptionCancelRequester", fields: [cancelRequestedById], references: [id], onDelete: Restrict)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  company           Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  plan              Plan                 @relation("CurrentPlan", fields: [planId], references: [id], onDelete: Restrict)
+  /// Validated guard selection, actor and remaining deactivations (HU-29).
+  guardSelection    Json?
+  pendingPlanId String?
+  pendingPlan Plan? @relation("PendingPlan", fields: [pendingPlanId], references: [id], onDelete: Restrict)
+  pendingPlanAt DateTime?
+  pendingGuardSelection Json?
+  pendingPlanAdminId String?
+  planChangePayments PlanChangePayment[]
+  changes SubscriptionChange[]
+  charges           SubscriptionCharge[]
+
+  // Partial unique index (one open subscription per company) lives in the migration SQL.
+  @@index([companyId])
+}
+
+enum SubscriptionChargeStatus {
+  pending
+  approved
+  rejected
+}
+
+/// One row per Mercado Pago authorized_payment.
+model SubscriptionCharge {
+  id                    String                   @id @default(cuid())
+  companyId             String
+  subscriptionId        String
+  mpAuthorizedPaymentId String                   @unique
+  mpPaymentId           String?
+  amount                Decimal                  @db.Decimal(12, 2)
+  status                SubscriptionChargeStatus
+  statusDetail          String?
+  retryAttempt          Int                      @default(0)
+  effectsAppliedStatus  SubscriptionChargeStatus?
+  gracePreferenceId String?
+  graceInitPoint String?
+  gracePreferenceExpiresAt DateTime?
+  /// The approved Checkout Pro payment regularizing this invoice; does not overwrite MP's debit.
+  gracePaidPaymentId String? @unique
+  chargedAt             DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  company               Company                  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  subscription          Subscription             @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([subscriptionId])
+}
+
+enum MercadoPagoNotificationStatus {
+  received
+  processed
+  failed
+}
+
+/// Platform-level log of received webhooks; its id is Mercado Pago's own notification id, so a retry can't be stored twice.
+model MercadoPagoNotification {
+  id          String                        @id
+  type        String
+  action      String?
+  resourceId  String
+  status      MercadoPagoNotificationStatus @default(received)
+  error       String?
+  receivedAt  DateTime                      @default(now())
+  processedAt DateTime?
+}
+
+
+enum SubscriptionChangeType {
+  upgrade
+  downgrade_scheduled
+  downgrade_applied
+  cancellation
+  cancellation_reverted
+}
+
+model PlanChangePayment {
+  id String @id @default(cuid())
+  companyId String
+  subscriptionId String
+  previousPlanId String
+  newPlanId String
+  adminId String
+  amount Decimal @db.Decimal(12, 2)
+  remainingDays Int
+  cycleDays Int
+  mpPreferenceId String? @unique
+  mpPaymentId String? @unique
+  status SubscriptionChargeStatus @default(pending)
+  rejectionReason String?
+  expiresAt DateTime
+  amountUpdatePending Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  previousPlan Plan @relation("PreviousPlan", fields: [previousPlanId], references: [id], onDelete: Restrict)
+  newPlan Plan @relation("NewPlan", fields: [newPlanId], references: [id], onDelete: Restrict)
+  admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  @@index([companyId])
+  @@index([subscriptionId])
+}
+
+model SubscriptionChange {
+  id String @id @default(cuid())
+  companyId String
+  subscriptionId String
+  type SubscriptionChangeType
+  planId String
+  effectiveAt DateTime
+  adminId String
+  reason String?
+  createdAt DateTime @default(now())
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  @@index([companyId])
+  @@index([subscriptionId, createdAt])
+}
+
+enum ReportExportType {
+  rounds
+  incidents
+  portal
+}
+
+enum ReportExportResult {
+  ok
+  failed
+}
+
+model ReportExport {
+  id            String @id @default(cuid())
+  companyId     String
+  userId        String
+  role          UserRole
+  siteIds       String[]
+  periodStart   String? @db.VarChar(10)
+  periodEnd     String? @db.VarChar(10)
+  reportType    ReportExportType
+  result        ReportExportResult
+  correlationId String
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user          User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
+}
+model SmsInbound {
+  id String @id @default(cuid())
+  provider String @default("http")
+  messageId String @db.VarChar(100)
+  fromOriginal String @db.VarChar(40)
+  fromNormalized String @db.VarChar(40)
+  text String @db.VarChar(1600)
+  gatewayReceivedAt DateTime @db.Timestamptz(3)
+  receivedAt DateTime @db.Timestamptz(3)
+  result SmsInboundAuthResult @default(unknown)
+  companyId String?
+  shiftId String?
+  alertId String? @db.Uuid
+  processedAt DateTime? @db.Timestamptz(3)
+  alert PanicAlert? @relation(fields: [alertId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  @@unique([provider, messageId])
+  @@index([shiftId])
+  @@index([fromNormalized])
+  @@index([companyId, receivedAt])
+}
+
+enum SmsInboundAuthResult {
+  valid
+  unverified
+  unknown
 }

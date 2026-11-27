@@ -43,6 +43,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import { NOTICES_PORT, type NoticesPort } from '../../common/ports/notices.port';
 import { RoundWindowStateService } from '../supervision/round-window-state.service';
+import { ACCOUNT_STATE_PORT, type AccountStatePort } from '../../common/ports/account-state.port';
 
 export const SHIFT_AUTO_CLOSE_QUEUE = 'shift-auto-close';
 export const SHIFT_AUTO_CLOSE_JOB = 'close-shift';
@@ -77,6 +78,7 @@ export class ShiftExecutionService {
     @Optional() @Inject(REALTIME_PORT) private readonly realtime?: RealtimePort,
     @Optional() private readonly config?: ConfigService<Env, true>,
     @Optional() @Inject(NOTICES_PORT) private readonly notices?: NoticesPort,
+    @Optional() @Inject(ACCOUNT_STATE_PORT) private readonly account?: AccountStatePort,
   ) {}
 
   async start(id: string, input: StartShiftRequest, user: AuthenticatedUser) {
@@ -94,7 +96,14 @@ export class ShiftExecutionService {
       return this.startResponse(replay.shift.id);
     }
     const shift = await this.ownedShift(id);
-    if (shift.status === 'cancelled' || shift.status === 'closed' || shift.status === 'auto_closed')
+    if (shift.site.status === 'inactive' || shift.site.client.status === 'inactive')
+      throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
+    if (
+      shift.status === 'cancelled' ||
+      shift.status === 'cancelled_by_suspension' ||
+      shift.status === 'closed' ||
+      shift.status === 'auto_closed'
+    )
       throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.notStartable });
     const assignment = await this.currentAssignment(shift.id);
     if (assignment?.guardId !== user.userId) {
@@ -144,7 +153,12 @@ export class ShiftExecutionService {
         if (claimed.count !== 1)
           throw new ConflictException({ code: SHIFT_EXECUTION_ERROR_CODES.reassigned });
         const changed = await tx.shift.updateMany({
-          where: { id, status: 'scheduled' },
+          where: {
+            id,
+            status: 'scheduled',
+            company: { accountStatus: { not: 'suspended' } },
+            site: { status: 'active', client: { status: 'active' } },
+          },
           data: {
             status: 'in_progress',
             startedAt: now,
@@ -278,11 +292,21 @@ export class ShiftExecutionService {
     });
     if (!notice) throw new ConflictException('El turno no está sin sincronizar');
     await this.prisma.tenantPrisma.$transaction(async (tx) => {
-      const changed = await tx.notice.updateMany({
+      const sync = await tx.shiftSyncState.findUnique({
+        where: { shiftId: id },
+        select: { syncedUntil: true },
+      });
+      const close = await tx.shiftEvent.findFirst({
+        where: { shiftId: id, type: 'close', assignment: { isCurrent: true } },
+        select: { id: true },
+      });
+      if ((sync?.syncedUntil && sync.syncedUntil >= shift.endsAt) || close)
+        throw new ConflictException('El turno ya está sincronizado');
+      const resolved = await tx.notice.updateMany({
         where: { id: notice.id, status: 'open' },
         data: { status: 'resolved', resolution: 'closed_without_data', resolvedAt: now },
       });
-      if (!changed.count) throw new ConflictException('El turno ya fue cerrado sin datos');
+      if (!resolved.count) throw new ConflictException('El turno ya fue cerrado sin datos');
       await tx.shift.update({
         where: { id },
         data: {
@@ -724,11 +748,29 @@ export class ShiftExecutionService {
     shift: { id: string; companyId: string; siteId: string },
     now: Date,
   ): Promise<number> {
+    if (this.account && (await this.account.get(shift.companyId)).status === 'suspended') {
+      await this.prisma.systemPrisma.shift.updateMany({
+        where: {
+          id: shift.id,
+          companyId: shift.companyId,
+          startedAt: null,
+          status: { in: ['scheduled', 'unassigned'] },
+          company: { accountStatus: 'suspended' },
+        },
+        data: { status: 'cancelled_by_suspension' },
+      });
+      await this.prisma.systemPrisma.shiftAssignment.updateMany({
+        where: { shiftId: shift.id, active: true, shift: { status: 'cancelled_by_suspension' } },
+        data: { active: false },
+      });
+      return 0;
+    }
     const changed = await this.prisma.systemPrisma.$transaction(async (tx) => {
       const result = await tx.shift.updateMany({
         where: {
           id: shift.id,
           status: 'scheduled',
+          company: { accountStatus: { not: 'suspended' } },
           endsAt: { lte: now },
           assignments: { some: { isCurrent: true, active: true, guard: { status: 'active' } } },
         },
@@ -856,7 +898,14 @@ export class ShiftExecutionService {
   private async ownedShift(id: string) {
     const shift = await this.prisma.tenantPrisma.shift.findFirst({
       where: { id },
-      include: { site: { include: { company: { select: { timezone: true } } } } },
+      include: {
+        site: {
+          include: {
+            company: { select: { timezone: true } },
+            client: { select: { status: true } },
+          },
+        },
+      },
     });
     if (!shift) throw new NotFoundException('Turno no encontrado');
     return shift;

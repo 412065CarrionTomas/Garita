@@ -13,6 +13,22 @@ import {
 } from './tenant-prisma';
 
 describe('registro del aislamiento tenant', () => {
+  it('aísla programaciones por empresa y por predio del supervisor', () => {
+    expect(
+      scopeArgs('ShiftSchedule', 'findMany', { where: { status: 'active' } }, 'norte'),
+    ).toEqual({ where: { status: 'active', companyId: 'norte' } });
+    expect(
+      addSiteAssignmentFilter(
+        'ShiftSchedule',
+        { where: { id: 'schedule' } },
+        { userId: 'supervisor', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [{ id: 'schedule' }, { site: { supervisors: { some: { userId: 'supervisor' } } } }],
+      },
+    });
+  });
   it('cubre todos los modelos del schema Prisma con un campo companyId', () => {
     const schema = readFileSync(resolve(process.cwd(), 'prisma/schema.prisma'), 'utf8');
     const schemaTenantModels = [...schema.matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\}/g)]
@@ -97,6 +113,24 @@ describe('registro del aislamiento tenant', () => {
         AND: [
           { status: 'active' },
           { checkpoint: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
+        ],
+      },
+    });
+  });
+
+  it('limita la bitácora de seguimiento a los predios del supervisor', () => {
+    expect(COMPANY_ID_MODELS).toContain('IncidentFollowUpAction');
+    expect(
+      addSiteAssignmentFilter(
+        'IncidentFollowUpAction',
+        { where: { incidentId: 'i1' } },
+        { userId: 'supervisor-1', companyId: 'norte', role: 'supervisor', status: 'active' },
+      ),
+    ).toEqual({
+      where: {
+        AND: [
+          { incidentId: 'i1' },
+          { incident: { site: { supervisors: { some: { userId: 'supervisor-1' } } } } },
         ],
       },
     });
@@ -416,6 +450,73 @@ describe('aislamiento del portal por cliente', () => {
     status: 'active' as const,
     clientId: 'client-a',
   };
+  it('HU-40 registra ReportExport y limita consultas de clientes al propio activo sin borrar el intento ajeno', () => {
+    expect(COMPANY_ID_MODELS).toContain('ReportExport');
+    expect(scopeArgs('ReportExport', 'create', { data: { userId: user.userId } }, 'north')).toEqual(
+      { data: { userId: user.userId, companyId: 'north' } },
+    );
+    expect(addClientFilter('Client', {}, user)).toEqual({
+      where: { AND: [{}, { id: 'client-a', status: 'active' }] },
+    });
+    for (const where of [{ id: 'client-b' }, { status: 'inactive' }, { companyId: 'south' }]) {
+      expect(addClientFilter('Client', { where }, user)).toEqual({
+        where: { ...where, AND: [where, { id: 'client-a', status: 'active' }] },
+      });
+    }
+  });
+  it('HU-40 filtra exportaciones propias aun sin where y rechaza escrituras con otro usuario', () => {
+    expect(addClientFilter('ReportExport', {}, user)).toEqual({
+      where: { AND: [{}, { userId: user.userId }] },
+    });
+    const where = { id: 'other-export', userId: 'other-user', companyId: 'north' };
+    expect(addClientFilter('ReportExport', { where }, user)).toEqual({
+      where: { ...where, AND: [where, { userId: user.userId }] },
+    });
+    expect(() =>
+      addClientFilter('ReportExport', { data: { userId: 'other-user' } }, user, 'create'),
+    ).toThrow();
+    expect(() =>
+      addClientFilter(
+        'ReportExport',
+        { where: {}, data: { userId: { set: 'other-user' } } },
+        user,
+        'updateMany',
+      ),
+    ).toThrow();
+    const data = { userId: user.userId, companyId: 'north' };
+    expect(addClientFilter('ReportExport', { data }, user, 'create')).toEqual({ data });
+    expect(addClientFilter('ReportExport', { data }, user, 'updateMany')).toEqual({
+      data,
+      where: { AND: [{}, { userId: user.userId }] },
+    });
+  });
+  it('el portal lee y escribe solo su propio diseño y sus fijados', () => {
+    for (const model of ['UserViewPreference', 'UserFavorite']) {
+      expect(addClientFilter(model, { where: { viewKey: 'v' } }, user, 'findMany')).toEqual({
+        where: { viewKey: 'v', AND: [{ viewKey: 'v' }, { userId: user.userId }] },
+      });
+      expect(() =>
+        addClientFilter(model, { data: [{ userId: 'other-user' }] }, user, 'createMany'),
+      ).toThrow();
+      // Actualizar sin userId en data vale: el where lo acota al usuario.
+      const data = { layout: {} };
+      expect(addClientFilter(model, { where: {}, data }, user, 'updateManyAndReturn')).toEqual({
+        data,
+        where: { AND: [{}, { userId: user.userId }] },
+      });
+      expect(() =>
+        addClientFilter(
+          model,
+          { where: {}, data: { userId: 'other-user' } },
+          user,
+          'updateManyAndReturn',
+        ),
+      ).toThrow();
+      expect(() =>
+        addClientFilter(model, { where: {}, data: { user: { connect: {} } } }, user, 'updateMany'),
+      ).toThrow();
+    }
+  });
   it('conserva el filtro tenant y exige predio y cliente activos aunque se intente otro filtro', () => {
     expect(
       addClientFilter(
@@ -453,5 +554,67 @@ describe('aislamiento del portal por cliente', () => {
   it('no modifica los permisos del administrador', () => {
     const args = { where: { status: 'inactive' } };
     expect(addClientFilter('Site', args, { ...user, role: 'admin' })).toBe(args);
+  });
+  it.each([
+    [
+      'RoundWindowState',
+      {
+        shift: {
+          site: { clientId: 'client-a', status: 'active', client: { status: 'active' } },
+          status: { not: 'cancelled' },
+        },
+      },
+    ],
+    [
+      'Incident',
+      {
+        site: { clientId: 'client-a', status: 'active', client: { status: 'active' } },
+        classificationStatus: 'client_visible',
+      },
+    ],
+    [
+      'PanicAlert',
+      {
+        site: { clientId: 'client-a', status: 'active', client: { status: 'active' } },
+        status: 'resolved',
+        outcome: 'real_emergency',
+      },
+    ],
+  ])(
+    'HU-28: %s conserva empresa y clave y exige visibilidad aunque el caller intente otro filtro',
+    (model, policy) => {
+      const where = { id: 'row', companyId: 'north', status: 'active', AND: [{ siteId: 'other' }] };
+      expect(addClientFilter(model, { where }, user)).toEqual({
+        where: { ...where, AND: [where, policy] },
+      });
+      expect(() => addClientFilter(model, {}, { ...user, clientId: null })).toThrow();
+    },
+  );
+});
+
+describe('HU-40: el rol cliente solo lee su registro', () => {
+  const user = { role: 'client', clientId: 'cliente', userId: 'u' } as never;
+  it('rechaza escrituras sobre Client', () => {
+    for (const operation of ['update', 'updateMany', 'delete', 'create', 'upsert'])
+      expect(() => addClientFilter('Client', { where: {} }, user, operation)).toThrow();
+    expect(() => addClientFilter('Client', { where: {} }, user, 'findFirst')).not.toThrow();
+  });
+});
+
+describe('aislamiento de los cambios de plan', () => {
+  it.each(['PlanChangePayment', 'SubscriptionChange'])(
+    '%s pertenece únicamente a su empresa',
+    (model) => {
+      expect(COMPANY_ID_MODELS).toContain(model);
+      expect(scopeArgs(model, 'findMany', { where: { companyId: 'otra' } }, 'propia')).toEqual({
+        where: { companyId: 'propia' },
+      });
+    },
+  );
+});
+
+it('HU-37: los SMS sin empresa y los de otra empresa no entran en la consulta tenant', () => {
+  expect(scopeArgs('SmsInbound', 'findMany', { where: { result: 'unknown' } }, 'north')).toEqual({
+    where: { result: 'unknown', companyId: 'north' },
   });
 });

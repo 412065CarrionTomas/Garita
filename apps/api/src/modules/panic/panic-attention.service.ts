@@ -5,6 +5,7 @@ import { CLOCK, type Clock } from '../../common/clock';
 import { REALTIME_PORT, type RealtimePort } from '../../common/ports/realtime.port';
 import type { Prisma } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { suspendedVisiblePanicWhere } from '../auth/account-suspension.policy';
 import { TenantResourceService } from '../auth/tenant-resource.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -26,8 +27,9 @@ export class PanicAttentionService {
     @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
   ) {}
 
-  async list(filters: z.infer<typeof panicAlertsQuerySchema>) {
+  async list(filters: z.infer<typeof panicAlertsQuerySchema>, user?: AuthenticatedUser) {
     const where: Prisma.PanicAlertWhereInput = {
+      ...suspendedVisiblePanicWhere(user),
       ...(filters.estado ? { status: filters.estado } : {}),
       ...(filters.predio ? { siteId: filters.predio } : {}),
     };
@@ -36,18 +38,20 @@ export class PanicAttentionService {
         where,
         include: summaryInclude,
         orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-        skip: (filters.pagina - 1) * 25,
-        take: 25,
+        skip: (filters.pagina - 1) * filters.porPagina,
+        take: filters.porPagina,
       }),
       this.prisma.tenantPrisma.panicAlert.count({ where }),
-      this.prisma.tenantPrisma.panicAlert.count({ where: { status: 'active' } }),
+      this.prisma.tenantPrisma.panicAlert.count({
+        where: { ...suspendedVisiblePanicWhere(user), status: 'active' },
+      }),
     ]);
     return {
       items: items.map((row) => this.summary(row)),
       total,
       activeCount,
       page: filters.pagina,
-      pageSize: 25,
+      pageSize: filters.porPagina,
     };
   }
 
@@ -70,8 +74,6 @@ export class PanicAttentionService {
     return {
       ...this.summary(row),
       timezone: row.company.timezone,
-      // TODO(HU-37): use the verified SMS ingestion result when that channel exists.
-      authenticated: true,
       latitude: row.latitude === null ? null : Number(row.latitude),
       longitude: row.longitude === null ? null : Number(row.longitude),
       accuracyMeters: row.accuracyMeters === null ? null : Number(row.accuracyMeters),
@@ -140,6 +142,8 @@ export class PanicAttentionService {
       id: row.id,
       status: row.status,
       channel: row.channel,
+      authenticated: !row.unverified,
+      phoneMismatch: row.phoneMismatch,
       triggeredAt: row.triggeredAt.toISOString(),
       receivedAt: row.receivedAt.toISOString(),
       confirmedAt: row.confirmedAt?.toISOString() ?? null,

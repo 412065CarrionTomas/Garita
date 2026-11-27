@@ -25,6 +25,7 @@ const page = {
   pagina: 1,
   total: 1,
   paginas: 1,
+  resumen: { active: 1, invitation_pending: 0, invitation_failed: 0, deactivated: 0 },
   items: [
     {
       id: 'u1',
@@ -46,6 +47,14 @@ const input = (name: string): HTMLInputElement => {
   const element = document.querySelector(`input[name=${name}]`);
   if (!(element instanceof HTMLInputElement)) throw new Error(`Missing input ${name}`);
   return element;
+};
+
+const openRowMenu = async () => {
+  await userEvent.click(await screen.findByRole('button', { name: 'Más acciones de Ana Pérez' }));
+};
+const rowAction = async (name: string) => {
+  await openRowMenu();
+  await userEvent.click(await screen.findByRole('menuitem', { name }));
 };
 
 const setup = (role = 'admin') => {
@@ -90,6 +99,23 @@ describe('PersonalPage', () => {
     jest.mocked(apiPost).mockResolvedValue({ ok: true });
   });
 
+  it('accepts the personnel detail returned when resending an invitation', async () => {
+    listedStatus = 'invitation_pending';
+    setup();
+    jest
+      .mocked(apiPost)
+      .mockImplementation((_path, _body, _request, response) =>
+        Promise.resolve(response.parse({ ...page.items[0], status: 'invitation_pending' })),
+      );
+    await screen.findByText(/Ana Pérez/, {}, { timeout: 10000 });
+    await openRowMenu();
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Reenviar invitación' }));
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalled();
+    });
+    expect(screen.queryByText('No se pudo reenviar la invitación.')).not.toBeInTheDocument();
+  });
+
   it('lista, pagina y filtra personal por rol y estado', async () => {
     setup();
     expect(await screen.findByText(/Ana Pérez/)).toBeInTheDocument();
@@ -105,14 +131,66 @@ describe('PersonalPage', () => {
         expect.anything(),
       );
     });
-    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('cambia el tamaño de página en el backend y salta a una página numerada', async () => {
+    jest.mocked(apiGet).mockResolvedValueOnce({ ...page, total: 160, paginas: 8 });
+    setup();
+    await screen.findByText(/Ana Pérez/);
+    expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('button', { name: 'Página 8' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Página 5' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Página 8' }));
+    // Las páginas siguientes responden con el total por defecto (1), y la paginación vuelve sola a
+    // la 1: por eso se verifica que se pidió la 8, no que fue la última llamada.
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('pagina=8'), expect.anything());
+    });
+    await userEvent.selectOptions(screen.getByLabelText('Por página'), '5');
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenLastCalledWith(
+        expect.stringMatching(/pagina=1&porPagina=5/),
+        expect.anything(),
+      );
+    });
+  });
+
+  it('busca sin botón al dejar de tipear y filtra desde los contadores', async () => {
+    setup();
+    await screen.findByText(/Ana Pérez/);
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Buscar personal' }), 'ana');
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenLastCalledWith(
+        expect.stringContaining('buscar=ana'),
+        expect.anything(),
+      );
+    });
+    const summary = screen.getByRole('group', { name: 'Resumen del personal' });
+    const deactivated = within(summary).getByRole('button', { name: /Desactivados/ });
+    await userEvent.click(deactivated);
+    expect(deactivated).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenLastCalledWith(
+        expect.stringContaining('estado=deactivated'),
+        expect.anything(),
+      );
+    });
+    expect(screen.getByLabelText('Filtrar por estado')).toHaveValue('deactivated');
   });
 
   it('oculta acciones a supervisores', async () => {
     setup('supervisor');
     await screen.findByText(/Ana Pérez/);
-    expect(screen.queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Desactivar' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Más acciones de Ana Pérez' }),
+    ).not.toBeInTheDocument();
   });
 
   it('abre y cancela el alta sin enviar una invitación', async () => {
@@ -130,7 +208,7 @@ describe('PersonalPage', () => {
   it('edita los mismos campos dentro del diálogo y guarda el registro', async () => {
     jest.mocked(apiPatch).mockResolvedValue(page.items[0]);
     setup();
-    await userEvent.click(await screen.findByRole('button', { name: 'Editar' }));
+    await rowAction('Editar');
     const dialog = screen.getByRole('dialog', { name: 'Editar personal' });
     expect(dialog).toHaveAttribute('aria-labelledby', 'edit-title');
     expect(dialog).toHaveAttribute('aria-describedby', expect.stringContaining('edit-description'));
@@ -158,7 +236,7 @@ describe('PersonalPage', () => {
   it('conserva las tres acciones de invitación pendiente en el menú', async () => {
     listedStatus = 'invitation_pending';
     setup();
-    await userEvent.click(await screen.findByRole('button', { name: 'Acciones' }));
+    await openRowMenu();
     const menu = screen.getByRole('menu');
     expect(within(menu).getByRole('menuitem', { name: 'Editar' })).toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: 'Desactivar' })).toBeInTheDocument();
@@ -182,7 +260,10 @@ describe('PersonalPage', () => {
         within(screen.getByRole('table')).getByText('Activo').closest('[data-slot="badge"]'),
       ).toHaveAttribute('data-variant', 'normal');
       const section = screen.getByRole('region', { name: 'Personal' });
-      expect(section.querySelector('[data-slot="table-container"]')).toHaveClass('overflow-x-auto');
+      // La tabla de datos se desplaza en su contenedor, no corta las columnas.
+      expect(section.querySelector('[data-slot="table-container"]')?.parentElement).toHaveClass(
+        'overflow-x-auto',
+      );
       for (const element of section.querySelectorAll('[class]')) {
         expect(element.getAttribute('class')).not.toMatch(
           /(?:bg|text|border)-(?:red|amber|gray|white|black)(?:-|\b)/,
@@ -237,12 +318,12 @@ describe('PersonalPage', () => {
   it('confirma o cancela la desactivación y permite reactivar y reenviar', async () => {
     setup();
     await screen.findByText(/Ana Pérez/);
-    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await rowAction('Desactivar');
     expect(screen.getByRole('dialog', { name: 'Desactivar usuario' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
     expect(apiPost).not.toHaveBeenCalled();
     listedStatus = 'deactivated';
-    fireEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await rowAction('Desactivar');
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar desactivación' }));
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith(
@@ -253,7 +334,7 @@ describe('PersonalPage', () => {
       );
     });
     listedStatus = 'deactivated';
-    await userEvent.click(screen.getByRole('button', { name: 'Reactivar' }));
+    await rowAction('Reactivar');
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith(
         '/usuarios/u1/reactivar',
@@ -287,7 +368,7 @@ describe('PersonalPage', () => {
     });
     setup();
     await screen.findByText(/Ana Pérez/);
-    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await rowAction('Desactivar');
     expect(await screen.findByText('Tiene 2 turnos futuros:')).toBeInTheDocument();
     expect(screen.getByText(/Predio A/)).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText('Derivar turnos a'), 'u2');
@@ -321,7 +402,7 @@ describe('PersonalPage', () => {
     });
     setup();
     await screen.findByText(/Ana Pérez/);
-    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await rowAction('Desactivar');
     await screen.findByText('Tiene 1 turnos futuros:');
     await userEvent.click(screen.getByLabelText('Dejar los turnos sin vigilador'));
     expect(screen.getByRole('alert')).toHaveTextContent('1 turnos quedarán sin vigilador');
@@ -359,7 +440,7 @@ describe('PersonalPage', () => {
 
     setup();
     await screen.findByText(/Ana Pérez/);
-    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await rowAction('Desactivar');
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar desactivación' }));
 
     // 1. Muestra el turno en curso con predio, inicio y fin en hora local
@@ -428,7 +509,7 @@ describe('PersonalPage', () => {
 
     setup();
     await screen.findByText(/Ana Pérez/);
-    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await rowAction('Desactivar');
     expect(await screen.findByText('Tiene 1 turnos futuros:')).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText('Derivar turnos a'), 'u2');
@@ -497,7 +578,7 @@ describe('PersonalPage', () => {
 
     setup();
     await screen.findByText(/Ana Pérez/);
-    await userEvent.click(screen.getByRole('button', { name: 'Desactivar' }));
+    await rowAction('Desactivar');
     await screen.findByText('Tiene 2 turnos futuros:');
     await userEvent.click(screen.getByLabelText('Dejar los turnos sin vigilador'));
     await userEvent.click(
@@ -530,5 +611,53 @@ describe('PersonalPage', () => {
         expect.anything(),
       );
     });
+  });
+});
+
+describe('HU-41 mensajes del cupo', () => {
+  it.each([
+    ['trial', 'Suscribirme'],
+    ['active', 'Cambiar de plan'],
+  ])('reactivación con cuenta %s muestra mensaje del servidor y %s', async (status, link) => {
+    listedStatus = 'deactivated';
+    setup();
+    jest.mocked(apiPost).mockRejectedValue(
+      new ApiError('Conflicto', 409, {
+        code: 'guard_limit_reached',
+        status,
+        message: 'Alcanzaste el límite de vigiladores.',
+      }),
+    );
+    await rowAction('Reactivar');
+    expect(await screen.findByText('Alcanzaste el límite de vigiladores.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: link })).toHaveAttribute('href', '/suscripcion');
+  });
+  it('alta con cupo completo no confunde el error con correo duplicado', async () => {
+    setup();
+    jest.mocked(apiPost).mockRejectedValue(
+      new ApiError('Conflicto', 409, {
+        code: 'guard_limit_reached',
+        status: 'trial',
+        message: 'Alcanzaste el límite de vigiladores de la prueba.',
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Invitar usuario' }));
+    const form = screen.getByRole('form', { name: 'Invitar usuario' });
+    fireEvent.change(within(form).getByLabelText('Nombre'), { target: { value: 'Ana' } });
+    fireEvent.change(within(form).getByLabelText('Apellido'), { target: { value: 'Prueba' } });
+    fireEvent.change(within(form).getByLabelText('Correo'), {
+      target: { value: 'ana@example.invalid' },
+    });
+    fireEvent.change(within(form).getByLabelText('Teléfono celular'), {
+      target: { value: '+5491123456789' },
+    });
+    fireEvent.submit(form);
+    expect(
+      await screen.findByText('Alcanzaste el límite de vigiladores de la prueba.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Suscribirme' })).toHaveAttribute(
+      'href',
+      '/suscripcion',
+    );
   });
 });

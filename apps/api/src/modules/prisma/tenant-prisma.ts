@@ -16,14 +16,17 @@ export const COMPANY_ID_MODELS = [
   'Round',
   'RoundVersionCheckpoint',
   'Shift',
+  'ShiftSchedule',
   'ShiftEvent',
   'CheckpointRecord',
   'InvalidScanAttempt',
   'RecordFlag',
   'Incident',
   'PanicAlert',
+  'SmsInbound',
   'PanicSmsDelivery',
   'IncidentClassification',
+  'IncidentFollowUpAction',
   'ShiftCredential',
   'SyncBatch',
   'ConnectionNotice',
@@ -33,7 +36,14 @@ export const COMPANY_ID_MODELS = [
   'Notice',
   'NoticeView',
   'NotificationPreference',
+  'UserViewPreference',
+  'UserFavorite',
   'NotificationDevice',
+  'Subscription',
+  'SubscriptionCharge',
+  'PlanChangePayment',
+  'SubscriptionChange',
+  'ReportExport',
 ] as const;
 /** Models without companyId declare the relation used to derive their tenant. */
 export const INDIRECT_TENANT_MODELS = {
@@ -106,6 +116,7 @@ export function addSiteAssignmentFilter(
   if (model === 'RoundVersionCheckpoint')
     return { ...args, where: { AND: [where, { roundVersion: { round: { site: assignment } } }] } };
   if (model === 'Shift') return { ...args, where: { AND: [where, { site: assignment }] } };
+  if (model === 'ShiftSchedule') return { ...args, where: { AND: [where, { site: assignment }] } };
   if (model === 'RoundWindowState')
     return { ...args, where: { AND: [where, { shift: { site: assignment } }] } };
   if (model === 'NoticeView')
@@ -132,6 +143,8 @@ export function addSiteAssignmentFilter(
   if (model === 'PanicSmsDelivery')
     return { ...args, where: { AND: [where, { alert: { site: assignment } }] } };
   if (model === 'IncidentClassification')
+    return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
+  if (model === 'IncidentFollowUpAction')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
   if (model === 'IncidentPhotoAuthorization')
     return { ...args, where: { AND: [where, { incident: { site: assignment } }] } };
@@ -191,20 +204,69 @@ export function applySiteAssignmentFilter(
   return { ...filtered, where: { ...where, ...(filtered.where as object) } };
 }
 
+const CREATE_OPERATIONS: readonly string[] = ['create', 'createMany', 'createManyAndReturn'];
+const CLIENT_OWN_ROW_MODELS: readonly string[] = [
+  'ReportExport',
+  'UserViewPreference',
+  'UserFavorite',
+];
+
 export function addClientFilter(
   model: string,
   args: unknown,
   user: TenantContext['user'],
+  operation?: string,
 ): unknown {
   if (!isRecord(args) || user?.role !== 'client') return args;
   if (!user.clientId) throw new ForbiddenException('El usuario no tiene cliente asociado');
   const where = isRecord(args.where) ? args.where : {};
   const site = { clientId: user.clientId, status: 'active', client: { status: 'active' } };
+  if (model === 'Client') {
+    // The client role only reads its own record.
+    if (operation && !/^(find|count|aggregate|groupBy)/.test(operation))
+      throw new ForbiddenException('El cliente no puede modificar su registro');
+    return { ...args, where: { ...where, AND: [where, { id: user.clientId, status: 'active' }] } };
+  }
+  // Filas propias del usuario: exportaciones, diseño de pantallas y fijados.
+  if (CLIENT_OWN_ROW_MODELS.includes(model)) {
+    const creating = operation !== undefined && CREATE_OPERATIONS.includes(operation);
+    const rows = (write: unknown): unknown[] =>
+      write === undefined ? [] : Array.isArray(write) ? write : [write];
+    // Lo que se crea debe ser del usuario. Lo que se actualiza ya lo acota el where: solo se
+    // rechaza si intenta pasar la fila a otro usuario.
+    for (const row of [...rows(creating ? args.data : undefined), ...rows(args.create)])
+      if (!isRecord(row) || row.userId !== user.userId || Object.hasOwn(row, 'user'))
+        throw new ForbiddenException('Solo se registran datos del usuario autenticado');
+    for (const row of [...rows(creating ? undefined : args.data), ...rows(args.update)])
+      if (
+        !isRecord(row) ||
+        (Object.hasOwn(row, 'userId') && row.userId !== user.userId) ||
+        Object.hasOwn(row, 'user')
+      )
+        throw new ForbiddenException('Solo se registran datos del usuario autenticado');
+    // create/createMany no aceptan where; las escrituras ya verificaron el propietario.
+    if (creating) return args;
+    return { ...args, where: { ...where, AND: [where, { userId: user.userId }] } };
+  }
   if (model === 'Site') return { ...args, where: { ...where, AND: [where, site] } };
   if (model === 'User') return { ...args, where: { ...where, id: user.userId } };
   if (model === 'Invitation') return { ...args, where: { ...where, userId: user.userId } };
   if (model === 'NotificationDevice') return { ...args, where: { ...where, userId: user.userId } };
-  // HU-28 habilitará otros modelos del portal con su filtro explícito.
+  if (model === 'RoundWindowState')
+    return {
+      ...args,
+      where: { ...where, AND: [where, { shift: { site, status: { not: 'cancelled' } } }] },
+    };
+  if (model === 'Incident')
+    return {
+      ...args,
+      where: { ...where, AND: [where, { site, classificationStatus: 'client_visible' }] },
+    };
+  if (model === 'PanicAlert')
+    return {
+      ...args,
+      where: { ...where, AND: [where, { site, status: 'resolved', outcome: 'real_emergency' }] },
+    };
   if (model !== 'Company') throw new ForbiddenException('Modelo no habilitado para el portal');
   return args;
 }
@@ -357,6 +419,7 @@ export function createTenantPrismaClient(systemPrisma: PrismaClient, context: Te
               model,
               applySiteAssignmentFilter(model, operation, tenantArgs, user),
               user,
+              operation,
             ) as typeof args,
           );
         },

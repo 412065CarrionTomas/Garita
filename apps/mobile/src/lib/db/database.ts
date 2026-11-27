@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   pendingFieldEventSchema,
   shiftOfflineDataSchema,
+  type CheckpointRecordRequest,
+  type CheckpointRecordResponse,
   type PendingFieldEvent,
   type ShiftOfflineData,
   createPanicAlertRequestSchema,
@@ -219,6 +221,7 @@ export class ExpoFieldDatabase implements FieldDatabase, MigrationDatabase {
     await this.db.runAsync('DELETE FROM shift_checkpoints');
     await this.db.runAsync('DELETE FROM server_time');
     await this.db.runAsync('DELETE FROM checkpoint_records');
+    await this.db.runAsync("DELETE FROM sync_state WHERE key IN ('synced_until', 'last_sync_at')");
     if (!data) return;
     await this.db.runAsync(
       'INSERT INTO current_shift (id, data) VALUES (1, ?)',
@@ -625,4 +628,41 @@ export type FieldRepository = ReturnType<typeof createFieldRepository>;
 
 export async function createDefaultFieldRepository() {
   return createFieldRepository(await openFieldDatabase());
+}
+
+/** Reconcile the optimistic record with the definitive single-event or batch response. */
+export async function applyCheckpointRecordResponse(
+  repository: FieldRepository,
+  request: CheckpointRecordRequest,
+  response: CheckpointRecordResponse,
+  /** Registros locales ya leídos: evita releer la tabla por cada evento de un lote. */
+  knownRecords?: readonly LocalCheckpointRecord[],
+): Promise<void> {
+  if (response.result !== 'recorded') {
+    await repository.updateCheckpointRecordServerResult(
+      request.recordId,
+      'rejected',
+      response.result === 'rejected' ? response.reason : response.cause,
+    );
+    return;
+  }
+  const existing = (knownRecords ?? (await repository.listCheckpointRecords(request.shiftId))).find(
+    (record) => record.recordId === request.recordId,
+  );
+  const data = existing ? null : await repository.getShiftData();
+  await repository.saveCheckpointRecord({
+    recordId: request.recordId,
+    shiftId: request.shiftId,
+    checkpointId: response.checkpointId,
+    checkpointName:
+      existing?.checkpointName ??
+      data?.checkpoints.find((point) => point.id === response.checkpointId)?.name ??
+      'Punto de control',
+    occurredAtUtc: request.clock?.trustedAt ?? request.occurredAtDevice,
+    countedFor: response.countedFor,
+    outOfWindow: response.outOfWindow,
+    serverResult: 'recorded',
+    serverReason: null,
+    createdAt: existing?.createdAt ?? request.occurredAtDevice,
+  });
 }

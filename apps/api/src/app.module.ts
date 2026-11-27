@@ -1,5 +1,7 @@
 import { CoverageNoticesModule } from './modules/coverage-notices/coverage-notices.module';
 import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
+import { ViewPreferencesModule } from './modules/view-preferences/view-preferences.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -28,6 +30,11 @@ import { PanicModule } from './modules/panic/panic.module';
 import { NoticesModule } from './modules/notices/notices.module';
 import { CompanyModule } from './modules/company/company.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { PortalModule } from './modules/portal/portal.module';
+import { ReportExportsModule } from './modules/report-exports/report-exports.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { SmsModule } from './modules/sms/sms.module';
+import { ShiftSchedulesModule } from './modules/shift-schedules/shift-schedules.module';
 
 @Module({
   imports: [
@@ -62,8 +69,15 @@ import { ReportsModule } from './modules/reports/reports.module';
     NoticesModule,
     CompanyModule,
     ReportsModule,
+    PortalModule,
+    ReportExportsModule,
     CoverageNoticesModule,
     NotificationPreferencesModule,
+    ViewPreferencesModule,
+    FavoritesModule,
+    SubscriptionsModule,
+    SmsModule,
+    ShiftSchedulesModule,
   ],
 })
 export class AppModule {}

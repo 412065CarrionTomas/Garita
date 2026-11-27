@@ -60,6 +60,20 @@ describe('NotificationsProcessor', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'shift_unsynced',
+    'shift_not_started',
+    'shift_closed_early',
+    'shift_without_guard',
+  ] as const)('delivers %s to staff web devices', async (kind) => {
+    await processor.process({
+      data: { ...job.data, payload: { kind, link: '/avisos/1' } },
+    } as Parameters<typeof processor.process>[0]);
+    expect(findDevices).toHaveBeenCalledWith({
+      where: { companyId: 'company-1', userId: { in: ['supervisor-1'] } },
+    });
+  });
+
   it('rejects extra queue payload fields before sending', async () => {
     const invalidJob = {
       data: { ...job.data, payload: { ...job.data.payload, address: 'private' } },

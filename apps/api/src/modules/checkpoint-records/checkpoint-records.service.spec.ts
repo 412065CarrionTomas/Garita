@@ -1,6 +1,14 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { CHECKPOINT_RECORD_ERROR_CODES, type CheckpointRecordRequest } from '@garita/shared';
-import { CheckpointRecordsService, computeRequestHash } from './checkpoint-records.service';
+import {
+  CHECKPOINT_RECORD_ERROR_CODES,
+  type CheckpointRecordRequest,
+  type ShiftOfflineData,
+} from '@garita/shared';
+import {
+  CheckpointRecordsService,
+  computeRequestHash,
+  type CheckpointRecordBatchContext,
+} from './checkpoint-records.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { QrService } from '../checkpoints/qr.service';
 import type { ShiftExecutionService } from '../shift-execution/shift-execution.service';
@@ -647,6 +655,119 @@ describe('CheckpointRecordsService', () => {
 
       expect(result.result).toBe('recorded');
       expect(checkpointRecordCreate).toHaveBeenCalled();
+    });
+  });
+  it('excludes invalidated records from imputation history', async () => {
+    await service.processRecord(createSampleRequest(), guardUser);
+    expect(checkpointRecordFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { shiftId: 'shift-1', invalidatedAt: null },
+      }),
+    );
+  });
+
+  it('does not pollute batch history when persistence fails', async () => {
+    const previousRecords: {
+      checkpointId: string;
+      occurredAtUtc: string;
+      countedFor: { roundId: string; windowIndex: number }[];
+    }[] = [];
+    checkpointRecordCreate.mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(
+      service.processRecord(createSampleRequest(), guardUser, { previousRecords }),
+    ).rejects.toThrow('database unavailable');
+    expect(previousRecords).toEqual([]);
+  });
+
+  it.each([
+    ['2026-10-13T09:30:00.000Z', true],
+    ['2026-10-13T10:30:00.000Z', false],
+  ])(
+    'accepts the outgoing credential assignment at %s after administrative coverage',
+    async (occurredAtDevice, countsForCompliance) => {
+      shiftFindFirst.mockResolvedValue({
+        id: 'shift-1',
+        companyId: 'company-1',
+        siteId: 'site-1',
+        status: 'scheduled',
+        closedBy: null,
+        closedAt: null,
+        events: [{ type: 'admin_close', occurredAt: new Date('2026-10-13T10:00:00.000Z') }],
+        assignments: [
+          {
+            id: 'old-assignment',
+            guardId: 'guard-1',
+            startsAt: new Date('2026-10-13T08:00:00Z'),
+            endsAt: new Date('2026-10-13T16:00:00Z'),
+          },
+        ],
+      });
+      const result = await service.processRecord(
+        createSampleRequest({ occurredAtDevice }),
+        guardUser,
+        { credentialAssignmentId: 'old-assignment' },
+      );
+      expect(result.result).toBe('recorded');
+      expect((checkpointRecordCreate.mock.calls as unknown[][])[0]?.[0]).toMatchObject({
+        data: { assignmentId: 'old-assignment', countsForCompliance },
+      });
+      expect((shiftFindFirst.mock.calls as unknown[][])[0]?.[0]).toMatchObject({
+        include: { assignments: { where: { id: 'old-assignment', guardId: 'guard-1' } } },
+      });
+    },
+  );
+  it.each(['2026-10-13T07:59:59.000Z', '2026-10-13T16:00:01.000Z'])(
+    'rejects a credential record outside its assignment at %s',
+    async (occurredAtDevice) => {
+      await expect(
+        service.processRecord(createSampleRequest({ occurredAtDevice }), guardUser, {
+          credentialAssignmentId: 'assign-1',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(checkpointRecordCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('imputes against the original assignment start snapshot after a replacement starts', async () => {
+    const original = (await getShiftOfflineData()) as ShiftOfflineData;
+    original.shift = {
+      id: 'shift-1',
+      siteId: 'site-1',
+      siteName: 'Predio',
+      startsAt: '2026-10-13T08:00:00.000Z',
+      endsAt: '2026-10-13T16:00:00.000Z',
+      timezone: 'UTC',
+      assignmentId: 'assign-1',
+    };
+    original.serverTime = { serverNowUtc: '2026-10-13T08:00:00.000Z' };
+    original.rounds = [
+      {
+        roundId: 'round-1',
+        roundVersionId: 'old-version',
+        name: 'Ronda',
+        checkpointIds: ['cp-1'],
+        frequencyMinutes: 120,
+        graceMinutes: 15,
+        windowStartLocal: '08:00',
+        windowEndLocal: '16:00',
+      },
+    ];
+    original.checkpoints = [
+      { id: 'cp-1', name: 'Punto 1', qrVersion: 1, nfcUid: null, isIndoor: false },
+    ];
+    const shift = (await shiftFindFirst()) as NonNullable<CheckpointRecordBatchContext['shift']>;
+    shift.events = [
+      { type: 'start', occurredAt: new Date('2026-10-13T08:00:00Z'), response: { data: original } },
+    ];
+    getShiftOfflineData.mockResolvedValue({ ...original, windows: [] });
+    expect(
+      await service.processRecord(createSampleRequest(), guardUser, {
+        credentialAssignmentId: 'assign-1',
+        shift,
+      }),
+    ).toMatchObject({
+      result: 'recorded',
+      countedFor: [{ roundId: 'round-1', windowIndex: 0, late: false }],
     });
   });
 });

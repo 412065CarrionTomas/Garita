@@ -39,6 +39,17 @@ const TITLES: Record<string, string> = {
   panic: 'Pánico',
 };
 
+const GUARD_AGENDA_KINDS: readonly NotificationJob['payload']['kind'][] = [
+  'shift_assigned',
+  'shift_changed',
+  'shift_reassigned_to_you',
+  'shift_removed',
+  'shift_cancelled',
+  'shift_closed_site_removed',
+  'shift_reassigned_from_you',
+  'shift_schedule_summary',
+];
+
 @Injectable()
 @Processor(NOTIFICATIONS_QUEUE)
 export class NotificationsProcessor extends WorkerHost {
@@ -63,7 +74,7 @@ export class NotificationsProcessor extends WorkerHost {
       where: {
         companyId: input.companyId,
         userId: { in: activeUsers.map(({ id }) => id) },
-        ...(payload.kind.startsWith('shift_') ? { kind: 'app' as const } : {}),
+        ...(GUARD_AGENDA_KINDS.includes(payload.kind) ? { kind: 'app' as const } : {}),
       },
     });
     for (let start = 0; start < devices.length; start += 500) {

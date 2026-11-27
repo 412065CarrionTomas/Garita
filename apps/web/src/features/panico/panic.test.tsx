@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import type * as ReactRouter from 'react-router';
@@ -29,6 +29,7 @@ const alert = {
   guard: { name: 'Pedro Díaz', phone: '+5493511234567' },
   timezone: 'America/Argentina/Buenos_Aires',
   authenticated: true,
+  phoneMismatch: false,
   latitude: -31.4,
   longitude: -64.2,
   accuracyMeters: 20,
@@ -45,7 +46,7 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-it('anuncia una alerta activa con texto, ícono, enlace y control para activar sonido', () => {
+it('anuncia una alerta activa con texto, ícono y enlace, sin botón de sonido', () => {
   renderWithQueryClient(
     <MemoryRouter>
       <PanicBanner alerts={[alert]} count={1} />
@@ -57,7 +58,7 @@ it('anuncia una alerta activa con texto, ícono, enlace y control para activar s
     'href',
     `/alertas-panico/${alert.id}`,
   );
-  expect(screen.getByRole('button', { name: 'Activar sonido de alertas' })).toBeEnabled();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });
 
 it('repite el tono y lo detiene cuando ya no hay activas', async () => {
@@ -93,12 +94,19 @@ it('repite el tono y lo detiene cuando ya no hay activas', async () => {
         <PanicBanner alerts={[alert]} count={1} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Activar sonido de alertas' }));
+    // El primer gesto en la página habilita el audio.
+    fireEvent.pointerDown(document);
     await waitFor(() => {
-      expect(localStorage.getItem('garita-panic-sound')).toBe('enabled');
+      expect(audio.resume).toHaveBeenCalled();
     });
+    // Con la alerta ya activa suena enseguida, sin esperar el próximo intervalo.
+    await waitFor(() => {
+      expect(start).toHaveBeenCalled();
+    });
+    // Habilitado el audio, los gestos siguientes ya no lo tocan.
+    fireEvent.pointerDown(document);
+    expect(audio.resume).toHaveBeenCalledTimes(1);
     const initial = start.mock.calls.length;
-    const { act } = await import('@testing-library/react');
     act(() => {
       jest.advanceTimersByTime(8000);
     });
@@ -125,8 +133,8 @@ it('repite el tono y lo detiene cuando ya no hay activas', async () => {
   }
 });
 
-it('recupera el sonido recordado al remontar los efectos en modo estricto', () => {
-  localStorage.setItem('garita-panic-sound', 'enabled');
+it('suena tras el primer gesto aunque los efectos se remonten en modo estricto', () => {
+  jest.useFakeTimers();
   const previous = window.AudioContext;
   const start = jest.fn();
   const contexts: { state: string }[] = [];
@@ -138,6 +146,7 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
         state: 'running',
         currentTime: 0,
         destination: {},
+        resume: () => Promise.resolve(),
         close: () => {
           audio.state = 'closed';
           return Promise.resolve();
@@ -165,11 +174,12 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
         </MemoryRouter>
       </StrictMode>,
     );
-    expect(start).toHaveBeenCalledTimes(2);
-    expect(contexts.map((audio) => audio.state)).toEqual(['closed', 'running']);
-    expect(
-      screen.queryByRole('button', { name: 'Activar sonido de alertas' }),
-    ).not.toBeInTheDocument();
+    fireEvent.pointerDown(document);
+    act(() => {
+      jest.advanceTimersByTime(4000);
+    });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(contexts.map((audio) => audio.state)).toEqual(['running']);
     view.unmount();
   } finally {
     Object.defineProperty(window, 'AudioContext', {
@@ -177,6 +187,7 @@ it('recupera el sonido recordado al remontar los efectos en modo estricto', () =
       writable: true,
       value: previous,
     });
+    jest.useRealTimers();
   }
 });
 
@@ -275,19 +286,49 @@ it('filtra el historial por predio y estado', async () => {
       <PanicListPage />
     </MemoryRouter>,
   );
-  await screen.findByText('Depósito Ruta 9 · Pedro Díaz');
-  fireEvent.change(screen.getByLabelText('Predio'), { target: { value: 'site' } });
-  fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'confirmed' } });
+  await screen.findByText('Pedro Díaz');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Predio' }), { target: { value: 'site' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmadas' }));
   await waitFor(() => {
     expect(apiGet).toHaveBeenCalledWith(
-      '/alertas-panico?pagina=1&estado=confirmed&predio=site',
+      '/alertas-panico?pagina=1&porPagina=10&estado=confirmed&predio=site',
       expect.anything(),
     );
   });
 });
 
+it('si la página queda vacía (se atendió la última), vuelve a la última con alertas', async () => {
+  // La página 1 todavía cuenta 4 alertas; al pedir la 2, la última ya no está y quedan 3.
+  jest.mocked(apiGet).mockImplementation((path) => {
+    if (path === '/predios') return Promise.resolve([alert.site]);
+    const second = new URLSearchParams(path.split('?')[1]).get('pagina') === '2';
+    return Promise.resolve({
+      items: second ? [] : [alert],
+      total: second ? 3 : 4,
+      activeCount: 3,
+      page: second ? 2 : 1,
+      pageSize: 3,
+    });
+  });
+  renderWithQueryClient(
+    <MemoryRouter>
+      <PanicListPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText('Pedro Díaz');
+  fireEvent.change(screen.getByLabelText('Por página'), { target: { value: '3' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Página 2' }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Página 1' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+  expect(screen.getByText('Pedro Díaz')).toBeInTheDocument();
+});
+
 it('muestra la indicación preparada para una alerta SMS no verificada', async () => {
-  jest.mocked(apiGet).mockResolvedValue({ ...alert, authenticated: false });
+  jest.mocked(apiGet).mockResolvedValue({ ...alert, authenticated: false, phoneMismatch: true });
   renderWithQueryClient(
     <MemoryRouter>
       <PanicDetailPage />
@@ -296,4 +337,30 @@ it('muestra la indicación preparada para una alerta SMS no verificada', async (
   expect(
     await screen.findByText('No verificada. Atendé la alerta igualmente.'),
   ).toBeInTheDocument();
+  expect(screen.getByText('Por SMS')).toBeVisible();
+  expect(screen.getByText('El número no coincide')).toBeVisible();
+});
+
+it('indica SMS, falta de verificación y número diferente también en el listado', async () => {
+  jest.mocked(apiGet).mockImplementation((path) =>
+    Promise.resolve(
+      path === '/predios'
+        ? []
+        : {
+            items: [{ ...alert, authenticated: false, phoneMismatch: true }],
+            total: 1,
+            page: 1,
+            pageSize: 25,
+            activeCount: 1,
+          },
+    ),
+  );
+  renderWithQueryClient(
+    <MemoryRouter>
+      <PanicListPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText('Por SMS')).toBeVisible();
+  expect(screen.getByText('No verificada')).toBeVisible();
+  expect(screen.getByText('El número no coincide')).toBeVisible();
 });

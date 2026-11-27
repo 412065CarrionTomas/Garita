@@ -77,3 +77,22 @@ Si el vigilador intenta cerrar sesión teniendo eventos pendientes en la cola lo
 ## 7. Punto de extensión para alertas urgentes (HU-21, CA8)
 
 El servicio de cola expone la función `sendUrgentEvent`, reservada para la alerta de pánico (HU-21). Esta vía permitirá saltar la espera de los lotes regulares y despachar de forma prioritaria la alerta al servidor.
+
+## Reconciliación de escaneos y avance del envío
+
+El envío directo y el lote aplican el resultado definitivo del servidor al registro
+local: `recorded` reemplaza `countedFor` y `outOfWindow`; `rejected` y
+`not_generated` quedan excluidos de lo contado, conservando su motivo. Una etiqueta
+NFC asociada después de descargar el turno puede ser aceptada por el servidor y
+crear su registro local. Un reintento de una lectura ya registrada recibe `duplicate`; el de un intento
+rechazado recibe su rechazo original. Ninguno duplica datos.
+
+Después de un envío directo confirmado se actualizan `last_sync_at` y
+`synced_until` con `computeSyncedUntil`; si queda un evento anterior pendiente, no
+se certifica un avance que lo saltee. Al reemplazar o borrar el turno local se
+eliminan ambas marcas. Un escaneo pendiente por reloj o por falla de envío programa
+la cola, y las lecturas NFC refrescan el turno tras guardar y tras recibir la
+respuesta del servidor.
+
+**Enviar ahora** distingue entre falta de señal, un envío ya en curso y un error
+de envío con conectividad; los dos últimos no se presentan como falta de señal.
