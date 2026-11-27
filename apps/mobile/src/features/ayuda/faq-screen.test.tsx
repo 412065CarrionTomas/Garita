@@ -68,13 +68,27 @@ describe('FaqScreen', () => {
     expect(screen.getByText(target.answer[0]?.split('**')[0] ?? '', { exact: false })).toBeTruthy();
   });
 
-  it('avisa cuando la búsqueda no encuentra nada', async () => {
+  it.each(['admin', 'supervisor'] as const)(
+    'al %s solo le muestra lo que aplica a la app y lo general',
+    async (role) => {
+      mockUser({ ...guard, role });
+      const screen = await render(<FaqScreen />);
+      for (const entry of faqEntries) {
+        const shown = screen.queryByRole('button', { name: entry.question });
+        if (entry.audiences.includes('public') || (entry.inApp && entry.audiences.includes(role)))
+          expect(shown).toBeTruthy();
+        else expect(shown).toBeNull();
+      }
+    },
+  );
+
+  it('avisa cuando la búsqueda no encuentra nada y permite borrarla', async () => {
     mockUser(guard);
     const screen = await render(<FaqScreen />);
-    await fireEvent.changeText(
-      screen.getByLabelText('Buscar en las preguntas'),
-      'zzzz-sin-coincidencias',
-    );
+    const search = screen.getByLabelText('Buscar en las preguntas');
+    await fireEvent.changeText(search, 'zzzz-sin-coincidencias');
     expect(screen.getByText('Sin resultados. Probá con otra palabra.')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Borrar búsqueda' }));
+    expect(screen.queryByText('Sin resultados. Probá con otra palabra.')).toBeNull();
   });
 });

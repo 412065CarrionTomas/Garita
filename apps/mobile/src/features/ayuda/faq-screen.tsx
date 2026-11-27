@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { faqForRole, groupFaqByTopic, LEGAL_OWNER, searchFaq } from '@garita/shared';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { faqForApp, groupFaqByTopic, LEGAL_OWNER, searchFaq } from '@garita/shared';
 import type { FaqEntry } from '@garita/shared';
 import { radius, space, touch } from '@garita/tokens';
 import { Button, Input, Loading, Screen, Text, fontFamily, useTheme } from '@/ui';
@@ -47,8 +47,8 @@ function FaqItem({ entry }: { entry: FaqEntry }) {
       </Pressable>
       {open && (
         <View style={styles.answer}>
-          {entry.answer.map((paragraph) => (
-            <RichText key={paragraph} text={paragraph} />
+          {entry.answer.map((paragraph, index) => (
+            <RichText key={index} text={paragraph} />
           ))}
         </View>
       )}
@@ -58,13 +58,11 @@ function FaqItem({ entry }: { entry: FaqEntry }) {
 
 /**
  * Preguntas frecuentes. Viajan dentro de la app, así se leen sin señal. Sin sesión solo muestra lo
- * general; con sesión suma las del rol.
+ * general; con sesión suma las del rol (a administrador y supervisor, solo lo de la app).
  */
 export function FaqScreen() {
   const { user, loading } = useAuth();
   const [query, setQuery] = useState('');
-  const entries = searchFaq(faqForRole(user?.role ?? null), query);
-  const groups = groupFaqByTopic(entries);
   // Abierta en frío (enlace), espera la sesión para no mostrar primero la vista sin rol.
   if (loading)
     return (
@@ -72,6 +70,7 @@ export function FaqScreen() {
         <Loading label="Verificando sesión…" />
       </Screen>
     );
+  const groups = groupFaqByTopic(searchFaq(faqForApp(user?.role ?? null), query));
   return (
     <Screen scroll style={styles.screen}>
       <View style={styles.back}>
@@ -99,9 +98,18 @@ export function FaqScreen() {
         returnKeyType="search"
       />
       {groups.length === 0 ? (
-        <Text color="mutedForeground" accessibilityLiveRegion="polite">
-          Sin resultados. Probá con otra palabra.
-        </Text>
+        <View style={styles.empty}>
+          <Text color="mutedForeground" accessibilityLiveRegion="polite">
+            Sin resultados. Probá con otra palabra.
+          </Text>
+          <Button
+            variant="outline"
+            label="Borrar búsqueda"
+            onPress={() => {
+              setQuery('');
+            }}
+          />
+        </View>
       ) : (
         groups.map((group) => (
           <View key={group.topic} style={styles.group}>
@@ -114,7 +122,17 @@ export function FaqScreen() {
           </View>
         ))
       )}
-      <Text color="mutedForeground">¿Necesitás más ayuda? Escribinos a {LEGAL_OWNER.email}.</Text>
+      <Text color="mutedForeground">
+        ¿Necesitás más ayuda? Escribinos a{' '}
+        <Text
+          accessibilityRole="link"
+          style={styles.link}
+          onPress={() => void Linking.openURL(`mailto:${LEGAL_OWNER.email}`)}
+        >
+          {LEGAL_OWNER.email}
+        </Text>
+        .
+      </Text>
     </Screen>
   );
 }
@@ -123,6 +141,8 @@ const styles = StyleSheet.create({
   screen: { gap: space[4], paddingBottom: space[8] },
   back: { alignItems: 'flex-start' },
   group: { gap: space[2] },
+  empty: { gap: space[3], alignItems: 'flex-start' },
+  link: { textDecorationLine: 'underline' },
   item: { borderWidth: 1, borderRadius: radius.md },
   question: {
     flexDirection: 'row',
