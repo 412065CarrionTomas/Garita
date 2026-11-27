@@ -48,3 +48,7 @@ Cada empresa trabaja de forma aislada: sus clientes, predios, turnos y usuarios 
 - [Guía para agentes de IA](AGENTS.md): stack y convenciones de código.
 - [Servicios externos](docs/servicios-externos.md): cuentas y credenciales.
 - [Despliegue de staging](docs/despliegue.md): Render, Vercel, Neon y EAS.
+
+## Licencia
+
+Software propietario. © 2026 Tomás Carrión. Todos los derechos reservados. El código se publica solo para lectura; no está permitido copiarlo, modificarlo, distribuirlo ni usarlo sin autorización escrita. Ver [LICENSE](LICENSE).
