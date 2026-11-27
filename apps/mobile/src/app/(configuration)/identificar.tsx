@@ -13,43 +13,49 @@ type State =
   | { kind: 'reading' }
   | { kind: 'found'; tag: IdentifiedNfcTag }
   | { kind: 'unknown' }
-  | { kind: 'error' };
+  | { kind: 'error'; message: string };
 
-const date = (value: string) =>
-  new Date(value).toLocaleString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+const DATE_TIME = new Intl.DateTimeFormat('es-AR', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+const date = (value: string) => DATE_TIME.format(new Date(value));
+const READ_FAILED = 'No se pudo leer la etiqueta. Acercala de nuevo y no la muevas.';
+const API_FAILED = 'No se pudo consultar la etiqueta. Revisá la conexión.';
 
 /** Lee una etiqueta suelta y dice de qué punto y predio es: sirve para ordenar una pila mezclada. */
 export default function IdentifyTagRoute() {
   const nfc = useNfcState();
   const [state, setState] = useState<State>({ kind: 'reading' });
-  // Cada "Leer otra" suma un intento y vuelve a esperar una etiqueta.
-  const [attempt, setAttempt] = useState(0);
+  // Solo se lee mientras la pantalla espera una etiqueta: volver a activar NFC no pisa un resultado.
+  const waiting = state.kind === 'reading';
 
   useEffect(() => {
-    if (nfc !== 'ready') return;
+    if (nfc !== 'ready' || !waiting) return;
     let active = true;
     readNfcTag()
-      .then(({ uid }) =>
-        apiRequest('POST', '/etiquetas-nfc/identificar', identifiedNfcTagSchema, {
-          uid: normalizeNfcUid(uid),
-        }),
+      .then(
+        ({ uid }) =>
+          apiRequest('POST', '/etiquetas-nfc/identificar', identifiedNfcTagSchema, {
+            uid: normalizeNfcUid(uid),
+          }).catch((error: unknown) => {
+            if (!active) return;
+            setState(
+              error instanceof ApiError && error.status === 404
+                ? { kind: 'unknown' }
+                : { kind: 'error', message: API_FAILED },
+            );
+          }),
+        // La lectura falló antes de consultar la API: no es un problema de conexión.
+        () => {
+          if (active) setState({ kind: 'error', message: READ_FAILED });
+        },
       )
       .then((tag) => {
-        if (active) setState({ kind: 'found', tag });
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        setState(
-          error instanceof ApiError && error.status === 404
-            ? { kind: 'unknown' }
-            : { kind: 'error' },
-        );
+        if (active && tag) setState({ kind: 'found', tag });
       })
       .finally(() => {
         // Una lectura vieja no corta la del intento nuevo.
@@ -59,7 +65,7 @@ export default function IdentifyTagRoute() {
       active = false;
       void cancelNfcRead();
     };
-  }, [nfc, attempt]);
+  }, [nfc, waiting]);
 
   return (
     <Screen scroll>
@@ -81,9 +87,7 @@ export default function IdentifyTagRoute() {
                 <Text>No está asociada a ningún punto. Podés usarla en cualquiera.</Text>
               </View>
             )}
-            {state.kind === 'error' && (
-              <Banner tone="danger">No se pudo leer la etiqueta. Revisá la conexión.</Banner>
-            )}
+            {state.kind === 'error' && <Banner tone="danger">{state.message}</Banner>}
           </View>
           {state.kind === 'found' && state.tag.status === 'active' && (
             <Button
@@ -102,10 +106,7 @@ export default function IdentifyTagRoute() {
               variant="secondary"
               size="lg"
               label="Leer otra"
-              onPress={() => {
-                setState({ kind: 'reading' });
-                setAttempt((n) => n + 1);
-              }}
+              onPress={() => setState({ kind: 'reading' })}
             />
           )}
         </>

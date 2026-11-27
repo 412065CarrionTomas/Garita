@@ -4,14 +4,15 @@ import type { Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { space } from '@garita/tokens';
 import { Button, ListItem, Text, ThemeSwitch, useTheme } from '@/ui';
+import type { AuthMeResponse } from '@garita/shared';
 import { useAuth } from '@/features/auth/auth-context';
 import { getSyncSnapshot } from '@/lib/cola';
 
-const ROLE_LABEL = {
+const ROLE_LABEL: Partial<Record<AuthMeResponse['role'], string>> = {
   guard: 'Vigilador',
   admin: 'Administrador',
   supervisor: 'Supervisor',
-} as const;
+};
 
 /**
  * Menú lateral: cuenta, tema, documentos legales y salida. El del vigilador suma sus envíos
@@ -63,7 +64,7 @@ export function GuardMenu({
             <View>
               <Text variant="heading">{`${user.firstName} ${user.lastName}`}</Text>
               <Text color="mutedForeground">
-                {`${ROLE_LABEL[user.role as keyof typeof ROLE_LABEL] ?? ''} · ${user.company.name}`}
+                {[ROLE_LABEL[user.role], user.company.name].filter(Boolean).join(' · ')}
               </Text>
             </View>
           )}

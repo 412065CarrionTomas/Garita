@@ -14,7 +14,8 @@ export const TAG_TEXT: Record<TagType, string> = {
 /** Avance de etiquetado: la barra es apoyo, el texto de al lado dice el número. */
 export function ProgressBar({ done, total }: { done: number; total: number }) {
   const { colors } = useTheme();
-  const ratio = total ? done / total : 0;
+  // Acotada: un dato raro (más etiquetas que puntos) no desborda la barra.
+  const ratio = total ? Math.min(1, Math.max(0, done / total)) : 0;
   return (
     <View
       accessibilityElementsHidden
@@ -26,7 +27,7 @@ export function ProgressBar({ done, total }: { done: number; total: number }) {
           styles.fill,
           {
             width: `${Math.round(ratio * 100)}%`,
-            backgroundColor: ratio === 1 ? colors.success : colors.primary,
+            backgroundColor: ratio >= 1 ? colors.success : colors.primary,
           },
         ]}
       />

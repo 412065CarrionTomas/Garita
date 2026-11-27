@@ -92,3 +92,12 @@ it('una etiqueta sin asociar se puede usar y se lee otra', async () => {
   expect(await screen.findByText('Galpón')).toBeOnTheScreen();
   expect(readNfcTag).toHaveBeenCalledTimes(2);
 });
+
+it('si falla la lectura no culpa a la conexión', async () => {
+  jest.mocked(readNfcTag).mockRejectedValueOnce(new Error('Tag lost'));
+  await mount();
+  expect(
+    await screen.findByText('No se pudo leer la etiqueta. Acercala de nuevo y no la muevas.'),
+  ).toBeOnTheScreen();
+  expect(apiRequest).not.toHaveBeenCalled();
+});

@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { Alert, Modal, StyleSheet, Switch, View } from 'react-native';
+import { Modal, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { radius, space, touch } from '@garita/tokens';
 import { Button, Icon, Text, useTheme } from '@/ui';
+import { NfcBlocker, type NfcState } from './nfc-status';
 import { PointNumber, TAG_TEXT, type TagType } from './parts';
 import { useTagAssociation, type TagPhase } from './use-tag-association';
 
@@ -27,6 +28,7 @@ export function ScanSheet({
   series,
   next,
   remaining,
+  nfc,
   auto,
   onAutoChange,
   onNext,
@@ -38,33 +40,37 @@ export function ScanSheet({
   next: SheetPoint | null;
   /** Pendientes de la serie que quedan, contando el actual. */
   remaining: number;
+  /** Sin NFC no se lee: la hoja lo avisa y no ofrece leer ni reintentar. */
+  nfc: NfcState;
   auto: boolean;
   onAutoChange: (value: boolean) => void;
-  onNext: () => void;
+  /** Recibe el punto desde el que se avanza: un doble toque no saltea ninguno. */
+  onNext: (fromId: string) => void;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const { colors } = useTheme();
-  const { phase, associate, confirmMove, remove, reset } = useTagAssociation(onChanged);
+  const { phase, associate, confirmMove, askRemove, remove, reset } = useTagAssociation(onChanged);
+  const ready = nfc === 'ready';
   const pointId = point?.id;
   const nextId = next?.id;
   const tagged = point ? point.tagType !== 'qr' : false;
 
   // Al abrir un punto sin etiqueta (o cualquiera de la serie) ya se espera la lectura.
   useEffect(() => {
-    if (!point) return reset();
+    if (!point || !ready) return reset();
     if (series || !tagged) void associate(point);
     else reset();
-    // Solo al cambiar de punto: la lista se refresca después de cada asociación.
+    // Solo al cambiar de punto o de NFC: la lista se refresca después de cada asociación.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pointId]);
+  }, [pointId, ready]);
 
   useEffect(() => {
     if (phase.kind !== 'done' || !series || !auto || !nextId) return;
-    const timer = setTimeout(onNext, AUTO_DELAY_MS);
+    const timer = setTimeout(() => onNext(pointId ?? ''), AUTO_DELAY_MS);
     return () => clearTimeout(timer);
     // Por id: la lista se refresca tras asociar y `next` llega como objeto nuevo.
-  }, [phase.kind, series, auto, nextId, onNext]);
+  }, [phase.kind, series, auto, pointId, nextId, onNext]);
 
   if (!point) return null;
 
@@ -72,15 +78,6 @@ export function ScanSheet({
     reset();
     onClose();
   };
-  const confirmRemove = () =>
-    Alert.alert(
-      `¿Quitar la etiqueta de ${point.name}?`,
-      'El punto queda sin etiqueta hasta que asocies otra.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Quitar', style: 'destructive', onPress: () => void remove(point) },
-      ],
-    );
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={close}>
@@ -105,7 +102,7 @@ export function ScanSheet({
             </View>
           </View>
 
-          <PhaseMessage phase={phase} point={point} />
+          {ready ? <PhaseMessage phase={phase} point={point} /> : <NfcBlocker state={nfc} />}
 
           {phase.kind === 'done' && (
             <View style={[styles.writeOn, { borderColor: colors.foreground }]}>
@@ -119,12 +116,25 @@ export function ScanSheet({
           <View style={styles.actions}>
             {phase.kind === 'idle' && tagged && (
               <>
+                {ready && (
+                  <Button
+                    size="lg"
+                    label="Reemplazar etiqueta"
+                    onPress={() => void associate(point)}
+                  />
+                )}
+                <Button variant="danger" label="Quitar etiqueta" onPress={askRemove} />
+              </>
+            )}
+            {phase.kind === 'confirmRemove' && (
+              <>
                 <Button
+                  variant="danger"
                   size="lg"
-                  label="Reemplazar etiqueta"
-                  onPress={() => void associate(point)}
+                  label="Sí, quitar"
+                  onPress={() => void remove(point)}
                 />
-                <Button variant="danger" label="Quitar etiqueta" onPress={confirmRemove} />
+                <Button variant="outline" label="No, volver" onPress={reset} />
               </>
             )}
             {phase.kind === 'move' && (
@@ -134,22 +144,28 @@ export function ScanSheet({
                   label={`Mover a ${point.name}`}
                   onPress={() => void confirmMove(point)}
                 />
-                <Button
-                  variant="outline"
-                  label="Leer otra etiqueta"
-                  onPress={() => void associate(point)}
-                />
+                {ready && (
+                  <Button
+                    variant="outline"
+                    label="Leer otra etiqueta"
+                    onPress={() => void associate(point)}
+                  />
+                )}
               </>
             )}
-            {phase.kind === 'error' && (
-              <Button size="lg" label="Reintentar" onPress={() => void associate(point)} />
+            {phase.kind === 'error' && (phase.action === 'remove' || ready) && (
+              <Button
+                size="lg"
+                label="Reintentar"
+                onPress={() => void (phase.action === 'remove' ? remove(point) : associate(point))}
+              />
             )}
             {phase.kind === 'done' && series && next && (
               <Button
                 size="lg"
                 label={auto ? `Pasando a ${pointName(next)}…` : `Siguiente: ${pointName(next)}`}
                 accessibilityLabel={`Siguiente punto: ${pointName(next)}`}
-                onPress={onNext}
+                onPress={() => onNext(point.id)}
               />
             )}
             {(phase.kind === 'done' || phase.kind === 'removed') && (!series || !next) && (
@@ -170,7 +186,8 @@ export function ScanSheet({
                 />
               </View>
             )}
-            {phase.kind !== 'done' && phase.kind !== 'removed' && (
+            {/* Mientras se guarda no se cancela: la API ya puede haber aplicado el cambio. */}
+            {phase.kind !== 'done' && phase.kind !== 'removed' && phase.kind !== 'saving' && (
               <Button variant="ghost" label={series ? 'Terminar' : 'Cancelar'} onPress={close} />
             )}
             {phase.kind === 'done' && series && next && (
@@ -207,6 +224,15 @@ function PhaseMessage({ phase, point }: { phase: TagPhase; point: SheetPoint }) 
           title: 'Acercala de nuevo',
           body: 'Es la lectura de prueba: confirma que la etiqueta quedó bien configurada.',
         };
+      case 'saving':
+        return { title: 'Guardando…' };
+      case 'confirmRemove':
+        return {
+          title: `¿Quitar la etiqueta de ${point.name}?`,
+          body: 'El punto queda sin etiqueta hasta que asocies otra.',
+          icon: 'cross' as const,
+          tone: 'danger' as const,
+        };
       case 'move':
         return {
           title: `Esta etiqueta es de ${phase.otherName}`,
@@ -227,7 +253,7 @@ function PhaseMessage({ phase, point }: { phase: TagPhase; point: SheetPoint }) 
         };
       case 'error':
         return {
-          title: 'No se pudo asociar',
+          title: phase.action === 'remove' ? 'No se pudo quitar' : 'No se pudo asociar',
           body: phase.message,
           icon: 'cross' as const,
           tone: 'danger' as const,

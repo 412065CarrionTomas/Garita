@@ -14,11 +14,15 @@ import { ProgressBar } from '@/features/etiquetas/parts';
 type Site = z.infer<typeof nfcConfigurationSitesSchema>[number];
 
 /** Sin mayúsculas ni tildes: "alamos" encuentra "Los Álamos". */
-const fold = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const fold = (text: string) =>
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 
 /** Primero los predios con puntos sin etiqueta; los completos y los vacíos, al final. */
 const byPending = (a: Site, b: Site) =>
-  Number(!(a.total - a.tagged)) - Number(!(b.total - b.tagged)) || a.name.localeCompare(b.name);
+  Number(a.tagged >= a.total) - Number(b.tagged >= b.total) || a.name.localeCompare(b.name, 'es');
 
 /**
  * Inicio del modo NFC: el administrador asocia etiquetas desde la oficina. Cada predio muestra
@@ -30,6 +34,8 @@ export default function ConfigurationHome() {
   const nfc = useNfcState();
   const [sites, setSites] = useState<Site[] | null>(null);
   const [error, setError] = useState(false);
+  // "Reintentar" suma un intento y vuelve a pedir los predios.
+  const [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState('');
   const shown = sites?.filter((site) => fold(site.name).includes(fold(query.trim())));
 
@@ -49,7 +55,9 @@ export default function ConfigurationHome() {
       return () => {
         mounted = false;
       };
-    }, []),
+      // `attempt` solo dispara la nueva consulta.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [attempt]),
   );
 
   return (
@@ -85,7 +93,21 @@ export default function ConfigurationHome() {
         Predios
       </Text>
       {error && (
-        <Banner tone="danger">No se pudieron cargar los predios. Revisá la conexión.</Banner>
+        <Banner
+          tone="danger"
+          action={
+            <Button
+              variant="outline"
+              label="Reintentar"
+              onPress={() => {
+                setError(false);
+                setAttempt((n) => n + 1);
+              }}
+            />
+          }
+        >
+          No se pudieron cargar los predios. Revisá la conexión.
+        </Banner>
       )}
       {!sites && !error && <Loading label="Cargando predios…" />}
       {sites?.length === 0 && (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { radius, space, touch } from '@garita/tokens';
@@ -39,17 +39,34 @@ export default function SitePointsRoute() {
   );
   const [auto, setAuto] = useState(false);
 
+  // Solo la última consulta toca la pantalla: una respuesta lenta o tardía no pisa a la nueva.
+  const request = useRef(0);
   const load = useCallback(() => {
+    const current = ++request.current;
     apiGet(`/predios/${encodeURIComponent(id)}/puntos`, pointsSchema)
       .then((loaded) => {
+        if (request.current !== current) return;
         setPoints(loaded);
         setError(false);
       })
-      .catch(() => setError(true));
+      .catch(() => {
+        if (request.current === current) setError(true);
+      });
   }, [id]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+    const requests = request;
+    return () => {
+      requests.current++;
+    };
+  }, [load]);
   const onNext = useCallback(
-    () => setSheet((current) => current && { ...current, index: current.index + 1 }),
+    (fromId: string) =>
+      setSheet((current) =>
+        current && current.ids[current.index] === fromId && current.index + 1 < current.ids.length
+          ? { ...current, index: current.index + 1 }
+          : current,
+      ),
     [],
   );
   const onClose = useCallback(() => setSheet(null), []);
@@ -66,7 +83,21 @@ export default function SitePointsRoute() {
       <BackHeader title={nombre ?? 'Predio'} />
       <NfcBlocker state={nfc} />
       {error && (
-        <Banner tone="danger">No se pudieron cargar los puntos. Revisá la conexión.</Banner>
+        <Banner
+          tone="danger"
+          action={
+            <Button
+              variant="outline"
+              label="Reintentar"
+              onPress={() => {
+                setError(false);
+                load();
+              }}
+            />
+          }
+        >
+          No se pudieron cargar los puntos. Revisá la conexión.
+        </Banner>
       )}
       {!points && !error && <Loading label="Cargando puntos…" />}
       {points && (
@@ -130,6 +161,7 @@ export default function SitePointsRoute() {
         series={sheet?.series ?? false}
         next={find(sheet?.ids[sheet.index + 1])}
         remaining={sheet ? sheet.ids.length - sheet.index : 0}
+        nfc={nfc}
         auto={auto}
         onAutoChange={setAuto}
         onNext={onNext}

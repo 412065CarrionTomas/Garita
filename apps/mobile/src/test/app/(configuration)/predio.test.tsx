@@ -1,4 +1,3 @@
-import { Alert } from 'react-native';
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native';
 import * as Network from 'expo-network';
 import { ThemeProvider } from '@/ui';
@@ -35,11 +34,7 @@ jest.mock('@/lib/nfc-secure', () => ({
   NotSecureNfcTag: jest.requireActual('@/lib/nfc-secure').NotSecureNfcTag,
   withSecureNfcTag: jest.fn(),
 }));
-jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({ play: jest.fn(), seekTo: jest.fn() }) }));
-jest.mock('expo-haptics', () => ({
-  notificationAsync: jest.fn(),
-  NotificationFeedbackType: { Success: 'success' },
-}));
+jest.mock('@/features/escaneo/feedback', () => ({ playSuccessFeedback: jest.fn() }));
 jest.mock('expo-network', () => ({ getNetworkStateAsync: jest.fn() }));
 
 type Point = { id: string; name: string; position: number; tagType: string };
@@ -127,7 +122,12 @@ it('con Pasar solo al siguiente avanza sin tocar nada', async () => {
 });
 
 it('si la etiqueta es de otro punto pide moverla en la misma hoja', async () => {
-  putMock.mockRejectedValueOnce(new ApiError('conflict', 409, { checkpointName: 'Tanque' }));
+  putMock.mockRejectedValueOnce(
+    new ApiError('conflict', 409, {
+      code: 'NFC_TAG_MOVE_CONFIRMATION_REQUIRED',
+      checkpointName: 'Tanque',
+    }),
+  );
   const user = userEvent.setup();
   await mount();
   await user.press(await screen.findByLabelText('Punto 1, Portón. Sin etiqueta'));
@@ -181,21 +181,50 @@ it('configura una etiqueta segura con la lectura de prueba', async () => {
   );
 });
 
-it('quita una etiqueta solo después de confirmar', async () => {
-  const alert = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
-    buttons?.find((button) => button.text === 'Quitar')?.onPress?.();
-  });
+it('quita una etiqueta solo después de confirmar en la misma hoja', async () => {
   const user = userEvent.setup();
   await mount();
   await user.press(await screen.findByRole('button', { name: /Todos/ }));
   await user.press(screen.getByLabelText('Punto 3, Tanque. Etiqueta segura'));
   await user.press(screen.getByRole('button', { name: 'Quitar etiqueta' }));
-  expect(alert).toHaveBeenCalledWith(
-    '¿Quitar la etiqueta de Tanque?',
-    expect.any(String),
-    expect.any(Array),
-  );
+  expect(screen.getByText('¿Quitar la etiqueta de Tanque?')).toBeOnTheScreen();
+  expect(apiDelete).not.toHaveBeenCalled();
+  await user.press(screen.getByRole('button', { name: 'Sí, quitar' }));
   expect(apiDelete).toHaveBeenCalledWith('/puntos/p3/etiqueta-nfc', expect.anything());
   expect(await screen.findByText('Etiqueta quitada')).toBeOnTheScreen();
-  alert.mockRestore();
+});
+
+it('con NFC apagado deja quitar pero no reemplazar ni leer', async () => {
+  jest.mocked(nfcAvailability).mockResolvedValue('disabled');
+  const user = userEvent.setup();
+  await mount();
+  expect(await screen.findByLabelText('Punto 1, Portón. Sin etiqueta')).toBeDisabled();
+  await user.press(screen.getByRole('button', { name: /Todos/ }));
+  await user.press(screen.getByLabelText('Punto 3, Tanque. Etiqueta segura'));
+  expect(screen.getByRole('button', { name: 'Quitar etiqueta' })).toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: 'Reemplazar etiqueta' })).toBeNull();
+  expect(withSecureNfcTag).not.toHaveBeenCalled();
+});
+
+it('asocia aunque no se sepa si hay internet', async () => {
+  jest
+    .mocked(Network.getNetworkStateAsync)
+    .mockResolvedValue({ isConnected: true, isInternetReachable: null } as never);
+  const user = userEvent.setup();
+  await mount();
+  await user.press(await screen.findByLabelText('Punto 1, Portón. Sin etiqueta'));
+  expect(await screen.findByText('Etiqueta asociada')).toBeOnTheScreen();
+});
+
+it('un conflicto de carrera muestra lo que explica la API, no la opción de mover', async () => {
+  putMock.mockRejectedValueOnce(
+    new ApiError('La etiqueta cambió de asociación. Actualizá el punto e intentá de nuevo.', 409, {
+      code: 'NFC_TAG_CONCURRENT_ASSOCIATION',
+    }),
+  );
+  const user = userEvent.setup();
+  await mount();
+  await user.press(await screen.findByLabelText('Punto 1, Portón. Sin etiqueta'));
+  expect(await screen.findByText(/La etiqueta cambió de asociación/)).toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: /Mover a/ })).toBeNull();
 });
