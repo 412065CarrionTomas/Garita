@@ -116,7 +116,7 @@ beforeEach(() => {
     }
     if (path.startsWith('/avisos/'))
       return Promise.resolve(current.find((item) => item.id === path.split('/')[2]) as never);
-    if (path === '/ventanas-ronda/en-revision')
+    if (path.startsWith('/ventanas-ronda/en-revision'))
       return Promise.resolve({ items: [], count: 0 } as never);
     if (path === '/incidentes/cola/cantidad') return Promise.resolve({ count: 0 } as never);
     return Promise.resolve([] as never);

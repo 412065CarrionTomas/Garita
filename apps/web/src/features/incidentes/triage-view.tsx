@@ -6,7 +6,7 @@ import {
 } from '@garita/shared';
 import { useQuery } from '@tanstack/react-query';
 import { Camera } from 'lucide-react';
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import { EmptyState } from '@/components/empty-state';
 import { Alert } from '@/components/ui/alert';
@@ -28,6 +28,21 @@ function SelectedIncident({
   onConflict: () => void;
 }) {
   const detail = useIncidentDetail(id);
+  // El formulario se abre a pedido: mientras tanto la ficha usa todo el alto.
+  const [deciding, setDeciding] = useState(false);
+  // Al abrir, el foco va a la primera opción; al ocultar, vuelve al botón que lo abrió.
+  const openButton = useRef<HTMLButtonElement>(null);
+  const decision = useRef<HTMLElement>(null);
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    if (deciding) decision.current?.querySelector<HTMLElement>('input')?.focus();
+    else openButton.current?.focus();
+  }, [deciding]);
+  const toggle = (open: boolean) => {
+    toggled.current = true;
+    setDeciding(open);
+  };
   if (detail.isPending)
     return (
       <div className="p-5">
@@ -59,29 +74,60 @@ function SelectedIncident({
               {incident.guardName}
             </p>
           </div>
-          <Button asChild variant="outline" size="sm">
-            <Link to={`/incidentes/${id}`}>Abrir ficha completa</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link to={`/incidentes/${id}`}>Abrir ficha completa</Link>
+            </Button>
+            {!deciding && (
+              <Button
+                ref={openButton}
+                onClick={() => {
+                  toggle(true);
+                }}
+              >
+                Clasificar
+              </Button>
+            )}
+          </div>
         </header>
         <IncidentBody incident={incident} compact />
       </div>
-      <section
-        aria-label="Decisión"
-        className="max-h-[55%] shrink-0 overflow-y-auto border-t-[1.5px] border-input bg-card px-5 py-4"
-      >
-        <DecisionForm
-          id={id}
-          reclassify={false}
-          shortcuts
-          submitLabel="Confirmar y seguir"
-          onDone={({ classification, severity }) => {
-            onDone(
-              `${title} (${incident.site.name}): ${INCIDENT_CLASSIFICATION_LABELS[classification].toLowerCase()}, gravedad ${INCIDENT_SEVERITY_LABELS[severity].toLowerCase()}.`,
-            );
-          }}
-          onConflict={onConflict}
-        />
-      </section>
+      {deciding && (
+        <section
+          ref={decision}
+          aria-labelledby={`triage-decision-${id}`}
+          className="max-h-[60%] shrink-0 space-y-3 overflow-y-auto border-t-[1.5px] border-input bg-card px-5 py-4"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <h3
+              id={`triage-decision-${id}`}
+              className="font-cond text-lg font-semibold tracking-wider uppercase"
+            >
+              Clasificar
+            </h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                toggle(false);
+              }}
+            >
+              Ocultar
+            </Button>
+          </div>
+          <DecisionForm
+            id={id}
+            reclassify={false}
+            submitLabel="Confirmar y seguir"
+            onDone={({ classification, severity }) => {
+              onDone(
+                `${title} (${incident.site.name}): ${INCIDENT_CLASSIFICATION_LABELS[classification].toLowerCase()}, gravedad ${INCIDENT_SEVERITY_LABELS[severity].toLowerCase()}.`,
+              );
+            }}
+            onConflict={onConflict}
+          />
+        </section>
+      )}
     </article>
   );
 }
