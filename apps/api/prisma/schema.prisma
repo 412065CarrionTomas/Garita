@@ -812,6 +812,8 @@ model CheckpointRecord {
 
   @@index([companyId, shiftId, occurredAtDevice])
   @@index([companyId, occurredAtDevice])
+  // Antecedentes del vigilador en revisión: últimos 30 días por hora del servidor.
+  @@index([companyId, receivedAt])
   @@index([companyId, checkpointId, occurredAtDevice])
   @@index([shiftId, occurredAtDevice])
   @@index([checkpointId, occurredAtDevice])
