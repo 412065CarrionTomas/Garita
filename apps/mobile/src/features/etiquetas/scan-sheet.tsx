@@ -217,7 +217,11 @@ function PhaseMessage({ phase, point }: { phase: TagPhase; point: SheetPoint }) 
       case 'idle':
         return {
           title: TAG_TEXT[point.tagType],
-          body: 'Reemplazala si se dañó o se perdió. Para ver de qué punto es una etiqueta suelta, usá Identificar etiqueta.',
+          // Sin etiqueta no hay nada que reemplazar (pasa si NFC se apaga antes de leer).
+          body:
+            point.tagType === 'qr'
+              ? undefined
+              : 'Reemplazala si se dañó o se perdió. Para ver de qué punto es una etiqueta suelta, usá Identificar etiqueta.',
         };
       case 'reading':
         return {
