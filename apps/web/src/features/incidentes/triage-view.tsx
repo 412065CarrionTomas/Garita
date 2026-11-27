@@ -6,7 +6,7 @@ import {
 } from '@garita/shared';
 import { useQuery } from '@tanstack/react-query';
 import { Camera } from 'lucide-react';
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import { EmptyState } from '@/components/empty-state';
 import { Alert } from '@/components/ui/alert';
@@ -30,6 +30,19 @@ function SelectedIncident({
   const detail = useIncidentDetail(id);
   // El formulario se abre a pedido: mientras tanto la ficha usa todo el alto.
   const [deciding, setDeciding] = useState(false);
+  // Al abrir, el foco va a la primera opción; al ocultar, vuelve al botón que lo abrió.
+  const openButton = useRef<HTMLButtonElement>(null);
+  const decision = useRef<HTMLElement>(null);
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    if (deciding) decision.current?.querySelector<HTMLElement>('input')?.focus();
+    else openButton.current?.focus();
+  }, [deciding]);
+  const toggle = (open: boolean) => {
+    toggled.current = true;
+    setDeciding(open);
+  };
   if (detail.isPending)
     return (
       <div className="p-5">
@@ -67,8 +80,9 @@ function SelectedIncident({
             </Button>
             {!deciding && (
               <Button
+                ref={openButton}
                 onClick={() => {
-                  setDeciding(true);
+                  toggle(true);
                 }}
               >
                 Clasificar
@@ -80,6 +94,7 @@ function SelectedIncident({
       </div>
       {deciding && (
         <section
+          ref={decision}
           aria-labelledby={`triage-decision-${id}`}
           className="max-h-[60%] shrink-0 space-y-3 overflow-y-auto border-t-[1.5px] border-input bg-card px-5 py-4"
         >
@@ -94,7 +109,7 @@ function SelectedIncident({
               variant="ghost"
               size="sm"
               onClick={() => {
-                setDeciding(false);
+                toggle(false);
               }}
             >
               Ocultar
