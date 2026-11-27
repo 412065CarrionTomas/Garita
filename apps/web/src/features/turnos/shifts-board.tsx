@@ -75,7 +75,7 @@ export function ShiftsBoard({
                     day < board.today && 'text-muted-foreground',
                   )}
                 >
-                  <span className={cn('capitalize', today && 'text-primary-foreground')}>
+                  <span className="capitalize">
                     {calendarDate(day, { weekday: 'short', day: 'numeric' })}
                   </span>
                   {today && <span className="sr-only"> (hoy)</span>}
