@@ -15,6 +15,8 @@ export const queueSchema = z.object({
   count: z.number(),
   overdue: z.number(),
   resolvedLastDay: z.number(),
+  /** Hay más de las que vinieron: conviene acotar con fechas o predio. */
+  truncated: z.boolean(),
   items: z.array(
     z.object({
       id: z.string(),
@@ -77,15 +79,15 @@ export const detailSchema = z.object({
       invalidated: z.boolean(),
       method: z.enum(['qr', 'nfc']),
       radiusMeters: z.number(),
-      isIndoor: z.boolean(),
       accuracyMeters: z.number().nullable(),
       distanceMeters: z.number().nullable(),
-      secondsFromPrevious: z.number().nullable(),
       flags: z.array(
         z.object({
           type: z.string(),
           severity: recordFlagSeveritySchema,
           reason: z.string().nullable(),
+          /** Los valores con que se generó la marca (distancia, intervalo, velocidad…). */
+          details: z.record(z.string(), z.unknown()).nullable(),
         }),
       ),
     }),
@@ -103,6 +105,9 @@ export const detailSchema = z.object({
 });
 export type Detail = z.infer<typeof detailSchema>;
 export type ReviewRecord = Detail['records'][number];
+
+export const countSchema = z.object({ count: z.number() });
+export const sitesSchema = z.array(z.looseObject({ id: z.string(), name: z.string() }));
 
 export const commentSchema = z.object({ comment: z.string().trim().min(5).max(500) });
 

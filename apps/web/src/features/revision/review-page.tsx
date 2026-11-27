@@ -14,11 +14,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { isCalendarDate } from '../turnos/shift-utils';
 import { FlagChip, ReviewDetail } from './review-detail';
 import {
   SEVERITY_LABELS,
   SEVERITY_ORDER,
+  countSchema,
   flagSeverity,
+  sitesSchema,
   dayTime,
   elapsed,
   flagLabel,
@@ -28,20 +31,25 @@ import {
 
 type Estado = 'pendientes' | 'resueltas';
 
-function useReviewQueue(estado: Estado, desde = '', hasta = '', enabled = true) {
-  const query = new URLSearchParams({ estado });
-  if (desde) query.set('desde', desde);
-  if (hasta) query.set('hasta', hasta);
+function useReviewQueue(filters: Record<string, string>, enabled: boolean) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
   return useQuery({
-    queryKey: ['revision', 'queue', estado, desde, hasta],
+    queryKey: ['revision', 'queue', query.toString()],
     queryFn: () => apiGet(`/ventanas-ronda/en-revision?${query.toString()}`, queueSchema),
     enabled,
     refetchInterval: 30_000,
   });
 }
 
-/** Contador de la barra: ventanas pendientes de decisión. */
-export const useReviewCount = (enabled: boolean) => useReviewQueue('pendientes', '', '', enabled);
+/** Contador de la barra: pide solo la cifra, no arma la bandeja en cada sondeo. */
+export function useReviewCount(enabled: boolean) {
+  return useQuery({
+    queryKey: ['revision', 'count'],
+    queryFn: () => apiGet('/ventanas-ronda/en-revision/cantidad', countSchema),
+    enabled,
+    refetchInterval: 30_000,
+  });
+}
 
 /**
  * Una ventana de la bandeja en tres renglones: qué ronda y cuánto espera, dónde y quién, y qué
@@ -61,7 +69,8 @@ function QueueRow({
   const types = [...item.flags.types].sort(
     (a, b) => SEVERITY_ORDER[flagSeverity(a)] - SEVERITY_ORDER[flagSeverity(b)],
   );
-  const worst = types[0] ? flagSeverity(types[0]) : null;
+  // La gravedad de la ventana (la misma que usa el filtro), no la de un tipo de marca.
+  const worst = item.severityLevel;
   return (
     <li>
       <button
@@ -141,11 +150,25 @@ export function ReviewPage() {
   const search = params.get('q') ?? '';
   const site = params.get('predio') ?? '';
   const severity = params.get('gravedad') ?? '';
-  const desde = params.get('desde') ?? '';
-  const hasta = params.get('hasta') ?? '';
+  // Una fecha mal escrita en la URL se ignora; un rango invertido se avisa sin consultar.
+  const date = (key: string) => {
+    const value = params.get(key) ?? '';
+    return isCalendarDate(value) ? value : '';
+  };
+  const desde = date('desde');
+  const hasta = date('hasta');
+  const invertedDates = Boolean(desde && hasta && desde > hasta);
   const [message, setMessage] = useState('');
   const [measure, height] = useFillHeight<HTMLDivElement>(16, 520);
-  const queue = useReviewQueue(estado, desde, hasta);
+  const queue = useReviewQueue({ estado, predio: site, desde, hasta }, !invertedDates);
+  const siteOptions = useQuery({
+    queryKey: ['predios', 'activos'],
+    queryFn: () => apiGet('/predios?estado=active', sitesSchema),
+  });
+  const hasFilters = Boolean(search || site || severity || desde || hasta);
+  const clearFilters = () => {
+    setParams(estado === 'resueltas' ? { estado } : {}, { replace: true });
+  };
   const setParam = (key: string, value: string) => {
     setParams(
       (old) => {
@@ -165,11 +188,11 @@ export function ReviewPage() {
   };
 
   const all = useMemo(() => queue.data?.items ?? [], [queue.data]);
-  const sites = [...new Map(all.map((item) => [item.shift.site.id, item.shift.site.name]))];
+  const sites = siteOptions.data ?? [];
   const term = search.trim().toLocaleLowerCase('es');
+  // El predio y las fechas los filtra la API; la búsqueda y la gravedad, sobre lo que llegó.
   const items = all.filter(
     (item) =>
-      (!site || item.shift.site.id === site) &&
       (!severity || item.severityLevel === severity) &&
       (!term ||
         [item.round.name, item.shift.site.name, item.guardName ?? ''].some((text) =>
@@ -231,9 +254,9 @@ export function ReviewPage() {
           }}
         >
           <NativeSelectOption value="">Predio: todos</NativeSelectOption>
-          {sites.map(([siteId, name]) => (
-            <NativeSelectOption key={siteId} value={siteId}>
-              {name}
+          {sites.map((option) => (
+            <NativeSelectOption key={option.id} value={option.id}>
+              {option.name}
             </NativeSelectOption>
           ))}
         </NativeSelect>
@@ -323,6 +346,16 @@ export function ReviewPage() {
           ))}
         </div>
       )}
+      {invertedDates && (
+        <Alert variant="destructive" role="alert">
+          La fecha &quot;desde&quot; tiene que ser anterior o igual a &quot;hasta&quot;.
+        </Alert>
+      )}
+      {data?.truncated && (
+        <p className="text-base text-warning">
+          Se muestran las primeras 200 ventanas. Acotá con fechas o predio para ver el resto.
+        </p>
+      )}
       {queue.isError && (
         <Alert variant="destructive">
           No pudimos cargar las ventanas.{' '}
@@ -331,10 +364,17 @@ export function ReviewPage() {
           </Button>
         </Alert>
       )}
-      {data && !selectedId && (
+      {data && !invertedDates && !selectedId && (
         <EmptyState
+          action={
+            hasFilters ? (
+              <Button variant="outline" onClick={clearFilters}>
+                Limpiar filtros
+              </Button>
+            ) : undefined
+          }
           title={
-            all.length === 0 && !desde && !hasta
+            all.length === 0 && !hasFilters
               ? estado === 'pendientes'
                 ? 'No hay rondas en revisión'
                 : 'No se resolvió ninguna ventana en los últimos 30 días'
@@ -347,7 +387,7 @@ export function ReviewPage() {
           }
         />
       )}
-      {data && selectedId && (
+      {data && !invertedDates && selectedId && (
         <div
           ref={measure}
           style={{ '--fill': `${String(height ?? 520)}px` } as CSSProperties}
@@ -356,9 +396,16 @@ export function ReviewPage() {
         >
           <div className="min-h-0 overflow-y-auto border-b-[1.5px] border-input bg-card lg:border-r-[1.5px] lg:border-b-0">
             {items.length === 0 ? (
-              <p className="p-4 text-base text-muted-foreground">
-                Ninguna ventana coincide con los filtros.
-              </p>
+              <div className="space-y-3 p-4">
+                <p className="text-base text-muted-foreground">
+                  Ninguna ventana coincide con los filtros.
+                </p>
+                {hasFilters && (
+                  <Button variant="outline" onClick={clearFilters}>
+                    Limpiar filtros
+                  </Button>
+                )}
+              </div>
             ) : (
               <ul
                 aria-label={estado === 'pendientes' ? 'Ventanas en revisión' : 'Ventanas resueltas'}

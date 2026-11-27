@@ -12,6 +12,7 @@ jest.mock('react-router', () => ({
 }));
 
 beforeEach(() => {
+  jest.clearAllMocks();
   routeId = undefined;
   window.history.replaceState({}, '', '/revision');
 });
@@ -23,11 +24,9 @@ const record = {
   invalidated: false,
   method: 'qr',
   radiusMeters: 30,
-  isIndoor: false,
   accuracyMeters: 10,
   distanceMeters: 445,
-  secondsFromPrevious: null,
-  flags: [{ type: 'simulated_location', severity: 'grave', reason: null }],
+  flags: [{ type: 'simulated_location', severity: 'grave', reason: null, details: null }],
 };
 const detail = {
   id: 'w1',
@@ -73,19 +72,21 @@ const queue = {
   count: 2,
   overdue: 2,
   resolvedLastDay: 0,
+  truncated: false,
   items: [item('w1', 'Perimetral'), item('w2', 'Interna')],
 };
 
-function renderPage(id?: string) {
+function renderPage(id?: string, window: object = detail) {
   routeId = id;
   // Pasa por el esquema real, como apiGet: valida los datos de prueba y convierte las fechas.
-  jest
-    .mocked(apiGet)
-    .mockImplementation((url, schema) =>
-      Promise.resolve(
-        schema.parse(url.startsWith('/ventanas-ronda/en-revision') ? queue : detail) as never,
-      ),
-    );
+  jest.mocked(apiGet).mockImplementation((url, schema) => {
+    const body = url.startsWith('/ventanas-ronda/en-revision')
+      ? queue
+      : url.startsWith('/predios')
+        ? [{ id: 'p1', name: 'Depósito' }]
+        : window;
+    return Promise.resolve(schema.parse(body) as never);
+  });
   return renderWithQueryClient(<ReviewPage />);
 }
 
@@ -153,4 +154,76 @@ it('pide a la API las rondas del rango de fechas elegido', async () => {
   );
   expect(screen.getByLabelText('Rondas desde')).toHaveValue('2026-11-20');
   expect(screen.getByRole('button', { name: 'Quitar fechas' })).toBeVisible();
+});
+
+it('con fechas invertidas avisa y no consulta la bandeja', async () => {
+  window.history.replaceState({}, '', '/revision?desde=2026-11-22&hasta=2026-11-20');
+  renderPage();
+  expect(await screen.findByRole('alert')).toHaveTextContent('anterior o igual');
+  expect(apiGet).not.toHaveBeenCalledWith(
+    expect.stringMatching(/^\/ventanas-ronda\/en-revision\?/),
+    expect.anything(),
+  );
+});
+
+it('si invalidar varias falla a mitad, avisa y el reintento no repite las guardadas', async () => {
+  const two = {
+    ...detail,
+    records: [record, { ...record, id: 'r2', checkpointName: 'Galpón' }],
+  };
+  jest
+    .mocked(apiPost)
+    .mockResolvedValueOnce(two)
+    .mockRejectedValueOnce(new Error('red'))
+    .mockResolvedValue(two);
+  const user = userEvent.setup();
+  renderPage('w1', two);
+  await user.click(await screen.findByRole('button', { name: 'Invalidar los 2' }));
+  const dialog = screen.getByRole('dialog');
+  await user.type(within(dialog).getByLabelText(/Motivo/), 'GPS simulado en ambas');
+  await user.click(within(dialog).getByRole('button', { name: 'Invalidar 2 marcados' }));
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('Se guardaron 1 de 2');
+  await user.click(within(dialog).getByRole('button', { name: 'Invalidar 2 marcados' }));
+  await waitFor(() => {
+    expect(apiPost).toHaveBeenCalledTimes(3);
+  });
+  // El reintento solo manda la que faltaba.
+  expect(jest.mocked(apiPost).mock.calls.map((call) => call[0])).toEqual([
+    '/registros-puntos/r1/invalidar',
+    '/registros-puntos/r2/invalidar',
+    '/registros-puntos/r2/invalidar',
+  ]);
+});
+
+it('en una ventana resuelta se puede restituir una lectura invalidada', async () => {
+  const resolved = {
+    ...detail,
+    status: 'incomplete',
+    records: [{ ...record, invalidated: true }],
+    decisions: [
+      {
+        id: 'd1',
+        kind: 'invalidate',
+        checkpointRecordId: 'r1',
+        comment: 'GPS simulado',
+        decidedAt: '2026-01-02T10:00:00Z',
+        decidedBy: 'Ana Paz',
+      },
+    ],
+  };
+  renderPage('w1', resolved);
+  expect(await screen.findByText(/recalculada por Ana Paz/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Restituir' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Validar ventana' })).not.toBeInTheDocument();
+});
+
+it('al validar avisa y pasa a la siguiente ventana', async () => {
+  jest.mocked(apiPost).mockResolvedValue({ ...detail, status: 'complete' });
+  const user = userEvent.setup();
+  renderPage();
+  await user.click(await screen.findByRole('button', { name: 'Validar ventana' }));
+  const dialog = screen.getByRole('dialog');
+  await user.type(within(dialog).getByLabelText(/Motivo/), 'Recorrido verificado por cámara');
+  await user.click(within(dialog).getByRole('button', { name: 'Validar ventana' }));
+  expect(await screen.findByText(/Perimetral · ventana 1 \(Depósito\) validada/)).toBeVisible();
 });

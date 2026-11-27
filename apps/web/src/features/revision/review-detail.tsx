@@ -53,21 +53,44 @@ export function FlagChip({ severity, children }: { severity: Severity; children:
   );
 }
 
-/** Los datos de esta lectura que respaldan la marca, para leerlos de un vistazo. */
-function evidence(record: ReviewRecord, type: string): string[] {
-  if (LOCATION_FLAGS.has(type)) {
-    if (record.distanceMeters === null) return ['Sin ubicación en la lectura'];
+const num = (value: unknown) => (typeof value === 'number' ? Math.round(value) : null);
+const meters = (value: number) =>
+  value >= 1000
+    ? `${(value / 1000).toLocaleString('es-AR', { maximumFractionDigits: 1 })} km`
+    : `${String(value)} m`;
+
+/**
+ * Los datos que respaldan la marca. Primero los guardados al generarla (`details`): son los que la
+ * dispararon aunque después se haya movido el punto o el reloj estuviera alterado.
+ */
+function evidence(record: ReviewRecord, flag: ReviewRecord['flags'][number]): string[] {
+  const d = flag.details ?? {};
+  if (flag.type === 'impossible_time') {
+    const seconds = num(d.timeDeltaSeconds);
+    const distance = num(d.distanceMeters);
     return [
-      `${String(record.distanceMeters)} m del punto`,
-      `radio ${String(record.radiusMeters)} m`,
-      ...(record.accuracyMeters === null
-        ? []
-        : [`precisión ± ${String(Math.round(record.accuracyMeters))} m`]),
+      ...(seconds === null ? [] : [`${gap(seconds)} desde el punto anterior`]),
+      ...(distance === null ? [] : [`a ${meters(distance)}`]),
+      ...(num(d.maxSpeedKmh) === null ? [] : [`máximo ${String(num(d.maxSpeedKmh))} km/h`]),
     ];
   }
-  if (type === 'impossible_time' && record.secondsFromPrevious !== null)
-    return [`${gap(record.secondsFromPrevious)} desde el punto anterior`];
-  if (type === 'qr_on_tagged_point') return ['Leído por QR'];
+  if (flag.type === 'time_altered') {
+    const offset = num(d.deviceOffsetMs);
+    return offset === null ? [] : [`reloj corrido ${gap(Math.abs(Math.round(offset / 1000)))}`];
+  }
+  if (flag.type === 'qr_on_tagged_point')
+    return [d.phoneNfc === 'on' ? 'Leído por QR con el NFC encendido' : 'Leído por QR'];
+  if (LOCATION_FLAGS.has(flag.type)) {
+    const distance = num(d.distanceMeters) ?? record.distanceMeters;
+    const radius = num(d.toleranceRadiusMeters) ?? record.radiusMeters;
+    const accuracy = num(d.accuracyMeters) ?? num(record.accuracyMeters);
+    if (distance === null) return ['Sin ubicación en la lectura'];
+    return [
+      `${meters(distance)} del punto`,
+      `radio ${String(radius)} m`,
+      ...(accuracy === null ? [] : [`precisión ± ${String(accuracy)} m`]),
+    ];
+  }
   return [];
 }
 
@@ -158,7 +181,7 @@ function RecordCard({
       <ul className="mt-2.5 space-y-2 pl-11">
         {flags.map((flag) => {
           const { label, meaning } = flagLabel(flag.type);
-          const facts = evidence(record, flag.type);
+          const facts = evidence(record, flag);
           return (
             <li key={flag.type} className="space-y-1">
               <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -208,7 +231,7 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
   const attention = data.records.filter((r) => r.flags.length > 0 || r.invalidated);
   const clean = data.records.filter((r) => !attention.includes(r));
   const flagged = attention.filter((r) => !r.invalidated);
-  const lastValidation = data.decisions.findLast((d) => d.kind === 'validate');
+  const lastDecision = data.decisions.at(-1);
   const history = data.guardHistory;
   const title = `${data.roundName} · ventana ${String(data.windowIndex + 1)}`;
   const recordAction = (r: ReviewRecord): ReviewAction =>
@@ -279,8 +302,8 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
         ) : (
           <p className="text-base">
             <span className="font-semibold">{STATUS_LABELS[data.status] ?? data.status}</span>
-            {lastValidation &&
-              ` · validada por ${lastValidation.decidedBy} el ${dayTime(lastValidation.decidedAt, data.timezone)}`}
+            {lastDecision &&
+              ` · ${lastDecision.kind === 'validate' ? 'validada' : 'recalculada'} por ${lastDecision.decidedBy} el ${dayTime(lastDecision.decidedAt, data.timezone)}`}
           </p>
         )}
       </header>
@@ -293,9 +316,9 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
           />
           <Tile
             label="Lecturas con marcas"
-            value={attention.length}
+            value={flagged.length}
             detail={`de ${String(data.records.length)}`}
-            tone={attention.length ? 'text-danger' : undefined}
+            tone={flagged.length ? 'text-danger' : undefined}
           />
           <Tile
             label="En revisión hace"
@@ -319,7 +342,9 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
           </h3>
           {attention.length === 0 ? (
             <p className="border-[1.5px] border-input bg-card px-4 py-3 text-base">
-              No quedan lecturas con marcas: la ronda se puede validar.
+              {pending
+                ? 'No quedan lecturas con marcas: la ronda se puede validar.'
+                : 'Ninguna lectura de esta ventana tiene marcas.'}
             </p>
           ) : (
             <ol className="space-y-2">
@@ -329,13 +354,9 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
                   record={r}
                   number={number(r)}
                   timezone={data.timezone}
-                  onAction={
-                    pending
-                      ? () => {
-                          setAction(recordAction(r));
-                        }
-                      : undefined
-                  }
+                  onAction={() => {
+                    setAction(recordAction(r));
+                  }}
                 />
               ))}
             </ol>
@@ -398,9 +419,14 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
         onClose={() => {
           setAction(null);
         }}
-        onDone={(done) => {
+        onDone={(done, window) => {
           setAction(null);
           if (done.closesWindow) onClosed(`${title} (${data.siteName}) validada.`);
+          // Invalidar puede sacar la ventana de revisión: se avisa y la bandeja pasa a la siguiente.
+          else if (pending && window && window.status !== 'in_review')
+            onClosed(
+              `${title} (${data.siteName}) quedó ${(STATUS_LABELS[window.status] ?? window.status).toLowerCase()}.`,
+            );
         }}
       />
     </article>

@@ -1,11 +1,11 @@
-import { useState, type SyntheticEvent } from 'react';
+import { useRef, useState, type SyntheticEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { commentSchema, detailSchema } from './review-contracts';
+import { commentSchema, detailSchema, type Detail } from './review-contracts';
 
 export interface ReviewAction {
   title: string;
@@ -25,49 +25,69 @@ export function DecisionDialog({
 }: {
   action: ReviewAction | null;
   onClose: () => void;
-  onDone: (action: ReviewAction) => void;
+  /** `window` es la ventana como quedó después de la última decisión guardada. */
+  onDone: (action: ReviewAction, window: Detail | undefined) => void;
 }) {
   const queryClient = useQueryClient();
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
+  // POST ya guardados de esta acción: un reintento tras un fallo parcial no los repite (409).
+  const saved = useRef(new Set<string>());
   const mutation = useMutation({
-    mutationFn: async (paths: string[]) => {
+    mutationFn: async (input: { action: ReviewAction; comment: string }) => {
+      let window: Detail | undefined;
       // En orden: cada invalidación recalcula la ventana.
-      for (const path of paths) await apiPost(path, { comment }, commentSchema, detailSchema);
+      for (const path of input.action.paths.filter((p) => !saved.current.has(p))) {
+        window = await apiPost(path, { comment: input.comment }, commentSchema, detailSchema);
+        saved.current.add(path);
+      }
+      return window;
     },
-    onSuccess: async () => {
-      const done = action;
-      setComment('');
-      setError('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['revision'] }),
-        queryClient.invalidateQueries({ queryKey: ['supervision'] }),
-      ]);
-      if (done) onDone(done);
+    onSuccess: async (window, input) => {
+      reset();
+      await refresh();
+      onDone(input.action, window);
     },
-    onError: async () => {
+    onError: async (_error, input) => {
+      const done = saved.current.size;
+      const total = input.action.paths.length;
       setError(
-        'No pudimos guardar la decisión. Revisá el estado de la ventana e intentá de nuevo.',
+        done > 0
+          ? `Se guardaron ${String(done)} de ${String(total)}. Reintentá para guardar las que faltan.`
+          : 'No pudimos guardar la decisión. Revisá el estado de la ventana e intentá de nuevo.',
       );
-      await queryClient.invalidateQueries({ queryKey: ['revision'] });
+      await refresh();
     },
   });
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['revision'] }),
+      queryClient.invalidateQueries({ queryKey: ['supervision'] }),
+    ]);
+  const reset = () => {
+    setComment('');
+    setError('');
+    saved.current = new Set();
+  };
+  const close = () => {
+    if (mutation.isPending) return;
+    reset();
+    onClose();
+  };
   const submit = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (mutation.isPending || !action) return;
     if (!commentSchema.safeParse({ comment }).success) {
       setError('Escribí el motivo: entre 5 y 500 caracteres.');
       return;
     }
-    if (action) mutation.mutate(action.paths);
+    mutation.mutate({ action, comment });
   };
   return (
     <Dialog
       open={Boolean(action)}
       onOpenChange={(open) => {
-        if (!open && !mutation.isPending) {
-          setError('');
-          onClose();
-        }
+        if (!open) close();
       }}
     >
       <DialogContent>
@@ -81,6 +101,7 @@ export function DecisionDialog({
             id="review-comment"
             rows={4}
             value={comment}
+            disabled={mutation.isPending}
             onChange={(event) => {
               setComment(event.target.value);
             }}
@@ -96,7 +117,7 @@ export function DecisionDialog({
             </p>
           )}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onClose} disabled={mutation.isPending}>
+            <Button type="button" variant="outline" onClick={close} disabled={mutation.isPending}>
               Cancelar
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
