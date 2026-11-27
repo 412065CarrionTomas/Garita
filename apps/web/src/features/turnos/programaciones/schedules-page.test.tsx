@@ -235,3 +235,12 @@ it.each(['Extender', 'Cancelar programación'])(
     });
   },
 );
+
+it('extender empieza el día siguiente al fin actual', async () => {
+  renderWithQueryClient(<SchedulesPage />);
+  const user = userEvent.setup();
+  await openMenu(user);
+  await user.click(screen.getByRole('menuitem', { name: 'Extender' }));
+  expect(screen.getByLabelText('Nueva fecha final incluida')).toHaveAttribute('min', '2030-10-31');
+  expect(screen.getByText(/Se agregan turnos desde el 31 oct/)).toBeInTheDocument();
+});

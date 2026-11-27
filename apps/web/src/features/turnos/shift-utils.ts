@@ -18,7 +18,12 @@ export const shiftRowSchema = z.looseObject({
   scheduleId: z.string().nullable().optional(),
   individuallyModified: z.boolean().optional(),
   minutesToSignal: z.number().nullable().optional(),
-  site: z.looseObject({ name: z.string(), company: z.looseObject({ timezone: z.string() }) }),
+  site: z.looseObject({
+    name: z.string(),
+    company: z.looseObject({ timezone: z.string() }),
+    connectivityType: z.string().optional(),
+    minutesToSignal: z.number().optional(),
+  }),
   assignments: z.array(
     z.looseObject({
       guard: z
@@ -137,18 +142,41 @@ export function timeToMinutes(value: string): number {
 }
 
 /**
- * Qué se puede hacer con un hueco: asignar uno que todavía no empezó, o cubrir uno que está en
- * hora. Uno que ya terminó es historia y no ofrece acción.
+ * Qué se puede hacer con un hueco, con las mismas condiciones que acepta la API: un turno sin
+ * vigilador que todavía no empezó se asigna editándolo; uno sin vigilador o sin cobertura que
+ * está en hora se cubre reasignándolo. Un no presentado ya terminó: es historia, sin acción.
  */
 export function gapAction(
   shift: { status: string; startsAt: string; endsAt: string },
   now: number,
 ): 'assign' | 'cover' | null {
-  if (!PROBLEM_STATUSES.has(shift.status)) return null;
   if (Date.parse(shift.endsAt) <= now) return null;
-  if (Date.parse(shift.startsAt) > now) return shift.status === 'unassigned' ? 'assign' : null;
-  return 'cover';
+  if (shift.status === 'unassigned') return Date.parse(shift.startsAt) > now ? 'assign' : 'cover';
+  return shift.status === 'uncovered' ? 'cover' : null;
 }
+
+/** Turno que todavía se puede editar o cancelar: no empezó, ni siquiera antes de hora. */
+export const isEditable = (shift: { status: string; startsAt: string }, now: number) =>
+  (shift.status === 'scheduled' || shift.status === 'unassigned') &&
+  Date.parse(shift.startsAt) > now;
+
+/** Minutos hasta tener señal de un predio sin cobertura (null si tiene señal). */
+export function signalMinutes(site: {
+  connectivityType?: unknown;
+  minutesToSignal?: unknown;
+}): number | null {
+  return site.connectivityType === 'without_signal' && typeof site.minutesToSignal === 'number'
+    ? site.minutesToSignal
+    : null;
+}
+
+/** Fecha de calendario YYYY-MM-DD válida (para no confiar en lo que trae la URL). */
+export const isCalendarDate = (value: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
+
+/** Hoy (YYYY-MM-DD) en la zona horaria dada. */
+export const todayIn = (timezone: string) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
 
 /** Focos de la planilla que se eligen desde la franja de cifras. */
 export const BOARD_FOCUS = {

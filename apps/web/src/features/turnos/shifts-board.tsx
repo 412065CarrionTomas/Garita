@@ -1,5 +1,6 @@
 import type { ShiftBoard, ShiftBoardCell } from '@garita/shared';
 import { Plus, Repeat } from 'lucide-react';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -36,6 +37,13 @@ export function ShiftsBoard({
   const sites = filter
     ? board.sites.filter((site) => site.days.some((day) => day.some(visible)))
     : board.sites;
+  if (filter && sites.length === 0)
+    return (
+      <EmptyState
+        title="Nada para mostrar esta semana"
+        description="Ningún turno coincide con el filtro. Tocá de nuevo la cifra o cambiá el estado."
+      />
+    );
   return (
     <div className="overflow-x-auto border-[1.5px] border-input">
       <table
@@ -116,7 +124,7 @@ export function ShiftsBoard({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="w-full text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        className="w-full text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                         aria-label={`Agregar turno en ${site.name} el ${calendarDate(day, { weekday: 'long', day: 'numeric', month: 'long' })}`}
                         onClick={() => {
                           onAdd(site.id, day);

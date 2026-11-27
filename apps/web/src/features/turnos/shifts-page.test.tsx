@@ -44,6 +44,7 @@ const cell = (overrides: Record<string, unknown> = {}) => ({
   guard: { id: 'guard-1', name: 'Pedro Díaz' },
   origin: 'schedule',
   rounds: ['Perimetral'],
+  minutesToSignal: null,
   ...overrides,
 });
 const boardWith = (cells: ReturnType<typeof cell>[][] = days.map(() => [])) => ({
@@ -163,6 +164,36 @@ describe('<ShiftsPage /> planilla', () => {
     await user.click(within(grid).getByRole('button', { name: 'Asignar' }));
     expect(await screen.findByRole('dialog', { name: 'Editar turno' })).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledWith('/turnos/gap', expect.anything());
+  });
+
+  it('ofrece cubrir un turno sin cobertura que sigue en hora', async () => {
+    const early = cell({
+      id: 'early',
+      status: 'uncovered',
+      startsAt: new Date(Date.now() - 3_600_000).toISOString(),
+      endsAt: new Date(Date.now() + 3_600_000).toISOString(),
+      minutesToSignal: 30,
+    });
+    mockQueries({ board: boardWith(days.map((_, i) => (i === 0 ? [early] : []))) });
+    renderPage();
+    const grid = await screen.findByRole('table', { name: 'Planilla semanal' });
+    expect(within(grid).getByText('Sin cobertura')).toBeInTheDocument();
+    expect(within(grid).getByRole('button', { name: 'Cubrir' })).toBeInTheDocument();
+  });
+
+  it('un estado desconocido en la URL no rompe la pantalla', async () => {
+    mockQueries({ board: boardWith(days.map((_, i) => (i === 0 ? [cell()] : []))) });
+    renderPage('/turnos?estado=sin_vigilador&semana=no-es-fecha');
+    const grid = await screen.findByRole('table', { name: 'Planilla semanal' });
+    expect(within(grid).getByText('Pedro Díaz')).toBeInTheDocument();
+    expect(apiGet).toHaveBeenCalledWith('/turnos/planilla?', expect.anything());
+  });
+
+  it('un filtro sin coincidencias muestra un estado vacío, no una tabla vacía', async () => {
+    mockQueries({ board: boardWith(days.map((_, i) => (i === 0 ? [cell()] : []))) });
+    renderPage('/turnos?foco=cubrir');
+    expect(await screen.findByText('Nada para mostrar esta semana')).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Planilla semanal' })).not.toBeInTheDocument();
   });
 
   it('un hueco que ya terminó queda como dato, sin acción', async () => {
@@ -288,6 +319,27 @@ describe('<ShiftsPage /> lista', () => {
     await waitFor(() => {
       expect(apiGet).toHaveBeenCalledWith(
         '/turnos?pagina=1&porPagina=25&orden=inicio%3Adesc&estado=problema',
+        expect.anything(),
+      );
+    });
+  });
+
+  it('un turno que el vigilador inició antes de hora no se edita ni se cubre', async () => {
+    mockQueries({ list: [listRow({ status: 'in_progress' })] });
+    const user = userEvent.setup();
+    renderPage('/turnos?vista=lista');
+    await user.click(await screen.findByRole('button', { name: 'Acciones del turno de Predio A' }));
+    expect(screen.queryByRole('menuitem', { name: 'Editar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cubrir' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cancelar turno' })).not.toBeInTheDocument();
+  });
+
+  it('filtra la lista por fechas en la zona de la empresa', async () => {
+    mockQueries({ list: [listRow()] });
+    renderPage('/turnos?vista=lista&desde=2030-10-14&hasta=2030-10-14');
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenCalledWith(
+        '/turnos?pagina=1&porPagina=25&orden=inicio%3Adesc&desde=2030-10-14T03%3A00%3A00.000Z&hasta=2030-10-15T02%3A59%3A59.999Z',
         expect.anything(),
       );
     });

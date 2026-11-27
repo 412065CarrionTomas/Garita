@@ -19,12 +19,12 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { errorMessage } from '@/lib/error-message';
 import { loadAvailableGuards } from '../../personal/available-guards';
 import { WEEKDAYS, WEEK_ORDER, crossesMidnight, dateTime, shortDate } from './schedule-format';
 
-const sitesSchema = z.array(
-  z.looseObject({ id: z.string(), name: z.string(), company: z.object({ timezone: z.string() }) }),
-);
+// looseObject: comparte la caché ['predios', 'activos'] con Turnos, que usa el resto.
+const sitesSchema = z.array(z.looseObject({ id: z.string(), name: z.string() }));
 // looseObject: comparte la caché ['rondas', predio] con Predios → Rondas, que necesita el resto.
 const roundsSchema = z.array(
   z.looseObject({ id: z.string(), name: z.string(), status: z.string() }),
@@ -67,7 +67,11 @@ export function WeekdaySelector({
               name="weekdays"
               checked={value.includes(day)}
               onCheckedChange={(checked) => {
-                onChange(checked ? [...value, day] : value.filter((item) => item !== day));
+                onChange(
+                  checked === true
+                    ? [...new Set([...value, day])]
+                    : value.filter((item) => item !== day),
+                );
               }}
               className="sr-only"
             />
@@ -236,7 +240,7 @@ function ScheduleForm({
     enabled: Boolean(form.siteId),
   });
   const fail = (failure: unknown) => {
-    setError(failure instanceof Error ? failure.message : 'No se pudo completar la operación');
+    setError(errorMessage(failure));
     requestAnimationFrame(() => errorRef.current?.focus());
   };
   const query = editing ? `?programacion=${encodeURIComponent(editing.id)}` : '';
@@ -282,7 +286,10 @@ function ScheduleForm({
       : null;
   const pending = save.isPending || preview.isPending;
   const roundNames = new Map((rounds.data ?? []).map((round) => [round.id, round.name]));
-  const activeRounds = (rounds.data ?? []).filter((round) => round.status === 'active');
+  // Las activas, más las dadas de baja que la programación ya tenía: así se pueden desmarcar.
+  const activeRounds = (rounds.data ?? []).filter(
+    (round) => round.status === 'active' || form.roundIds.includes(round.id),
+  );
 
   // La vista previa se pide sola cuando los datos están completos, con una pausa para no
   // consultar en cada tecla.
@@ -469,13 +476,19 @@ function ScheduleForm({
                       checked={form.roundIds.includes(round.id)}
                       onCheckedChange={(checked) => {
                         set({
-                          roundIds: checked
-                            ? [...form.roundIds, round.id]
-                            : form.roundIds.filter((id) => id !== round.id),
+                          roundIds:
+                            checked === true
+                              ? [...new Set([...form.roundIds, round.id])]
+                              : form.roundIds.filter((id) => id !== round.id),
                         });
                       }}
                     />
-                    <span className="truncate">{round.name}</span>
+                    <span className="truncate">
+                      {round.name}
+                      {round.status !== 'active' && (
+                        <span className="text-muted-foreground"> (dada de baja)</span>
+                      )}
+                    </span>
                   </label>
                 ))}
               </div>

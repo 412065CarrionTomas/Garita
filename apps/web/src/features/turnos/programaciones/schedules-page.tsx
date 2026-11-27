@@ -5,6 +5,8 @@ import { useSearchParams } from 'react-router';
 import { z } from 'zod';
 import {
   SCHEDULE_EXPIRING_DAYS,
+  SCHEDULE_LIST_STATES,
+  scheduleDateOffset,
   scheduleOperationSchema,
   shiftScheduleExtensionSchema,
   shiftScheduleListSchema,
@@ -30,6 +32,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { errorMessage } from '@/lib/error-message';
 import { cn } from '@/lib/utils';
 import { loadAvailableGuards } from '../../personal/available-guards';
 import { ScheduleFormDialog } from './schedule-form-dialog';
@@ -107,11 +110,13 @@ function Validity({ schedule }: { schedule: Schedule }) {
       >
         {schedule.status === 'cancelled'
           ? 'Cancelada'
-          : !live
-            ? `Finalizó el ${shortDate(schedule.endDate)}`
-            : left === 0
-              ? 'Vence hoy'
-              : `Vence en ${left} ${left === 1 ? 'día' : 'días'}`}
+          : schedule.status === 'finished'
+            ? 'Finalizada'
+            : !live
+              ? `Finalizó el ${shortDate(schedule.endDate)}`
+              : left === 0
+                ? 'Vence hoy'
+                : `Vence en ${left} ${left === 1 ? 'día' : 'días'}`}
       </span>
     </span>
   );
@@ -138,7 +143,17 @@ export function SchedulesPage() {
       { replace: true },
     );
   };
+  // Estado de la URL validado: uno desconocido se trata como "vigentes".
+  const estado = (SCHEDULE_LIST_STATES as readonly string[]).includes(value('estado'))
+    ? value('estado')
+    : '';
   const [searchInput, setSearchInput] = useState(value('q'));
+  // Atrás/adelante cambian la URL: el campo de búsqueda la sigue.
+  const [shownQ, setShownQ] = useState(value('q'));
+  if (shownQ !== value('q')) {
+    setShownQ(value('q'));
+    if (value('q') !== searchInput.trim()) setSearchInput(value('q'));
+  }
   useEffect(() => {
     const term = searchInput.trim();
     if (term === (params.get('q') ?? '')) return;
@@ -161,6 +176,8 @@ export function SchedulesPage() {
 
   const query = new URLSearchParams();
   for (const key of FILTER_KEYS) if (value(key)) query.set(key, value(key));
+  // "Vigente" es el estado por defecto y uno desconocido no se manda: la API respondería 400.
+  if (!estado || estado === 'vigente') query.delete('estado');
   const schedules = useQuery({
     queryKey: ['programaciones-turnos', query.toString()],
     queryFn: () =>
@@ -197,7 +214,6 @@ export function SchedulesPage() {
     },
   });
 
-  const estado = value('estado');
   const hasFilters = FILTER_KEYS.some((key) => value(key));
   const expiring = schedules.data?.expiring ?? 0;
   const selectClass = 'w-full sm:w-auto sm:max-w-56';
@@ -273,7 +289,7 @@ export function SchedulesPage() {
         <NativeSelect
           aria-label="Estado"
           className={selectClass}
-          value={estado}
+          value={estado === 'vigente' ? '' : estado}
           onChange={(event) => {
             update({ estado: event.target.value });
           }}
@@ -491,7 +507,7 @@ export function SchedulesPage() {
           </DialogTitle>
           <DialogDescription>
             {action?.kind === 'extend'
-              ? `${action.schedule.siteName} · ${action.schedule.guardName}. Se agregan turnos desde el ${shortDate(action.schedule.endDate)}, hasta tres meses más.`
+              ? `${action.schedule.siteName} · ${action.schedule.guardName}. Se agregan turnos desde el ${shortDate(scheduleDateOffset(action.schedule.endDate, 1))}, hasta tres meses más.`
               : `${action?.schedule.siteName ?? ''} · ${action?.schedule.guardName ?? ''}. Se cancelan los ${action?.schedule.upcomingCount ?? 0} turnos próximos; los realizados se conservan.`}
           </DialogDescription>
           <form
@@ -508,7 +524,7 @@ export function SchedulesPage() {
                   id="extension-end"
                   type="date"
                   required
-                  min={action.schedule.endDate}
+                  min={scheduleDateOffset(action.schedule.endDate, 1)}
                   value={extensionEnd}
                   onChange={(event) => {
                     setExtensionEnd(event.target.value);
@@ -516,17 +532,12 @@ export function SchedulesPage() {
                 />
               </div>
             )}
-            {change.error && (
-              <Alert variant="destructive">
-                {change.error instanceof Error
-                  ? change.error.message
-                  : 'No se pudo completar la operación'}
-              </Alert>
-            )}
+            {change.error && <Alert variant="destructive">{errorMessage(change.error)}</Alert>}
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
                 variant="outline"
+                disabled={change.isPending}
                 onClick={() => {
                   setAction(null);
                 }}

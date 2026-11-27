@@ -60,6 +60,10 @@ export function ShiftEditor({
     queryKey: ['turnos', 'detalle', shiftId],
     queryFn: () => apiGet(`/turnos/${encodeURIComponent(shiftId ?? '')}`, shiftRowSchema),
     enabled: Boolean(shiftId),
+    // Sin caché entre aperturas: reabrir un turno recién guardado no puede mostrar datos viejos,
+    // y mientras se edita no se recarga por debajo.
+    gcTime: 0,
+    refetchOnWindowFocus: false,
   });
   return (
     <Dialog
@@ -162,7 +166,8 @@ function ShiftForm({
     enabled: Boolean(form.siteId),
   });
   const selectedSite = sites.data?.find((site) => site.id === form.siteId);
-  const timezone = selectedSite?.company.timezone ?? DEFAULT_TIMEZONE;
+  const timezone =
+    selectedSite?.company.timezone ?? editing?.site.company.timezone ?? DEFAULT_TIMEZONE;
   // Turnos vecinos del mismo predio: solo para avisar qué ventanas quedan sin cubrir.
   const neighbours = useQuery({
     queryKey: ['turnos', 'vecinos', form.siteId, form.startDate],
@@ -178,7 +183,10 @@ function ShiftForm({
       ),
     enabled: Boolean(form.siteId && form.startDate),
   });
-  const activeRounds = (rounds.data ?? []).filter((round) => round.status === 'active');
+  // Las activas, más las dadas de baja que el turno ya tenía: así se pueden desmarcar.
+  const activeRounds = (rounds.data ?? []).filter(
+    (round) => round.status === 'active' || form.roundIds.includes(round.id),
+  );
 
   const preview = useMemo(() => {
     if (!form.startDate || !form.startTime || !form.endDate || !form.endTime)
@@ -233,7 +241,7 @@ function ShiftForm({
     setError('');
     setFieldErrors({});
     setConflict('');
-    if (!selectedSite) {
+    if (!form.siteId) {
       setFieldErrors({ siteId: 'Seleccioná un predio.' });
       return;
     }
@@ -438,12 +446,15 @@ function ShiftForm({
                   onChange={(event) => {
                     set({
                       roundIds: event.target.checked
-                        ? [...form.roundIds, round.id]
+                        ? [...new Set([...form.roundIds, round.id])]
                         : form.roundIds.filter((id) => id !== round.id),
                     });
                   }}
                 />
                 {round.name}
+                {round.status !== 'active' && (
+                  <span className="text-muted-foreground">(dada de baja)</span>
+                )}
               </Label>
             ))}
           </div>

@@ -18,8 +18,9 @@ import {
   calendarDate,
   formatShiftTime,
   guardName,
+  gapAction,
   isCancelled,
-  isFinished,
+  isEditable,
   shiftOrigin,
   type ShiftRow,
 } from './shift-utils';
@@ -183,10 +184,9 @@ function ShiftActions({
   onCover: (shift: ShiftRow) => void;
   onCancel: (shift: ShiftRow) => void;
 }) {
-  const started = Date.parse(shift.startsAt) <= now;
-  const open = !isCancelled(shift.status) && !isFinished(shift.status);
-  const editable = open && !started && shift.status !== 'no_show';
-  const coverable = open && Date.parse(shift.endsAt) > now;
+  const editable = isEditable(shift, now);
+  // Reasignar solo lo que la API acepta: en hora, sin vigilador o sin cobertura.
+  const coverable = gapAction(shift, now) === 'cover';
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -208,13 +208,13 @@ function ShiftActions({
             {shift.assignments[0]?.guard ? 'Editar' : 'Asignar vigilador'}
           </DropdownMenuItem>
         )}
-        {coverable && started && (
+        {coverable && (
           <DropdownMenuItem
             onSelect={() => {
               onCover(shift);
             }}
           >
-            Reasignar
+            Cubrir
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>

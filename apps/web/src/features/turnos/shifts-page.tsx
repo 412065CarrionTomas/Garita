@@ -1,5 +1,7 @@
 import {
+  SHIFT_LIST_ORDERS,
   SHIFT_LIST_STATES,
+  localDateTimeToUtc,
   addDays,
   shiftBoardSchema,
   weekStart,
@@ -29,6 +31,7 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
+import { errorMessage } from '@/lib/error-message';
 import { loadAvailableGuards } from '../personal/available-guards';
 import { ReassignDialog } from '../supervision/reassign-dialog';
 import { ShiftEditor, type ShiftEditorTarget } from './shift-form-dialog';
@@ -36,8 +39,11 @@ import {
   BOARD_FOCUS,
   calendarDate,
   type BoardFocus,
-  isCancelled,
-  isFinished,
+  gapAction,
+  isCalendarDate,
+  isEditable,
+  signalMinutes,
+  todayIn,
   LIST_SORT_IDS,
   shiftPageSchema,
   sitesSchema,
@@ -76,7 +82,10 @@ export function ShiftsPage() {
   const client = useQueryClient();
   const value = (key: string) => params.get(key) ?? '';
   const view: View = params.get('vista') === 'lista' ? 'lista' : 'planilla';
-  const estado = value('estado') as ShiftListState | '';
+  const estado: ShiftListState | '' =
+    value('estado') in SHIFT_LIST_STATES ? (value('estado') as ShiftListState) : '';
+  const date = (key: 'semana' | 'desde' | 'hasta') =>
+    isCalendarDate(value(key)) ? value(key) : '';
   const update = (changes: Record<string, string | null>, resetPage = true) => {
     setParams(
       (old) => {
@@ -113,7 +122,8 @@ export function ShiftsPage() {
   const guards = useQuery({ queryKey: ['personal', 'vigiladores'], queryFn: loadAvailableGuards });
 
   const boardQuery = new URLSearchParams();
-  for (const key of ['semana', 'predio', 'vigilador'] as const)
+  if (date('semana')) boardQuery.set('semana', date('semana'));
+  for (const key of ['predio', 'vigilador'] as const)
     if (value(key)) boardQuery.set(key, value(key));
   const board = useQuery({
     queryKey: ['turnos', 'planilla', boardQuery.toString()],
@@ -122,21 +132,37 @@ export function ShiftsPage() {
     enabled: view === 'planilla',
   });
 
-  const page = Number(params.get('pagina') ?? '1') || 1;
-  const pageSize = Number(params.get('porPagina') ?? '25') || 25;
-  const orden = params.get('orden') ?? 'inicio:desc';
-  const invertedDates = Boolean(
-    value('desde') && value('hasta') && value('desde') > value('hasta'),
-  );
+  const positive = (raw: string, fallback: number, max: number) => {
+    const number = Number(raw);
+    return Number.isInteger(number) && number >= 1 && number <= max ? number : fallback;
+  };
+  const page = positive(value('pagina'), 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = positive(value('porPagina'), 25, 100);
+  const orden = (SHIFT_LIST_ORDERS as readonly string[]).includes(value('orden'))
+    ? value('orden')
+    : 'inicio:desc';
+  // Las fechas de los filtros son de la empresa, no del navegador.
+  const timezone =
+    board.data?.timezone ?? sites.data?.[0]?.company.timezone ?? 'America/Argentina/Buenos_Aires';
+  const invertedDates = Boolean(date('desde') && date('hasta') && date('desde') > date('hasta'));
   const listQuery = new URLSearchParams({
     pagina: String(page),
     porPagina: String(pageSize),
     orden,
   });
-  for (const key of ['predio', 'vigilador', 'estado', 'q'] as const)
+  for (const key of ['predio', 'vigilador', 'q'] as const)
     if (value(key)) listQuery.set(key, value(key));
-  if (value('desde')) listQuery.set('desde', new Date(`${value('desde')}T00:00:00`).toISOString());
-  if (value('hasta')) listQuery.set('hasta', new Date(`${value('hasta')}T23:59:59`).toISOString());
+  if (estado) listQuery.set('estado', estado);
+  if (date('desde'))
+    listQuery.set('desde', localDateTimeToUtc(date('desde'), 0, timezone).toISOString());
+  if (date('hasta'))
+    // Hasta el último instante del día: el comienzo del siguiente menos un milisegundo.
+    listQuery.set(
+      'hasta',
+      new Date(
+        localDateTimeToUtc(addDays(date('hasta'), 1), 0, timezone).getTime() - 1,
+      ).toISOString(),
+    );
   const list = useQuery({
     queryKey: ['turnos', 'lista', listQuery.toString()],
     queryFn: () => apiGet(`/turnos?${listQuery.toString()}`, shiftPageSchema),
@@ -181,33 +207,31 @@ export function ShiftsPage() {
     setMessage(text);
     void client.invalidateQueries({ queryKey: ['turnos'] });
   };
-  /** Un hueco que todavía no empezó se cubre editando el turno; uno en marcha, reasignándolo. */
+  /** Un hueco que todavía no empezó se asigna editando el turno; uno en hora, reasignándolo. */
   const coverShift = (shift: {
     id: string;
     status: string;
     startsAt: string;
     endsAt: string;
-    minutesToSignal?: number | null;
+    minutesToSignal: number | null;
   }) => {
-    if (Date.parse(shift.startsAt) > now) setEditor({ shiftId: shift.id });
+    if (gapAction(shift, now) === 'assign') setEditor({ shiftId: shift.id });
     else
       setCover({
         shiftId: shift.id,
         endsAt: shift.endsAt,
-        minutesToSignal: shift.minutesToSignal ?? null,
-        covering: shift.status !== 'unassigned',
+        minutesToSignal: shift.minutesToSignal,
+        // "Cubrir el resto" solo cuando el vigilador se fue antes de hora.
+        covering: shift.status === 'uncovered',
       });
   };
+  // Lo que todavía no empezó se edita; lo demás (en curso, cerrado, cancelado) se mira en detalle.
   const openCell = (cell: ShiftBoardCell) => {
-    const started = Date.parse(cell.startsAt) <= now;
-    if (isCancelled(cell.status) || isFinished(cell.status) || started)
-      void navigate(`/supervision/turnos/${cell.id}`);
-    else setEditor({ shiftId: cell.id });
+    if (isEditable(cell, now)) setEditor({ shiftId: cell.id });
+    else void navigate(`/supervision/turnos/${cell.id}`);
   };
 
-  const week = weekStart(
-    value('semana') || (board.data?.today ?? new Date().toISOString().slice(0, 10)),
-  );
+  const week = weekStart(date('semana') || (board.data?.today ?? todayIn(timezone)));
   const weekLabel = `${calendarDate(week, { day: 'numeric', month: 'short' })} – ${calendarDate(
     addDays(week, 6),
     { day: 'numeric', month: 'short', year: 'numeric' },
@@ -220,7 +244,12 @@ export function ShiftsPage() {
           (!focus || BOARD_FOCUS[focus](cell, now)) &&
           (!estado || (SHIFT_LIST_STATES[estado] as readonly string[]).includes(cell.status))
       : undefined;
-  const hasFilters = FILTER_KEYS.some((key: FilterKey) => value(key));
+  // Cada vista cuenta solo los filtros que aplica.
+  const viewKeys: readonly FilterKey[] =
+    view === 'planilla'
+      ? ['predio', 'vigilador', 'estado', 'foco']
+      : ['predio', 'vigilador', 'estado', 'q', 'desde', 'hasta'];
+  const hasFilters = viewKeys.some((key) => value(key));
   const selectClass = 'w-full sm:w-auto sm:max-w-56';
 
   return (
@@ -306,7 +335,8 @@ export function ShiftsPage() {
           className={selectClass}
           value={estado}
           onChange={(event) => {
-            update({ estado: event.target.value });
+            // Estado y foco se pisan: elegir uno quita el otro.
+            update({ estado: event.target.value, foco: null });
           }}
         >
           <NativeSelectOption value="">Estado: todos</NativeSelectOption>
@@ -397,7 +427,7 @@ export function ShiftsPage() {
           summary={summary}
           focus={focus}
           onFocus={(next) => {
-            update({ foco: next === focus ? null : next });
+            update({ foco: next === focus ? null : next, estado: null });
           }}
         />
       )}
@@ -426,8 +456,8 @@ export function ShiftsPage() {
               if (action === 'assign') setEditor({ shiftId: cell.id });
               else coverShift(cell);
             }}
-            onAdd={(siteId, date) => {
-              setEditor({ siteId, date });
+            onAdd={(siteId, day) => {
+              setEditor({ siteId, date: day });
             }}
           />
         )
@@ -458,7 +488,9 @@ export function ShiftsPage() {
             onEdit={(shift) => {
               setEditor({ shiftId: shift.id });
             }}
-            onCover={coverShift}
+            onCover={(shift) => {
+              coverShift({ ...shift, minutesToSignal: signalMinutes(shift.site) });
+            }}
             onCancel={(shift) => {
               cancel.reset();
               setCancelling({ id: shift.id, siteName: shift.site.name });
@@ -512,9 +544,10 @@ export function ShiftsPage() {
           </AlertDialogDescription>
           {cancel.error && (
             <Alert variant="destructive">
-              {cancel.error instanceof ApiError
+              {cancel.error instanceof ApiError &&
+              (cancel.error.body as { code?: unknown } | null)?.code === 'SHIFT_STARTED'
                 ? 'Solo se puede reasignar este turno porque ya pasó la hora de inicio.'
-                : 'No se pudo cancelar el turno.'}
+                : errorMessage(cancel.error)}
             </Alert>
           )}
           <div className="flex justify-end gap-2">
