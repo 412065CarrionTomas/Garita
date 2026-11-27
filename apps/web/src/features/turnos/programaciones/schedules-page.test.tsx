@@ -181,6 +181,7 @@ it('abre el modal, calcula la vista previa sola, la invalida al cambiar datos y 
     expect.objectContaining({ siteId: 'site' }),
     expect.anything(),
     expect.anything(),
+    expect.objectContaining({ signal: expect.anything() as unknown }),
   );
   fireEvent.change(within(panel).getByLabelText('Hora de inicio'), {
     target: { value: '21:00' },
@@ -192,6 +193,7 @@ it('abre el modal, calcula la vista previa sola, la invalida al cambiar datos y 
       expect.objectContaining({ startTime: '21:00' }),
       expect.anything(),
       expect.anything(),
+      expect.objectContaining({ signal: expect.anything() as unknown }),
     );
   });
   await waitFor(() => {

@@ -265,12 +265,14 @@ function ScheduleForm({
   }, [previewKey]);
   const preview = useQuery({
     queryKey: ['vista-previa-programacion', editing?.id ?? null, requested],
-    queryFn: () =>
+    // La señal aborta la consulta en vuelo si cambian los datos o se cierra el modal.
+    queryFn: ({ signal }) =>
       apiPost(
         `/programaciones-turnos/previsualizar${query}`,
         requested,
         inputSchema,
         schedulePreviewSchema,
+        { signal },
       ),
     enabled: requested !== null,
     gcTime: 0,
@@ -309,13 +311,10 @@ function ScheduleForm({
     setError('');
   };
   // La vista previa vale solo para los datos con que se pidió y mientras no se esté recalculando.
-  const current =
-    preview.data &&
-    !preview.isFetching &&
-    requested !== null &&
-    JSON.stringify(requested) === previewKey
-      ? preview.data
-      : null;
+  // Vista previa (o error) de los datos que hay en pantalla, no de los anteriores a la pausa.
+  const isCurrentRequest = requested !== null && JSON.stringify(requested) === previewKey;
+  const currentError = isCurrentRequest && preview.isError;
+  const current = preview.data && !preview.isFetching && isCurrentRequest ? preview.data : null;
   const pending = save.isPending || preview.isFetching;
   const roundNames = new Map((rounds.data ?? []).map((round) => [round.id, round.name]));
   // Las activas, más las dadas de baja que la programación ya tenía: así se pueden desmarcar.
@@ -337,7 +336,7 @@ function ScheduleForm({
     ? complete
       ? (parsed.error.issues[0]?.message ?? 'Revisá los datos.')
       : 'Se calcula sola al completar predio, vigilador, días, vigencia y una ronda.'
-    : preview.isError
+    : currentError
       ? `No se pudo calcular: ${errorMessage(preview.error)}`
       : 'Calculando los turnos…';
 
@@ -532,7 +531,7 @@ function ScheduleForm({
             >
               <p className="font-semibold text-foreground">Vista previa</p>
               <p>{previewHint}</p>
-              {preview.isError && parsed.success && (
+              {currentError && (
                 <Button
                   type="button"
                   variant="outline"
