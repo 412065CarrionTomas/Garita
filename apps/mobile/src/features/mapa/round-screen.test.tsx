@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { GuardRoundVersion } from '@garita/shared';
 import { apiGet } from '@/lib/api-client';
@@ -59,4 +59,18 @@ it('no repite una ronda pedida dos veces ni avisa falta de señal si la API resp
   await render(<RoundScreen versionIds={['v1', 'v1', 'ajena']} />);
   expect(await screen.findAllByText('1. Portón')).toHaveLength(1);
   expect(screen.queryByText(/no se pudo cargar sin señal/)).toBeNull();
+});
+
+it('no desplaza la pantalla mientras hay un dedo sobre el mapa', async () => {
+  jest.mocked(apiGet).mockResolvedValue([version]);
+  await render(<RoundScreen versionIds={['v1']} />);
+  const frame = await screen.findByTestId('route-map-frame');
+  const scrollEnabled = () => screen.getByTestId('round-scroll').props.scrollEnabled;
+  await fireEvent(frame, 'touchStart');
+  expect(scrollEnabled()).toBe(false);
+  // Al levantar uno de dos dedos (pellizco) sigue bloqueado.
+  await fireEvent(frame, 'touchEnd', { nativeEvent: { touches: [{}] } });
+  expect(scrollEnabled()).toBe(false);
+  await fireEvent(frame, 'touchEnd', { nativeEvent: { touches: [] } });
+  expect(scrollEnabled()).toBe(true);
 });
