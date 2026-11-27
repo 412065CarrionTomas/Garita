@@ -58,6 +58,7 @@ export function ReassignDialog({
       ),
     onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: ['supervision'] });
+      void queryClient.invalidateQueries({ queryKey: ['turnos'] });
       if (response.warning) setWarningReceived(true);
       else onOpenChange(false);
     },

@@ -13,6 +13,7 @@ export * from './rounds/route';
 export * from './rounds/guard-round-version';
 export * from './shifts/windows';
 export * from './shifts/schemas';
+export * from './shifts/board';
 export * from './shifts/reassignment';
 export * from './shifts/guard-shifts';
 export * from './field/shift-offline-data';

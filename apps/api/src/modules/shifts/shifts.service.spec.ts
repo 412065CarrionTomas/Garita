@@ -1,4 +1,8 @@
-import { SCHEDULE_REGENERATION_REASON, ShiftsService } from './shifts.service';
+import {
+  SCHEDULE_REGENERATION_REASON,
+  ShiftsService,
+  effectiveShiftStatus,
+} from './shifts.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TenantResourceService } from '../auth/tenant-resource.service';
 
@@ -86,24 +90,97 @@ it.each([
 describe('audit shift list filters', () => {
   const now = new Date('2030-05-10T22:30:00Z');
   const findMany = jest.fn().mockResolvedValue([]);
+  const count = jest.fn().mockResolvedValue(0);
   const service = new ShiftsService(
-    { tenantPrisma: { shift: { findMany } } } as unknown as PrismaService,
+    { tenantPrisma: { shift: { findMany, count } } } as unknown as PrismaService,
     {} as TenantResourceService,
     { now: () => now },
     { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
     { resolve: jest.fn(), raise: jest.fn() },
     { emitToSite: jest.fn() },
   );
-  it('excludes only unassigned shifts when sinVigilador is false', async () => {
-    await service.list({ sinVigilador: 'false' });
+  it('filters by state group (with derived uncovered), searches by word and paginates', async () => {
+    const result = await service.list({
+      estado: 'problema',
+      q: 'ferre  díaz',
+      orden: 'predio:asc',
+      pagina: 3,
+      porPagina: 10,
+    });
+    const byWord = (word: string) => {
+      const search = { contains: word, mode: 'insensitive' };
+      return {
+        OR: [
+          { site: { name: search } },
+          {
+            assignments: {
+              some: {
+                isCurrent: true,
+                guard: { OR: [{ firstName: search }, { lastName: search }] },
+              },
+            },
+          },
+        ],
+      };
+    };
+    const where = {
+      AND: [
+        {
+          OR: [
+            { status: { not: 'cancelled' } },
+            { cancellationReason: null },
+            { cancellationReason: { not: SCHEDULE_REGENERATION_REASON } },
+          ],
+        },
+        {
+          OR: [
+            { status: { in: ['unassigned', 'uncovered', 'no_show'] } },
+            {
+              status: 'closed',
+              closedEarly: true,
+              endsAt: { gt: now },
+              OR: [{ closeReason: null }, { closeReason: { not: 'baja del predio' } }],
+            },
+            { status: 'scheduled', endsAt: { lte: now } },
+          ],
+        },
+        byWord('ferre'),
+        byWord('díaz'),
+      ],
+    };
     expect(findMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        where: {
-          NOT: { status: 'cancelled', cancellationReason: SCHEDULE_REGENERATION_REASON },
-          status: { not: 'unassigned' },
-        },
+        where,
+        orderBy: [{ site: { name: 'asc' } }, { startsAt: 'desc' }],
+        skip: 20,
+        take: 10,
       }),
     );
+    expect(count).toHaveBeenLastCalledWith({ where });
+    expect(result).toEqual({ items: [], total: 0 });
+  });
+  it('reports a shift closed early and still in its slot as uncovered', () => {
+    const endsAt = new Date(now.getTime() + 60_000);
+    expect(
+      effectiveShiftStatus(
+        { status: 'closed', closedEarly: true, closeReason: 'Fin', endsAt },
+        now,
+      ),
+    ).toBe('uncovered');
+    expect(
+      effectiveShiftStatus(
+        { status: 'closed', closedEarly: true, closeReason: 'baja del predio', endsAt },
+        now,
+      ),
+    ).toBe('closed');
+    expect(
+      effectiveShiftStatus(
+        { status: 'closed', closedEarly: true, closeReason: null, endsAt: now },
+        now,
+      ),
+    ).toBe('closed');
+    expect(effectiveShiftStatus({ status: 'scheduled', endsAt: now }, now)).toBe('no_show');
+    expect(effectiveShiftStatus({ status: 'scheduled', endsAt }, now)).toBe('scheduled');
   });
   it('includes current running assignments even after scheduled end', async () => {
     await service.mine({ userId: 'guard', companyId: 'company', role: 'guard', status: 'active' });
@@ -227,5 +304,110 @@ describe('guard shifts in a date range', () => {
     findMany.mockResolvedValueOnce([overnight, evening]);
     const page = await service.mineInRange(guard, { desde: '2030-05-10', hasta: '2030-05-10' });
     expect(page.items.map((s) => s.id)).toEqual(['night']);
+  });
+});
+
+describe('weekly shift board', () => {
+  const shift = (overrides: Record<string, unknown>) => ({
+    id: 'night',
+    siteId: 'site-b',
+    site: { name: 'Barrio' },
+    status: 'scheduled',
+    startsAt: new Date('2026-11-24T01:00:00Z'),
+    endsAt: new Date('2026-11-24T09:00:00Z'),
+    serviceDate: new Date('2026-11-23T00:00:00Z'),
+    scheduleId: 'schedule',
+    individuallyModified: false,
+    assignments: [{ guard: { id: 'g1', firstName: 'Valentina', lastName: 'Castro' } }],
+    rounds: [{ round: { name: 'Perimetral' } }],
+    ...overrides,
+  });
+  const findMany = jest.fn().mockResolvedValue([
+    shift({}),
+    shift({
+      id: 'early',
+      status: 'closed',
+      closedEarly: true,
+      closeReason: 'Descompostura',
+      startsAt: new Date('2026-11-26T01:00:00Z'),
+      endsAt: new Date('2026-11-26T09:00:00Z'),
+      serviceDate: new Date('2026-11-25T00:00:00Z'),
+    }),
+    shift({
+      id: 'live',
+      status: 'no_show',
+      startsAt: new Date('2026-11-26T04:00:00Z'),
+      endsAt: new Date('2026-11-26T12:00:00Z'),
+      serviceDate: new Date('2026-11-26T00:00:00Z'),
+    }),
+    shift({
+      id: 'gap',
+      status: 'unassigned',
+      startsAt: new Date('2026-11-30T01:00:00Z'),
+      endsAt: new Date('2026-11-30T09:00:00Z'),
+      serviceDate: new Date('2026-11-29T00:00:00Z'),
+      scheduleId: null,
+      assignments: [],
+    }),
+  ]);
+  const service = new ShiftsService(
+    {
+      tenantPrisma: {
+        company: {
+          findUniqueOrThrow: jest.fn().mockResolvedValue({
+            timezone: 'America/Argentina/Buenos_Aires',
+          }),
+        },
+        shift: { findMany },
+        site: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 'site-b', name: 'Barrio' },
+            { id: 'site-a', name: 'Acopio' },
+          ]),
+        },
+      },
+    } as unknown as PrismaService,
+    {} as TenantResourceService,
+    // Jueves 26/11 a las 02:00 en Buenos Aires.
+    { now: () => new Date('2026-11-26T05:00:00Z') },
+    { notifyUsers: jest.fn(), notifySiteStaff: jest.fn() },
+    { resolve: jest.fn(), raise: jest.fn() },
+    { emitToSite: jest.fn() },
+  );
+  const user = { userId: 'u', companyId: 'company', role: 'admin', status: 'active' } as const;
+
+  it('places a night shift on its start day, keeps empty sites and splits gaps by action', async () => {
+    const board = await service.board({}, user);
+    expect(board.today).toBe('2026-11-26');
+    expect(board.days[0]).toBe('2026-11-23');
+    expect(board.sites.map((site) => site.name)).toEqual(['Acopio', 'Barrio']);
+    const [, barrio] = board.sites;
+    if (!barrio) throw new Error('Falta el predio Barrio');
+    expect(barrio.days[0]).toEqual([
+      expect.objectContaining({
+        id: 'night',
+        origin: 'schedule',
+        guard: { id: 'g1', name: 'Valentina Castro' },
+        rounds: ['Perimetral'],
+      }),
+    ]);
+    expect(barrio.days[6]).toEqual([
+      expect.objectContaining({ id: 'gap', origin: 'manual', guard: null }),
+    ]);
+    // El nocturno del lunes terminó sin iniciarse: cuenta como no presentado aunque diga scheduled.
+    expect(board.summary).toEqual({ total: 4, sites: 1, toAssign: 1, toCover: 1, noShows: 2 });
+    expect(barrio.days[2]).toEqual([expect.objectContaining({ id: 'early', status: 'uncovered' })]);
+    expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
+      where: {
+        AND: expect.arrayContaining([
+          {
+            serviceDate: {
+              gte: new Date('2026-11-23T00:00:00.000Z'),
+              lte: new Date('2026-11-29T00:00:00.000Z'),
+            },
+          },
+        ]) as unknown,
+      },
+    });
   });
 });

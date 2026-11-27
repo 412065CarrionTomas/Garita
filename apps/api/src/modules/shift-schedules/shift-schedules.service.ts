@@ -9,7 +9,11 @@ import {
   shiftInputSchema,
   shiftScheduleInputSchema,
   shiftScheduleDefinitionSchema,
+  SCHEDULE_EXPIRING_DAYS,
+  type ScheduleListState,
+  type ShiftScheduleQuery,
   type ShiftScheduleInput,
+  type ShiftScheduleList,
   type SchedulePreview,
 } from '@garita/shared';
 import { CLOCK, type Clock } from '../../common/clock';
@@ -32,23 +36,98 @@ export class ShiftSchedulesService {
     @Inject(NOTIFICATIONS_PORT) private readonly notifications: NotificationsPort,
   ) {}
 
-  async list(query: { predio?: string; vigilador?: string }) {
+  async list(query: ShiftScheduleQuery): Promise<ShiftScheduleList> {
     if (query.predio) await this.resources.findOwnedOrThrow('Site', query.predio);
     if (query.vigilador) await this.resources.findOwnedOrThrow('User', query.vigilador);
     const company = await this.prisma.tenantPrisma.company.findFirstOrThrow({
       select: { timezone: true },
     });
-    const schedules = await this.prisma.tenantPrisma.shiftSchedule.findMany({
-      where: {
-        status: 'active',
-        endDate: { gte: new Date(this.today(company.timezone)) },
-        ...(query.predio ? { siteId: query.predio } : {}),
-        ...(query.vigilador ? { guardId: query.vigilador } : {}),
+    const today = this.today(company.timezone);
+    const todayDate = new Date(today);
+    const expiringDate = new Date(scheduleDateOffset(today, SCHEDULE_EXPIRING_DAYS));
+    const current = { status: 'active' as const, endDate: { gte: todayDate } };
+    const byState: Record<ScheduleListState, Prisma.ShiftScheduleWhereInput> = {
+      vigente: current,
+      por_vencer: { status: 'active', endDate: { gte: todayDate, lte: expiringDate } },
+      finalizada: {
+        OR: [{ status: 'finished' }, { status: 'active', endDate: { lt: todayDate } }],
       },
-      orderBy: { startDate: 'asc' },
-      take: 500,
-    });
-    return schedules.map(presentSchedule);
+      cancelada: { status: 'cancelled' },
+    };
+    const words = query.q?.split(/\s+/).filter(Boolean) ?? [];
+    const scope: Prisma.ShiftScheduleWhereInput = {
+      ...(query.predio ? { siteId: query.predio } : {}),
+      ...(query.vigilador ? { guardId: query.vigilador } : {}),
+    };
+    const [schedules, expiring] = await Promise.all([
+      this.prisma.tenantPrisma.shiftSchedule.findMany({
+        where: {
+          ...scope,
+          AND: [
+            byState[query.estado ?? 'vigente'],
+            // Cada palabra tiene que aparecer en el predio, el nombre o el apellido del vigilador.
+            ...words.map((word) => {
+              const search = { contains: word, mode: 'insensitive' as const };
+              return {
+                OR: [
+                  { site: { name: search } },
+                  { guard: { firstName: search } },
+                  { guard: { lastName: search } },
+                ],
+              };
+            }),
+          ],
+        },
+        include: {
+          site: { select: { name: true } },
+          guard: { select: { firstName: true, lastName: true } },
+        },
+        orderBy: [{ endDate: 'asc' }, { startDate: 'asc' }],
+        take: 500,
+      }),
+      this.prisma.tenantPrisma.shiftSchedule.count({ where: { ...scope, ...byState.por_vencer } }),
+    ]);
+    if (!schedules.length) return { items: [], expiring };
+    const ids = schedules.map((schedule) => schedule.id);
+    const roundIds = [...new Set(schedules.flatMap((schedule) => schedule.roundIds))];
+    const live = {
+      scheduleId: { in: ids },
+      status: { notIn: ['cancelled', 'cancelled_by_suspension'] as const },
+    } satisfies Prisma.ShiftWhereInput;
+    const [upcoming, modified, rounds] = await Promise.all([
+      this.prisma.tenantPrisma.shift.groupBy({
+        by: ['scheduleId'],
+        where: { ...live, startsAt: { gt: this.clock.now() } },
+        _count: { _all: true },
+      }),
+      this.prisma.tenantPrisma.shift.groupBy({
+        by: ['scheduleId'],
+        where: { ...live, individuallyModified: true },
+        _count: { _all: true },
+      }),
+      this.prisma.tenantPrisma.round.findMany({
+        where: { id: { in: roundIds } },
+        select: { id: true, name: true },
+      }),
+    ]);
+    const countOf = (rows: { scheduleId: string | null; _count: { _all: number } }[]) =>
+      new Map(rows.map((row) => [row.scheduleId, row._count._all]));
+    const upcomingBy = countOf(upcoming);
+    const modifiedBy = countOf(modified);
+    const roundNames = new Map(rounds.map((round) => [round.id, round.name]));
+    const todayMs = todayDate.getTime();
+    return {
+      items: schedules.map((schedule) => ({
+        ...presentSchedule(schedule),
+        siteName: schedule.site.name,
+        guardName: `${schedule.guard.firstName} ${schedule.guard.lastName}`.trim(),
+        roundNames: schedule.roundIds.flatMap((id) => roundNames.get(id) ?? []),
+        daysToEnd: Math.round((schedule.endDate.getTime() - todayMs) / 86_400_000),
+        upcomingCount: upcomingBy.get(schedule.id) ?? 0,
+        modifiedCount: modifiedBy.get(schedule.id) ?? 0,
+      })),
+      expiring,
+    };
   }
 
   async preview(

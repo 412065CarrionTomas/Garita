@@ -1,15 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { renderWithQueryClient } from '@/test/render';
-import {
-  SchedulePreviewTable,
-  ScheduleResult,
-  SchedulesPage,
-  WeekdaySelector,
-} from './schedules-page';
-import { ShiftsPanel } from '../shifts-panel';
+import { SchedulePreviewTable, WeekdaySelector } from './schedule-form-dialog';
+import { ScheduleResult, SchedulesPage } from './schedules-page';
 
 jest.mock('@/lib/api-client', () => ({
   apiGet: jest.fn(),
@@ -22,12 +17,18 @@ const schedule = {
   siteId: 'site',
   guardId: 'guard',
   roundIds: ['round'],
-  weekdays: [1],
+  weekdays: [1, 3, 5],
   startTime: '22:00',
   endTime: '06:00',
   startDate: '2030-10-05',
   endDate: '2030-10-30',
   status: 'active' as const,
+  siteName: 'Depósito',
+  guardName: 'Pedro Díaz',
+  roundNames: ['Perimetral'],
+  daysToEnd: 6,
+  upcomingCount: 9,
+  modifiedCount: 2,
 };
 const preview = {
   timezone: 'America/Argentina/Buenos_Aires',
@@ -69,6 +70,7 @@ const site = {
   status: 'active',
 };
 beforeEach(() => {
+  window.history.replaceState({}, '', '/programaciones-turnos');
   globalThis.ResizeObserver = jest.fn().mockImplementation(() => ({
     observe: jest.fn(),
     unobserve: jest.fn(),
@@ -76,7 +78,8 @@ beforeEach(() => {
   }));
   jest.clearAllMocks();
   jest.mocked(apiGet).mockImplementation((path) => {
-    if (path === '/programaciones-turnos') return Promise.resolve([schedule] as never);
+    if (path.startsWith('/programaciones-turnos'))
+      return Promise.resolve({ items: [schedule], expiring: 1 } as never);
     if (path.startsWith('/predios?')) return Promise.resolve([site] as never);
     if (path.includes('/rondas'))
       return Promise.resolve([{ id: 'round', name: 'Perimetral', status: 'active' }] as never);
@@ -91,6 +94,12 @@ beforeEach(() => {
   jest.mocked(apiPatch).mockResolvedValue(result);
 });
 
+async function openMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole('button', { name: 'Acciones de la programación de Depósito' }),
+  );
+}
+
 it('el selector anuncia días y selección, con Tab y Espacio', async () => {
   function Harness() {
     const [value, setValue] = useState<number[]>([]);
@@ -102,46 +111,96 @@ it('el selector anuncia días y selección, con Tab y Espacio', async () => {
   expect(screen.getByRole('checkbox', { name: 'Lunes' })).toHaveFocus();
   await user.keyboard(' ');
   expect(screen.getByRole('checkbox', { name: 'Lunes' })).toBeChecked();
-  expect(screen.getByRole('status')).toHaveTextContent('1 días seleccionados');
+  expect(screen.getByRole('status')).toHaveTextContent('1 elegido');
   await user.keyboard(' ');
   expect(screen.getByRole('checkbox', { name: 'Lunes' })).not.toBeChecked();
 });
-it('muestra el conflicto con texto e identifica el turno; las ventanas no impiden confirmar', () => {
-  render(<SchedulePreviewTable preview={preview} />);
-  expect(screen.getByText('Conflicto: no se generará')).toBeInTheDocument();
-  expect(screen.getByText(/Turno conflicting/)).toBeInTheDocument();
+
+it('resume la vista previa: conflictos primero y ventanas con el nombre de la ronda', () => {
+  render(
+    <SchedulePreviewTable preview={preview} roundNames={new Map([['round', 'Perimetral']])} />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent(
+    '0 turnos a generar · 1 con conflicto · 1 ventanas sin cubrir',
+  );
+  expect(screen.getByText(/Conflicto: no se generará 1 turno/)).toBeInTheDocument();
+  expect(screen.getByText(/el vigilador ya tiene un turno de/)).toBeInTheDocument();
   expect(screen.getByText(/Podés confirmar igualmente/)).toBeInTheDocument();
+  expect(screen.getByText(/04:00–07:00 · Perimetral/)).toBeInTheDocument();
 });
-it('informa los afectados y conservados', () => {
+
+it('informa los generados, afectados y conservados', () => {
   render(<ScheduleResult result={result} />);
   expect(screen.getByRole('status')).toHaveTextContent(
     '1 turnos generados, 1 afectados y 1 conservados',
   );
-  expect(screen.getByText('manual')).toBeInTheDocument();
-  expect(screen.getByText('old')).toBeInTheDocument();
 });
-it('previsualiza una modificación, invalida la vista al cambiar datos y confirma', async () => {
+
+it('muestra la semana tipo, la vigencia y los turnos de cada programación', async () => {
+  renderWithQueryClient(<SchedulesPage />);
+  const table = await screen.findByRole('table', { name: 'Programaciones' });
+  expect(within(table).getByText('Pedro Díaz')).toBeInTheDocument();
+  expect(within(table).getByRole('img', { name: 'Lunes, Miércoles, Viernes' })).toBeVisible();
+  expect(within(table).getByText('Vence en 6 días')).toBeInTheDocument();
+  expect(within(table).getByText('9 próximos')).toBeInTheDocument();
+  expect(within(table).getByText('2 editados a mano')).toBeInTheDocument();
+  expect(within(table).getByTitle('Termina al día siguiente')).toBeInTheDocument();
+});
+
+it('filtra por vencer desde el resumen y guarda el filtro en la URL', async () => {
+  renderWithQueryClient(<SchedulesPage />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: '1 por vencer en 14 días' }));
+  expect(window.location.search).toContain('estado=por_vencer');
+  await waitFor(() => {
+    expect(apiGet).toHaveBeenCalledWith(
+      '/programaciones-turnos?estado=por_vencer',
+      expect.anything(),
+    );
+  });
+});
+
+it('abre el modal, calcula la vista previa sola, la invalida al cambiar datos y confirma', async () => {
   jest.mocked(apiPost).mockResolvedValue({
     ...preview,
     shifts: preview.shifts.map((shift) => ({ ...shift, conflicts: [] })),
   });
   renderWithQueryClient(<SchedulesPage />);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole('button', { name: 'Modificar' }));
-  await user.click(screen.getByRole('button', { name: 'Previsualizar' }));
-  await screen.findByRole('button', { name: 'Confirmar modificación' });
+  await openMenu(user);
+  await user.click(screen.getByRole('menuitem', { name: 'Modificar' }));
+  const panel = await screen.findByRole('dialog', { name: 'Modificar programación' });
+  expect(within(panel).getByText(/Termina al día siguiente/)).toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: 'Previsualizar' })).not.toBeInTheDocument();
+  const confirm = within(panel).getByRole('button', { name: 'Confirmar modificación' });
+  await waitFor(() => {
+    expect(confirm).toBeEnabled();
+  });
   expect(apiPost).toHaveBeenCalledWith(
     '/programaciones-turnos/previsualizar?programacion=schedule',
     expect.objectContaining({ siteId: 'site' }),
     expect.anything(),
     expect.anything(),
+    expect.objectContaining({ signal: expect.anything() as unknown }),
   );
-  fireEvent.change(screen.getByLabelText('Hora de inicio (obligatorio)'), {
+  fireEvent.change(within(panel).getByLabelText('Hora de inicio'), {
     target: { value: '21:00' },
   });
-  expect(screen.queryByRole('button', { name: 'Confirmar modificación' })).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Previsualizar' }));
-  await user.click(await screen.findByRole('button', { name: 'Confirmar modificación' }));
+  expect(confirm).toBeDisabled();
+  await waitFor(() => {
+    expect(apiPost).toHaveBeenLastCalledWith(
+      '/programaciones-turnos/previsualizar?programacion=schedule',
+      expect.objectContaining({ startTime: '21:00' }),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ signal: expect.anything() as unknown }),
+    );
+  });
+  await waitFor(() => {
+    expect(confirm).toBeEnabled();
+  });
+  jest.mocked(apiPatch).mockResolvedValue(result);
+  await user.click(confirm);
   await waitFor(() => {
     expect(apiPatch).toHaveBeenCalledWith(
       '/programaciones-turnos/schedule',
@@ -153,13 +212,16 @@ it('previsualiza una modificación, invalida la vista al cambiar datos y confirm
   expect(
     await screen.findByText(/1 turnos generados, 1 afectados y 1 conservados/),
   ).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
 it.each(['Extender', 'Cancelar programación'])(
-  'confirma la acción %s desde el listado',
+  'confirma la acción %s desde el menú de la fila',
   async (name) => {
     renderWithQueryClient(<SchedulesPage />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name }));
+    await openMenu(user);
+    await user.click(screen.getByRole('menuitem', { name }));
     if (name === 'Extender')
       fireEvent.change(screen.getByLabelText('Nueva fecha final incluida'), {
         target: { value: '2030-11-06' },
@@ -175,31 +237,47 @@ it.each(['Extender', 'Cancelar programación'])(
     });
   },
 );
-it('muestra ambos distintivos dentro de la pantalla de turnos', async () => {
-  const fallback = jest.mocked(apiGet).getMockImplementation();
-  if (!fallback) throw new Error('Falta el mock de las consultas');
-  jest.mocked(apiGet).mockImplementation((path, schema) =>
-    path.startsWith('/turnos')
-      ? Promise.resolve(
-          schema.parse([
-            {
-              id: 'shift',
-              siteId: 'site',
-              startsAt: '2030-10-06T01:00Z',
-              endsAt: '2030-10-06T09:00Z',
-              serviceDate: '2030-10-05',
-              status: 'scheduled',
-              scheduleId: 'schedule',
-              individuallyModified: true,
-              site,
-              assignments: [],
-              rounds: [],
-            },
-          ]),
-        )
-      : fallback(path, schema),
-  );
-  renderWithQueryClient(<ShiftsPanel />);
-  expect(await screen.findByText('De programación')).toBeInTheDocument();
-  expect(screen.getByText('Modificado individualmente')).toBeInTheDocument();
+
+it('extender empieza el día siguiente al fin actual', async () => {
+  renderWithQueryClient(<SchedulesPage />);
+  const user = userEvent.setup();
+  await openMenu(user);
+  await user.click(screen.getByRole('menuitem', { name: 'Extender' }));
+  expect(screen.getByLabelText('Nueva fecha final incluida')).toHaveAttribute('min', '2030-10-31');
+  expect(screen.getByText(/Se agregan turnos desde el 31 oct/)).toBeInTheDocument();
+});
+
+it('con las fechas al revés explica qué corregir en lugar de esperar la vista previa', async () => {
+  renderWithQueryClient(<SchedulesPage />);
+  const user = userEvent.setup();
+  await openMenu(user);
+  await user.click(screen.getByRole('menuitem', { name: 'Modificar' }));
+  const panel = await screen.findByRole('dialog', { name: 'Modificar programación' });
+  fireEvent.change(within(panel).getByLabelText('Hasta (incluido)'), {
+    target: { value: '2030-10-01' },
+  });
+  expect(
+    await within(panel).findByText('La fecha final debe ser posterior o igual a la inicial.'),
+  ).toBeInTheDocument();
+  expect(within(panel).getByRole('button', { name: 'Confirmar modificación' })).toBeDisabled();
+});
+
+it('si la vista previa falla, muestra el motivo y deja reintentar', async () => {
+  jest.mocked(apiPost).mockRejectedValueOnce(new Error('Sin conexión con la API'));
+  renderWithQueryClient(<SchedulesPage />);
+  const user = userEvent.setup();
+  await openMenu(user);
+  await user.click(screen.getByRole('menuitem', { name: 'Modificar' }));
+  const panel = await screen.findByRole('dialog', { name: 'Modificar programación' });
+  expect(
+    await within(panel).findByText('No se pudo calcular: Sin conexión con la API'),
+  ).toBeInTheDocument();
+  jest.mocked(apiPost).mockResolvedValueOnce({
+    ...preview,
+    shifts: preview.shifts.map((shift) => ({ ...shift, conflicts: [] })),
+  });
+  await user.click(within(panel).getByRole('button', { name: 'Reintentar' }));
+  await waitFor(() => {
+    expect(within(panel).getByRole('button', { name: 'Confirmar modificación' })).toBeEnabled();
+  });
 });

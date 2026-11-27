@@ -18,7 +18,7 @@ import { PersonalPage } from '../personal/personal-page';
 import { ActivationPage } from '../activacion/activation-page';
 import { ClientDetailPage, ClientsPage } from '../clientes/clients-page';
 import { SitesPage } from '../predios/sites-page';
-import { ShiftsPanel } from '../turnos/shifts-panel';
+import { ShiftsPage } from '../turnos/shifts-page';
 import { SchedulesPage } from '../turnos/programaciones/schedules-page';
 import {
   IncidentsPage,
@@ -333,7 +333,7 @@ export function AppRoutes() {
           path="/turnos"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <ShiftsPanel />
+              <ShiftsPage />
             </Protected>
           }
         />
