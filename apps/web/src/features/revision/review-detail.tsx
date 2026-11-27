@@ -222,15 +222,22 @@ export function ReviewDetail({
   id,
   onClosed,
   onNotice,
+  onDeciding,
 }: {
   id: string;
   /** La ventana dejó de estar pendiente: la bandeja pasa a la siguiente. */
   onClosed: (text: string) => void;
   /** Se guardó una decisión y la ventana sigue elegida. */
   onNotice: (text: string) => void;
+  /** Se abre una decisión: fijar esta ventana para que el sondeo de la bandeja no la cambie. */
+  onDeciding: () => void;
 }) {
   const { data, isPending, isError, refetch } = useReviewDetail(id);
-  const [action, setAction] = useState<ReviewAction | null>(null);
+  const [action, setOpenAction] = useState<ReviewAction | null>(null);
+  const setAction = (next: ReviewAction | null) => {
+    if (next) onDeciding();
+    setOpenAction(next);
+  };
   if (isPending)
     return (
       <div role="status" className="space-y-3 p-5">

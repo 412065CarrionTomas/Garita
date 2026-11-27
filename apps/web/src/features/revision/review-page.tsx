@@ -431,6 +431,10 @@ export function ReviewPage() {
               key={selectedId}
               id={selectedId}
               onNotice={setMessage}
+              onDeciding={() => {
+                // Sin :id, la ventana elegida depende de la bandeja, que se refresca sola.
+                if (!id) select(selectedId);
+              }}
               onClosed={(text) => {
                 setMessage(text);
                 // Pasa a la que seguía en la lista (o a la anterior si era la última).
