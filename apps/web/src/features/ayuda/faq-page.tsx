@@ -82,6 +82,13 @@ function FaqList({ role }: { role: UserRole | null }) {
                         <RichText text={paragraph} />
                       </p>
                     ))}
+                    {entry.link && (
+                      <p>
+                        <Link className="font-medium underline" to={entry.link.path}>
+                          Ir a {entry.link.label}
+                        </Link>
+                      </p>
+                    )}
                   </div>
                 </details>
               ))}

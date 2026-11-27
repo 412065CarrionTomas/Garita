@@ -53,12 +53,29 @@ describe('PublicFaqPage', () => {
   });
 });
 
+const renderFaq = () =>
+  render(
+    <MemoryRouter>
+      <FaqPage />
+    </MemoryRouter>,
+  );
+
 describe('FaqPage', () => {
+  it('enlaza la pantalla donde se resuelve la pregunta', () => {
+    mockRole('admin');
+    renderFaq();
+    const entry = faqEntries.find((item) => item.id === 'panic-attend-and-resolve');
+    expect(entry?.link).toBeDefined();
+    expect(
+      screen.getAllByRole('link', { name: `Ir a ${entry?.link?.label ?? ''}` })[0],
+    ).toHaveAttribute('href', entry?.link?.path);
+  });
+
   it.each(['admin', 'supervisor', 'client'] as const)(
     'muestra lo del rol %s y nada ajeno',
     (role) => {
       mockRole(role);
-      render(<FaqPage />);
+      renderFaq();
       for (const question of questions((a) => a.includes(role) || a.includes('public')))
         expect(screen.getByText(question)).toBeInTheDocument();
       for (const question of questions((a) => !a.includes(role) && !a.includes('public')))
@@ -68,7 +85,7 @@ describe('FaqPage', () => {
 
   it('filtra con la búsqueda y ofrece borrarla cuando no hay resultados', () => {
     mockRole('admin');
-    render(<FaqPage />);
+    renderFaq();
     const search = screen.getByRole('searchbox', { name: 'Buscar en las preguntas' });
     fireEvent.change(search, { target: { value: 'zzzz-sin-coincidencias' } });
     expect(screen.getByText('Sin resultados')).toBeInTheDocument();
