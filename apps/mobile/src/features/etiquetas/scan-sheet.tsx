@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Modal, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { radius, space, touch } from '@garita/tokens';
@@ -13,6 +13,9 @@ export interface SheetPoint {
   position: number;
   tagType: TagType;
 }
+
+/** Fases que un cambio de NFC sobre el mismo punto no toca: un resultado o un guardado en curso. */
+const SETTLED = new Set(['saving', 'done', 'removed', 'confirmRemove', 'move', 'error']);
 
 /** Cuánto se ve el éxito antes de pasar solo al siguiente punto. */
 const AUTO_DELAY_MS = 1500;
@@ -57,9 +60,13 @@ export function ScanSheet({
   const tagged = point ? point.tagType !== 'qr' : false;
 
   // Al abrir un punto sin etiqueta (o cualquiera de la serie) ya se espera la lectura.
+  const shownId = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!point || !ready) return reset();
-    if (series || !tagged) void associate(point);
+    const samePoint = shownId.current === pointId;
+    shownId.current = pointId;
+    if (!point) return reset();
+    if (samePoint && SETTLED.has(phase.kind)) return;
+    if (ready && (series || !tagged)) void associate(point);
     else reset();
     // Solo al cambiar de punto o de NFC: la lista se refresca después de cada asociación.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,6 +82,8 @@ export function ScanSheet({
   if (!point) return null;
 
   const close = () => {
+    // Atrás de Android tampoco corta un guardado: la API ya puede haber aplicado el cambio.
+    if (phase.kind === 'saving') return;
     reset();
     onClose();
   };
@@ -102,7 +111,8 @@ export function ScanSheet({
             </View>
           </View>
 
-          {ready ? <PhaseMessage phase={phase} point={point} /> : <NfcBlocker state={nfc} />}
+          {!ready && <NfcBlocker state={nfc} />}
+          <PhaseMessage phase={phase} point={point} />
 
           {phase.kind === 'done' && (
             <View style={[styles.writeOn, { borderColor: colors.foreground }]}>

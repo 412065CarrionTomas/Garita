@@ -127,6 +127,7 @@ export function useTagAssociation(onChanged: () => void) {
           for (let i = 0; step.apdu && i < MAX_SECURE_STEPS; i++) {
             if (!alive()) throw new Superseded();
             const response = await tag.transceive(step.apdu);
+            if (!alive()) throw new Superseded();
             step = await apiRequest(
               'POST',
               `/etiquetas-seguras/configuracion/${encodeURIComponent(step.sessionId)}/comando`,

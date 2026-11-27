@@ -57,6 +57,10 @@ export default function IdentifyTagRoute() {
       .then((tag) => {
         if (active && tag) setState({ kind: 'found', tag });
       })
+      // Un UID que no se puede normalizar es una mala lectura, no un problema de conexión.
+      .catch(() => {
+        if (active) setState({ kind: 'error', message: READ_FAILED });
+      })
       .finally(() => {
         // Una lectura vieja no corta la del intento nuevo.
         if (active) void cancelNfcRead();

@@ -203,6 +203,11 @@ it('con NFC apagado deja quitar pero no reemplazar ni leer', async () => {
   await user.press(screen.getByLabelText('Punto 3, Tanque. Etiqueta segura'));
   expect(screen.getByRole('button', { name: 'Quitar etiqueta' })).toBeOnTheScreen();
   expect(screen.queryByRole('button', { name: 'Reemplazar etiqueta' })).toBeNull();
+  // El aviso de NFC no tapa la confirmación ni el resultado de quitar.
+  await user.press(screen.getByRole('button', { name: 'Quitar etiqueta' }));
+  expect(screen.getByText('¿Quitar la etiqueta de Tanque?')).toBeOnTheScreen();
+  await user.press(screen.getByRole('button', { name: 'Sí, quitar' }));
+  expect(await screen.findByText('Etiqueta quitada')).toBeOnTheScreen();
   expect(withSecureNfcTag).not.toHaveBeenCalled();
 });
 
