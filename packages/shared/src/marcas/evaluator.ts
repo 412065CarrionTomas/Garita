@@ -33,6 +33,9 @@ export function evaluateTimeFlags(
   return flags;
 }
 
+/** Pares de puntos más cercanos no se evalúan por tiempo imposible. */
+export const IMPOSSIBLE_TIME_MIN_METERS = 100;
+
 /**
  * Pure and deterministic evaluation of suspicious record flags according to HU-15.
  *
@@ -42,12 +45,12 @@ export function evaluateTimeFlags(
  * - location_unverifiable: accuracy > 100m or location status === 'unverifiable', outdoor checkpoints only (leve)
  * - location_disabled: location status === 'disabled', outdoor checkpoints only (media)
  * - qr_on_tagged_point: method === 'qr' on checkpoint with active tag, if phoneNfc is 'on' or 'off' (media); no flag if 'unsupported'
- * - impossible_time: speed between consecutive checkpoints (using configured coordinates) > site max speed, only if distance >= 100m (grave)
+ * - impossible_time: speed between consecutive checkpoints (using configured coordinates) > max speed of the pair, only if distance >= IMPOSSIBLE_TIME_MIN_METERS (grave)
  * - indoor checkpoints: neither out_of_range nor lack of location / accuracy is flagged
  */
 export function evaluateRecordFlags(input: EvaluateRecordFlagsInput): EvaluatedFlag[] {
   const flags = evaluateTimeFlags(input.record.clock, input.record.receivedAt);
-  const { record, checkpoint, previousRecord, site } = input;
+  const { record, checkpoint, previousRecord, speed } = input;
 
   // 1. Simulated location (grave) - applies regardless of indoor/outdoor
   if (record.location.simulation === 'simulated') {
@@ -137,8 +140,7 @@ export function evaluateRecordFlags(input: EvaluateRecordFlagsInput): EvaluatedF
       checkpoint.longitude,
     );
 
-    // Only evaluated if distance between configured checkpoints is at least 100 meters
-    if (checkpointDistance >= 100) {
+    if (checkpointDistance >= IMPOSSIBLE_TIME_MIN_METERS) {
       const tCurrent = new Date(record.clock?.trustedAt ?? record.occurredAtDevice).getTime();
       const tPrevious = new Date(
         previousRecord.trustedAt ?? previousRecord.occurredAtDevice,
@@ -152,14 +154,14 @@ export function evaluateRecordFlags(input: EvaluateRecordFlagsInput): EvaluatedF
         speedKmh = (checkpointDistance / timeDeltaSeconds) * 3.6;
       }
 
-      if (speedKmh > site.maxSpeedKmh) {
+      if (speedKmh > speed.maxSpeedKmh) {
         flags.push({
           type: 'impossible_time',
           severity: FLAG_SEVERITY.impossible_time,
           reason: 'speed_exceeded',
           details: {
             speedKmh: Number.isFinite(speedKmh) ? Math.round(speedKmh * 100) / 100 : 'infinity',
-            maxSpeedKmh: site.maxSpeedKmh,
+            maxSpeedKmh: speed.maxSpeedKmh,
             distanceMeters: Math.round(checkpointDistance * 100) / 100,
             timeDeltaSeconds,
           },

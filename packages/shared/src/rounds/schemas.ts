@@ -44,6 +44,8 @@ export const roundInputSchema = z
       });
   });
 
+export type RoundInput = z.infer<typeof roundInputSchema>;
+
 export const previewRoundSchema = z
   .object({
     frequencyMinutes: z.number().int(),

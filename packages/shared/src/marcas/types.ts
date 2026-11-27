@@ -112,7 +112,8 @@ export interface EvaluateRecordFlagsInput {
       longitude: number;
     };
   } | null;
-  site: {
+  /** Máximo del par de lecturas: el de sus rondas o, si no tienen, el del predio. */
+  speed: {
     maxSpeedKmh: number;
   };
 }
