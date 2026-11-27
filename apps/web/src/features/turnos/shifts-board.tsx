@@ -11,6 +11,7 @@ import {
   formatShiftTime,
   gapAction,
   isCancelled,
+  isFinished,
 } from './shift-utils';
 
 /**
@@ -70,16 +71,11 @@ export function ShiftsBoard({
                   aria-current={today ? 'date' : undefined}
                   className={cn(
                     'border-l border-border px-3 py-2 text-left text-sm',
-                    today ? 'font-bold' : 'font-semibold',
+                    today ? 'bg-primary font-bold text-primary-foreground' : 'font-semibold',
                     day < board.today && 'text-muted-foreground',
                   )}
                 >
-                  <span
-                    className={cn(
-                      'capitalize',
-                      today && 'border-b-2 border-primary pb-0.5 text-foreground',
-                    )}
-                  >
+                  <span className={cn('capitalize', today && 'text-primary-foreground')}>
                     {calendarDate(day, { weekday: 'short', day: 'numeric' })}
                   </span>
                   {today && <span className="sr-only"> (hoy)</span>}
@@ -91,7 +87,7 @@ export function ShiftsBoard({
         <tbody>
           {sites.map((site) => (
             <tr key={site.id} className="border-b border-border align-top last:border-b-0">
-              <th scope="row" className="px-3 py-2 text-left text-base font-semibold">
+              <th scope="row" className="bg-muted/60 px-3 py-2 text-left text-base font-semibold">
                 {site.name}
               </th>
               {site.days.map((cells, index) => {
@@ -101,12 +97,12 @@ export function ShiftsBoard({
                   <td
                     key={day}
                     className={cn(
-                      'group border-l border-border p-1',
+                      'group border-l border-border p-1.5',
                       day === board.today && 'bg-primary/5',
                       day < board.today && 'text-muted-foreground',
                     )}
                   >
-                    <ul className="space-y-1">
+                    <ul className="space-y-1.5">
                       {shown.map((cell) => (
                         <li key={cell.id}>
                           <BoardShift
@@ -163,19 +159,25 @@ function BoardShift({
   const action = gapAction(cell, now);
   const live = cell.status === 'in_progress';
   const time = `${formatShiftTime(cell.startsAt, timezone)}–${formatShiftTime(cell.endsAt, timezone)}`;
+  const past = Date.parse(cell.endsAt) < now;
+  // El fondo dice en qué está el turno: lo que viene es tarjeta, lo que pasó se apaga, y solo el
+  // hueco que todavía se puede resolver se marca fuerte; el hueco pasado queda como dato.
+  const surface = action
+    ? 'border-l-4 border-warning bg-warning-soft'
+    : live
+      ? 'border-l-4 border-success bg-success-soft'
+      : cancelled
+        ? ''
+        : problem
+          ? 'border border-dashed border-input'
+          : past || isFinished(cell.status)
+            ? 'bg-muted'
+            : 'border border-border bg-card';
   return (
-    <div
-      className={cn(
-        'rounded-sm',
-        // Solo el hueco que todavía se puede resolver se marca fuerte; el pasado queda como dato.
-        action && 'border-l-4 border-warning bg-warning-soft',
-        problem && !action && 'border-l-4 border-border',
-        live && 'border-l-4 border-success',
-      )}
-    >
+    <div className={cn('rounded-sm', surface)}>
       <button
         type="button"
-        className="block w-full rounded-sm px-2 py-1 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+        className="block w-full rounded-sm px-2 py-1 text-left hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-ring"
         title={cell.rounds.join(', ')}
         onClick={() => {
           onOpen(cell);
@@ -204,7 +206,13 @@ function BoardShift({
           <span
             className={cn(
               'block text-sm font-semibold',
-              action ? 'text-warning' : live ? 'text-success' : 'text-muted-foreground',
+              action
+                ? 'text-warning'
+                : live
+                  ? 'text-success'
+                  : problem
+                    ? 'text-danger'
+                    : 'text-muted-foreground',
             )}
           >
             {SHIFT_STATES[cell.status]?.label}
