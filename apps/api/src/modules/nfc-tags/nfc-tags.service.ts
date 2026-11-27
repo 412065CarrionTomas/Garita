@@ -85,14 +85,22 @@ export class NfcTagsService {
         select: { id: true, name: true },
       }),
       this.prisma.tenantPrisma.checkpoint.findMany({
-        where: { status: 'active' },
-        select: { siteId: true, nfcTags: { where: { status: 'active' }, select: { id: true } } },
+        // Un predio dado de baja conserva sus puntos activos: no se traen.
+        where: { status: 'active', site: { status: 'active' } },
+        select: {
+          siteId: true,
+          nfcTags: { where: { status: 'active' }, select: { id: true }, take: 1 },
+        },
       }),
     ]);
-    return sites.map((site) => {
-      const own = points.filter((point) => point.siteId === site.id);
-      return { ...site, total: own.length, tagged: own.filter((p) => p.nfcTags.length).length };
-    });
+    const counts = new Map<string, { total: number; tagged: number }>();
+    for (const point of points) {
+      const count = counts.get(point.siteId) ?? { total: 0, tagged: 0 };
+      count.total++;
+      if (point.nfcTags.length) count.tagged++;
+      counts.set(point.siteId, count);
+    }
+    return sites.map((site) => ({ ...site, ...(counts.get(site.id) ?? { total: 0, tagged: 0 }) }));
   }
 
   /** Dice a qué punto pertenece una etiqueta leída: su asociación más reciente en la empresa. */
@@ -107,7 +115,12 @@ export class NfcTagsService {
     const lastRead =
       tag.status === 'active'
         ? await this.prisma.tenantPrisma.checkpointRecord.findFirst({
-            where: { checkpointId: tag.checkpointId, method: 'nfc' },
+            // Solo marcas hechas con esta etiqueta: las de la anterior del punto no cuentan.
+            where: {
+              checkpointId: tag.checkpointId,
+              method: 'nfc',
+              occurredAtDevice: { gte: tag.associatedAt },
+            },
             orderBy: { occurredAtDevice: 'desc' },
             select: { occurredAtDevice: true },
           })

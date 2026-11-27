@@ -43,8 +43,8 @@ export const nfcTagSummarySchema = z.object({
 export const nfcConfigurationSiteSchema = z.object({
   id: z.string(),
   name: z.string(),
-  total: z.number().int(),
-  tagged: z.number().int(),
+  total: z.number().int().nonnegative(),
+  tagged: z.number().int().nonnegative(),
 });
 export const nfcConfigurationSitesSchema = z.array(nfcConfigurationSiteSchema);
 export type AssociateNfcTag = z.infer<typeof associateNfcTagSchema>;
