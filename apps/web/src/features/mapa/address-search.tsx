@@ -116,12 +116,15 @@ export function AddressSearch({
           setActive(-1);
         }}
         onBlur={() => {
+          // Sin el término, reabrir con la referencia movida no busca el texto viejo.
           setOpen(false);
+          setTerm('');
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.preventDefault();
           if (event.key === 'Escape') {
             setOpen(false);
+            setTerm('');
             return;
           }
           if (!expanded) return;

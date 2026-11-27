@@ -253,7 +253,8 @@ export function RoundEditor({
         );
       else notify(`Se calcularon las ${String(streets)} partes por calles.`);
     },
-    onError: () => {
+    onError: (_error, sent) => {
+      if ((sent.speedProfile ?? '') !== speedRef.current) return;
       notify('No se pudo calcular el recorrido. Tu recorrido no se modificó: reintentá.', 'danger');
     },
   });
@@ -414,7 +415,8 @@ export function RoundEditor({
       graceMinutes: grace,
       route,
       speedProfile: speed || null,
-      ...(speed === 'custom' ? { maxSpeedKmh: customKmh } : {}),
+      // Vacío: falta el dato (no «mínimo 5 km/h», que es lo que daría convertirlo a 0).
+      ...(speed === 'custom' ? { maxSpeedKmh: customKmh.trim() || undefined } : {}),
       ...(allowStraight ? { allowStraight } : {}),
     });
     if (!parsed.success) {

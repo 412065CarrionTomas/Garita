@@ -122,3 +122,30 @@ it('muestra «Buscando…» y atenúa las sugerencias viejas mientras llega la b
     expect(screen.getByRole('listbox')).toHaveAttribute('aria-busy', 'false');
   });
 });
+it('al reabrir tras mover la referencia no busca el texto anterior', async () => {
+  function Harness() {
+    const [near, setNear] = useState({ latitude: -31.4, longitude: -64.18 });
+    return (
+      <>
+        <AddressSearch onSelect={jest.fn()} near={near} />
+        <button
+          type="button"
+          onClick={() => {
+            setNear({ latitude: -31.5, longitude: -64.3 });
+          }}
+        >
+          Mover
+        </button>
+      </>
+    );
+  }
+  renderWithQueryClient(<Harness />);
+  const input = screen.getByRole('combobox');
+  fireEvent.change(input, { target: { value: 'Calle' } });
+  await screen.findAllByRole('option');
+  fireEvent.keyDown(input, { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Mover' }));
+  fireEvent.change(input, { target: { value: '' } });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
