@@ -15,7 +15,7 @@ const queueSchema = z
   })
   .strict()
   .refine((q) => !q.desde || !q.hasta || q.desde <= q.hasta, {
-    message: 'La fecha inicial debe ser anterior a la final',
+    message: 'La fecha inicial debe ser anterior o igual a la final',
   });
 const decisionSchema = z.object({ comment: z.string().trim().min(5).max(500) }).strict();
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -30,6 +30,12 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 @Roles('admin', 'supervisor')
 export class RoundReviewController {
   constructor(private readonly reviews: RoundReviewService) {}
+
+  @Get('ventanas-ronda/en-revision/cantidad')
+  @ApiOperation({ summary: 'Cuenta las ventanas en revisión (contador de la barra)' })
+  pendingCount() {
+    return this.reviews.pendingCount();
+  }
 
   @Get('ventanas-ronda/en-revision')
   @ApiOperation({ summary: 'Lista ventanas pendientes o resueltas (30 días) y los contadores' })

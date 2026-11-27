@@ -31,8 +31,11 @@ const personName = { select: { firstName: true, lastName: true } } as const;
 const fullName = (person: { firstName: string; lastName: string }) =>
   `${person.firstName} ${person.lastName}`;
 
-/** Vigilador dueño de la ventana: la asignación vigente al cierre (la misma regla del recálculo). */
-function ownerGuard(
+/**
+ * Dueño de la ventana: la asignación vigente al cierre (la misma regla del recálculo). Solo sus
+ * lecturas cuentan para la ventana; las de una asignación anterior del turno no.
+ */
+function windowAssignment(
   endsAt: Date,
   assignments: {
     id: string;
@@ -51,7 +54,13 @@ function ownerGuard(
     })),
   );
   const owner = assignments.find((assignment) => assignment.id === ownerId);
-  return owner?.guard ? { id: owner.guardId ?? null, name: fullName(owner.guard) } : null;
+  return owner
+    ? {
+        assignmentId: owner.id,
+        guardId: owner.guardId ?? null,
+        guardName: owner.guard ? fullName(owner.guard) : null,
+      }
+    : null;
 }
 
 function belongsToWindow(
@@ -88,10 +97,19 @@ export class RoundReviewService {
     @Inject(REPORT_RECALCULATION_PORT) private readonly reports: ReportRecalculationPort,
   ) {}
 
+  /** Contador de la barra: solo cuenta, para que el sondeo de cada 30 s no arme la bandeja. */
+  async pendingCount() {
+    return {
+      count: await this.prisma.tenantPrisma.roundWindowState.count({
+        where: { status: 'in_review' },
+      }),
+    };
+  }
+
   /**
-   * Bandeja de revisión: pendientes (en revisión) o resueltas en los últimos 30 días, con el
-   * vigilador, las marcas vigentes y la última decisión. `count` es siempre el de pendientes
-   * (lo usa el contador de la barra).
+   * Bandeja de revisión: pendientes (en revisión) o resueltas (30 días, o el rango de fechas), con
+   * el vigilador, las marcas vigentes y la última decisión. `count` es siempre el de pendientes.
+   * Trae hasta 200: `truncated` avisa que hay más y conviene acotar con fechas o predio.
    */
   async queue(
     user: AuthenticatedUser,
@@ -107,7 +125,8 @@ export class RoundReviewService {
       ...(filter.desde ? { gte: localDateTimeToUtc(filter.desde, 0, timezone) } : {}),
       ...(filter.hasta ? { lt: localDateTimeToUtc(filter.hasta, 1440, timezone) } : {}),
     };
-    const [count, overdue, resolvedLastDay, windows] = await Promise.all([
+    const pending = filter.estado === 'pendientes';
+    const [count, overdue, resolvedLastDay, found] = await Promise.all([
       db.roundWindowState.count({ where: { status: 'in_review', ...site } }),
       db.roundWindowState.count({
         where: { status: 'in_review', inReviewSince: { lt: new Date(now - DAY) }, ...site },
@@ -120,23 +139,26 @@ export class RoundReviewService {
         },
       }),
       db.roundWindowState.findMany({
-        where:
-          filter.estado === 'pendientes'
-            ? { status: 'in_review', ...site, ...(dated ? { startsAt } : {}) }
-            : {
-                status: { not: 'in_review' },
-                // Sin fechas, lo resuelto en los últimos 30 días; con fechas, las rondas de ese rango.
-                ...(dated
-                  ? { startsAt, decisions: { some: {} } }
-                  : {
-                      decisions: {
-                        some: { decidedAt: { gte: new Date(now - LOOKBACK_DAYS * DAY) } },
-                      },
-                    }),
-                ...site,
-              },
-        orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
-        take: QUEUE_LIMIT,
+        where: pending
+          ? { status: 'in_review', ...site, ...(dated ? { startsAt } : {}) }
+          : {
+              status: { not: 'in_review' },
+              // Sin fechas, lo resuelto en los últimos 30 días; con fechas, las rondas de ese rango.
+              ...(dated
+                ? { startsAt, decisions: { some: {} } }
+                : {
+                    decisions: {
+                      some: { decidedAt: { gte: new Date(now - LOOKBACK_DAYS * DAY) } },
+                    },
+                  }),
+              ...site,
+            },
+        // Pendientes: la más vieja primero. Resueltas: las más recientes, para que el tope no
+        // deje afuera lo último.
+        orderBy: pending
+          ? [{ startsAt: 'asc' }, { id: 'asc' }]
+          : [{ startsAt: 'desc' }, { id: 'desc' }],
+        take: QUEUE_LIMIT + 1,
         include: {
           shift: {
             select: {
@@ -156,25 +178,33 @@ export class RoundReviewService {
         },
       }),
     ]);
-    const records = windows.length
+    const windows = found.slice(0, QUEUE_LIMIT);
+    // Solo lecturas vigentes con alguna marca, agrupadas por turno.
+    const flagged = windows.length
       ? await db.checkpointRecord.findMany({
           where: {
             shiftId: { in: [...new Set(windows.map((window) => window.shiftId))] },
             countsForCompliance: true,
             invalidatedAt: null,
+            flags: { some: {} },
           },
           select: {
             shiftId: true,
+            assignmentId: true,
             countedFor: true,
             flags: { select: { type: true, severity: true } },
           },
         })
       : [];
+    const byShift = new Map<string, typeof flagged>();
+    for (const record of flagged)
+      byShift.set(record.shiftId, [...(byShift.get(record.shiftId) ?? []), record]);
     const items = windows.map((item) => {
-      const flags = records
+      const owner = windowAssignment(item.endsAt, item.shift.assignments);
+      const flags = (byShift.get(item.shiftId) ?? [])
         .filter(
           (record) =>
-            record.shiftId === item.shiftId &&
+            record.assignmentId === owner?.assignmentId &&
             belongsToWindow(record.countedFor, item.roundId, item.windowIndex),
         )
         .flatMap((record) => record.flags);
@@ -191,7 +221,7 @@ export class RoundReviewService {
         expectedCount: item.expectedCount,
         shift: { id: item.shift.id, site: item.shift.site },
         round: item.round,
-        guardName: ownerGuard(item.endsAt, item.shift.assignments)?.name ?? null,
+        guardName: owner?.guardName ?? null,
         flags: {
           grave: flags.filter((flag) => flag.severity === 'grave').length,
           media: flags.filter((flag) => flag.severity === 'media').length,
@@ -211,12 +241,19 @@ export class RoundReviewService {
       };
     });
     // Resueltas: la última decisión primero.
-    if (filter.estado === 'resueltas')
+    if (!pending)
       items.sort(
         (a, b) =>
           (b.resolution?.decidedAt.getTime() ?? 0) - (a.resolution?.decidedAt.getTime() ?? 0),
       );
-    return { timezone, count, overdue, resolvedLastDay, items };
+    return {
+      timezone,
+      count,
+      overdue,
+      resolvedLastDay,
+      truncated: found.length > QUEUE_LIMIT,
+      items,
+    };
   }
 
   private async companyTimezone(user: AuthenticatedUser) {
@@ -228,8 +265,9 @@ export class RoundReviewService {
   }
 
   /**
-   * Ventana con la evidencia para decidir: por registro, distancia al punto contra su radio,
-   * precisión, tiempo desde el anterior y marcas; y los antecedentes del vigilador (30 días).
+   * Ventana con la evidencia para decidir: por lectura del dueño de la ventana, sus marcas con los
+   * datos con que se generaron (`details`), la distancia actual al punto y la precisión; y los
+   * antecedentes del vigilador en 30 días.
    */
   async detail(id: string, user: AuthenticatedUser) {
     await this.resources.findOwnedOrThrow('RoundWindowState', id);
@@ -255,40 +293,45 @@ export class RoundReviewService {
       },
     });
     if (!window) throw new NotFoundException('Ventana no encontrada');
-    const guard = ownerGuard(window.endsAt, window.shift.assignments);
-    const since = new Date(this.clock.now().getTime() - LOOKBACK_DAYS * DAY);
-    const byGuard = { assignment: { guardId: guard?.id ?? '' } };
+    const owner = windowAssignment(window.endsAt, window.shift.assignments);
+    // Antecedentes: lecturas que cuentan, hechas en los últimos 30 días; marcas e invalidaciones
+    // de esas mismas lecturas, para que las tres cifras hablen de lo mismo.
+    const recent = {
+      assignment: { guardId: owner?.guardId ?? '' },
+      countsForCompliance: true,
+      occurredAtDevice: { gte: new Date(this.clock.now().getTime() - LOOKBACK_DAYS * DAY) },
+    };
     const [timezone, records, history] = await Promise.all([
       this.companyTimezone(user),
-      db.checkpointRecord.findMany({
-        where: { shiftId: window.shiftId, countsForCompliance: true },
-        orderBy: { occurredAtDevice: 'asc' },
-        include: {
-          checkpoint: {
-            select: {
-              name: true,
-              latitude: true,
-              longitude: true,
-              toleranceRadiusMeters: true,
-              isIndoor: true,
+      owner
+        ? db.checkpointRecord.findMany({
+            where: {
+              shiftId: window.shiftId,
+              assignmentId: owner.assignmentId,
+              countsForCompliance: true,
             },
-          },
-          flags: { select: { type: true, severity: true, reason: true, details: true } },
-        },
-      }),
-      guard?.id
+            orderBy: [{ occurredAtDevice: 'asc' }, { id: 'asc' }],
+            include: {
+              checkpoint: {
+                select: {
+                  name: true,
+                  latitude: true,
+                  longitude: true,
+                  toleranceRadiusMeters: true,
+                },
+              },
+              flags: { select: { type: true, severity: true, reason: true, details: true } },
+            },
+          })
+        : [],
+      owner?.guardId
         ? Promise.all([
-            db.checkpointRecord.count({ where: { ...byGuard, occurredAtDevice: { gte: since } } }),
-            db.recordFlag.count({
-              where: { severity: 'grave', createdAt: { gte: since }, checkpointRecord: byGuard },
-            }),
-            db.checkpointRecord.count({ where: { ...byGuard, invalidatedAt: { gte: since } } }),
+            db.checkpointRecord.count({ where: recent }),
+            db.recordFlag.count({ where: { severity: 'grave', checkpointRecord: recent } }),
+            db.checkpointRecord.count({ where: { ...recent, invalidatedAt: { not: null } } }),
           ])
         : null,
     ]);
-    const own = records.filter((record) =>
-      belongsToWindow(record.countedFor, window.roundId, window.windowIndex),
-    );
     return {
       id: window.id,
       shiftId: window.shiftId,
@@ -304,50 +347,37 @@ export class RoundReviewService {
       windowIndex: window.windowIndex,
       recordedCount: window.recordedCount,
       expectedCount: window.expectedCount,
-      guardName: guard?.name ?? null,
+      guardName: owner?.guardName ?? null,
       guardHistory: history && {
         days: LOOKBACK_DAYS,
         records: history[0],
         graveFlags: history[1],
         invalidatedRecords: history[2],
       },
-      records: own.map((record, index) => {
-        const checkpoint = {
-          latitude: Number(record.checkpoint.latitude),
-          longitude: Number(record.checkpoint.longitude),
-        };
-        const location =
-          record.latitude === null || record.longitude === null
-            ? null
-            : { latitude: Number(record.latitude), longitude: Number(record.longitude) };
-        const previous = index > 0 ? own[index - 1] : undefined;
-        return {
+      records: records
+        .filter((record) => belongsToWindow(record.countedFor, window.roundId, window.windowIndex))
+        .map((record) => ({
           id: record.id,
           checkpointName: record.checkpoint.name,
           occurredAtDevice: record.occurredAtDevice,
           invalidated: Boolean(record.invalidatedAt),
           method: record.method,
           radiusMeters: record.checkpoint.toleranceRadiusMeters,
-          isIndoor: record.checkpoint.isIndoor,
           accuracyMeters: record.accuracyMeters === null ? null : Number(record.accuracyMeters),
-          distanceMeters: location
-            ? Math.round(
-                haversineMeters(
-                  checkpoint.latitude,
-                  checkpoint.longitude,
-                  location.latitude,
-                  location.longitude,
+          // Contra la posición actual del punto; las marcas traen la de cuando se evaluaron.
+          distanceMeters:
+            record.latitude === null || record.longitude === null
+              ? null
+              : Math.round(
+                  haversineMeters(
+                    Number(record.checkpoint.latitude),
+                    Number(record.checkpoint.longitude),
+                    Number(record.latitude),
+                    Number(record.longitude),
+                  ),
                 ),
-              )
-            : null,
-          secondsFromPrevious: previous
-            ? Math.round(
-                (record.occurredAtDevice.getTime() - previous.occurredAtDevice.getTime()) / 1000,
-              )
-            : null,
           flags: record.flags,
-        };
-      }),
+        })),
       decisions: window.decisions.map((decision) => ({
         id: decision.id,
         kind: decision.kind,
