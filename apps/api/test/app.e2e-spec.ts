@@ -2583,6 +2583,7 @@ describe('Aplicación (e2e)', () => {
         '/api/v1/rondas/{id}/baja',
         '/api/v1/rondas/previsualizar-ventanas',
         '/api/v1/configuracion/predios',
+        '/api/v1/etiquetas-nfc/identificar',
         '/api/v1/predios/{id}/puntos',
         '/api/v1/puntos/{id}/etiqueta-nfc',
         '/api/v1/turnos',
@@ -3676,6 +3677,117 @@ describe('Aplicación (e2e)', () => {
       .set('Authorization', 'Bearer token-supervisor')
       .send({ uid: 'A1B2C3D4' })
       .expect(404);
+  });
+
+  it('identifica a qué punto pertenece una etiqueta y cuenta el avance por predio', async () => {
+    const prisma = app.get(PrismaService).systemPrisma;
+    const point = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northAssignedSiteId,
+        name: `Identificar NFC ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdNfcCheckpointIds.push(point.id);
+    const uid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    const auth = { Authorization: 'Bearer token-admin' };
+    const client = request(app.getHttpServer());
+    const path = '/api/v1/etiquetas-nfc/identificar';
+    await client.post(path).send({ uid }).expect(401);
+    await client.post(path).set('Authorization', 'Bearer token-guard').send({ uid }).expect(403);
+    await client.post(path).set(auth).send({ uid: 'xx' }).expect(400);
+    await client.post(path).set(auth).send({ uid }).expect(404);
+    await client.put(`/api/v1/puntos/${point.id}/etiqueta-nfc`).set(auth).send({ uid }).expect(200);
+    await client
+      .post(path)
+      .set(auth)
+      .send({ uid })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          status: 'active',
+          kind: 'basic',
+          checkpoint: { id: point.id, name: point.name },
+          site: { id: northAssignedSiteId },
+          lastReadAt: null,
+        });
+      });
+    // Otra empresa no ve la etiqueta.
+    await client
+      .post(path)
+      .set('Authorization', 'Bearer token-south-admin')
+      .send({ uid })
+      .expect(404);
+    await client.post(path).set('Authorization', 'Bearer token-client').send({ uid }).expect(403);
+    const supervisor = { Authorization: 'Bearer token-supervisor' };
+    await client.post(path).set(supervisor).send({ uid }).expect(200);
+    // El supervisor no ve etiquetas de predios que no tiene asignados.
+    const outside = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        name: `Identificar fuera ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdNfcCheckpointIds.push(outside.id);
+    const outsideUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    await client
+      .put(`/api/v1/puntos/${outside.id}/etiqueta-nfc`)
+      .set(auth)
+      .send({ uid: outsideUid })
+      .expect(200);
+    await client.post(path).set(supervisor).send({ uid: outsideUid }).expect(404);
+    // Reemplazada por otra: deja de estar vigente y no informa lecturas.
+    const newUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    await client
+      .put(`/api/v1/puntos/${point.id}/etiqueta-nfc`)
+      .set(auth)
+      .send({ uid: newUid })
+      .expect(200);
+    await client
+      .post(path)
+      .set(auth)
+      .send({ uid })
+      .expect(200)
+      .expect(({ body }) => {
+        const replaced = z
+          .object({ status: z.string(), endedAt: z.string().nullable(), lastReadAt: z.null() })
+          .parse(body);
+        expect(replaced.status).toBe('replaced');
+        expect(replaced.endedAt).not.toBeNull();
+      });
+    // Una configuración segura a medias no cuenta como asociación.
+    const incompleteUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    await prisma.nfcTag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointId: point.id,
+        uid: incompleteUid,
+        status: 'removed',
+        configurationStatus: 'incomplete',
+        associatedById: actor.id,
+      },
+    });
+    await client.post(path).set(auth).send({ uid: incompleteUid }).expect(404);
+    await client
+      .get('/api/v1/configuracion/predios')
+      .set(auth)
+      .expect(200)
+      .expect(({ body }) => {
+        const site = z
+          .array(z.object({ id: z.string(), total: z.number(), tagged: z.number() }))
+          .parse(body)
+          .find(({ id }) => id === northAssignedSiteId);
+        expect(site?.tagged).toBeGreaterThanOrEqual(1);
+        expect(site?.total).toBeGreaterThanOrEqual(site?.tagged ?? 0);
+      });
   });
 
   it('configura por APDU una etiqueta simulada, exige prueba SUN y aísla sesiones', async () => {

@@ -78,12 +78,66 @@ export class NfcTagsService {
   }
 
   async configurationSites(_user: AuthenticatedUser) {
-    const sites = await this.prisma.tenantPrisma.site.findMany({
-      where: { status: 'active' },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
+    const [sites, points] = await Promise.all([
+      this.prisma.tenantPrisma.site.findMany({
+        where: { status: 'active' },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      }),
+      this.prisma.tenantPrisma.checkpoint.findMany({
+        // Un predio dado de baja conserva sus puntos activos: no se traen.
+        where: { status: 'active', site: { status: 'active' } },
+        select: {
+          siteId: true,
+          nfcTags: { where: { status: 'active' }, select: { id: true }, take: 1 },
+        },
+      }),
+    ]);
+    const counts = new Map<string, { total: number; tagged: number }>();
+    for (const point of points) {
+      const count = counts.get(point.siteId) ?? { total: 0, tagged: 0 };
+      count.total++;
+      if (point.nfcTags.length) count.tagged++;
+      counts.set(point.siteId, count);
+    }
+    return sites.map((site) => ({ ...site, ...(counts.get(site.id) ?? { total: 0, tagged: 0 }) }));
+  }
+
+  /** Dice a qué punto pertenece una etiqueta leída: su asociación más reciente en la empresa. */
+  async identify(uid: string) {
+    const tag = await this.prisma.tenantPrisma.nfcTag.findFirst({
+      // Una configuración segura a medias deja un registro que nunca llegó a asociarse.
+      where: { uid, configurationStatus: { not: 'incomplete' } },
+      orderBy: { associatedAt: 'desc' },
+      include: { checkpoint: { include: { site: { select: { id: true, name: true } } } } },
     });
-    return sites;
+    if (!tag) throw new NotFoundException('La etiqueta no está asociada a ningún punto');
+    const lastRead =
+      tag.status === 'active'
+        ? await this.prisma.tenantPrisma.checkpointRecord.findFirst({
+            // Solo marcas hechas con esta etiqueta: las de la anterior del punto no cuentan.
+            where: {
+              checkpointId: tag.checkpointId,
+              method: 'nfc',
+              occurredAtDevice: { gte: tag.associatedAt },
+            },
+            orderBy: { occurredAtDevice: 'desc' },
+            select: { occurredAtDevice: true },
+          })
+        : null;
+    return {
+      status: tag.status,
+      kind: tag.kind,
+      associatedAt: tag.associatedAt,
+      endedAt: tag.endedAt,
+      checkpoint: {
+        id: tag.checkpoint.id,
+        name: tag.checkpoint.name,
+        position: tag.checkpoint.position,
+      },
+      site: tag.checkpoint.site,
+      lastReadAt: lastRead?.occurredAtDevice ?? null,
+    };
   }
 
   async associate(checkpointId: string, input: AssociateNfcTag, user: AuthenticatedUser) {

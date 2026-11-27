@@ -25,6 +25,7 @@ export function Segmented<T extends string>({
       horizontal
       showsHorizontalScrollIndicator={false}
       accessibilityLabel={label}
+      style={styles.scroll}
       contentContainerStyle={[styles.group, { borderColor: colors.foreground }]}
     >
       {options.map((option) => {
@@ -48,6 +49,8 @@ export function Segmented<T extends string>({
 }
 
 const styles = StyleSheet.create({
+  // Sin esto, en una pantalla de alto fijo el ScrollView se estira y ocupa el lugar sobrante.
+  scroll: { flexGrow: 0 },
   group: { borderWidth: 1.5, borderRadius: radius.lg, overflow: 'hidden' },
   option: { minHeight: touch.min, paddingHorizontal: space[4], justifyContent: 'center' },
 });
