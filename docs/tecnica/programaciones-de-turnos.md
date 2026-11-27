@@ -16,14 +16,14 @@ Las horas se interpretan en `Company.timezone`, mediante `localDateTimeToUtc`; n
 
 Todos los paths llevan el prefijo `/api/v1`. Swagger está en `/api/docs`.
 
-| Método y recurso                                | Operación                                                                                                                                                                                              |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| POST `/programaciones-turnos/previsualizar`     | Valida cada turno; devuelve fechas, conflictos identificados y ventanas sin cubrir, sin persistir. Para editar, el query opcional `programacion` excluye los turnos reemplazables de esa programación. |
-| POST `/programaciones-turnos`                   | Crea programación y turnos sin conflicto en una única transacción.                                                                                                                                     |
-| GET `/programaciones-turnos?predio=&vigilador=` | Lista vigentes por fecha y estado, hasta 500, con filtros opcionales.                                                                                                                                  |
-| PATCH `/programaciones-turnos/:id`              | Acepta campos parciales y regenera los turnos reemplazables; devuelve generados, reemplazados, conservados y conflictos.                                                                               |
-| POST `/programaciones-turnos/:id/extender`      | Recibe `{ endDate }` y agrega solo la continuación.                                                                                                                                                    |
-| POST `/programaciones-turnos/:id/cancelar`      | Cancela los futuros sin iniciar y conserva los demás.                                                                                                                                                  |
+| Método y recurso                            | Operación                                                                                                                                                                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST `/programaciones-turnos/previsualizar` | Valida cada turno; devuelve fechas, conflictos identificados y ventanas sin cubrir, sin persistir. Para editar, el query opcional `programacion` excluye los turnos reemplazables de esa programación.                     |
+| POST `/programaciones-turnos`               | Crea programación y turnos sin conflicto en una única transacción.                                                                                                                                                         |
+| GET `/programaciones-turnos`                | Devuelve `{ items, expiring }`. Filtra por `predio`, `vigilador`, `q` y `estado` (`vigente` por defecto, `por_vencer`, `finalizada`, `cancelada`); cada ítem suma nombres, días hasta el fin y turnos próximos y editados. |
+| PATCH `/programaciones-turnos/:id`          | Acepta campos parciales y regenera los turnos reemplazables; devuelve generados, reemplazados, conservados y conflictos.                                                                                                   |
+| POST `/programaciones-turnos/:id/extender`  | Recibe `{ endDate }` y agrega solo la continuación.                                                                                                                                                                        |
+| POST `/programaciones-turnos/:id/cancelar`  | Cancela los futuros sin iniciar y conserva los demás.                                                                                                                                                                      |
 
 La entrada incluye `siteId`, `guardId`, `weekdays`, `startTime`, `endTime`, `roundIds`, `startDate` y `endDate`. Los contratos y el generador puro viven en `packages/shared/src/shifts/schedules.ts`.
 
