@@ -286,7 +286,7 @@ describe('HU-32 programaciones semanales por HTTP', () => {
       // V10 H4: el vigilador recibe solo el resumen, no un aviso por cada turno reemplazado.
       expect(notifyUsers).toHaveBeenCalledTimes(1);
       const listed = await http().get(`/api/v1/turnos?predio=${siteId}`).set(auth()).expect(200);
-      expect(listed.body.items).toHaveLength(20);
+      expect((listed.body as { items: unknown[] }).items).toHaveLength(20);
       expect(
         (await db.shift.findUniqueOrThrow({ where: { id: edited.id } })).startsAt.getTime(),
       ).toBe(edited.startsAt.getTime() + 60 * 60 * 1000);
