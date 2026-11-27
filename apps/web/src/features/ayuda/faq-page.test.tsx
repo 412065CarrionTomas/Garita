@@ -83,6 +83,19 @@ describe('FaqPage', () => {
     },
   );
 
+  it('muestra primero las preguntas del rol y al final las generales', () => {
+    mockRole('client');
+    renderFaq();
+    const shown = screen.getAllByText(/^¿.+\?$/).map((node) => node.textContent);
+    const firstPublic = shown.findIndex((text) =>
+      faqEntries.some((entry) => entry.question === text && entry.audiences.includes('public')),
+    );
+    const lastOwn = shown.findLastIndex((text) =>
+      faqEntries.some((entry) => entry.question === text && entry.audiences.includes('client')),
+    );
+    expect(firstPublic).toBeGreaterThan(lastOwn);
+  });
+
   it('filtra con la búsqueda y ofrece borrarla cuando no hay resultados', () => {
     mockRole('admin');
     renderFaq();
