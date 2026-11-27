@@ -1,4 +1,5 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { ScrollView, StyleSheet, View, type GestureResponderEvent } from 'react-native';
 import { space } from '@garita/tokens';
 import { SUSPENSION_MESSAGES, type GuardRoundVersion } from '@garita/shared';
 import { Banner, Loading, Text, useTheme } from '@/ui';
@@ -31,6 +32,11 @@ export function RoundScreen({
   // Sin repetidos: un id dos veces en el enlace no duplica capas ni claves.
   const ids = [...new Set(versionIds)];
   const { versions: found, partial, loading, error } = useRoundVersions(ids);
+  // Con un dedo sobre el mapa la pantalla no se desplaza: si no, el ScrollView le roba el gesto.
+  const [onMap, setOnMap] = useState(false);
+  const releaseMap = (event: GestureResponderEvent) => {
+    if (!event.nativeEvent.touches.length) setOnMap(false);
+  };
   const versions = ids.flatMap((id) => found.get(id) ?? []);
   const doneSet = new Set(done);
   const stateOf = (id: string): PointState =>
@@ -50,7 +56,7 @@ export function RoundScreen({
   const many = versions.length > 1;
   const names = versions.map((v) => v.name).join(' y ');
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView testID="round-scroll" contentContainerStyle={styles.content} scrollEnabled={!onMap}>
       <Text variant="title">{many ? 'Recorridos del turno' : (versions[0]?.name ?? '')}</Text>
       {many ? (
         versions.map((version, i) => <Legend key={version.id} version={version} index={i} />)
@@ -62,12 +68,19 @@ export function RoundScreen({
           Algún recorrido no se pudo cargar sin señal. Se muestran los que están en el celular.
         </Banner>
       )}
-      <RouteMap
-        live={live}
-        versions={versions}
-        stateOf={stateOf}
-        label={`Mapa con ${many ? 'los recorridos' : 'el recorrido'} ${names}, puntos numerados en orden`}
-      />
+      <View
+        testID="route-map-frame"
+        onTouchStart={() => setOnMap(true)}
+        onTouchEnd={releaseMap}
+        onTouchCancel={() => setOnMap(false)}
+      >
+        <RouteMap
+          live={live}
+          versions={versions}
+          stateOf={stateOf}
+          label={`Mapa con ${many ? 'los recorridos' : 'el recorrido'} ${names}, puntos numerados en orden`}
+        />
+      </View>
       {versions.map((version) => (
         <View key={version.id} style={styles.group}>
           {many && <Text variant="subheading">{version.name}</Text>}

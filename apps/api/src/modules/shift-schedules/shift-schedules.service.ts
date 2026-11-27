@@ -59,35 +59,40 @@ export class ShiftSchedulesService {
       ...(query.predio ? { siteId: query.predio } : {}),
       ...(query.vigilador ? { guardId: query.vigilador } : {}),
     };
-    const [schedules, expiring] = await Promise.all([
+    const where: Prisma.ShiftScheduleWhereInput = {
+      ...scope,
+      AND: [
+        byState[query.estado ?? 'vigente'],
+        // Cada palabra tiene que aparecer en el predio, el nombre o el apellido del vigilador.
+        ...words.map((word) => {
+          const search = { contains: word, mode: 'insensitive' as const };
+          return {
+            OR: [
+              { site: { name: search } },
+              { guard: { firstName: search } },
+              { guard: { lastName: search } },
+            ],
+          };
+        }),
+      ],
+    };
+    const [schedules, total, expiring] = await Promise.all([
       this.prisma.tenantPrisma.shiftSchedule.findMany({
-        where: {
-          ...scope,
-          AND: [
-            byState[query.estado ?? 'vigente'],
-            // Cada palabra tiene que aparecer en el predio, el nombre o el apellido del vigilador.
-            ...words.map((word) => {
-              const search = { contains: word, mode: 'insensitive' as const };
-              return {
-                OR: [
-                  { site: { name: search } },
-                  { guard: { firstName: search } },
-                  { guard: { lastName: search } },
-                ],
-              };
-            }),
-          ],
-        },
+        where,
         include: {
           site: { select: { name: true } },
           guard: { select: { firstName: true, lastName: true } },
         },
-        orderBy: [{ endDate: 'asc' }, { startDate: 'asc' }],
-        take: 500,
+        // El id desempata: sin él, dos con las mismas fechas pueden repetirse entre páginas.
+        orderBy: [{ endDate: 'asc' }, { startDate: 'asc' }, { id: 'asc' }],
+        skip: (query.pagina - 1) * query.porPagina,
+        take: query.porPagina,
       }),
+      this.prisma.tenantPrisma.shiftSchedule.count({ where }),
       this.prisma.tenantPrisma.shiftSchedule.count({ where: { ...scope, ...byState.por_vencer } }),
     ]);
-    if (!schedules.length) return { items: [], expiring };
+    const page = { total, pagina: query.pagina };
+    if (!schedules.length) return { items: [], ...page, expiring };
     const ids = schedules.map((schedule) => schedule.id);
     const roundIds = [...new Set(schedules.flatMap((schedule) => schedule.roundIds))];
     const live = {
@@ -126,6 +131,7 @@ export class ShiftSchedulesService {
         upcomingCount: upcomingBy.get(schedule.id) ?? 0,
         modifiedCount: modifiedBy.get(schedule.id) ?? 0,
       })),
+      ...page,
       expiring,
     };
   }

@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import {
   scheduleOperationSchema,
   schedulePreviewSchema,
+  shiftScheduleListSchema,
   type ShiftScheduleInput,
 } from '@garita/shared';
 import { AppModule } from '../src/app.module';
@@ -603,8 +604,21 @@ describe('HU-32 programaciones semanales por HTTP', () => {
     );
     expect(
       (await http().get('/api/v1/programaciones-turnos').set(auth('foreign')).expect(200)).body,
-    ).toEqual({ items: [], expiring: 0 });
+    ).toEqual({ items: [], total: 0, pagina: 1, expiring: 0 });
     await http().get('/api/v1/programaciones-turnos').set(auth('supervisor')).expect(200);
+    // Paginada: respeta el tamaño pedido y rechaza uno que no está entre los permitidos.
+    const page = shiftScheduleListSchema.parse(
+      (
+        await http()
+          .get('/api/v1/programaciones-turnos?pagina=1&porPagina=3')
+          .set(auth())
+          .expect(200)
+      ).body,
+    );
+    expect(page.pagina).toBe(1);
+    expect(page.items.length).toBeLessThanOrEqual(3);
+    expect(page.total).toBeGreaterThanOrEqual(page.items.length);
+    await http().get('/api/v1/programaciones-turnos?porPagina=7').set(auth()).expect(400);
     await http()
       .get(`/api/v1/programaciones-turnos?predio=${hiddenSiteId}`)
       .set(auth('supervisor'))

@@ -4,7 +4,19 @@ La especificación OpenAPI vigente está en `/api/docs` al ejecutar la API. Este
 
 ## `GET /configuracion/predios`
 
-Devuelve predios activos disponibles para configuración: todos los de la empresa para administrador y solo los asignados al supervisor.
+Devuelve predios activos disponibles para configuración: todos los de la empresa para administrador y solo los asignados al supervisor. Cada predio trae su avance: `total` (puntos activos) y `tagged` (cuántos tienen etiqueta vigente).
+
+## `POST /etiquetas-nfc/identificar`
+
+Body: `{ "uid": "04:a1-02 0b" }`. Dice a qué punto pertenece una etiqueta leída: devuelve su asociación más reciente en la empresa (`status`, `kind`, `associatedAt`, `endedAt`, `checkpoint` con `id`, `name` y `position`, y `site` con `id` y `name`). `lastReadAt` es el último marcado NFC de un vigilador en ese punto desde que se asoció esa etiqueta; es `null` si nadie la marcó o si la etiqueta ya no está vigente. Una configuración segura que quedó a medias no cuenta como asociación.
+
+| Estado | Significado                                                                           |
+| ------ | ------------------------------------------------------------------------------------- |
+| `200`  | Etiqueta encontrada.                                                                  |
+| `400`  | UID inválido.                                                                         |
+| `401`  | Token ausente o inválido.                                                             |
+| `403`  | Rol sin permiso.                                                                      |
+| `404`  | La etiqueta no está asociada a ningún punto de la empresa o de los predios asignados. |
 
 ## `GET /predios/:id/puntos?incluirEtiqueta=true`
 

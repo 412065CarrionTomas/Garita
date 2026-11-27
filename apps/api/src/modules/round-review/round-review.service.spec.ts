@@ -54,7 +54,10 @@ function setup(now = graceEndsAt, shiftOverrides: Record<string, unknown> = {}) 
       findUnique: jest.fn().mockResolvedValue({ status: 'complete_late' }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       update: jest.fn(),
+      count: jest.fn().mockResolvedValue(1),
     },
+    company: { findUniqueOrThrow: jest.fn().mockResolvedValue({ timezone: 'UTC' }) },
+    recordFlag: { count: jest.fn().mockResolvedValue(0) },
     checkpointRecord: {
       findFirst: jest.fn().mockResolvedValue(record),
       findMany: jest.fn().mockImplementation(() => Promise.resolve([record])),
@@ -62,6 +65,7 @@ function setup(now = graceEndsAt, shiftOverrides: Record<string, unknown> = {}) 
         record.invalidatedAt = now;
         return Promise.resolve({ count: 1 });
       }),
+      count: jest.fn().mockResolvedValue(0),
     },
     roundReviewDecision: { create: jest.fn() },
   };
@@ -140,4 +144,157 @@ it.each([
   expect(db.roundWindowState.update).toHaveBeenCalledWith(
     expect.objectContaining({ data: expect.objectContaining({ status }) as unknown }),
   );
+});
+
+it('lists the queue with guard, live flags and counters', async () => {
+  const { service, db, window } = setup();
+  const owner = {
+    id: 'owner',
+    startsAt,
+    result: 'started',
+    guard: { firstName: 'Ana', lastName: 'Paz' },
+  };
+  const item = {
+    ...window,
+    shift: { id: 'shift', site: { id: 'site', name: 'Norte' }, assignments: [owner] },
+    round: { name: 'Perimetral' },
+    decisions: [],
+  };
+  db.roundWindowState.findMany.mockResolvedValue([item]);
+  db.checkpointRecord.findMany.mockResolvedValue([
+    {
+      shiftId: 'shift',
+      assignmentId: 'owner',
+      countedFor: [{ roundId: 'round', windowIndex: 0 }],
+      flags: [
+        { type: 'simulated_location', severity: 'grave' },
+        { type: 'out_of_range', severity: 'media' },
+      ],
+    },
+    // Otra ventana del mismo turno: no suma.
+    {
+      shiftId: 'shift',
+      assignmentId: 'owner',
+      countedFor: [{ roundId: 'round', windowIndex: 1 }],
+      flags: [{ type: 'time_altered', severity: 'grave' }],
+    },
+    // Una asignación anterior del turno: no cuenta para la ventana.
+    {
+      shiftId: 'shift',
+      assignmentId: 'previous',
+      countedFor: [{ roundId: 'round', windowIndex: 0 }],
+      flags: [{ type: 'replayed_read', severity: 'grave' }],
+    },
+  ]);
+  const queue = await service.queue(user, { estado: 'pendientes' });
+  expect(db.checkpointRecord.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({ flags: { some: {} } }) as unknown,
+    }),
+  );
+  expect(queue).toMatchObject({ timezone: 'UTC', count: 1, overdue: 1, truncated: false });
+  expect(queue.items[0]).toMatchObject({
+    guardName: 'Ana Paz',
+    flags: { grave: 1, media: 1, leve: 0, types: ['simulated_location', 'out_of_range'] },
+    resolution: null,
+  });
+});
+
+it('filters the queue by the round dates in the company timezone, end day included', async () => {
+  const { service, db } = setup();
+  db.roundWindowState.findMany.mockResolvedValue([]);
+  await service.queue(user, { estado: 'resueltas', desde: '2026-11-20', hasta: '2026-11-22' });
+  expect(db.roundWindowState.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({
+        status: { not: 'in_review' },
+        startsAt: { gte: new Date('2026-11-20T00:00:00Z'), lt: new Date('2026-11-23T00:00:00Z') },
+      }) as unknown,
+    }),
+  );
+});
+
+it('brings the most recent resolved windows first and flags a truncated list', async () => {
+  const { service, db, window } = setup();
+  const item = {
+    ...window,
+    status: 'complete',
+    shift: { id: 'shift', site: { id: 'site', name: 'Norte' }, assignments: [] },
+    round: { name: 'Perimetral' },
+    decisions: [],
+  };
+  db.roundWindowState.findMany.mockResolvedValue(
+    Array.from({ length: 201 }, (_, i) => ({ ...item, id: `w${String(i)}` })),
+  );
+  const queue = await service.queue(user, { estado: 'resueltas' });
+  expect(db.roundWindowState.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({ orderBy: [{ startsAt: 'desc' }, { id: 'desc' }], take: 201 }),
+  );
+  expect(queue.truncated).toBe(true);
+  expect(queue.items).toHaveLength(200);
+});
+
+it('shows only the window owner readings, with flag details and the guard history', async () => {
+  const { service, db, window } = setup();
+  jest.restoreAllMocks(); // setup() espía detail(); acá se prueba el real.
+  db.roundWindowState.findFirst.mockResolvedValue({
+    ...window,
+    shift: {
+      id: 'shift',
+      siteId: 'site',
+      site: { name: 'Norte' },
+      assignments: [{ id: 'owner', startsAt, result: 'started', guardId: 'guard', guard: null }],
+    },
+    round: { name: 'Perimetral' },
+    decisions: [],
+  });
+  const reading = {
+    id: 'r1',
+    countedFor: [{ roundId: 'round', windowIndex: 0 }],
+    occurredAtDevice: startsAt,
+    invalidatedAt: null,
+    method: 'qr',
+    latitude: -31.4,
+    longitude: -64.18,
+    accuracyMeters: 10,
+    checkpoint: { name: 'Portón', latitude: -31.4, longitude: -64.18, toleranceRadiusMeters: 30 },
+    flags: [
+      {
+        type: 'impossible_time',
+        severity: 'grave',
+        reason: 'speed_exceeded',
+        details: { timeDeltaSeconds: 20, distanceMeters: 400 },
+      },
+    ],
+  };
+  db.checkpointRecord.findMany.mockResolvedValue([
+    reading,
+    { ...reading, id: 'other-window', countedFor: [{ roundId: 'round', windowIndex: 1 }] },
+  ]);
+  db.checkpointRecord.count.mockResolvedValueOnce(50).mockResolvedValueOnce(2);
+  db.recordFlag.count.mockResolvedValue(3);
+  const detail = await service.detail('window', user);
+  // Solo las lecturas de la asignación dueña, y solo las de esta ventana.
+  expect(db.checkpointRecord.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: { shiftId: 'shift', assignmentId: 'owner', countsForCompliance: true },
+    }),
+  );
+  expect(detail.records.map((r) => r.id)).toEqual(['r1']);
+  expect(detail.records[0]).toMatchObject({ distanceMeters: 0, radiusMeters: 30 });
+  expect(detail.records[0]?.flags[0]?.details).toEqual({
+    timeDeltaSeconds: 20,
+    distanceMeters: 400,
+  });
+  expect(detail.records[0]).not.toHaveProperty('location');
+  // Antecedentes por hora del servidor, no del celular.
+  expect(db.checkpointRecord.count).toHaveBeenCalledWith({
+    where: expect.objectContaining({ receivedAt: { gte: expect.any(Date) as unknown } }) as unknown,
+  });
+  expect(detail.guardHistory).toEqual({
+    days: 30,
+    records: 50,
+    graveFlags: 3,
+    invalidatedRecords: 2,
+  });
 });

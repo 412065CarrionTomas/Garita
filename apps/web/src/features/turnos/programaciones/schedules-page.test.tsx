@@ -79,7 +79,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(apiGet).mockImplementation((path) => {
     if (path.startsWith('/programaciones-turnos'))
-      return Promise.resolve({ items: [schedule], expiring: 1 } as never);
+      return Promise.resolve({ items: [schedule], total: 1, pagina: 1, expiring: 1 } as never);
     if (path.startsWith('/predios?')) return Promise.resolve([site] as never);
     if (path.includes('/rondas'))
       return Promise.resolve([{ id: 'round', name: 'Perimetral', status: 'active' }] as never);
@@ -154,7 +154,7 @@ it('filtra por vencer desde el resumen y guarda el filtro en la URL', async () =
   expect(window.location.search).toContain('estado=por_vencer');
   await waitFor(() => {
     expect(apiGet).toHaveBeenCalledWith(
-      '/programaciones-turnos?estado=por_vencer',
+      '/programaciones-turnos?estado=por_vencer&pagina=1&porPagina=20',
       expect.anything(),
     );
   });
@@ -280,4 +280,26 @@ it('si la vista previa falla, muestra el motivo y deja reintentar', async () => 
   await waitFor(() => {
     expect(within(panel).getByRole('button', { name: 'Confirmar modificación' })).toBeEnabled();
   });
+});
+
+it('si la página pedida ya no existe vuelve a la última con resultados', async () => {
+  window.history.replaceState({}, '', '/programaciones-turnos?pagina=5');
+  jest.mocked(apiGet).mockImplementation((path) => {
+    if (path.startsWith('/programaciones-turnos'))
+      return Promise.resolve({
+        items: path.includes('pagina=1&') ? [schedule] : [],
+        total: 1,
+        pagina: 1,
+        expiring: 0,
+      } as never);
+    if (path.startsWith('/predios?')) return Promise.resolve([site] as never);
+    return Promise.resolve({ items: [], paginas: 1 } as never);
+  });
+  renderWithQueryClient(<SchedulesPage />);
+  await waitFor(() => {
+    expect(window.location.search).not.toContain('pagina=5');
+  });
+  // La primera página vuelve a mostrar la programación.
+  const table = await screen.findByRole('table', { name: 'Programaciones' });
+  expect(await within(table).findByText('Depósito')).toBeInTheDocument();
 });

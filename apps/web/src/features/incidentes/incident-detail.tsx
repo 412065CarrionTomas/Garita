@@ -220,88 +220,113 @@ export function IncidentBody({
   const tz = incident.timezone;
   const caption = `${INCIDENT_TYPE_LABELS[incident.type]} · ${fullDateTime(incident.occurredAt, tz)}`;
   const { shiftContext: shift } = incident;
-  return (
-    <div
-      className={
-        compact
-          ? 'grid gap-6 2xl:grid-cols-[3fr_2fr]'
-          : 'grid gap-8 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]'
-      }
-    >
-      <div className="min-w-0 space-y-6">
-        <Section title="Qué reportó el vigilador">
-          <p className="text-base leading-relaxed">
-            {incident.description ?? (
-              <span className="text-muted-foreground">Sin descripción.</span>
-            )}
+  const report = (
+    <Section title="Qué reportó el vigilador">
+      <p className={compact ? 'text-lg leading-relaxed' : 'text-base leading-relaxed'}>
+        {incident.description ?? <span className="text-muted-foreground">Sin descripción.</span>}
+      </p>
+    </Section>
+  );
+  const photos = (
+    <Section title={`Fotos (${String(incident.photos.length)})`}>
+      <PhotoGallery photos={incident.photos} caption={caption} />
+    </Section>
+  );
+  const location = (
+    <Section title="Ubicación">
+      {incident.location ? (
+        <>
+          <div className="overflow-hidden border-[1.5px] border-input">
+            <SitesMap
+              height={compact ? 240 : 300}
+              sites={[
+                {
+                  id: incident.id,
+                  name: 'Ubicación del incidente',
+                  latitude: incident.location.latitude,
+                  longitude: incident.location.longitude,
+                },
+              ]}
+            />
+          </div>
+          <p className="text-sm text-muted-foreground tabular-nums">
+            {incident.location.latitude.toFixed(6)}, {incident.location.longitude.toFixed(6)}
+            {incident.location.accuracyMeters !== null &&
+              ` · precisión ±${String(Math.round(incident.location.accuracyMeters))} m`}
           </p>
-        </Section>
-        <Section title={`Fotos (${String(incident.photos.length)})`}>
-          <PhotoGallery photos={incident.photos} caption={caption} />
-        </Section>
+        </>
+      ) : (
+        <p className="text-muted-foreground">El celular no registró la ubicación.</p>
+      )}
+    </Section>
+  );
+  const context = (
+    <Section title="Contexto del turno">
+      <dl>
+        <Fact label="Turno">
+          {shortDateTime(shift.startsAt, tz)} – {shortDateTime(shift.endsAt, tz)}
+        </Fact>
+        <Fact label="Ronda">{shift.roundName ?? 'Sin ronda asignada'}</Fact>
+        <Fact label="Último punto marcado">
+          {shift.lastCheckpoint
+            ? `${shift.lastCheckpoint.name} · ${shortDateTime(shift.lastCheckpoint.at, tz)}`
+            : 'Ninguno antes del incidente'}
+        </Fact>
+        <Fact label="Recibido en el sistema">{shortDateTime(incident.receivedAt, tz)}</Fact>
+      </dl>
+    </Section>
+  );
+  const related = (
+    <Section title="Otros incidentes en el predio (30 días)">
+      {incident.relatedIncidents.length ? (
+        <ul className="space-y-1">
+          {incident.relatedIncidents.map((item) => (
+            <li key={item.id}>
+              <Link
+                to={`/incidentes/${item.id}`}
+                className="flex justify-between gap-3 underline-offset-4 hover:underline"
+              >
+                <span>{INCIDENT_TYPE_LABELS[item.type]}</span>
+                <span className="text-muted-foreground tabular-nums">
+                  {shortDateTime(item.occurredAt, tz)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground">Es el único del último mes.</p>
+      )}
+    </Section>
+  );
+  // En la bandeja: el reporte arriba y destacado; fotos, ubicación y contexto en tres columnas
+  // para que no quede un hueco debajo de las fotos.
+  if (compact)
+    return (
+      <div className="space-y-5">
+        <div className="border-[1.5px] border-l-4 border-input border-l-primary bg-card px-4 py-3">
+          {report}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2 2xl:grid-cols-3">
+          {photos}
+          {location}
+          <div className="min-w-0 space-y-6">
+            {context}
+            {related}
+          </div>
+        </div>
+      </div>
+    );
+  return (
+    <div className="grid gap-8 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="min-w-0 space-y-6">
+        {report}
+        {photos}
       </div>
       <div className="min-w-0 space-y-6">
-        <Section title="Ubicación">
-          {incident.location ? (
-            <>
-              <div className="overflow-hidden border-[1.5px] border-input">
-                <SitesMap
-                  height={compact ? 220 : 300}
-                  sites={[
-                    {
-                      id: incident.id,
-                      name: 'Ubicación del incidente',
-                      latitude: incident.location.latitude,
-                      longitude: incident.location.longitude,
-                    },
-                  ]}
-                />
-              </div>
-              <p className="text-sm text-muted-foreground tabular-nums">
-                {incident.location.latitude.toFixed(6)}, {incident.location.longitude.toFixed(6)}
-                {incident.location.accuracyMeters !== null &&
-                  ` · precisión ±${String(Math.round(incident.location.accuracyMeters))} m`}
-              </p>
-            </>
-          ) : (
-            <p className="text-muted-foreground">El celular no registró la ubicación.</p>
-          )}
-        </Section>
-        <Section title="Contexto del turno">
-          <dl>
-            <Fact label="Turno">
-              {shortDateTime(shift.startsAt, tz)} – {shortDateTime(shift.endsAt, tz)}
-            </Fact>
-            <Fact label="Ronda">{shift.roundName ?? 'Sin ronda asignada'}</Fact>
-            <Fact label="Último punto marcado">
-              {shift.lastCheckpoint
-                ? `${shift.lastCheckpoint.name} · ${shortDateTime(shift.lastCheckpoint.at, tz)}`
-                : 'Ninguno antes del incidente'}
-            </Fact>
-            <Fact label="Recibido en el sistema">{shortDateTime(incident.receivedAt, tz)}</Fact>
-          </dl>
-        </Section>
-        <Section title="Otros incidentes en el predio (30 días)">
-          {incident.relatedIncidents.length ? (
-            <ul className="space-y-1">
-              {incident.relatedIncidents.map((related) => (
-                <li key={related.id}>
-                  <Link
-                    to={`/incidentes/${related.id}`}
-                    className="flex justify-between gap-3 underline-offset-4 hover:underline"
-                  >
-                    <span>{INCIDENT_TYPE_LABELS[related.type]}</span>
-                    <span className="text-muted-foreground tabular-nums">
-                      {shortDateTime(related.occurredAt, tz)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-muted-foreground">Es el único del último mes.</p>
-          )}
-        </Section>
+        {location}
+        {context}
+        {related}
       </div>
     </div>
   );

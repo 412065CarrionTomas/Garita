@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isReportExportPeriodAllowed } from '../reports/export';
 import { localDateTimeToUtc } from '../rounds/windows';
+import { pageNumberSchema, pageSizeSchema } from '../pagination';
 
 export function scheduleDateOffset(date: string, days: number): string {
   const value = new Date(`${date}T00:00:00Z`);
@@ -57,6 +58,8 @@ export const shiftScheduleQuerySchema = z.strictObject({
   /** Sin estado: las vigentes (incluye las por vencer). */
   estado: z.enum(SCHEDULE_LIST_STATES).optional(),
   q: z.string().trim().max(100).optional(),
+  pagina: pageNumberSchema,
+  porPagina: pageSizeSchema,
 });
 export type ShiftScheduleQuery = z.infer<typeof shiftScheduleQuerySchema>;
 export type ShiftScheduleInput = z.infer<typeof shiftScheduleInputSchema>;
@@ -105,6 +108,9 @@ export const shiftScheduleListItemSchema = shiftScheduleSchema.extend({
 export type ShiftScheduleListItem = z.infer<typeof shiftScheduleListItemSchema>;
 export const shiftScheduleListSchema = z.object({
   items: z.array(shiftScheduleListItemSchema),
+  /** Programaciones que cumplen los filtros, en todas las páginas. */
+  total: z.number().int(),
+  pagina: z.number().int(),
   /** Vigentes que terminan dentro de SCHEDULE_EXPIRING_DAYS, sin importar el filtro de estado. */
   expiring: z.number().int(),
 });
