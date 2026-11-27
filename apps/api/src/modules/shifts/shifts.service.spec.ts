@@ -141,6 +141,7 @@ describe('audit shift list filters', () => {
               endsAt: { gt: now },
               OR: [{ closeReason: null }, { closeReason: { not: 'baja del predio' } }],
             },
+            { status: 'scheduled', endsAt: { lte: now } },
           ],
         },
         byWord('ferre'),
@@ -178,6 +179,8 @@ describe('audit shift list filters', () => {
         now,
       ),
     ).toBe('closed');
+    expect(effectiveShiftStatus({ status: 'scheduled', endsAt: now }, now)).toBe('no_show');
+    expect(effectiveShiftStatus({ status: 'scheduled', endsAt }, now)).toBe('scheduled');
   });
   it('includes current running assignments even after scheduled end', async () => {
     await service.mine({ userId: 'guard', companyId: 'company', role: 'guard', status: 'active' });
@@ -391,7 +394,8 @@ describe('weekly shift board', () => {
     expect(barrio.days[6]).toEqual([
       expect.objectContaining({ id: 'gap', origin: 'manual', guard: null }),
     ]);
-    expect(board.summary).toEqual({ total: 4, sites: 1, toAssign: 1, toCover: 1, noShows: 1 });
+    // El nocturno del lunes terminó sin iniciarse: cuenta como no presentado aunque diga scheduled.
+    expect(board.summary).toEqual({ total: 4, sites: 1, toAssign: 1, toCover: 1, noShows: 2 });
     expect(barrio.days[2]).toEqual([expect.objectContaining({ id: 'early', status: 'uncovered' })]);
     expect((findMany.mock.lastCall as unknown[] | undefined)?.[0]).toMatchObject({
       where: {

@@ -68,22 +68,32 @@ function uncoveredWhere(now: Date): Prisma.ShiftWhereInput {
   };
 }
 
-/** Estado que ve el supervisor: deriva "sin cobertura" igual que En vivo y `reassign`. */
+/**
+ * Estado que ve el supervisor, igual que En vivo y `reassign`: "sin cobertura" si se cerró antes
+ * de hora y sigue en su franja; "no presentado" si terminó sin iniciarse, aunque el proceso que lo
+ * marca todavía no haya corrido.
+ */
 export function effectiveShiftStatus(
   shift: { status: string; closedEarly?: boolean; closeReason?: string | null; endsAt: Date },
   now: Date,
 ): string {
-  return shift.status === 'closed' &&
+  if (
+    shift.status === 'closed' &&
     shift.closedEarly &&
     shift.closeReason !== SITE_REMOVAL_REASON &&
     now < shift.endsAt
-    ? 'uncovered'
-    : shift.status;
+  )
+    return 'uncovered';
+  if (shift.status === 'scheduled' && now >= shift.endsAt) return 'no_show';
+  return shift.status;
 }
 
 function stateWhere(state: ShiftListState, now: Date): Prisma.ShiftWhereInput {
   const statuses = { status: { in: [...SHIFT_LIST_STATES[state]] } };
-  if (state === 'problema') return { OR: [statuses, uncoveredWhere(now)] };
+  // Un programado que ya terminó sin iniciarse es un no presentado: va en problema, no en programado.
+  const lateNoShow = { status: 'scheduled' as const, endsAt: { lte: now } };
+  if (state === 'problema') return { OR: [statuses, uncoveredWhere(now), lateNoShow] };
+  if (state === 'programado') return { AND: [statuses, { endsAt: { gt: now } }] };
   if (state === 'finalizado') return { AND: [statuses, { NOT: uncoveredWhere(now) }] };
   return statuses;
 }
