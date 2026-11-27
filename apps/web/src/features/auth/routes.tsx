@@ -28,7 +28,7 @@ import {
 } from '../incidentes/incidents-page';
 import { SupervisionPage } from '../supervision/supervision-page';
 import { ShiftDetailPage } from '../supervision/shift-detail-page';
-import { ReviewPage, ReviewDetailPage, useReviewCount } from '../revision/review-page';
+import { ReviewPage, useReviewCount } from '../revision/review-page';
 import { NoticesPage } from '../avisos/notices-page';
 import { NoticeDetailPage } from '../avisos/notice-detail-page';
 import { useOpenNotices } from '../avisos/queries';
@@ -309,7 +309,7 @@ export function AppRoutes() {
           path="/revision/:id"
           element={
             <Protected roles={['admin', 'supervisor']}>
-              <ReviewDetailPage />
+              <ReviewPage />
             </Protected>
           }
         />

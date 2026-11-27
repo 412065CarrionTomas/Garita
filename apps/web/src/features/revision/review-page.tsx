@@ -1,344 +1,397 @@
 /* eslint react-refresh/only-export-components: off */
-import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router';
-import { AlertTriangleIcon } from 'lucide-react';
-import { z } from 'zod';
-import { apiGet, apiPost } from '@/lib/api-client';
-import { PageHeader } from '@/components/page-header';
+import { useMemo, useState, type CSSProperties } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { Search } from 'lucide-react';
+import { apiGet } from '@/lib/api-client';
+import { useFillHeight } from '@/lib/use-fill-height';
+import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/empty-state';
-import { StatusBadge } from '@/components/status-badge';
+import { PageHeader } from '@/components/page-header';
+import { SegmentedFilter } from '@/components/segmented-filter';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
+import { FlagChip, ReviewDetail } from './review-detail';
+import {
+  SEVERITY_LABELS,
+  SEVERITY_ORDER,
+  flagSeverity,
+  dayTime,
+  elapsed,
+  flagLabel,
+  queueSchema,
+  type QueueItem,
+} from './review-contracts';
 
-const severitySchema = z.enum(['grave', 'media', 'leve']).nullable();
-const rowSchema = z.object({
-  id: z.string(),
-  status: z.string(),
-  severityLevel: severitySchema,
-  startsAt: z.string(),
-  endsAt: z.string(),
-  windowIndex: z.number(),
-  recordedCount: z.number(),
-  expectedCount: z.number(),
-  overdue: z.boolean(),
-  shift: z.object({ id: z.string(), site: z.object({ id: z.string(), name: z.string() }) }),
-  round: z.object({ name: z.string() }),
-});
-const queueSchema = z.object({ count: z.number(), items: z.array(rowSchema) });
-const detailSchema = z.object({
-  id: z.string(),
-  shiftId: z.string(),
-  siteId: z.string(),
-  siteName: z.string(),
-  roundName: z.string(),
-  status: z.string(),
-  severityLevel: severitySchema,
-  startsAt: z.string(),
-  endsAt: z.string(),
-  recordedCount: z.number(),
-  expectedCount: z.number(),
-  records: z.array(
-    z.object({
-      id: z.string(),
-      checkpointName: z.string(),
-      occurredAtDevice: z.string(),
-      invalidated: z.boolean(),
-      flags: z.array(
-        z.object({ type: z.string(), severity: z.string(), reason: z.string().nullable() }),
-      ),
-    }),
-  ),
-  decisions: z.array(
-    z.object({
-      id: z.string(),
-      kind: z.enum(['validate', 'invalidate', 'restore']),
-      checkpointRecordId: z.string().nullable(),
-      comment: z.string(),
-      decidedAt: z.string(),
-      decidedBy: z.string(),
-    }),
-  ),
-});
-const commentSchema = z.object({ comment: z.string().trim().min(5).max(500) });
+type Estado = 'pendientes' | 'resueltas';
 
-export function useReviewCount(enabled: boolean) {
+function useReviewQueue(estado: Estado, desde = '', hasta = '', enabled = true) {
+  const query = new URLSearchParams({ estado });
+  if (desde) query.set('desde', desde);
+  if (hasta) query.set('hasta', hasta);
   return useQuery({
-    queryKey: ['revision', 'queue'],
-    queryFn: () => apiGet('/ventanas-ronda/en-revision', queueSchema),
+    queryKey: ['revision', 'queue', estado, desde, hasta],
+    queryFn: () => apiGet(`/ventanas-ronda/en-revision?${query.toString()}`, queueSchema),
     enabled,
     refetchInterval: 30_000,
   });
 }
 
-function Severity({ level }: { level: z.infer<typeof severitySchema> }) {
-  if (!level) return null;
+/** Contador de la barra: ventanas pendientes de decisión. */
+export const useReviewCount = (enabled: boolean) => useReviewQueue('pendientes', '', '', enabled);
+
+/**
+ * Una ventana de la bandeja en tres renglones: qué ronda y cuánto espera, dónde y quién, y qué
+ * marcas tiene (por nombre, que es lo que hace falta para decidir).
+ */
+function QueueRow({
+  item,
+  timezone,
+  selected,
+  onSelect,
+}: {
+  item: QueueItem;
+  timezone: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const types = [...item.flags.types].sort(
+    (a, b) => SEVERITY_ORDER[flagSeverity(a)] - SEVERITY_ORDER[flagSeverity(b)],
+  );
+  const worst = types[0] ? flagSeverity(types[0]) : null;
   return (
-    <span className="inline-flex items-center gap-1">
-      <AlertTriangleIcon aria-hidden="true" className="size-4" />
-      <StatusBadge tone={level === 'grave' ? 'danger' : level === 'media' ? 'warning' : 'info'}>
-        {`Gravedad ${level}`}
-      </StatusBadge>
-    </span>
+    <li>
+      <button
+        type="button"
+        aria-current={selected ? 'true' : undefined}
+        onClick={onSelect}
+        className={cn(
+          'block w-full space-y-1.5 border-b border-l-4 border-b-border px-4 py-3 text-left hover:bg-muted',
+          worst === 'grave'
+            ? 'border-l-danger'
+            : worst === 'media'
+              ? 'border-l-warning'
+              : 'border-l-transparent',
+          selected && 'bg-muted ring-2 ring-primary ring-inset',
+        )}
+      >
+        <span className="flex items-baseline justify-between gap-3">
+          <span className="truncate text-lg font-semibold">
+            {item.round.name} · v{item.windowIndex + 1}
+          </span>
+          {item.resolution ? (
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+              {dayTime(item.resolution.decidedAt, timezone)}
+            </span>
+          ) : (
+            item.inReviewSince && (
+              <span
+                className={cn(
+                  'shrink-0 rounded-sm px-1.5 text-sm font-semibold tabular-nums',
+                  item.overdue ? 'bg-warning-soft text-warning' : 'bg-muted text-muted-foreground',
+                )}
+              >
+                hace {elapsed(item.inReviewSince)}
+                {item.overdue && <span className="sr-only"> (más de 24 h)</span>}
+              </span>
+            )
+          )}
+        </span>
+        <span className="block truncate text-muted-foreground">
+          <span className="font-semibold text-foreground">{item.guardName ?? 'Sin vigilador'}</span>
+          {' · '}
+          <span className="tabular-nums">{dayTime(item.startsAt, timezone)}</span> ·{' '}
+          {item.shift.site.name}
+        </span>
+        <span className="flex flex-wrap gap-1.5 text-sm">
+          {item.resolution ? (
+            <span>
+              <span className="font-semibold">
+                {item.resolution.kind === 'validate' ? 'Validada' : 'Recalculada'}
+              </span>{' '}
+              por {item.resolution.decidedBy}
+            </span>
+          ) : types.length ? (
+            types.map((type) => (
+              <FlagChip key={type} severity={flagSeverity(type)}>
+                {flagLabel(type).label}
+              </FlagChip>
+            ))
+          ) : (
+            <span className="text-muted-foreground">Sin marcas vigentes</span>
+          )}
+        </span>
+      </button>
+    </li>
   );
 }
 
+/**
+ * Bandeja de revisión de rondas: a la izquierda las ventanas con marcas graves, a la derecha la
+ * elegida con la evidencia y la decisión. `/revision/:id` abre una ventana puntual (avisos).
+ */
 export function ReviewPage() {
-  const { data, isPending, isError, refetch } = useReviewCount(true);
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const estado: Estado = params.get('estado') === 'resueltas' ? 'resueltas' : 'pendientes';
+  const search = params.get('q') ?? '';
+  const site = params.get('predio') ?? '';
+  const severity = params.get('gravedad') ?? '';
+  const desde = params.get('desde') ?? '';
+  const hasta = params.get('hasta') ?? '';
+  const [message, setMessage] = useState('');
+  const [measure, height] = useFillHeight<HTMLDivElement>(16, 520);
+  const queue = useReviewQueue(estado, desde, hasta);
+  const setParam = (key: string, value: string) => {
+    setParams(
+      (old) => {
+        const next = new URLSearchParams(old);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+  const select = (next: string | undefined) => {
+    void navigate(
+      { pathname: next ? `/revision/${next}` : '/revision', search: params.toString() },
+      { replace: true },
+    );
+  };
+
+  const all = useMemo(() => queue.data?.items ?? [], [queue.data]);
+  const sites = [...new Map(all.map((item) => [item.shift.site.id, item.shift.site.name]))];
+  const term = search.trim().toLocaleLowerCase('es');
+  const items = all.filter(
+    (item) =>
+      (!site || item.shift.site.id === site) &&
+      (!severity || item.severityLevel === severity) &&
+      (!term ||
+        [item.round.name, item.shift.site.name, item.guardName ?? ''].some((text) =>
+          text.toLocaleLowerCase('es').includes(term),
+        )),
+  );
+  // Sin ventana en la URL se abre la primera; una de la URL se respeta aunque no esté en la lista.
+  const selectedId = id ?? items[0]?.id;
+
+  const data = queue.data;
   return (
-    <section className="space-y-6" aria-labelledby="review-title">
+    <section className="space-y-4" aria-labelledby="review-title">
       <PageHeader
         id="review-title"
         title="Rondas en revisión"
-        description="Ventanas que necesitan una decisión del supervisor."
+        description="Rondas con marcas graves: decidí con la evidencia si cuentan para el cumplimiento."
       />
-      {isPending && (
-        <div role="status" className="space-y-2">
-          <span className="sr-only">Cargando rondas…</span>
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-16 w-full" />
-          ))}
-        </div>
-      )}
-      {isError && (
-        <Alert variant="destructive">
-          No pudimos cargar las rondas.{' '}
-          <Button variant="outline" size="sm" onClick={() => void refetch()}>
-            Reintentar
-          </Button>
-        </Alert>
-      )}
-      {data && (
-        <p aria-live="polite" className="t-label text-muted-foreground tabular-nums">
-          {data.count} {data.count === 1 ? 'ventana pendiente' : 'ventanas pendientes'}
-        </p>
-      )}
-      {data?.count === 0 && <EmptyState title="No hay rondas en revisión" />}
-      {data && data.count > 0 && (
-        <ul className="divide-y divide-border border-[1.5px] border-input">
-          {data.items.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
-            >
-              <div className="min-w-0 space-y-1">
-                <p className="font-semibold">
-                  {item.round.name} · {item.shift.site.name} · ventana {item.windowIndex + 1}
-                </p>
-                <p className="text-sm text-muted-foreground tabular-nums">
-                  Desde {new Date(item.startsAt).toLocaleString('es-AR')} · {item.recordedCount} de{' '}
-                  {item.expectedCount} puntos
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Severity level={item.severityLevel} />
-                  {item.overdue && <StatusBadge tone="warning">Más de 24 h pendiente</StatusBadge>}
-                </div>
-              </div>
-              <Button asChild variant="outline" size="sm">
-                <Link to={`/revision/${item.id}`}>Ver detalle</Link>
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-export function ReviewDetailPage() {
-  const { id } = useParams();
-  const queryClient = useQueryClient();
-  const [action, setAction] = useState<{ path: string; title: string } | null>(null);
-  const [comment, setComment] = useState('');
-  const [error, setError] = useState('');
-  const { data, isPending, isError, refetch } = useQuery({
-    queryKey: ['revision', id],
-    queryFn: () => apiGet(`/ventanas-ronda/${encodeURIComponent(id ?? '')}`, detailSchema),
-    enabled: Boolean(id),
-  });
-  const mutation = useMutation({
-    mutationFn: (path: string) => apiPost(path, { comment }, commentSchema, detailSchema),
-    onSuccess: async () => {
-      setAction(null);
-      setComment('');
-      setError('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['revision'] }),
-        queryClient.invalidateQueries({ queryKey: ['supervision'] }),
-      ]);
-    },
-    onError: () => {
-      setError('No pudimos guardar la decisión. Intentá de nuevo.');
-    },
-  });
-  const submit = (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const parsed = commentSchema.safeParse({ comment });
-    if (!parsed.success) {
-      setError('Escribí entre 5 y 500 caracteres.');
-      return;
-    }
-    if (action) mutation.mutate(action.path);
-  };
-  return (
-    <section className="space-y-6" aria-labelledby="review-detail-title">
-      <Link
-        to="/revision"
-        className="text-sm font-semibold text-foreground underline underline-offset-4"
+      <div
+        role="search"
+        aria-label="Filtrar ventanas"
+        className="flex flex-wrap items-center gap-2"
       >
-        ← Volver a rondas en revisión
-      </Link>
-      {isPending && (
-        <div role="status" className="space-y-2">
-          <span className="sr-only">Cargando ventana…</span>
-          <Skeleton className="h-10 w-2/3" />
-          <Skeleton className="h-40 w-full" />
-        </div>
-      )}
-      {isError && (
-        <Alert variant="destructive">
-          No pudimos cargar la ventana.{' '}
-          <Button variant="outline" size="sm" onClick={() => void refetch()}>
-            Reintentar
-          </Button>
-        </Alert>
-      )}
-      {data && (
-        <>
-          <PageHeader
-            id="review-detail-title"
-            title={`${data.roundName} · ${data.siteName}`}
-            description={`${data.recordedCount} de ${data.expectedCount} puntos registrados`}
-            actions={<Severity level={data.severityLevel} />}
+        <SegmentedFilter<Estado>
+          ariaLabel="Estado"
+          value={estado}
+          onChange={(value) => {
+            // Cambiar de lista suelta la ventana elegida y los filtros.
+            void navigate(value === 'resueltas' ? '/revision?estado=resueltas' : '/revision', {
+              replace: true,
+            });
+          }}
+          options={[
+            { value: 'pendientes', label: `Pendientes${data ? ` (${String(data.count)})` : ''}` },
+            { value: 'resueltas', label: 'Resueltas' },
+          ]}
+        />
+        <div className="relative w-full sm:w-56">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
           />
-          <section className="space-y-4 border-[1.5px] border-input p-4">
-            <p>
-              Estado:{' '}
-              {data.status === 'in_review'
-                ? 'En revisión'
-                : data.status === 'not_done'
-                  ? 'No realizada'
-                  : data.status === 'incomplete'
-                    ? 'Incompleta'
-                    : 'Completa'}
-            </p>
-            {data.status === 'in_review' && (
-              <Button
-                onClick={() => {
-                  setAction({
-                    path: `/ventanas-ronda/${data.id}/validar`,
-                    title: 'Validar ventana',
-                  });
-                }}
-              >
-                Validar ventana
-              </Button>
-            )}
-            <h2 className="t-label text-muted-foreground">Registros</h2>
-            <ul className="space-y-3">
-              {data.records.map((record) => (
-                <li key={record.id} className="space-y-2 border-b border-border pb-3">
-                  <p className={cn('tabular-nums', record.invalidated && 'line-through')}>
-                    {record.checkpointName} ·{' '}
-                    {new Date(record.occurredAtDevice).toLocaleString('es-AR')} ·{' '}
-                    {record.invalidated ? 'Invalidado' : 'Válido'}
-                  </p>
-                  {record.flags.map((flag) => (
-                    <p key={flag.type} className="text-sm">
-                      ⚠ {flag.severity}: {flag.reason ?? flag.type}
-                    </p>
-                  ))}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setAction({
-                        path: `/registros-puntos/${record.id}/${record.invalidated ? 'restituir' : 'invalidar'}`,
-                        title: record.invalidated ? 'Restituir registro' : 'Invalidar registro',
-                      });
-                    }}
-                  >
-                    {record.invalidated ? 'Restituir' : 'Invalidar'}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section className="space-y-3 border-[1.5px] border-input p-4">
-            <h2 className="t-label text-muted-foreground">Historial de decisiones</h2>
-            {data.decisions.length === 0 && <p>Sin decisiones todavía.</p>}
-            <ol className="space-y-2">
-              {data.decisions.map((decision) => (
-                <li key={decision.id} className="tabular-nums">
-                  {decision.kind === 'validate'
-                    ? 'Validó'
-                    : decision.kind === 'invalidate'
-                      ? 'Invalidó'
-                      : 'Restituyó'}{' '}
-                  · {decision.decidedBy} · {new Date(decision.decidedAt).toLocaleString('es-AR')} ·{' '}
-                  {decision.comment}
-                </li>
-              ))}
-            </ol>
-          </section>
-        </>
-      )}
-      <Dialog
-        open={Boolean(action)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setAction(null);
-            setError('');
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogTitle>{action?.title}</DialogTitle>
-          <DialogDescription>
-            Explicá el motivo de la decisión. Quedará en el historial.
-          </DialogDescription>
-          <form onSubmit={submit} className="space-y-4">
-            <Label htmlFor="review-comment">Comentario o motivo</Label>
-            <Textarea
-              id="review-comment"
-              value={comment}
-              onChange={(event) => {
-                setComment(event.target.value);
+          <Input
+            type="search"
+            aria-label="Buscar ventanas"
+            placeholder="Ronda, predio o vigilador"
+            className="pl-9"
+            value={search}
+            onChange={(event) => {
+              setParam('q', event.target.value);
+            }}
+          />
+        </div>
+        <NativeSelect
+          aria-label="Predio"
+          className="w-full sm:w-auto sm:max-w-48"
+          value={site}
+          onChange={(event) => {
+            setParam('predio', event.target.value);
+          }}
+        >
+          <NativeSelectOption value="">Predio: todos</NativeSelectOption>
+          {sites.map(([siteId, name]) => (
+            <NativeSelectOption key={siteId} value={siteId}>
+              {name}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="Gravedad"
+          className="w-full sm:w-auto"
+          value={severity}
+          onChange={(event) => {
+            setParam('gravedad', event.target.value);
+          }}
+        >
+          <NativeSelectOption value="">Gravedad: todas</NativeSelectOption>
+          {(['grave', 'media', 'leve'] as const).map((s) => (
+            <NativeSelectOption key={s} value={s}>
+              {SEVERITY_LABELS[s]}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {/* Fechas de la ronda; en Resueltas, sin fechas se ven los últimos 30 días. */}
+        <div className="flex items-center gap-1.5">
+          <Input
+            type="date"
+            aria-label="Rondas desde"
+            title="Rondas desde"
+            className="w-auto"
+            value={desde}
+            max={hasta || undefined}
+            onChange={(event) => {
+              setParam('desde', event.target.value);
+            }}
+          />
+          <span aria-hidden="true" className="text-muted-foreground">
+            –
+          </span>
+          <Input
+            type="date"
+            aria-label="Rondas hasta"
+            title="Rondas hasta"
+            className="w-auto"
+            value={hasta}
+            min={desde || undefined}
+            onChange={(event) => {
+              setParam('hasta', event.target.value);
+            }}
+          />
+          {(desde || hasta) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setParams(
+                  (old) => {
+                    const next = new URLSearchParams(old);
+                    next.delete('desde');
+                    next.delete('hasta');
+                    return next;
+                  },
+                  { replace: true },
+                );
               }}
-              aria-invalid={Boolean(error)}
-              aria-describedby={error ? 'review-comment-error' : undefined}
-              minLength={5}
-              maxLength={500}
-              required
-            />
-            {error && (
-              <p id="review-comment-error" className="text-sm text-danger" role="alert">
-                {error}
+            >
+              Quitar fechas
+            </Button>
+          )}
+        </div>
+        {data && (
+          <p className="text-base text-muted-foreground lg:ml-auto">
+            <span
+              className={cn('font-semibold', data.overdue > 0 ? 'text-warning' : 'text-foreground')}
+            >
+              {data.overdue}
+            </span>{' '}
+            con más de 24 h ·{' '}
+            <span className="font-semibold text-foreground">{data.resolvedLastDay}</span> resueltas
+            en 24 h
+          </p>
+        )}
+      </div>
+      <p role="status" aria-live="polite" className={cn('text-base', !message && 'sr-only')}>
+        {message && <>Listo: {message}</>}
+      </p>
+      {queue.isPending && (
+        <div role="status" className="space-y-2">
+          <span className="sr-only">Cargando ventanas…</span>
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      )}
+      {queue.isError && (
+        <Alert variant="destructive">
+          No pudimos cargar las ventanas.{' '}
+          <Button variant="outline" size="sm" onClick={() => void queue.refetch()}>
+            Reintentar
+          </Button>
+        </Alert>
+      )}
+      {data && !selectedId && (
+        <EmptyState
+          title={
+            all.length === 0 && !desde && !hasta
+              ? estado === 'pendientes'
+                ? 'No hay rondas en revisión'
+                : 'No se resolvió ninguna ventana en los últimos 30 días'
+              : 'Ninguna ventana coincide con los filtros'
+          }
+          description={
+            all.length === 0 && estado === 'pendientes'
+              ? 'Cuando una ronda tenga marcas graves aparece acá para decidir si cuenta.'
+              : undefined
+          }
+        />
+      )}
+      {data && selectedId && (
+        <div
+          ref={measure}
+          style={{ '--fill': `${String(height ?? 520)}px` } as CSSProperties}
+          // Alto fijo solo en dos columnas; en pantallas angostas fluye y scrollea la página.
+          className="grid min-h-0 border-[1.5px] border-input lg:h-(--fill) lg:grid-cols-[minmax(0,2fr)_minmax(0,5fr)]"
+        >
+          <div className="min-h-0 overflow-y-auto border-b-[1.5px] border-input bg-card lg:border-r-[1.5px] lg:border-b-0">
+            {items.length === 0 ? (
+              <p className="p-4 text-base text-muted-foreground">
+                Ninguna ventana coincide con los filtros.
               </p>
-            )}
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setAction(null);
-                }}
+            ) : (
+              <ul
+                aria-label={estado === 'pendientes' ? 'Ventanas en revisión' : 'Ventanas resueltas'}
               >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={mutation.isPending}>
-                {mutation.isPending ? 'Guardando…' : action?.title}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+                {items.map((item) => (
+                  <QueueRow
+                    key={item.id}
+                    item={item}
+                    timezone={data.timezone}
+                    selected={item.id === selectedId}
+                    onSelect={() => {
+                      select(item.id);
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="flex min-h-0 flex-col">
+            <ReviewDetail
+              key={selectedId}
+              id={selectedId}
+              onClosed={(text) => {
+                setMessage(text);
+                // Pasa a la que seguía en la lista (o a la anterior si era la última).
+                const index = items.findIndex((item) => item.id === selectedId);
+                const rest = items.filter((item) => item.id !== selectedId);
+                select(rest[Math.min(Math.max(index, 0), rest.length - 1)]?.id);
+              }}
+            />
+          </div>
+        </div>
+      )}
     </section>
   );
 }
