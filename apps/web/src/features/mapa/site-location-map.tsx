@@ -47,7 +47,7 @@ export function SiteMapLocation({
     <section aria-label="Ubicación del predio" className="min-w-0 space-y-4">
       {search && (
         <>
-          <AddressSearch onSelect={props.onChange} />
+          <AddressSearch onSelect={props.onChange} near={props} />
           <p className="text-sm text-muted-foreground">
             {unset
               ? 'Buscá la dirección o hacé clic en el mapa para ubicar el predio.'

@@ -634,6 +634,7 @@ export function CheckpointsPanel({ site, actions }: SiteProps) {
                     />
                   </Label>
                   <AddressSearch
+                    near={form}
                     onSelect={(latitude, longitude) => {
                       setForm({ ...form, latitude, longitude });
                     }}
