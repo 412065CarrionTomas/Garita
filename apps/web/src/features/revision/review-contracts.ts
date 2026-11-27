@@ -158,9 +158,12 @@ export function elapsed(from: Date, now = Date.now()) {
 /** "4 min 20 s" o "45 s": tiempo entre dos lecturas. */
 export function gap(seconds: number) {
   if (seconds < 60) return `${String(seconds)} s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest ? `${String(minutes)} min ${String(rest)} s` : `${String(minutes)} min`;
+  const pair = (big: number, bigUnit: string, small: number, smallUnit: string) =>
+    small ? `${String(big)} ${bigUnit} ${String(small)} ${smallUnit}` : `${String(big)} ${bigUnit}`;
+  if (seconds < 3600) return pair(Math.floor(seconds / 60), 'min', seconds % 60, 's');
+  if (seconds < 86_400)
+    return pair(Math.floor(seconds / 3600), 'h', Math.floor((seconds % 3600) / 60), 'min');
+  return pair(Math.floor(seconds / 86_400), 'd', Math.floor((seconds % 86_400) / 3600), 'h');
 }
 
 export const dayTime = (value: Date, timeZone: string) =>

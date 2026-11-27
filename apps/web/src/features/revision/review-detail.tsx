@@ -53,7 +53,8 @@ export function FlagChip({ severity, children }: { severity: Severity; children:
   );
 }
 
-const num = (value: unknown) => (typeof value === 'number' ? Math.round(value) : null);
+const num = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null;
 const meters = (value: number) =>
   value >= 1000
     ? `${(value / 1000).toLocaleString('es-AR', { maximumFractionDigits: 1 })} km`
@@ -69,14 +70,26 @@ function evidence(record: ReviewRecord, flag: ReviewRecord['flags'][number]): st
     const seconds = num(d.timeDeltaSeconds);
     const distance = num(d.distanceMeters);
     return [
-      ...(seconds === null ? [] : [`${gap(seconds)} desde el punto anterior`]),
+      ...(seconds === null
+        ? []
+        : // El evaluador admite 0 o negativo (dos lecturas en el mismo instante).
+          [
+            seconds <= 0
+              ? 'en el mismo instante que el punto anterior'
+              : `${gap(seconds)} desde el punto anterior`,
+          ]),
       ...(distance === null ? [] : [`a ${meters(distance)}`]),
       ...(num(d.maxSpeedKmh) === null ? [] : [`máximo ${String(num(d.maxSpeedKmh))} km/h`]),
     ];
   }
   if (flag.type === 'time_altered') {
+    if (flag.reason === 'trusted_time_in_future') return ['Hora adelantada respecto del servidor'];
+    // Lo que se movió el reloj desde la referencia del turno, no el desfase absoluto.
     const offset = num(d.deviceOffsetMs);
-    return offset === null ? [] : [`reloj corrido ${gap(Math.abs(Math.round(offset / 1000)))}`];
+    const reference = num(d.referenceOffsetMs);
+    if (offset === null) return [];
+    const seconds = Math.abs(Math.round((offset - (reference ?? 0)) / 1000));
+    return seconds === 0 ? [] : [`reloj movido ${gap(seconds)}`];
   }
   if (flag.type === 'qr_on_tagged_point')
     return [d.phoneNfc === 'on' ? 'Leído por QR con el NFC encendido' : 'Leído por QR'];
@@ -205,7 +218,17 @@ function RecordCard({
  * Ventana elegida en la bandeja. Primero lo que hay que decidir: las lecturas con marcas, cada una
  * con su evidencia y su acción; las lecturas limpias van resumidas al pie.
  */
-export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: string) => void }) {
+export function ReviewDetail({
+  id,
+  onClosed,
+  onNotice,
+}: {
+  id: string;
+  /** La ventana dejó de estar pendiente: la bandeja pasa a la siguiente. */
+  onClosed: (text: string) => void;
+  /** Se guardó una decisión y la ventana sigue elegida. */
+  onNotice: (text: string) => void;
+}) {
   const { data, isPending, isError, refetch } = useReviewDetail(id);
   const [action, setAction] = useState<ReviewAction | null>(null);
   if (isPending)
@@ -238,11 +261,13 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
     r.invalidated
       ? {
           title: 'Restituir registro',
+          doneText: 'Registro restituido',
           effect: `${r.checkpointName} vuelve a contar para la ronda.`,
           paths: [`/registros-puntos/${r.id}/restituir`],
         }
       : {
           title: 'Invalidar registro',
+          doneText: 'Registro invalidado',
           effect: `${r.checkpointName} deja de contar: la ronda se recalcula y puede quedar incompleta.`,
           paths: [`/registros-puntos/${r.id}/invalidar`],
         };
@@ -277,6 +302,7 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
                 onClick={() => {
                   setAction({
                     title: `Invalidar ${String(flagged.length)} marcados`,
+                    doneText: `${String(flagged.length)} lecturas invalidadas`,
                     effect: `Dejan de contar: ${flagged.map((r) => r.checkpointName).join(', ')}. La ronda se recalcula.`,
                     paths: flagged.map((r) => `/registros-puntos/${r.id}/invalidar`),
                   });
@@ -421,11 +447,16 @@ export function ReviewDetail({ id, onClosed }: { id: string; onClosed: (text: st
         }}
         onDone={(done, window) => {
           setAction(null);
-          if (done.closesWindow) onClosed(`${title} (${data.siteName}) validada.`);
+          const name = `${title} (${data.siteName})`;
+          // Una lectura puede contar para dos ventanas: solo vale el estado si es esta misma.
+          const status = window?.id === data.id ? window.status : undefined;
+          if (done.closesWindow) onClosed(`${name} validada.`);
           // Invalidar puede sacar la ventana de revisión: se avisa y la bandeja pasa a la siguiente.
-          else if (pending && window && window.status !== 'in_review')
-            onClosed(
-              `${title} (${data.siteName}) quedó ${(STATUS_LABELS[window.status] ?? window.status).toLowerCase()}.`,
+          else if (pending && status && status !== 'in_review')
+            onClosed(`${name} quedó ${(STATUS_LABELS[status] ?? status).toLowerCase()}.`);
+          else
+            onNotice(
+              `${done.doneText ?? done.title} en ${name}${status ? `: la ventana está ${(STATUS_LABELS[status] ?? status).toLowerCase()}` : ''}.`,
             );
         }}
       />

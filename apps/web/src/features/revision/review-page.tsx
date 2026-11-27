@@ -162,8 +162,9 @@ export function ReviewPage() {
   const [measure, height] = useFillHeight<HTMLDivElement>(16, 520);
   const queue = useReviewQueue({ estado, predio: site, desde, hasta }, !invertedDates);
   const siteOptions = useQuery({
-    queryKey: ['predios', 'activos'],
-    queryFn: () => apiGet('/predios?estado=active', sitesSchema),
+    // Todos, no solo activos: puede haber ventanas resueltas de un predio dado de baja.
+    queryKey: ['predios', 'todos'],
+    queryFn: () => apiGet('/predios', sitesSchema),
   });
   const hasFilters = Boolean(search || site || severity || desde || hasta);
   const clearFilters = () => {
@@ -338,7 +339,8 @@ export function ReviewPage() {
       <p role="status" aria-live="polite" className={cn('text-base', !message && 'sr-only')}>
         {message && <>Listo: {message}</>}
       </p>
-      {queue.isPending && (
+      {/* Deshabilitada por fechas invertidas sigue 'pending': no mostrar carga eterna. */}
+      {!invertedDates && queue.isPending && (
         <div role="status" className="space-y-2">
           <span className="sr-only">Cargando ventanas…</span>
           {[0, 1, 2, 3].map((i) => (
@@ -428,6 +430,7 @@ export function ReviewPage() {
             <ReviewDetail
               key={selectedId}
               id={selectedId}
+              onNotice={setMessage}
               onClosed={(text) => {
                 setMessage(text);
                 // Pasa a la que seguía en la lista (o a la anterior si era la última).

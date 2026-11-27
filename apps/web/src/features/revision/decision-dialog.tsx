@@ -15,6 +15,8 @@ export interface ReviewAction {
   paths: string[];
   /** La ventana deja de estar pendiente: la bandeja pasa a la siguiente. */
   closesWindow?: boolean;
+  /** Lo que se hizo, en pasado, para el aviso de confirmación. */
+  doneText?: string;
 }
 
 /** Toda decisión lleva un motivo: queda en el historial de la ventana. */
@@ -44,8 +46,9 @@ export function DecisionDialog({
       return window;
     },
     onSuccess: async (window, input) => {
-      reset();
       await refresh();
+      // Después de refrescar: limpiar antes deja el diálogo en blanco mientras termina.
+      reset();
       onDone(input.action, window);
     },
     onError: async (_error, input) => {
@@ -56,7 +59,10 @@ export function DecisionDialog({
           ? `Se guardaron ${String(done)} de ${String(total)}. Reintentá para guardar las que faltan.`
           : 'No pudimos guardar la decisión. Revisá el estado de la ventana e intentá de nuevo.',
       );
-      await refresh();
+      // Con algo ya guardado, la ventana pudo salir de la bandeja: refrescarla ahora cambiaría
+      // la ventana elegida y cerraría este diálogo antes del reintento. Se refresca al cerrar.
+      if (done > 0) await queryClient.invalidateQueries({ queryKey: ['revision', 'detail'] });
+      else await refresh();
     },
   });
   const refresh = () =>
@@ -71,6 +77,7 @@ export function DecisionDialog({
   };
   const close = () => {
     if (mutation.isPending) return;
+    if (saved.current.size > 0) void refresh();
     reset();
     onClose();
   };

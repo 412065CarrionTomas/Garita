@@ -160,6 +160,7 @@ it('con fechas invertidas avisa y no consulta la bandeja', async () => {
   window.history.replaceState({}, '', '/revision?desde=2026-11-22&hasta=2026-11-20');
   renderPage();
   expect(await screen.findByRole('alert')).toHaveTextContent('anterior o igual');
+  expect(screen.queryByText('Cargando ventanas…')).not.toBeInTheDocument();
   expect(apiGet).not.toHaveBeenCalledWith(
     expect.stringMatching(/^\/ventanas-ronda\/en-revision\?/),
     expect.anything(),
@@ -226,4 +227,83 @@ it('al validar avisa y pasa a la siguiente ventana', async () => {
   await user.type(within(dialog).getByLabelText(/Motivo/), 'Recorrido verificado por cámara');
   await user.click(within(dialog).getByRole('button', { name: 'Validar ventana' }));
   expect(await screen.findByText(/Perimetral · ventana 1 \(Depósito\) validada/)).toBeVisible();
+});
+
+it('un fallo parcial sin ventana en la URL no cierra el diálogo aunque la ventana salga', async () => {
+  const two = {
+    ...detail,
+    records: [record, { ...record, id: 'r2', checkpointName: 'Galpón' }],
+  };
+  let pendingItems = queue.items;
+  jest.mocked(apiGet).mockImplementation((url, schema) => {
+    const body = url.startsWith('/ventanas-ronda/en-revision')
+      ? { ...queue, items: pendingItems }
+      : url.startsWith('/predios')
+        ? []
+        : two;
+    return Promise.resolve(schema.parse(body) as never);
+  });
+  jest
+    .mocked(apiPost)
+    .mockImplementationOnce(() => {
+      // La primera invalidación saca w1 de la bandeja.
+      pendingItems = queue.items.filter((i) => i.id !== 'w1');
+      return Promise.resolve({ ...two, status: 'incomplete' });
+    })
+    .mockRejectedValueOnce(new Error('red'));
+  const user = userEvent.setup();
+  renderWithQueryClient(<ReviewPage />);
+  await user.click(await screen.findByRole('button', { name: 'Invalidar los 2' }));
+  const dialog = screen.getByRole('dialog');
+  await user.type(within(dialog).getByLabelText(/Motivo/), 'GPS simulado en ambas');
+  await user.click(within(dialog).getByRole('button', { name: 'Invalidar 2 marcados' }));
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('Se guardaron 1 de 2');
+  // Sigue la misma ventana (el modal oculta el fondo a la accesibilidad).
+  expect(
+    screen.getByRole('heading', { name: 'Perimetral · ventana 1', hidden: true }),
+  ).toBeInTheDocument();
+});
+
+it('muestra cuánto se movió el reloj y las lecturas en el mismo instante', async () => {
+  const clocks = {
+    ...detail,
+    records: [
+      {
+        ...record,
+        flags: [
+          {
+            type: 'time_altered',
+            severity: 'grave',
+            reason: 'device_offset_changed',
+            details: { deviceOffsetMs: 0, referenceOffsetMs: 3_600_000 },
+          },
+          {
+            type: 'impossible_time',
+            severity: 'grave',
+            reason: 'speed_exceeded',
+            details: { timeDeltaSeconds: 0, distanceMeters: 300 },
+          },
+        ],
+      },
+    ],
+  };
+  renderPage('w1', clocks);
+  expect(await screen.findByText('reloj movido 1 h')).toBeVisible();
+  expect(screen.getByText('en el mismo instante que el punto anterior')).toBeVisible();
+});
+
+it('al restituir en una ventana resuelta confirma con un aviso', async () => {
+  const resolved = {
+    ...detail,
+    status: 'incomplete',
+    records: [{ ...record, invalidated: true }],
+  };
+  jest.mocked(apiPost).mockResolvedValue({ ...resolved, status: 'in_review' });
+  const user = userEvent.setup();
+  renderPage('w1', resolved);
+  await user.click(await screen.findByRole('button', { name: 'Restituir' }));
+  const dialog = screen.getByRole('dialog');
+  await user.type(within(dialog).getByLabelText(/Motivo/), 'El GPS fallaba ese día');
+  await user.click(within(dialog).getByRole('button', { name: 'Restituir registro' }));
+  expect(await screen.findByText(/Registro restituido en Perimetral · ventana 1/)).toBeVisible();
 });
