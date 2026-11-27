@@ -421,7 +421,14 @@ describe('RoundsPanel', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Nombre')).toHaveValue('Copia de Perimetral');
     expect(screen.getByLabelText('Velocidad')).toHaveValue('');
+    // Personalizada sin km/h: error junto al campo, que se va al cambiar de perfil.
+    await user.selectOptions(screen.getByLabelText('Velocidad'), 'custom');
+    await user.clear(screen.getByLabelText('Velocidad personalizada (km/h)'));
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
+    expect(await screen.findByText(/La velocidad mínima permitida es 5 km\/h/)).toBeInTheDocument();
+    expect(apiPost).not.toHaveBeenCalled();
     await user.selectOptions(screen.getByLabelText('Velocidad'), 'vehicle');
+    expect(screen.queryByText(/La velocidad mínima permitida/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith(

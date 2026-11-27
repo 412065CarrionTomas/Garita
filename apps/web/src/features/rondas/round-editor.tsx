@@ -22,7 +22,6 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { ApiError, apiPatch, apiPost } from '@/lib/api-client';
 import { useBusy } from '@/lib/use-busy';
 import { useFloatingNotice } from '@/lib/use-floating-notice';
@@ -54,6 +53,7 @@ import {
 } from './route-draft';
 import { RouteInspector } from './route-inspector';
 import { SchedulePicker } from './schedule-picker';
+import { SpeedField } from './speed-field';
 
 export interface EditorPoint {
   id: string;
@@ -149,7 +149,7 @@ export function RoundEditor({
   const [speed, setSpeed] = useState<SpeedProfile | ''>(version?.speedProfile ?? '');
   // El perfil al momento de responder «Calcular por calles»: una respuesta de otro se descarta.
   const speedRef = useRef(speed);
-  const [customKmh, setCustomKmh] = useState(version?.maxSpeedKmh ?? 10);
+  const [customKmh, setCustomKmh] = useState(String(version?.maxSpeedKmh ?? 10));
   const [selected, setSelected] = useState(initialIds);
   const [draft, setDraft] = useState<RouteDraft>(() => {
     const saved = storedRouteInput(version?.route) ?? defaultRouteInput(versionIds.length);
@@ -398,7 +398,7 @@ export function RoundEditor({
     end !== (version?.windowEndLocal ?? '06:00') ||
     grace !== (version?.graceMinutes ?? 15) ||
     speed !== (version?.speedProfile ?? '') ||
-    (speed === 'custom' && customKmh !== version?.maxSpeedKmh);
+    (speed === 'custom' && customKmh !== String(version?.maxSpeedKmh));
   const leave = () => {
     if (dirty && !window.confirm('¿Descartar los cambios de la ronda?')) return;
     onClose();
@@ -521,45 +521,19 @@ export function RoundEditor({
             setGrace(next.grace);
           }}
         />
-        <div className="grid gap-1.5">
-          <Label htmlFor="round-speed">Velocidad</Label>
-          <div className="flex items-center gap-2">
-            <NativeSelect
-              id="round-speed"
-              value={speed}
-              onChange={(event) => {
-                const next = event.target.value as SpeedProfile | '';
-                setSpeed(next);
-                speedRef.current = next;
-                setFieldErrors(({ maxSpeedKmh: _dropped, ...rest }) => rest);
-                // Lo calculado era para el perfil anterior: las partes por calles se recalculan.
-                setMemo(new Map());
-              }}
-            >
-              <NativeSelectOption value="">La del predio</NativeSelectOption>
-              <NativeSelectOption value="walking">A pie (10 km/h)</NativeSelectOption>
-              <NativeSelectOption value="bicycle">Bicicleta (25 km/h)</NativeSelectOption>
-              <NativeSelectOption value="vehicle">Vehículo (60 km/h)</NativeSelectOption>
-              <NativeSelectOption value="custom">Personalizada</NativeSelectOption>
-            </NativeSelect>
-            {speed === 'custom' && (
-              <Input
-                type="number"
-                aria-label="Velocidad personalizada (km/h)"
-                aria-invalid={Boolean(fieldErrors.maxSpeedKmh)}
-                aria-describedby={fieldErrors.maxSpeedKmh ? 'round-speed-error' : undefined}
-                min={5}
-                max={120}
-                value={customKmh}
-                onChange={(event) => {
-                  setCustomKmh(Number(event.target.value));
-                }}
-                className="w-20"
-              />
-            )}
-          </div>
-          {fieldError('maxSpeedKmh', 'round-speed-error')}
-        </div>
+        <SpeedField
+          speed={speed}
+          kmh={customKmh}
+          errors={fieldErrors.maxSpeedKmh}
+          onSpeedChange={(next) => {
+            setSpeed(next);
+            speedRef.current = next;
+            setFieldErrors(({ maxSpeedKmh: _dropped, ...rest }) => rest);
+            // Lo calculado era para el perfil anterior: las partes por calles se recalculan.
+            setMemo(new Map());
+          }}
+          onKmhChange={setCustomKmh}
+        />
         <EditorHelp />
         {/* En la fila del formulario y no como franja: no le quita alto al mapa ni a la lista. */}
         {Boolean(editing?.scheduledShifts) && (

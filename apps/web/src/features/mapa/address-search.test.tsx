@@ -94,3 +94,31 @@ it('con la lista cerrada, mover la referencia no vuelve a buscar', async () => {
   await new Promise((resolve) => setTimeout(resolve, 300));
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+it('muestra «Buscando…» y atenúa las sugerencias viejas mientras llega la búsqueda', async () => {
+  const body = {
+    features: [{ geometry: { coordinates: [-58, -34] }, properties: { name: 'Primera' } }],
+  };
+  let release: () => void = () => undefined;
+  jest.mocked(fetch).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = () => {
+          resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
+        };
+      }),
+  );
+  renderWithQueryClient(<AddressSearch onSelect={jest.fn()} />);
+  const input = screen.getByRole('combobox');
+  fireEvent.change(input, { target: { value: 'Calle' } });
+  expect(await screen.findByRole('status')).toHaveTextContent('Buscando…');
+  release();
+  expect(await screen.findByRole('listbox')).toHaveAttribute('aria-busy', 'false');
+  fireEvent.change(input, { target: { value: 'Calle 2' } });
+  await waitFor(() => {
+    expect(screen.getByRole('listbox')).toHaveAttribute('aria-busy', 'true');
+  });
+  release();
+  await waitFor(() => {
+    expect(screen.getByRole('listbox')).toHaveAttribute('aria-busy', 'false');
+  });
+});
