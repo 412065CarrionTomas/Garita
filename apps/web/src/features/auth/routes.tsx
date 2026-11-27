@@ -199,23 +199,18 @@ export function RoleLayout() {
 }
 
 /**
- * Sin sesión, la ayuda general; con sesión, dentro del panel y con las preguntas del rol.
- * Espera a verificar la sesión para no mostrar la vista pública a quien ya ingresó.
+ * La ayuda sin sesión. Espera a verificar la sesión para no mostrar la vista pública a quien ya
+ * ingresó; con sesión, `/ayuda` vive dentro del layout del panel (ver `AppRoutes`).
  */
-export function FaqLayout() {
-  const { user, loading } = useAuth();
+export function PublicFaqRoute() {
+  const { loading } = useAuth();
   if (loading)
     return (
       <p role="status" className="p-6">
         Verificando sesión…
       </p>
     );
-  if (!user) return <PublicFaqPage />;
-  return (
-    <Protected roles={['admin', 'supervisor', 'client']}>
-      <RoleLayout />
-    </Protected>
-  );
+  return <PublicFaqPage />;
 }
 
 /** Las rutas de cada sección quedan protegidas por rol dentro del layout autenticado. */
@@ -228,9 +223,8 @@ export function AppRoutes() {
       <Route path="/activar" element={<ActivationPage />} />
       <Route path="/terminos" element={<TermsPage />} />
       <Route path="/privacidad" element={<PrivacyPage />} />
-      <Route path="/ayuda" element={<FaqLayout />}>
-        <Route index element={<FaqPage />} />
-      </Route>
+      {/* Con sesión va dentro del layout: una segunda instancia cortaría el pánico y el tiempo real. */}
+      {!user && <Route path="/ayuda" element={<PublicFaqRoute />} />}
       <Route
         path="/"
         element={<Navigate to={user ? homePathForRole(user.role) : '/ingresar'} replace />}
@@ -242,6 +236,7 @@ export function AppRoutes() {
           </Protected>
         }
       >
+        {user && <Route path="/ayuda" element={<FaqPage />} />}
         <Route
           path="/supervision"
           element={
