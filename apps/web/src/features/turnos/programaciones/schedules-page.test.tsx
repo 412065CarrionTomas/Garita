@@ -79,7 +79,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(apiGet).mockImplementation((path) => {
     if (path.startsWith('/programaciones-turnos'))
-      return Promise.resolve({ items: [schedule], expiring: 1 } as never);
+      return Promise.resolve({ items: [schedule], total: 1, pagina: 1, expiring: 1 } as never);
     if (path.startsWith('/predios?')) return Promise.resolve([site] as never);
     if (path.includes('/rondas'))
       return Promise.resolve([{ id: 'round', name: 'Perimetral', status: 'active' }] as never);
@@ -154,7 +154,7 @@ it('filtra por vencer desde el resumen y guarda el filtro en la URL', async () =
   expect(window.location.search).toContain('estado=por_vencer');
   await waitFor(() => {
     expect(apiGet).toHaveBeenCalledWith(
-      '/programaciones-turnos?estado=por_vencer',
+      '/programaciones-turnos?estado=por_vencer&pagina=1&porPagina=20',
       expect.anything(),
     );
   });
