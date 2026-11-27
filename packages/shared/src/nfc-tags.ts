@@ -39,6 +39,26 @@ export const nfcTagSummarySchema = z.object({
   associatedAt: z.iso.datetime().or(z.date()),
   uid: z.string().optional(),
 });
-export const nfcConfigurationSiteSchema = z.object({ id: z.string(), name: z.string() });
+/** Predio del modo NFC con su avance: puntos activos y cuántos tienen etiqueta vigente. */
+export const nfcConfigurationSiteSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  total: z.number().int(),
+  tagged: z.number().int(),
+});
 export const nfcConfigurationSitesSchema = z.array(nfcConfigurationSiteSchema);
 export type AssociateNfcTag = z.infer<typeof associateNfcTagSchema>;
+
+export const identifyNfcTagSchema = z.object({ uid: nfcTagUidSchema });
+/** A qué punto pertenece una etiqueta leída (la asociación más reciente). */
+export const identifiedNfcTagSchema = z.object({
+  status: nfcTagStatusSchema,
+  kind: z.enum(['basic', 'secure']),
+  associatedAt: z.iso.datetime(),
+  endedAt: z.iso.datetime().nullable(),
+  checkpoint: z.object({ id: z.string(), name: z.string(), position: z.number().int() }),
+  site: z.object({ id: z.string(), name: z.string() }),
+  /** Última vez que un vigilador la marcó; solo si sigue vigente. */
+  lastReadAt: z.iso.datetime().nullable(),
+});
+export type IdentifiedNfcTag = z.infer<typeof identifiedNfcTagSchema>;

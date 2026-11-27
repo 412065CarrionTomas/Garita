@@ -78,12 +78,53 @@ export class NfcTagsService {
   }
 
   async configurationSites(_user: AuthenticatedUser) {
-    const sites = await this.prisma.tenantPrisma.site.findMany({
-      where: { status: 'active' },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
+    const [sites, points] = await Promise.all([
+      this.prisma.tenantPrisma.site.findMany({
+        where: { status: 'active' },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      }),
+      this.prisma.tenantPrisma.checkpoint.findMany({
+        where: { status: 'active' },
+        select: { siteId: true, nfcTags: { where: { status: 'active' }, select: { id: true } } },
+      }),
+    ]);
+    return sites.map((site) => {
+      const own = points.filter((point) => point.siteId === site.id);
+      return { ...site, total: own.length, tagged: own.filter((p) => p.nfcTags.length).length };
     });
-    return sites;
+  }
+
+  /** Dice a qué punto pertenece una etiqueta leída: su asociación más reciente en la empresa. */
+  async identify(uid: string) {
+    const tag = await this.prisma.tenantPrisma.nfcTag.findFirst({
+      // Una configuración segura a medias deja un registro que nunca llegó a asociarse.
+      where: { uid, configurationStatus: { not: 'incomplete' } },
+      orderBy: { associatedAt: 'desc' },
+      include: { checkpoint: { include: { site: { select: { id: true, name: true } } } } },
+    });
+    if (!tag) throw new NotFoundException('La etiqueta no está asociada a ningún punto');
+    const lastRead =
+      tag.status === 'active'
+        ? await this.prisma.tenantPrisma.checkpointRecord.findFirst({
+            where: { checkpointId: tag.checkpointId, method: 'nfc' },
+            orderBy: { occurredAtDevice: 'desc' },
+            select: { occurredAtDevice: true },
+          })
+        : null;
+    return {
+      status: tag.status,
+      kind: tag.kind,
+      associatedAt: tag.associatedAt,
+      endedAt: tag.endedAt,
+      checkpoint: {
+        id: tag.checkpoint.id,
+        name: tag.checkpoint.name,
+        position: tag.checkpoint.position,
+      },
+      site: tag.checkpoint.site,
+      lastReadAt: lastRead?.occurredAtDevice ?? null,
+    };
   }
 
   async associate(checkpointId: string, input: AssociateNfcTag, user: AuthenticatedUser) {
