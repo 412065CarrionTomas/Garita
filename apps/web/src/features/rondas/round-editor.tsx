@@ -12,6 +12,7 @@ import {
   type RouteFailure,
   type RouteInput,
   type RouteMode,
+  type SpeedProfile,
 } from '@garita/shared';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { z } from 'zod';
@@ -52,6 +53,7 @@ import {
 } from './route-draft';
 import { RouteInspector } from './route-inspector';
 import { SchedulePicker } from './schedule-picker';
+import { SpeedField } from './speed-field';
 
 export interface EditorPoint {
   id: string;
@@ -63,12 +65,17 @@ export interface EditorPoint {
 export interface EditorRound {
   id: string;
   name: string;
+  /** Turnos programados que toman la versión vigente: los alcanza la edición. */
+  scheduledShifts?: number;
   currentVersion: {
     frequencyMinutes: number;
     windowStartLocal: string;
     windowEndLocal: string;
     graceMinutes: number;
     route?: unknown;
+    /** Sin perfil: la ronda usa la velocidad del predio. */
+    speedProfile?: SpeedProfile | null;
+    maxSpeedKmh?: number | null;
     checkpoints: { checkpoint: { id: string; name: string } }[];
   } | null;
 }
@@ -81,6 +88,7 @@ const INLINE_FIELDS = new Set([
   'windowStartLocal',
   'windowEndLocal',
   'graceMinutes',
+  'maxSpeedKmh',
 ]);
 
 const TOOLS: { value: RouteTool; label: string }[] = [
@@ -138,6 +146,10 @@ export function RoundEditor({
   const [start, setStart] = useState(version?.windowStartLocal ?? '22:00');
   const [end, setEnd] = useState(version?.windowEndLocal ?? '06:00');
   const [grace, setGrace] = useState(version?.graceMinutes ?? 15);
+  const [speed, setSpeed] = useState<SpeedProfile | ''>(version?.speedProfile ?? '');
+  // El perfil al momento de responder «Calcular por calles»: una respuesta de otro se descarta.
+  const speedRef = useRef(speed);
+  const [customKmh, setCustomKmh] = useState(String(version?.maxSpeedKmh ?? 10));
   const [selected, setSelected] = useState(initialIds);
   const [draft, setDraft] = useState<RouteDraft>(() => {
     const saved = storedRouteInput(version?.route) ?? defaultRouteInput(versionIds.length);
@@ -227,6 +239,7 @@ export function RoundEditor({
       ),
     // Las fallas se leen contra el recorrido enviado: mientras tanto se pudo seguir editando.
     onSuccess: (result, sent) => {
+      if ((sent.speedProfile ?? '') !== speedRef.current) return;
       setMemo((current) => rememberRoute(current, result.route, result.failures));
       const streets = result.route.legs.flatMap((leg) =>
         leg.sections.filter((section) => section.mode === 'streets'),
@@ -240,7 +253,8 @@ export function RoundEditor({
         );
       else notify(`Se calcularon las ${String(streets)} partes por calles.`);
     },
-    onError: () => {
+    onError: (_error, sent) => {
+      if ((sent.speedProfile ?? '') !== speedRef.current) return;
       notify('No se pudo calcular el recorrido. Tu recorrido no se modificó: reintentá.', 'danger');
     },
   });
@@ -383,7 +397,9 @@ export function RoundEditor({
     frequency !== (version?.frequencyMinutes ?? 120) ||
     start !== (version?.windowStartLocal ?? '22:00') ||
     end !== (version?.windowEndLocal ?? '06:00') ||
-    grace !== (version?.graceMinutes ?? 15);
+    grace !== (version?.graceMinutes ?? 15) ||
+    speed !== (version?.speedProfile ?? '') ||
+    (speed === 'custom' && customKmh !== String(version?.maxSpeedKmh));
   const leave = () => {
     if (dirty && !window.confirm('¿Descartar los cambios de la ronda?')) return;
     onClose();
@@ -398,6 +414,9 @@ export function RoundEditor({
       windowEndLocal: end,
       graceMinutes: grace,
       route,
+      speedProfile: speed || null,
+      // Vacío: falta el dato (no «mínimo 5 km/h», que es lo que daría convertirlo a 0).
+      ...(speed === 'custom' ? { maxSpeedKmh: customKmh.trim() || undefined } : {}),
       ...(allowStraight ? { allowStraight } : {}),
     });
     if (!parsed.success) {
@@ -504,7 +523,33 @@ export function RoundEditor({
             setGrace(next.grace);
           }}
         />
+        <SpeedField
+          speed={speed}
+          kmh={customKmh}
+          errors={fieldErrors.maxSpeedKmh}
+          onSpeedChange={(next) => {
+            setSpeed(next);
+            speedRef.current = next;
+            setFieldErrors(({ maxSpeedKmh: _dropped, ...rest }) => rest);
+            // Lo calculado era para el perfil anterior: las partes por calles se recalculan.
+            setMemo(new Map());
+          }}
+          onKmhChange={setCustomKmh}
+        />
         <EditorHelp />
+        {/* En la fila del formulario y no como franja: no le quita alto al mapa ni a la lista. */}
+        {Boolean(editing?.scheduledShifts) && (
+          <p
+            role="note"
+            aria-label="Turnos afectados"
+            className="max-w-sm self-center text-sm text-muted-foreground"
+          >
+            {editing?.scheduledShifts === 1
+              ? 'Los cambios se aplican al turno programado con esta ronda.'
+              : `Los cambios se aplican a los ${String(editing?.scheduledShifts)} turnos programados con esta ronda.`}{' '}
+            Los turnos en curso y el historial no cambian.
+          </p>
+        )}
         <div className="ml-auto flex gap-2 self-center">
           <Button
             type="button"
@@ -720,7 +765,12 @@ export function RoundEditor({
               size="sm"
               disabled={calculate.isPending || estimate.pending === 0}
               onClick={() => {
-                calculate.mutate({ siteId, checkpointIds: selected, route });
+                calculate.mutate({
+                  siteId,
+                  checkpointIds: selected,
+                  route,
+                  speedProfile: speed || null,
+                });
               }}
             >
               {calculate.isPending ? 'Calculando…' : 'Calcular por calles'}

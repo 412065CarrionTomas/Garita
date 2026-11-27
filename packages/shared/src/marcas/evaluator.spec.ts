@@ -28,7 +28,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
     hasActiveNfcTag: false,
   };
 
-  const defaultSite = {
+  const defaultSpeed = {
     maxSpeedKmh: 10, // walking by default
   };
 
@@ -50,7 +50,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
       },
       checkpoint,
       previousRecord: overrides?.previousRecord,
-      site: overrides?.site ?? defaultSite,
+      speed: overrides?.speed ?? defaultSpeed,
     };
   };
 
@@ -164,7 +164,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
             longitude: baseCheckpoint.longitude,
           },
         },
-        site: { maxSpeedKmh: 10 },
+        speed: { maxSpeedKmh: 10 },
       });
 
       const flags = evaluateRecordFlags(input);
@@ -201,7 +201,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
             longitude: baseCheckpoint.longitude,
           },
         },
-        site: { maxSpeedKmh: 60 },
+        speed: { maxSpeedKmh: 60 },
       });
 
       const flags = evaluateRecordFlags(input);
@@ -232,7 +232,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
             longitude: baseCheckpoint.longitude,
           },
         },
-        site: { maxSpeedKmh: 60 },
+        speed: { maxSpeedKmh: 60 },
       });
 
       const flags = evaluateRecordFlags(input);
@@ -646,7 +646,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
             longitude: baseCheckpoint.longitude,
           },
         },
-        site: { maxSpeedKmh: 10 },
+        speed: { maxSpeedKmh: 10 },
       });
 
       const flags = evaluateRecordFlags(input);
@@ -676,7 +676,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
             longitude: baseCheckpoint.longitude,
           },
         },
-        site: { maxSpeedKmh: 10 },
+        speed: { maxSpeedKmh: 10 },
       });
 
       const flags = evaluateRecordFlags(input);
@@ -706,7 +706,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
             longitude: baseCheckpoint.longitude,
           },
         },
-        site: { maxSpeedKmh: 10 },
+        speed: { maxSpeedKmh: 10 },
       });
 
       const flags = evaluateRecordFlags(input);
@@ -742,7 +742,7 @@ describe('evaluateRecordFlags (HU-15 Criterios de Aceptación y BDD)', () => {
             longitude: baseCheckpoint.longitude,
           },
         },
-        site: { maxSpeedKmh: 10 },
+        speed: { maxSpeedKmh: 10 },
       });
 
       const flags = evaluateRecordFlags(input);

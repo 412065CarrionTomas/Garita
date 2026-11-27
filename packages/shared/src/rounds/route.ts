@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { haversineMeters } from '../marcas/haversine';
+import { speedProfileSchema } from '../marcas/types';
 
 /**
  * Recorrido ideal de una ronda: la ruta que el vigilador DEBERÍA seguir, en el orden que armó
@@ -127,6 +128,8 @@ export const roundRoutePreviewInputSchema = z.object({
     .max(ROUTE_LIMITS.pointsPerRoute)
     .refine((ids) => new Set(ids).size === ids.length, 'No se pueden repetir puntos.'),
   route: routeInputSchema,
+  /** Perfil de la ronda; sin esto, el del predio. */
+  speedProfile: speedProfileSchema.nullish(),
 });
 export type RoundRoutePreviewInput = z.infer<typeof roundRoutePreviewInputSchema>;
 
