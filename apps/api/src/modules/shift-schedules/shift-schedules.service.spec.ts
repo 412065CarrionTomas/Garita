@@ -20,7 +20,9 @@ describe('schedule list', () => {
       guard: { firstName: 'Lucas', lastName: 'Fernández' },
     },
   ]);
-  const count = jest.fn().mockResolvedValue(3);
+  const count = jest.fn((args: { where: { status?: string } }) =>
+    Promise.resolve(args.where.status === 'active' ? 3 : 7),
+  );
   const groupBy = jest
     .fn()
     .mockResolvedValueOnce([{ scheduleId: 'schedule', _count: { _all: 9 } }])
@@ -50,7 +52,7 @@ describe('schedule list', () => {
     groupBy.mockClear();
     await expect(service.list({ q: 'nadie', pagina: 1, porPagina: 20 })).resolves.toEqual({
       items: [],
-      total: 3,
+      total: 7,
       pagina: 1,
       expiring: 3,
     });
@@ -73,7 +75,7 @@ describe('schedule list', () => {
     });
     expect(result).toEqual({
       expiring: 3,
-      total: 3,
+      total: 7,
       pagina: 2,
       items: [
         expect.objectContaining({
