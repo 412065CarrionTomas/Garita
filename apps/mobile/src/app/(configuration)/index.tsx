@@ -1,282 +1,170 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert } from 'react-native';
-import { Badge, Banner, Button, Card, ListItem, Screen, Text, ThemeSwitch } from '@/ui';
-import { useAudioPlayer } from 'expo-audio';
-import * as Haptics from 'expo-haptics';
-import * as Network from 'expo-network';
-import { z } from 'zod';
-import {
-  nfcConfigurationSitesSchema,
-  normalizeNfcUid,
-  secureTagStepResponseSchema,
-} from '@garita/shared';
+import { useCallback, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { space, radius, touch } from '@garita/tokens';
+import { nfcConfigurationSitesSchema } from '@garita/shared';
+import type { z } from 'zod';
+import { Banner, Button, Icon, Input, Loading, Screen, Text, useTheme } from '@/ui';
+import { GuardMenu } from '@/features/navegacion/guard-menu';
 import { useAuth } from '@/features/auth/auth-context';
-import { ApiError, apiDelete, apiGet, apiRequest } from '@/lib/api-client';
-import { cancelNfcRead, nfcAvailability, openNfcSettings, readNfcTag } from '@/lib/nfc';
-import { NotSecureNfcTag, withSecureNfcTag } from '@/lib/nfc-secure';
+import { apiGet } from '@/lib/api-client';
+import { NfcBlocker, useNfcState } from '@/features/etiquetas/nfc-status';
+import { ProgressBar } from '@/features/etiquetas/parts';
 
-const checkpointListSchema = z.array(
-  z.looseObject({
-    id: z.string(),
-    name: z.string(),
-    etiquetaNfc: z
-      .looseObject({ status: z.string(), uid: z.string().optional() })
-      .nullable()
-      .optional(),
-  }),
-);
-const resultSchema = z.looseObject({ id: z.string(), status: z.string() });
-const emptySchema = z.unknown();
-type CheckpointItem = z.infer<typeof checkpointListSchema>[number];
+type Site = z.infer<typeof nfcConfigurationSitesSchema>[number];
 
+/** Sin mayúsculas ni tildes: "alamos" encuentra "Los Álamos". */
+const fold = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/** Primero los predios con puntos sin etiqueta; los completos y los vacíos, al final. */
+const byPending = (a: Site, b: Site) =>
+  Number(!(a.total - a.tagged)) - Number(!(b.total - b.tagged)) || a.name.localeCompare(b.name);
+
+/**
+ * Inicio del modo NFC: el administrador asocia etiquetas desde la oficina. Cada predio muestra
+ * cuántos puntos faltan; los puntos y el escaneo van en la pantalla del predio.
+ */
 export default function ConfigurationHome() {
-  const { user, logout } = useAuth();
-  const [sites, setSites] = useState<z.infer<typeof nfcConfigurationSitesSchema>>([]);
-  const [siteId, setSiteId] = useState('');
-  const [points, setPoints] = useState<CheckpointItem[]>([]);
-  const [availability, setAvailability] = useState<
-    'checking' | 'unsupported' | 'disabled' | 'ready'
-  >('checking');
-  const [busyId, setBusyId] = useState('');
-  const [message, setMessage] = useState('');
-  const player = useAudioPlayer(require('../../../assets/sounds/nfc-confirmation.wav'));
+  const { user } = useAuth();
+  const [menu, setMenu] = useState(false);
+  const nfc = useNfcState();
+  const [sites, setSites] = useState<Site[] | null>(null);
+  const [error, setError] = useState(false);
+  const [query, setQuery] = useState('');
+  const shown = sites?.filter((site) => fold(site.name).includes(fold(query.trim())));
 
-  const loadPoints = useCallback(async (id: string) => {
-    if (!id) return;
-    try {
-      setPoints(
-        await apiGet(
-          `/predios/${encodeURIComponent(id)}/puntos?incluirEtiqueta=true`,
-          checkpointListSchema,
-        ),
-      );
-    } catch {
-      setMessage('No pudimos cargar los puntos. Revisá tu conexión.');
-    }
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    void Promise.all([
-      apiGet('/configuracion/predios', nfcConfigurationSitesSchema),
-      nfcAvailability(),
-    ])
-      .then(([availableSites, state]) => {
-        if (!mounted) return;
-        setSites(availableSites);
-        setSiteId(availableSites[0]?.id ?? '');
-        setAvailability(state);
-      })
-      .catch(() => {
-        if (mounted) setMessage('No pudimos cargar la configuración. Revisá tu conexión.');
-      });
-    return () => {
-      mounted = false;
-      void cancelNfcRead();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!siteId) return;
-    let mounted = true;
-    void apiGet(
-      `/predios/${encodeURIComponent(siteId)}/puntos?incluirEtiqueta=true`,
-      checkpointListSchema,
-    )
-      .then((loadedPoints) => {
-        if (mounted) setPoints(loadedPoints);
-      })
-      .catch(() => {
-        if (mounted) setMessage('No pudimos cargar los puntos. Revisá tu conexión.');
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [siteId]);
-
-  const associate = async (point: CheckpointItem, uid: string, confirmMove = false) => {
-    try {
-      await apiRequest(
-        'PUT',
-        `/puntos/${encodeURIComponent(point.id)}/etiqueta-nfc`,
-        resultSchema,
-        { uid: normalizeNfcUid(uid), confirmMove },
-      );
-      await loadPoints(siteId);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      player.seekTo(0);
-      player.play();
-      setMessage(`Etiqueta asociada a ${point.name}`);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        const payload = error.payload as { checkpointName?: unknown } | undefined;
-        const other =
-          typeof payload?.checkpointName === 'string' ? payload.checkpointName : 'otro punto';
-        Alert.alert(`La etiqueta está asociada a ${other}. ¿Moverla a ${point.name}?`, '', [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Mover etiqueta', onPress: () => void associate(point, uid, true) },
-        ]);
-      } else if (error instanceof ApiError && error.status === 422)
-        setMessage('Etiqueta no disponible');
-      else setMessage('No pudimos asociar la etiqueta. Revisá tu conexión.');
-    }
-  };
-
-  const startAssociation = async (point: CheckpointItem) => {
-    if (busyId) return;
-    setBusyId(point.id);
-    try {
-      const network = await Network.getNetworkStateAsync();
-      if (!network.isConnected || network.isInternetReachable === false) {
-        setMessage('Se necesita conexión para asociar una etiqueta.');
-        return;
-      }
-      if (availability !== 'ready') return;
-      setMessage('Acercá la etiqueta al celular…');
-      const sessionId = await withSecureNfcTag(async (tag) => {
-        setMessage('Etiqueta segura detectada. Configurando…');
-        let step = await apiRequest(
-          'POST',
-          `/puntos/${encodeURIComponent(point.id)}/etiqueta-segura/configuracion`,
-          secureTagStepResponseSchema,
-          { uid: tag.uid, version: tag.version },
-        );
-        for (let i = 0; step.apdu && i < 23; i++) {
-          const response = await tag.transceive(step.apdu);
-          step = await apiRequest(
-            'POST',
-            `/etiquetas-seguras/configuracion/${encodeURIComponent(step.sessionId)}/comando`,
-            secureTagStepResponseSchema,
-            { response },
-          );
-          setMessage(`Configurando etiqueta segura: paso ${i + 1}`);
-        }
-        if (!step.complete) throw new Error('Configuración incompleta');
-        return step.sessionId;
-      });
-      setMessage('Configuración enviada. Acercá la etiqueta para la lectura de prueba.');
-      const proof = await readNfcTag();
-      if (!proof.sdmMessage) throw new Error('Lectura de prueba sin SUN');
-      await apiRequest(
-        'POST',
-        `/etiquetas-seguras/configuracion/${encodeURIComponent(sessionId)}/confirmar`,
-        resultSchema,
-        { sdmMessage: proof.sdmMessage },
-      );
-      await loadPoints(siteId);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      player.seekTo(0);
-      player.play();
-      setMessage(`Etiqueta segura asociada a ${point.name}`);
-    } catch (error) {
-      if (error instanceof NotSecureNfcTag) await associate(point, error.uid);
-      else if (error instanceof ApiError && error.status === 422)
-        setMessage('Etiqueta no disponible');
-      else setMessage('La configuración no se completó. Volvé a acercar el celular');
-    } finally {
-      setBusyId('');
-      await cancelNfcRead();
-    }
-  };
-
-  const removeTag = async (point: CheckpointItem) => {
-    if (busyId) return;
-    setBusyId(point.id);
-    try {
-      await apiDelete(`/puntos/${encodeURIComponent(point.id)}/etiqueta-nfc`, emptySchema);
-      await loadPoints(siteId);
-      setMessage(`Etiqueta quitada de ${point.name}`);
-    } catch {
-      setMessage('No pudimos quitar la etiqueta.');
-    } finally {
-      setBusyId('');
-    }
-  };
+  // Al volver de un predio se ve el avance nuevo.
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      apiGet('/configuracion/predios', nfcConfigurationSitesSchema)
+        .then((loaded) => {
+          if (!mounted) return;
+          setSites([...loaded].sort(byPending));
+          setError(false);
+        })
+        .catch(() => {
+          if (mounted) setError(true);
+        });
+      return () => {
+        mounted = false;
+      };
+    }, []),
+  );
 
   return (
     <Screen scroll>
-      <Text variant="caption" color="mutedForeground">
-        {user?.role === 'admin' ? 'Administrador' : 'Supervisor'}
-      </Text>
-      <Text variant="title">Modo de configuración</Text>
-      <Text color="mutedForeground">Asociá las etiquetas NFC de los puntos de control.</Text>
-      {availability === 'unsupported' && (
-        <Banner tone="warning">Tu celular no puede leer etiquetas NFC</Banner>
-      )}
-      {availability === 'disabled' && (
-        <>
-          <Banner tone="warning">NFC está apagado. Activá NFC para asociar etiquetas.</Banner>
-          <Button
-            variant="outline"
-            label="Abrir ajustes de NFC"
-            accessibilityRole="button"
-            accessibilityLabel="Abrir ajustes de NFC"
-            onPress={() => void openNfcSettings()}
-          />
-        </>
-      )}
-      {!!message && <Banner tone="info">{message}</Banner>}
-      <Text variant="heading">Predios</Text>
-      {sites.map((site) => (
-        <ListItem
-          key={site.id}
-          title={site.name}
-          trailing={siteId === site.id ? <Badge tone="info" label="Seleccionado" /> : undefined}
+      <View style={styles.header}>
+        <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Seleccionar predio ${site.name}`}
-          accessibilityState={{ selected: siteId === site.id, disabled: !!busyId }}
-          disabled={!!busyId}
-          onPress={() => setSiteId(site.id)}
-        />
-      ))}
-      <Text variant="heading">Puntos</Text>
-      {points.map((point) => (
-        <Card key={point.id}>
-          <Text variant="subheading">{point.name}</Text>
-          <Badge
-            tone={point.etiquetaNfc?.status === 'active' ? 'success' : 'neutral'}
-            label={
-              point.etiquetaNfc?.status === 'active' ? 'Etiqueta NFC asociada' : 'Sin etiqueta NFC'
-            }
-          />
-          {availability === 'ready' && (
-            <Button
-              label={
-                busyId === point.id
-                  ? 'Leyendo…'
-                  : point.etiquetaNfc?.status === 'active'
-                    ? 'Reemplazar etiqueta'
-                    : 'Asociar etiqueta'
-              }
-              accessibilityRole="button"
-              accessibilityLabel={`${point.etiquetaNfc?.status === 'active' ? 'Reemplazar' : 'Asociar'} etiqueta NFC a ${point.name}`}
-              disabled={!!busyId}
-              onPress={() => void startAssociation(point)}
-            />
-          )}
-          {point.etiquetaNfc?.status === 'active' && (
-            <Button
-              variant="outline"
-              label="Quitar etiqueta"
-              accessibilityRole="button"
-              accessibilityLabel={`Quitar etiqueta NFC de ${point.name}`}
-              disabled={!!busyId}
-              onPress={() => void removeTag(point)}
-            />
-          )}
-        </Card>
-      ))}
-      <Card>
-        <Text variant="heading">Apariencia</Text>
-        <ThemeSwitch />
-      </Card>
+          accessibilityLabel="Abrir menú"
+          onPress={() => setMenu(true)}
+          style={styles.menuButton}
+        >
+          <Icon name="menu" size={24} />
+        </Pressable>
+        <Text color="mutedForeground">
+          {user?.role === 'admin' ? 'Administrador' : 'Supervisor'}
+        </Text>
+      </View>
+      <View style={styles.intro}>
+        <Text variant="title">Etiquetas NFC</Text>
+        <Text>Asociá una etiqueta a cada punto de control y escribile su número.</Text>
+      </View>
+      <NfcBlocker state={nfc} />
       <Button
-        variant="ghost"
-        label="Cerrar sesión"
-        accessibilityRole="button"
-        accessibilityLabel="Cerrar sesión"
-        onPress={() => void logout()}
+        variant="secondary"
+        size="lg"
+        label="Identificar etiqueta"
+        accessibilityLabel="Identificar etiqueta: ver de qué punto es"
+        disabled={nfc !== 'ready'}
+        onPress={() => router.push('/(configuration)/identificar')}
       />
+
+      <Text variant="heading" style={styles.section}>
+        Predios
+      </Text>
+      {error && (
+        <Banner tone="danger">No se pudieron cargar los predios. Revisá la conexión.</Banner>
+      )}
+      {!sites && !error && <Loading label="Cargando predios…" />}
+      {sites?.length === 0 && (
+        <Text color="mutedForeground">No tenés predios para configurar.</Text>
+      )}
+      {!!sites?.length && (
+        <Input
+          label="Buscar predio"
+          placeholder="Nombre del predio"
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+      )}
+      {!!sites?.length && !shown?.length && (
+        <Text color="mutedForeground">{`Ningún predio coincide con "${query.trim()}".`}</Text>
+      )}
+      {shown?.map((site) => (
+        <SiteRow key={site.id} site={site} />
+      ))}
+      <GuardMenu open={menu} onClose={() => setMenu(false)} />
     </Screen>
   );
 }
+
+function SiteRow({ site }: { site: Site }) {
+  const { colors } = useTheme();
+  const pending = site.total - site.tagged;
+  const summary = !site.total
+    ? 'Sin puntos cargados'
+    : pending
+      ? `Faltan ${pending} de ${site.total} puntos`
+      : `Completo: ${site.total} puntos con etiqueta`;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${site.name}. ${summary}`}
+      onPress={() =>
+        router.push({
+          pathname: '/(configuration)/predio/[id]',
+          params: { id: site.id, nombre: site.name },
+        })
+      }
+      style={({ pressed }) => [
+        styles.site,
+        { backgroundColor: colors.card, borderColor: colors.border },
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={styles.siteTop}>
+        <Text variant="subheading" style={styles.flex}>
+          {site.name}
+        </Text>
+        <Icon name="forward" />
+      </View>
+      <View style={styles.siteSummary}>
+        {!pending && !!site.total && <Icon name="check" color="success" />}
+        <Text color={pending || !site.total ? 'mutedForeground' : 'success'}>{summary}</Text>
+      </View>
+      {!!site.total && <ProgressBar done={site.tagged} total={site.total} />}
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  intro: { gap: space[1] },
+  section: { marginTop: space[4] },
+  header: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  menuButton: { minWidth: touch.min, minHeight: touch.min, justifyContent: 'center' },
+  site: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: space[4],
+    gap: space[2],
+    minHeight: touch.action,
+  },
+  siteTop: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  siteSummary: { flexDirection: 'row', alignItems: 'center', gap: space[1.5] },
+  flex: { flex: 1 },
+  pressed: { opacity: 0.85 },
+});

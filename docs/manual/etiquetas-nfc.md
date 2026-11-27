@@ -12,29 +12,34 @@ pnpm dlx eas-cli@latest build --profile development --platform android
 
 Instalá el APK/enlace entregado por EAS y abrí Garita. Iniciá sesión como administrador o supervisor. El administrador puede configurar todos los predios activos de su empresa; el supervisor ve los predios que tiene asignados.
 
-## Asociar o reemplazar en Android
+## Asociar etiquetas (Android)
 
-1. Abrí **Modo de configuración** y elegí el predio.
-2. Buscá el punto y tocá **Asociar etiqueta**. Para reemplazar una dañada, tocá **Reemplazar etiqueta**.
-3. Con la pantalla de asociación abierta, acercá la parte trasera del teléfono a la etiqueta hasta que la app confirme con vibración, sonido y el mensaje **Etiqueta asociada a {punto}**.
-4. Si la etiqueta está en otro punto de la empresa, revisá el nombre que muestra el diálogo y confirmá **Mover etiqueta** solo si corresponde.
+La asociación se hace desde la oficina, con las etiquetas en la mano: la ubicación de cada punto es la que se cargó en el panel web.
 
-Si el teléfono no admite NFC, la app lo indica y no muestra la acción. Si NFC está apagado, activalo desde **Abrir ajustes de NFC**. La asociación requiere internet; conectate antes de empezar.
+1. En **Etiquetas NFC** elegí el predio. Los predios con puntos sin etiqueta aparecen primero, con cuántos faltan.
+2. En el predio, los puntos van en el orden de la ronda. Tocá **Etiquetar pendientes** para recorrerlos en serie, o tocá un punto para asociar solo ese.
+3. Se abre la hoja de escaneo: acercá la parte trasera del teléfono a la etiqueta. Todo lo que pasa (lectura, configuración segura, lectura de prueba, errores) se ve en esa hoja.
+4. Al asociar, la app confirma con vibración y sonido y muestra en grande el número y nombre del punto: **escribilo en la etiqueta** antes de seguir.
+5. En serie, tocá **Siguiente** para pasar al próximo punto, o activá **Pasar solo al siguiente** para que avance sin tocar nada.
+6. Si la etiqueta ya es de otro punto de la empresa, la hoja lo dice: confirmá **Mover a {punto}** solo si corresponde, o leé otra etiqueta.
+
+Si el teléfono no admite NFC, la app lo indica y no deja escanear. Si NFC está apagado, activalo desde **Activar NFC**; al volver a la app el aviso desaparece solo. La asociación requiere internet.
 
 La app lee etiquetas NFC-A (NfcA) y NFC-V / ISO 15693 (NfcV), incluidas etiquetas industriales de UID de 8 bytes como ICODE SLIX. Para instalar una etiqueta sobre metal, usá una etiqueta anti-metal.
 
-## Asociar o reemplazar en iPhone
+## Asociar etiquetas (iPhone)
 
-1. Abrí **Modo de configuración** y elegí el predio y punto.
-2. Tocá **Asociar etiqueta** o **Reemplazar etiqueta**.
-3. Cuando aparezca la ventana de lectura de iOS, acercá la etiqueta al iPhone y mantenelo junto a ella hasta que Garita confirme con vibración, sonido y el mensaje **Etiqueta asociada a {punto}**.
-4. Si aparece el diálogo de movimiento, verificá el otro punto antes de confirmar.
+El recorrido es el mismo. Cuando aparezca la ventana de lectura de iOS, acercá la etiqueta al iPhone y mantenelo junto a ella hasta que Garita confirme.
 
 La lectura de iOS usa la sesión de etiquetas del sistema y lee el UID de fábrica, incluso si la etiqueta está virgen y todavía no tiene contenido NDEF. Se admiten etiquetas MIFARE y NFC-V / ISO 15693.
 
-## Quitar una etiqueta
+## Reemplazar o quitar una etiqueta
 
-En el punto correspondiente, tocá **Quitar etiqueta**. El registro queda en el historial como quitado; después podés asociar otra vez ese UID.
+En el predio, tocá **Todos** y elegí el punto. **Reemplazar etiqueta** lee una nueva y deja vigente solo esa. **Quitar etiqueta** pide confirmación; el registro queda en el historial como quitado y después podés asociar otra vez ese UID.
+
+## Identificar una etiqueta
+
+Desde el inicio, tocá **Identificar etiqueta** y acercá una etiqueta suelta. La app dice a qué punto y predio pertenece, si es segura o común, desde cuándo está en uso y cuándo la marcó un vigilador por última vez. Si fue reemplazada o quitada, lo avisa; si no es de ningún punto, se puede usar en cualquiera.
 
 ## Verificación manual antes de habilitar dispositivos
 
@@ -44,7 +49,9 @@ En el punto correspondiente, tocá **Quitar etiqueta**. El registro queda en el 
 - [ ] iPhone: una etiqueta ISO 15693 / NFC-V se lee y queda asociada.
 - [ ] Reemplazar una etiqueta ya asociada deja vigente solamente la nueva.
 - [ ] Mover una etiqueta de otro punto requiere confirmación.
-- [ ] Una etiqueta de otra empresa muestra **Etiqueta no disponible**.
+- [ ] En serie, **Pasar solo al siguiente** avanza al próximo punto después de asociar.
+- [ ] **Identificar etiqueta** muestra el punto de una etiqueta asociada y avisa si no es de ninguno.
+- [ ] Una etiqueta de otra empresa muestra **Esta etiqueta no está disponible para tu empresa.**
 - [ ] Sin NFC, NFC apagado y sin conexión muestran sus avisos y no intentan asociar.
 - [ ] Probar una etiqueta anti-metal fijada sobre una superficie metálica.
 

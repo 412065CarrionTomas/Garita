@@ -7,14 +7,23 @@ import { Button, ListItem, Text, ThemeSwitch, useTheme } from '@/ui';
 import { useAuth } from '@/features/auth/auth-context';
 import { getSyncSnapshot } from '@/lib/cola';
 
-/** Menú lateral del vigilador: cuenta, tema, envíos pendientes, documentos legales y salida. */
+const ROLE_LABEL = {
+  guard: 'Vigilador',
+  admin: 'Administrador',
+  supervisor: 'Supervisor',
+} as const;
+
+/**
+ * Menú lateral: cuenta, tema, documentos legales y salida. El del vigilador suma sus envíos
+ * pendientes (`pendingCount`); el modo NFC del administrador lo usa sin ellos.
+ */
 export function GuardMenu({
   open,
   pendingCount,
   onClose,
 }: {
   open: boolean;
-  pendingCount: number;
+  pendingCount?: number;
   onClose: () => void;
 }) {
   const { colors } = useTheme();
@@ -27,6 +36,7 @@ export function GuardMenu({
   const confirmLogout = async () => {
     // El menú se cierra antes: en iOS un Alert sobre un Modal abierto puede no mostrarse.
     onClose();
+    if (pendingCount === undefined) return void logout();
     // Se cuenta en el momento: el número de la cabecera puede ir atrasado (p. ej. cierre sin señal).
     const { pendingCount: pending } = await getSyncSnapshot();
     if (pending === 0) return void logout();
@@ -52,19 +62,23 @@ export function GuardMenu({
           {user && (
             <View>
               <Text variant="heading">{`${user.firstName} ${user.lastName}`}</Text>
-              <Text color="mutedForeground">{`Vigilador · ${user.company.name}`}</Text>
+              <Text color="mutedForeground">
+                {`${ROLE_LABEL[user.role as keyof typeof ROLE_LABEL] ?? ''} · ${user.company.name}`}
+              </Text>
             </View>
           )}
           <ThemeSwitch />
-          <ListItem
-            title="Envíos"
-            subtitle={
-              pendingCount
-                ? `${pendingCount} ${pendingCount === 1 ? 'pendiente' : 'pendientes'}`
-                : 'Todo enviado'
-            }
-            onPress={() => go('/envio')}
-          />
+          {pendingCount !== undefined && (
+            <ListItem
+              title="Envíos"
+              subtitle={
+                pendingCount
+                  ? `${pendingCount} ${pendingCount === 1 ? 'pendiente' : 'pendientes'}`
+                  : 'Todo enviado'
+              }
+              onPress={() => go('/envio')}
+            />
+          )}
           <ListItem title="Términos y condiciones" onPress={() => go('/legal/terminos')} />
           <ListItem title="Política de privacidad" onPress={() => go('/legal/privacidad')} />
           <View style={styles.fill} />
