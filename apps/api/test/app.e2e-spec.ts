@@ -3720,6 +3720,62 @@ describe('Aplicación (e2e)', () => {
       .set('Authorization', 'Bearer token-south-admin')
       .send({ uid })
       .expect(404);
+    await client.post(path).set('Authorization', 'Bearer token-client').send({ uid }).expect(403);
+    const supervisor = { Authorization: 'Bearer token-supervisor' };
+    await client.post(path).set(supervisor).send({ uid }).expect(200);
+    // El supervisor no ve etiquetas de predios que no tiene asignados.
+    const outside = await prisma.checkpoint.create({
+      data: {
+        companyId: 'norte-company',
+        siteId: northUnassignedSiteId,
+        name: `Identificar fuera ${randomUUID()}`,
+        latitude: -34.6,
+        longitude: -58.4,
+      },
+    });
+    createdNfcCheckpointIds.push(outside.id);
+    const outsideUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    await client
+      .put(`/api/v1/puntos/${outside.id}/etiqueta-nfc`)
+      .set(auth)
+      .send({ uid: outsideUid })
+      .expect(200);
+    await client.post(path).set(supervisor).send({ uid: outsideUid }).expect(404);
+    // Reemplazada por otra: deja de estar vigente y no informa lecturas.
+    const newUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    await client
+      .put(`/api/v1/puntos/${point.id}/etiqueta-nfc`)
+      .set(auth)
+      .send({ uid: newUid })
+      .expect(200);
+    await client
+      .post(path)
+      .set(auth)
+      .send({ uid })
+      .expect(200)
+      .expect(({ body }) => {
+        const replaced = z
+          .object({ status: z.string(), endedAt: z.string().nullable(), lastReadAt: z.null() })
+          .parse(body);
+        expect(replaced.status).toBe('replaced');
+        expect(replaced.endedAt).not.toBeNull();
+      });
+    // Una configuración segura a medias no cuenta como asociación.
+    const incompleteUid = `04${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+    const actor = await prisma.user.findUniqueOrThrow({
+      where: { firebaseUid: 'seed-norte-admin' },
+    });
+    await prisma.nfcTag.create({
+      data: {
+        companyId: 'norte-company',
+        checkpointId: point.id,
+        uid: incompleteUid,
+        status: 'removed',
+        configurationStatus: 'incomplete',
+        associatedById: actor.id,
+      },
+    });
+    await client.post(path).set(auth).send({ uid: incompleteUid }).expect(404);
     await client
       .get('/api/v1/configuracion/predios')
       .set(auth)
