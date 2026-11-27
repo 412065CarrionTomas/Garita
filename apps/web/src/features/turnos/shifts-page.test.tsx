@@ -183,7 +183,7 @@ describe('<ShiftsPage /> planilla', () => {
 
   it('un estado desconocido en la URL no rompe la pantalla', async () => {
     mockQueries({ board: boardWith(days.map((_, i) => (i === 0 ? [cell()] : []))) });
-    renderPage('/turnos?estado=sin_vigilador&semana=no-es-fecha');
+    renderPage('/turnos?estado=sin_vigilador&semana=2030-02-31');
     const grid = await screen.findByRole('table', { name: 'Planilla semanal' });
     expect(within(grid).getByText('Pedro Díaz')).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledWith('/turnos/planilla?', expect.anything());
@@ -343,6 +343,22 @@ describe('<ShiftsPage /> lista', () => {
         expect.anything(),
       );
     });
+  });
+
+  it('ofrece reasignar un turno en hora cuyo vigilador no inició', async () => {
+    mockQueries({
+      list: [
+        listRow({
+          startsAt: new Date(Date.now() - 3_600_000).toISOString(),
+          endsAt: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage('/turnos?vista=lista');
+    await user.click(await screen.findByRole('button', { name: 'Acciones del turno de Predio A' }));
+    expect(screen.getByRole('menuitem', { name: 'Reasignar' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Editar' })).not.toBeInTheDocument();
   });
 
   it('cancela un turno futuro después de confirmar', async () => {

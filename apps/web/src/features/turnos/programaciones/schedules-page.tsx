@@ -199,22 +199,24 @@ export function SchedulesPage() {
     await client.invalidateQueries({ queryKey: ['turnos'] });
   };
   const change = useMutation({
-    mutationFn: async () => {
-      if (!action) throw new Error('Elegí una programación');
-      return apiPost(
-        `/programaciones-turnos/${action.schedule.id}/${action.kind === 'extend' ? 'extender' : 'cancelar'}`,
-        action.kind === 'extend' ? { endDate: extensionEnd } : {},
-        action.kind === 'extend' ? shiftScheduleExtensionSchema : z.strictObject({}),
+    // Recibe todo por parámetro: no depende de lo que haya en pantalla al resolverse.
+    mutationFn: (input: { id: string; kind: 'extend' | 'cancel'; endDate: string }) =>
+      apiPost(
+        `/programaciones-turnos/${input.id}/${input.kind === 'extend' ? 'extender' : 'cancelar'}`,
+        input.kind === 'extend' ? { endDate: input.endDate } : {},
+        input.kind === 'extend' ? shiftScheduleExtensionSchema : z.strictObject({}),
         scheduleOperationSchema,
-      );
-    },
+      ),
     onSuccess: async (operation) => {
       setAction(null);
       await refresh(operation);
     },
   });
 
-  const hasFilters = FILTER_KEYS.some((key) => value(key));
+  // Con los valores ya validados: "vigentes" es el estado por defecto, no un filtro.
+  const hasFilters =
+    Boolean(value('q') || value('predio') || value('vigilador')) ||
+    Boolean(estado && estado !== 'vigente');
   const expiring = schedules.data?.expiring ?? 0;
   const selectClass = 'w-full sm:w-auto sm:max-w-56';
 
@@ -513,7 +515,12 @@ export function SchedulesPage() {
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              change.mutate();
+              if (action)
+                change.mutate({
+                  id: action.schedule.id,
+                  kind: action.kind,
+                  endDate: extensionEnd,
+                });
             }}
             className="mt-4 space-y-4"
           >

@@ -244,3 +244,38 @@ it('extender empieza el día siguiente al fin actual', async () => {
   expect(screen.getByLabelText('Nueva fecha final incluida')).toHaveAttribute('min', '2030-10-31');
   expect(screen.getByText(/Se agregan turnos desde el 31 oct/)).toBeInTheDocument();
 });
+
+it('con las fechas al revés explica qué corregir en lugar de esperar la vista previa', async () => {
+  renderWithQueryClient(<SchedulesPage />);
+  const user = userEvent.setup();
+  await openMenu(user);
+  await user.click(screen.getByRole('menuitem', { name: 'Modificar' }));
+  const panel = await screen.findByRole('dialog', { name: 'Modificar programación' });
+  fireEvent.change(within(panel).getByLabelText('Hasta (incluido)'), {
+    target: { value: '2030-10-01' },
+  });
+  expect(
+    await within(panel).findByText('La fecha final debe ser posterior o igual a la inicial.'),
+  ).toBeInTheDocument();
+  expect(within(panel).getByRole('button', { name: 'Confirmar modificación' })).toBeDisabled();
+});
+
+it('si la vista previa falla, muestra el motivo y deja reintentar', async () => {
+  jest.mocked(apiPost).mockRejectedValueOnce(new Error('Sin conexión con la API'));
+  renderWithQueryClient(<SchedulesPage />);
+  const user = userEvent.setup();
+  await openMenu(user);
+  await user.click(screen.getByRole('menuitem', { name: 'Modificar' }));
+  const panel = await screen.findByRole('dialog', { name: 'Modificar programación' });
+  expect(
+    await within(panel).findByText('No se pudo calcular: Sin conexión con la API'),
+  ).toBeInTheDocument();
+  jest.mocked(apiPost).mockResolvedValueOnce({
+    ...preview,
+    shifts: preview.shifts.map((shift) => ({ ...shift, conflicts: [] })),
+  });
+  await user.click(within(panel).getByRole('button', { name: 'Reintentar' }));
+  await waitFor(() => {
+    expect(within(panel).getByRole('button', { name: 'Confirmar modificación' })).toBeEnabled();
+  });
+});

@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { apiGet, apiPatch, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPatch, apiPost } from '@/lib/api-client';
 import { errorMessage } from '@/lib/error-message';
 import { loadAvailableGuards } from '../../personal/available-guards';
 import { WEEKDAYS, WEEK_ORDER, crossesMidnight, dateTime, shortDate } from './schedule-format';
@@ -244,14 +244,39 @@ function ScheduleForm({
     requestAnimationFrame(() => errorRef.current?.focus());
   };
   const query = editing ? `?programacion=${encodeURIComponent(editing.id)}` : '';
-  const preview = useMutation({
-    mutationFn: (input: ShiftScheduleInput) =>
+  const parsed = inputSchema.safeParse(form);
+  const previewKey = parsed.success ? JSON.stringify(parsed.data) : '';
+  // La vista previa se pide sola cuando los datos están completos, con una pausa para no
+  // consultar en cada tecla. Es una consulta por datos: una respuesta vieja que llega tarde
+  // queda en su propia clave y no pisa la vigente.
+  const [requested, setRequested] = useState<ShiftScheduleInput | null>(null);
+  useEffect(() => {
+    // Con datos inválidos no se pide nada; la vista previa anterior deja de valer por la clave.
+    if (!parsed.success) return;
+    const input = parsed.data;
+    const timer = setTimeout(() => {
+      setRequested(input);
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+    };
+    // Solo depende de los datos: `parsed` cambia en cada render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey]);
+  const preview = useQuery({
+    queryKey: ['vista-previa-programacion', editing?.id ?? null, requested],
+    queryFn: () =>
       apiPost(
         `/programaciones-turnos/previsualizar${query}`,
-        input,
+        requested,
         inputSchema,
         schedulePreviewSchema,
       ),
+    enabled: requested !== null,
+    gcTime: 0,
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
   });
   const save = useMutation({
     mutationFn: (input: ShiftScheduleInput) =>
@@ -269,48 +294,52 @@ function ScheduleForm({
             scheduleOperationSchema,
           ),
     onSuccess: onSaved,
-    onError: fail,
+    onError: (failure) => {
+      fail(failure);
+      // Los turnos cambiaron desde la vista previa: se recalcula antes de poder confirmar.
+      if (
+        failure instanceof ApiError &&
+        (failure.body as { code?: unknown } | null)?.code === 'SCHEDULE_CHANGED'
+      )
+        void preview.refetch();
+    },
   });
   const set = (patch: Partial<ShiftScheduleInput>) => {
     setForm((previous) => ({ ...previous, ...patch }));
-    preview.reset();
     setError('');
   };
-  const parsed = inputSchema.safeParse(form);
-  // La vista previa vale solo para los datos con que se pidió.
+  // La vista previa vale solo para los datos con que se pidió y mientras no se esté recalculando.
   const current =
     preview.data &&
-    parsed.success &&
-    JSON.stringify(parsed.data) === JSON.stringify(preview.variables)
+    !preview.isFetching &&
+    requested !== null &&
+    JSON.stringify(requested) === previewKey
       ? preview.data
       : null;
-  const pending = save.isPending || preview.isPending;
+  const pending = save.isPending || preview.isFetching;
   const roundNames = new Map((rounds.data ?? []).map((round) => [round.id, round.name]));
   // Las activas, más las dadas de baja que la programación ya tenía: así se pueden desmarcar.
   const activeRounds = (rounds.data ?? []).filter(
     (round) => round.status === 'active' || form.roundIds.includes(round.id),
   );
-
-  // La vista previa se pide sola cuando los datos están completos, con una pausa para no
-  // consultar en cada tecla.
-  const previewKey = parsed.success ? JSON.stringify(parsed.data) : '';
-  useEffect(() => {
-    if (!parsed.success) return;
-    const input = parsed.data;
-    const timer = setTimeout(() => {
-      preview.mutate(input);
-    }, 400);
-    return () => {
-      clearTimeout(timer);
-    };
-    // Solo depende de los datos: `parsed` y `preview` cambian en cada render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewKey]);
-  const previewHint = preview.isError
-    ? `No se pudo calcular: ${preview.error instanceof Error ? preview.error.message : 'revisá los datos'}.`
-    : parsed.success
-      ? 'Calculando los turnos…'
-      : 'Se calcula sola al completar predio, vigilador, días, vigencia y una ronda.';
+  // Con todo cargado pero inválido (fechas al revés, más de tres meses) se dice qué corregir.
+  const complete = Boolean(
+    form.siteId &&
+    form.guardId &&
+    form.weekdays.length &&
+    form.startTime &&
+    form.endTime &&
+    form.startDate &&
+    form.endDate &&
+    form.roundIds.length,
+  );
+  const previewHint = !parsed.success
+    ? complete
+      ? (parsed.error.issues[0]?.message ?? 'Revisá los datos.')
+      : 'Se calcula sola al completar predio, vigilador, días, vigencia y una ronda.'
+    : preview.isError
+      ? `No se pudo calcular: ${errorMessage(preview.error)}`
+      : 'Calculando los turnos…';
 
   return (
     <form
@@ -503,6 +532,17 @@ function ScheduleForm({
             >
               <p className="font-semibold text-foreground">Vista previa</p>
               <p>{previewHint}</p>
+              {preview.isError && parsed.success && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => void preview.refetch()}
+                >
+                  Reintentar
+                </Button>
+              )}
             </div>
           )}
         </div>

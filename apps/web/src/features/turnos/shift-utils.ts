@@ -170,9 +170,14 @@ export function signalMinutes(site: {
     : null;
 }
 
-/** Fecha de calendario YYYY-MM-DD válida (para no confiar en lo que trae la URL). */
-export const isCalendarDate = (value: string) =>
-  /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
+/**
+ * Fecha de calendario YYYY-MM-DD que existe (para no confiar en lo que trae la URL). Se compara
+ * ida y vuelta: `Date` acepta el 31 de febrero y lo corre al 3 de marzo.
+ */
+export function isCalendarDate(value: string): boolean {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
 
 /** Hoy (YYYY-MM-DD) en la zona horaria dada. */
 export const todayIn = (timezone: string) =>

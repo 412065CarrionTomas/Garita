@@ -249,7 +249,17 @@ export function ShiftsPage() {
     view === 'planilla'
       ? ['predio', 'vigilador', 'estado', 'foco']
       : ['predio', 'vigilador', 'estado', 'q', 'desde', 'hasta'];
-  const hasFilters = viewKeys.some((key) => value(key));
+  // Con los valores ya validados: un parámetro inválido que se ignora no cuenta como filtro.
+  const effective: Record<FilterKey, string> = {
+    predio: value('predio'),
+    vigilador: value('vigilador'),
+    estado,
+    foco: focus ?? '',
+    q: value('q'),
+    desde: date('desde'),
+    hasta: date('hasta'),
+  };
+  const hasFilters = viewKeys.some((key) => effective[key]);
   const selectClass = 'w-full sm:w-auto sm:max-w-56';
 
   return (

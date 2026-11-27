@@ -187,6 +187,11 @@ function ShiftActions({
   const editable = isEditable(shift, now);
   // Reasignar solo lo que la API acepta: en hora, sin vigilador o sin cobertura.
   const coverable = gapAction(shift, now) === 'cover';
+  // Programado y en hora, pero el vigilador no inició: la API acepta pasarlo a otro.
+  const reassignable =
+    shift.status === 'scheduled' &&
+    Date.parse(shift.startsAt) <= now &&
+    Date.parse(shift.endsAt) > now;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -208,13 +213,13 @@ function ShiftActions({
             {shift.assignments[0]?.guard ? 'Editar' : 'Asignar vigilador'}
           </DropdownMenuItem>
         )}
-        {coverable && (
+        {(coverable || reassignable) && (
           <DropdownMenuItem
             onSelect={() => {
               onCover(shift);
             }}
           >
-            Cubrir
+            {coverable ? 'Cubrir' : 'Reasignar'}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
