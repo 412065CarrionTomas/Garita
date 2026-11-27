@@ -281,3 +281,25 @@ it('si la vista previa falla, muestra el motivo y deja reintentar', async () => 
     expect(within(panel).getByRole('button', { name: 'Confirmar modificación' })).toBeEnabled();
   });
 });
+
+it('si la página pedida ya no existe vuelve a la última con resultados', async () => {
+  window.history.replaceState({}, '', '/programaciones-turnos?pagina=5');
+  jest.mocked(apiGet).mockImplementation((path) => {
+    if (path.startsWith('/programaciones-turnos'))
+      return Promise.resolve({
+        items: path.includes('pagina=1&') ? [schedule] : [],
+        total: 1,
+        pagina: 1,
+        expiring: 0,
+      } as never);
+    if (path.startsWith('/predios?')) return Promise.resolve([site] as never);
+    return Promise.resolve({ items: [], paginas: 1 } as never);
+  });
+  renderWithQueryClient(<SchedulesPage />);
+  await waitFor(() => {
+    expect(window.location.search).not.toContain('pagina=5');
+  });
+  // La primera página vuelve a mostrar la programación.
+  const table = await screen.findByRole('table', { name: 'Programaciones' });
+  expect(await within(table).findByText('Depósito')).toBeInTheDocument();
+});

@@ -16,7 +16,7 @@ import {
 } from '@garita/shared';
 import { DataTable } from '@/components/data-table';
 import { Pagination } from '@/components/pagination';
-import { PAGE_SIZES } from '@/lib/page-items';
+import { PAGE_SIZES, lastPage } from '@/lib/page-items';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { Alert } from '@/components/ui/alert';
@@ -182,7 +182,9 @@ export function SchedulesPage() {
   for (const key of FILTER_KEYS) if (value(key)) query.set(key, value(key));
   // "Vigente" es el estado por defecto y uno desconocido no se manda: la API respondería 400.
   if (!estado || estado === 'vigente') query.delete('estado');
-  const page = Math.max(1, Number(value('pagina')) || 1);
+  // Entero entre 1 y el tope de la API: otro valor en la URL respondería 400.
+  const asked = Number(value('pagina'));
+  const page = Number.isInteger(asked) && asked >= 1 && asked <= 100_000 ? asked : 1;
   // Un tamaño que la API no acepta respondería 400: se usa el de siempre.
   const pageSize = (PAGE_SIZES as readonly number[]).includes(Number(value('porPagina')))
     ? Number(value('porPagina'))
@@ -198,6 +200,15 @@ export function SchedulesPage() {
       ),
     placeholderData: keepPreviousData,
   });
+  // Se quitó lo último de la página (p. ej. una cancelación) o la URL pide una que no existe:
+  // volver a la última que tenga resultados.
+  const last = lastPage(schedules.data?.total ?? 0, pageSize);
+  const outOfRange = Boolean(schedules.data) && !schedules.isPlaceholderData && page > last;
+  useEffect(() => {
+    if (outOfRange) update({ pagina: last > 1 ? String(last) : null });
+    // `update` cambia en cada render; alcanza con reaccionar al rango.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outOfRange, last]);
   const sites = useQuery({
     queryKey: ['predios', 'activos'],
     queryFn: () => apiGet('/predios?estado=active', sitesSchema),
