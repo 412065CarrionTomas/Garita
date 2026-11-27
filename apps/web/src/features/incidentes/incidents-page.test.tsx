@@ -110,18 +110,20 @@ it('la bandeja abre el más antiguo, muestra su antigüedad y el contexto del tu
   expect(screen.getByText('Perímetro')).toBeInTheDocument();
 });
 
-it('clasifica con gravedad por teclado y pasa al siguiente', async () => {
+it('abre el formulario a pedido, clasifica y pasa al siguiente', async () => {
   mockApi();
   jest
     .mocked(apiPost)
     .mockResolvedValue({ classificationStatus: 'internal', decidedAt: '2026-10-21T03:00:00Z' });
   renderAt('/incidentes?vista=por-clasificar');
-  const form = await screen.findByRole('form', { name: 'Clasificar incidente' });
-  fireEvent.keyDown(window, { key: '3' });
+  // El formulario está oculto hasta tocar "Clasificar".
+  fireEvent.click(await screen.findByRole('button', { name: 'Clasificar' }));
+  const form = screen.getByRole('form', { name: 'Clasificar incidente' });
+  fireEvent.click(within(form).getByLabelText('Alta'));
   fireEvent.change(within(form).getByLabelText('Comentario interno'), {
     target: { value: 'Se revisó el cerco' },
   });
-  fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+  fireEvent.submit(form);
   await waitFor(() => {
     expect(jest.mocked(apiPost)).toHaveBeenCalledWith(
       '/incidentes/incident-1/clasificar',
@@ -142,7 +144,8 @@ it('si otro ya lo clasificó (409) avisa en vez de mostrar un error', async () =
   mockApi();
   jest.mocked(apiPost).mockRejectedValue(new ApiError('Conflicto', 409));
   renderAt('/incidentes?vista=por-clasificar');
-  const form = await screen.findByRole('form', { name: 'Clasificar incidente' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Clasificar' }));
+  const form = screen.getByRole('form', { name: 'Clasificar incidente' });
   fireEvent.change(within(form).getByLabelText('Comentario interno'), {
     target: { value: 'Comentario válido' },
   });

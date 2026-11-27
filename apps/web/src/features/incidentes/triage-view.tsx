@@ -28,6 +28,8 @@ function SelectedIncident({
   onConflict: () => void;
 }) {
   const detail = useIncidentDetail(id);
+  // El formulario se abre a pedido: mientras tanto la ficha usa todo el alto.
+  const [deciding, setDeciding] = useState(false);
   if (detail.isPending)
     return (
       <div className="p-5">
@@ -59,29 +61,58 @@ function SelectedIncident({
               {incident.guardName}
             </p>
           </div>
-          <Button asChild variant="outline" size="sm">
-            <Link to={`/incidentes/${id}`}>Abrir ficha completa</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link to={`/incidentes/${id}`}>Abrir ficha completa</Link>
+            </Button>
+            {!deciding && (
+              <Button
+                onClick={() => {
+                  setDeciding(true);
+                }}
+              >
+                Clasificar
+              </Button>
+            )}
+          </div>
         </header>
         <IncidentBody incident={incident} compact />
       </div>
-      <section
-        aria-label="Decisión"
-        className="max-h-[55%] shrink-0 overflow-y-auto border-t-[1.5px] border-input bg-card px-5 py-4"
-      >
-        <DecisionForm
-          id={id}
-          reclassify={false}
-          shortcuts
-          submitLabel="Confirmar y seguir"
-          onDone={({ classification, severity }) => {
-            onDone(
-              `${title} (${incident.site.name}): ${INCIDENT_CLASSIFICATION_LABELS[classification].toLowerCase()}, gravedad ${INCIDENT_SEVERITY_LABELS[severity].toLowerCase()}.`,
-            );
-          }}
-          onConflict={onConflict}
-        />
-      </section>
+      {deciding && (
+        <section
+          aria-labelledby={`triage-decision-${id}`}
+          className="max-h-[60%] shrink-0 space-y-3 overflow-y-auto border-t-[1.5px] border-input bg-card px-5 py-4"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <h3
+              id={`triage-decision-${id}`}
+              className="font-cond text-lg font-semibold tracking-wider uppercase"
+            >
+              Clasificar
+            </h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setDeciding(false);
+              }}
+            >
+              Ocultar
+            </Button>
+          </div>
+          <DecisionForm
+            id={id}
+            reclassify={false}
+            submitLabel="Confirmar y seguir"
+            onDone={({ classification, severity }) => {
+              onDone(
+                `${title} (${incident.site.name}): ${INCIDENT_CLASSIFICATION_LABELS[classification].toLowerCase()}, gravedad ${INCIDENT_SEVERITY_LABELS[severity].toLowerCase()}.`,
+              );
+            }}
+            onConflict={onConflict}
+          />
+        </section>
+      )}
     </article>
   );
 }

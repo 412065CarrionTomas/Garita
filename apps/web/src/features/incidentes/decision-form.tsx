@@ -7,7 +7,7 @@ import {
   type IncidentSeverity,
 } from '@garita/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import { useState, type SyntheticEvent } from 'react';
 import { z } from 'zod';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, apiPost } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
-import { shortcutsBlocked } from './incident-ui';
 
 type Visibility = 'client_visible' | 'internal';
 
@@ -26,21 +25,17 @@ const responseSchema = z.object({
 });
 
 const VISIBILITY = [
-  ['internal', 'Interno', 'Solo lo ve la empresa.', 'I'],
-  ['client_visible', 'Visible al cliente', 'Lo verá el cliente del predio.', 'V'],
+  ['internal', 'Interno', 'Solo lo ve la empresa.'],
+  ['client_visible', 'Visible al cliente', 'Lo verá el cliente del predio.'],
 ] as const;
 
 const choiceClass =
   'relative grid cursor-pointer gap-0.5 rounded-md border-[1.5px] border-input px-3 py-2.5 has-[:checked]:bg-muted has-[:checked]:ring-2 has-[:checked]:ring-inset has-[:checked]:ring-primary has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring';
 
-/**
- * Decisión sobre un incidente: quién lo ve, gravedad, si requiere seguimiento y comentarios.
- * Con `shortcuts`, I/V eligen visibilidad, 1/2/3 la gravedad y Ctrl+Enter confirma.
- */
+/** Decisión sobre un incidente: quién lo ve, gravedad, si requiere seguimiento y comentarios. */
 export function DecisionForm({
   id,
   reclassify,
-  shortcuts = false,
   submitLabel,
   onDone,
   onConflict,
@@ -55,14 +50,12 @@ export function DecisionForm({
     followUpStatus: IncidentFollowUpStatus;
     clientNote?: string | null;
   };
-  shortcuts?: boolean;
   submitLabel?: string;
   onDone: (result: { classification: Visibility; severity: IncidentSeverity }) => void;
   /** Otro usuario lo clasificó antes (409). */
   onConflict?: () => void;
 }) {
   const client = useQueryClient();
-  const formRef = useRef<HTMLFormElement>(null);
   const [classification, setClassification] = useState<Visibility>(
     initial?.classification ?? 'internal',
   );
@@ -83,7 +76,6 @@ export function DecisionForm({
         schema,
         responseSchema,
       ),
-    // Lo enviado, no el estado actual: pudo cambiar con un atajo mientras se guardaba.
     onSuccess: async (_data, body) => {
       await client.invalidateQueries({ queryKey: ['incidents'] });
       onDone(body);
@@ -95,32 +87,6 @@ export function DecisionForm({
       }
     },
   });
-
-  const pending = mutation.isPending;
-  useEffect(() => {
-    if (!shortcuts) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (pending || document.querySelector('[role="dialog"]')) return;
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        formRef.current?.requestSubmit();
-        return;
-      }
-      if (shortcutsBlocked(event) || event.ctrlKey || event.metaKey || event.altKey) return;
-      const key = event.key.toLowerCase();
-      if (key === 'i') setClassification('internal');
-      else if (key === 'v') setClassification('client_visible');
-      else if (key === '1') setSeverity('low');
-      else if (key === '2') setSeverity('medium');
-      else if (key === '3') setSeverity('high');
-      else return;
-      event.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [shortcuts, pending]);
 
   const submit = (event: SyntheticEvent) => {
     event.preventDefault();
@@ -168,7 +134,6 @@ export function DecisionForm({
 
   return (
     <form
-      ref={formRef}
       onSubmit={submit}
       aria-label={reclassify ? 'Reclasificar incidente' : 'Clasificar incidente'}
       className="space-y-4"
@@ -177,7 +142,7 @@ export function DecisionForm({
         <fieldset className="space-y-1.5">
           <legend className="mb-1.5 text-sm font-semibold">Quién lo ve</legend>
           <div className="grid gap-2 sm:grid-cols-2">
-            {VISIBILITY.map(([value, title, hint, key]) => (
+            {VISIBILITY.map(([value, title, hint]) => (
               <label key={value} className={choiceClass}>
                 <input
                   type="radio"
@@ -189,14 +154,7 @@ export function DecisionForm({
                   }}
                   className="absolute opacity-0"
                 />
-                <span className="font-bold">
-                  {title}
-                  {shortcuts && (
-                    <kbd className="ml-2 rounded-sm border border-border px-1 text-sm font-normal text-muted-foreground">
-                      {key}
-                    </kbd>
-                  )}
-                </span>
+                <span className="font-bold">{title}</span>
                 <span className="text-sm text-muted-foreground">{hint}</span>
               </label>
             ))}
@@ -205,7 +163,7 @@ export function DecisionForm({
         <fieldset className="space-y-1.5">
           <legend className="mb-1.5 text-sm font-semibold">Gravedad</legend>
           <div className="grid grid-cols-3 gap-2">
-            {INCIDENT_SEVERITIES.map((value, index) => (
+            {INCIDENT_SEVERITIES.map((value) => (
               <label key={value} className={cn(choiceClass, 'place-items-center text-center')}>
                 <input
                   type="radio"
@@ -217,14 +175,7 @@ export function DecisionForm({
                   }}
                   className="absolute opacity-0"
                 />
-                <span className="font-bold">
-                  {INCIDENT_SEVERITY_LABELS[value]}
-                  {shortcuts && (
-                    <kbd className="ml-1.5 rounded-sm border border-border px-1 text-sm font-normal text-muted-foreground">
-                      {index + 1}
-                    </kbd>
-                  )}
-                </span>
+                <span className="font-bold">{INCIDENT_SEVERITY_LABELS[value]}</span>
               </label>
             ))}
           </div>
@@ -262,12 +213,6 @@ export function DecisionForm({
             ? 'Guardando…'
             : (submitLabel ?? (reclassify ? 'Cambiar clasificación' : 'Confirmar clasificación'))}
         </Button>
-        {shortcuts && (
-          <p className="text-sm text-muted-foreground">
-            Atajos: <kbd>↑</kbd>/<kbd>↓</kbd> cambiar incidente · <kbd>I</kbd>/<kbd>V</kbd> quién lo
-            ve · <kbd>1</kbd>–<kbd>3</kbd> gravedad · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> confirmar
-          </p>
-        )}
       </div>
     </form>
   );
