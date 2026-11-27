@@ -88,11 +88,14 @@ describe('LegalAcceptanceGate', () => {
     expect(screen.getByText('Contenido del panel')).toBeInTheDocument();
   });
 
-  it('deja leer las preguntas frecuentes antes de aceptar', () => {
-    window.history.replaceState({}, '', '/ayuda');
-    renderGate(true);
-    expect(screen.getByText('Contenido del panel')).toBeInTheDocument();
-  });
+  it.each(['/ayuda', '/ayuda/'])(
+    'deja leer las preguntas frecuentes antes de aceptar (%s)',
+    (path) => {
+      window.history.replaceState({}, '', path);
+      renderGate(true);
+      expect(screen.getByText('Contenido del panel')).toBeInTheDocument();
+    },
+  );
 });
 
 describe('páginas legales', () => {

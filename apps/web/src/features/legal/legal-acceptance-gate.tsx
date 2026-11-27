@@ -11,7 +11,7 @@ import { LegalConsent } from './legal-pages';
 /**
  * Pide aceptar la versión vigente de Términos y Privacidad antes de usar el panel.
  * Las alertas de pánico quedan siempre accesibles: una emergencia no espera a un trámite.
- * La ayuda también, porque es la misma información que se ve sin sesión.
+ * La ayuda también: explica cómo usar Garita y no requiere aceptar nada nuevo.
  */
 export function LegalAcceptanceGate({ children }: { children: ReactNode }) {
   const { user, acceptLegal } = useAuth();
@@ -19,10 +19,11 @@ export function LegalAcceptanceGate({ children }: { children: ReactNode }) {
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const path = pathname.replace(/\/+$/, '');
   if (
     !user?.legalAcceptanceRequired ||
-    pathname === '/ayuda' ||
-    pathname === '/alertas-panico' ||
+    path === '/ayuda' ||
+    path === '/alertas-panico' ||
     pathname.startsWith('/alertas-panico/')
   )
     return children;

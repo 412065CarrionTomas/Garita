@@ -36,10 +36,14 @@ describe('HU-43 suspended gate', () => {
     );
     expect(screen.getByText('Pago')).toBeInTheDocument();
   });
-  it.each(['admin', 'supervisor', 'client'] as const)('keeps the FAQ readable for %s', (role) => {
-    window.history.replaceState({}, '', '/ayuda');
+  it.each([
+    ['admin', '/ayuda'],
+    ['supervisor', '/ayuda'],
+    ['client', '/ayuda/'],
+  ] as const)('keeps the FAQ readable for %s at %s', (role, path) => {
+    window.history.replaceState({}, '', path);
     render(
-      <MemoryRouter initialEntries={['/ayuda']}>
+      <MemoryRouter initialEntries={[path]}>
         <AccountSuspendedGate suspended role={role}>
           <p>Preguntas</p>
         </AccountSuspendedGate>
